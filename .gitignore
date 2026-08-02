@@ -10,3 +10,5 @@ lws/
 evidence/
 evolver-home/
 .evolver/
+web/node_modules/
+web/dist/
