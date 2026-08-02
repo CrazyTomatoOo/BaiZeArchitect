@@ -6,3 +6,7 @@ _archived/
 *.tsbuildinfo
 out/*.pending.md
 test-repo-2/
+lws/
+evidence/
+evolver-home/
+.evolver/

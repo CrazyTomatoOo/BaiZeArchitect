@@ -19,8 +19,15 @@ import {
 	ModelRuntime,
 	SessionManager,
 } from "@earendil-works/pi-coding-agent";
-import { createProvider, envApiKeyAuth, lazyApi, type Api, type Model } from "@earendil-works/pi-ai";
+import {
+	createProvider,
+	envApiKeyAuth,
+	lazyApi,
+	type Api,
+	type Model,
+} from "@earendil-works/pi-ai";
 import { Type } from "typebox";
+import { getEvolverClient } from "./evolver-client.js";
 
 // ponytail: PROJECT_ROOT 指向项目根(.pi/skills 所在),不是 agent-runtime 目录。
 // resourceLoader.cwd 用它发现 skills;createAgentSession.cwd 用目标仓库——两者分离。
@@ -29,9 +36,11 @@ const PROJECT_ROOT =
 const PROVIDER =
 	process.env.RUNTIME_MODEL_PROVIDER ??
 	process.env.PI_PROVIDER ??
-	"zai-coding-cn";
-const MODEL_ID = process.env.RUNTIME_MODEL_ID ?? process.env.PI_MODEL ?? "glm-5.2";
+	"bailian";
+const MODEL_ID =
+	process.env.RUNTIME_MODEL_ID ?? process.env.PI_MODEL ?? "glm-5.2";
 const OUT_DIR = process.env.BAIZE_OUT_DIR ?? path.join(PROJECT_ROOT, "out");
+const EVIDENCE_DIR = process.env.BAIZE_EVIDENCE_DIR ?? "/evidence";
 
 const SYSTEM_PROMPT = [
 	"你是 BaiZe Architect 的设计 agent。",
@@ -86,7 +95,12 @@ const PLAN_PARAMETERS = Type.Object({
 
 type Plan = Record<string, unknown>;
 
-function fallbackPlan(repoId: string, sha: string, requirement: string, reason: string): Plan {
+function fallbackPlan(
+	repoId: string,
+	sha: string,
+	requirement: string,
+	reason: string,
+): Plan {
 	return {
 		contextSummary: `BaiZe runtime 未产出 plan(${reason})。`,
 		evidenceCandidates: [],
@@ -103,12 +117,121 @@ function fallbackPlan(repoId: string, sha: string, requirement: string, reason: 
 			components: [],
 			qualityAttributes: ["traceability", "governance"],
 		},
-		restApiContent: { changeRequest: requirement, repository: repoId, endpoints: [] },
+		restApiContent: {
+			changeRequest: requirement,
+			repository: repoId,
+			endpoints: [],
+		},
 		dataDesignContent: { changeRequest: requirement, database: "", tables: [] },
 		decisionTitle: `Use evidence-backed design for ${requirement.slice(0, 40)}`,
 		findingTitle: `Traceability for ${repoId}`,
 	};
 }
+// #5: 宿主 evidence.sh 用 codebase-memory-mcp 产 evidence/<repoId>.json(架构/hotspots/
+// boundaries/clusters + 历史 ADR),容器挂 /evidence 读取。architect 用结构化证据定位真实符号,
+// read/grep 仍负责行号精度——mcp 给结构,read/grep 给行。
+// ponytail: 容器内 evolver-mcp stdio(agent mid-design gene-search)非沉淀路径,speculative,
+// 按需再加;宿主 evolve.sh + manage_adr 已闭环 #9 经验沉淀→复用。
+interface EvidenceDoc {
+	repositoryId: string;
+	project?: string;
+	architecture?: {
+		total_nodes?: number;
+		total_edges?: number;
+		languages?: Array<{ language: string; file_count: number }>;
+		entry_points?: Array<{ name: string; qualified_name: string; file: string }>;
+		hotspots?: Array<{ name: string; qualified_name: string; fan_in: number }>;
+		boundaries?: Array<{ from: string; to: string; call_count: number }>;
+		layers?: Array<{ name: string; layer: string; reason: string }>;
+		clusters?: Array<{ id: number; label: string; members: number; cohesion: number; top_nodes: string[] }>;
+	};
+	priorAdr?: { content?: string; status?: string };
+}
+
+function loadEvidence(repoId: string): EvidenceDoc | null {
+	const dir = process.env.BAIZE_EVIDENCE_DIR ?? "/evidence";
+	const file = path.join(dir, `${repoId}.json`);
+	try {
+		return JSON.parse(readFileSync(file, "utf8")) as EvidenceDoc;
+	} catch {
+		return null;
+	}
+}
+
+function stripProj(qn: string, proj?: string): string {
+	if (proj && qn.startsWith(proj + ".")) return qn.slice(proj.length + 1);
+	return qn;
+}
+
+function evidenceToPromptBlock(ev: EvidenceDoc): string {
+	const a = ev.architecture;
+	const lines: string[] = ["## 仓库架构证据 (codebase-memory-mcp 结构化 — 定位真实符号与影响面)"];
+	if (a) {
+		const langs = (a.languages ?? []).map((l) => `${l.language}(${l.file_count})`).join(", ");
+		lines.push(`- 规模: ${a.total_nodes ?? "?"} 节点 / ${a.total_edges ?? "?"} 边;语言: ${langs || "?"}`);
+		const eps = (a.entry_points ?? []).map((e) => `${e.name} (${e.file})`).join(", ");
+		if (eps) lines.push(`- 入口: ${eps}`);
+		const hs = (a.hotspots ?? []).slice(0, 8).map((h) => `${stripProj(h.qualified_name, ev.project)}(${h.fan_in})`).join(", ");
+		if (hs) lines.push(`- 高影响热点(fan_in): ${hs}`);
+		const bd = (a.boundaries ?? []).slice(0, 6).map((b) => `${b.from}→${b.to}(${b.call_count})`).join(", ");
+		if (bd) lines.push(`- 跨包边界: ${bd}`);
+		const core = (a.layers ?? []).filter((l) => l.layer === "core").map((l) => l.name).join(", ");
+		const internal = (a.layers ?? []).filter((l) => l.layer === "internal").map((l) => l.name).join(", ");
+		if (core || internal) lines.push(`- 分层: core=[${core}]; internal=[${internal}]`);
+		const cl = (a.clusters ?? []).slice(0, 6).map((c) => `${(c.top_nodes ?? []).slice(0, 3).join("/")}(cohesion ${c.cohesion?.toFixed(2)})`).join(", ");
+		if (cl) lines.push(`- 真实模块(Leiden 社区): ${cl}`);
+		lines.push("- 基于以上结构,用 read/grep 精确定位热点符号真实行号;evidenceCandidates 必须是真实路径+行号(禁止编造).");
+	}
+	const adr = ev.priorAdr?.content?.trim();
+	lines.push("## 历史决策 (复用 — 上次设计沉淀,避免重复决策)");
+	lines.push(adr && adr.length > 0 ? adr.slice(0, 2000) : "(无历史 ADR,首次设计)");
+	return lines.join("\n");
+}
+// #9b: evolver_recall 自定义工具 — BAIZE_EVOLVER=1 时 architect mid-design 查本机已审核 gene。
+const evolverRecallTool = defineTool({
+	name: "evolver_recall",
+	label: "Recall Reusable Genes",
+	description:
+		"查本机已审核通过的可复用经验 gene(设计模式/坑/决策)。设计前调用一次。",
+	parameters: Type.Object({
+		limit: Type.Optional(Type.Number({ description: "返回数量,默认 5" })),
+	}),
+	execute: async (_id, params) => {
+		const c = await getEvolverClient();
+		if (!c) {
+			return {
+				content: [{ type: "text", text: "(evolver-mcp 未启用或启动失败)" }],
+				details: {},
+			};
+		}
+		try {
+			const limit = (params as { limit?: number }).limit ?? 5;
+			const res = (await c.call("evolver_recall", { limit })) as {
+				content?: Array<{ text?: string }>;
+			} | undefined;
+			const text = (res?.content ?? [])
+				.map((b) => b.text ?? "")
+				.join("; ")
+				.trim();
+			return {
+				content: [
+					{ type: "text", text: text || "(无可用 gene — 本地 store 空)" },
+				],
+				details: {},
+			};
+		} catch (e) {
+			return {
+				content: [
+					{
+						type: "text",
+						text: `(evolver_recall 失败: ${e instanceof Error ? e.message : e})`,
+					},
+				],
+				details: {},
+			};
+		}
+	},
+});
 
 const modelRuntime = await ModelRuntime.create();
 const agentDir = getAgentDir();
@@ -125,25 +248,41 @@ await resourceLoader.reload({ resolveProjectTrust: async () => true });
 const BAILIAN_BASE = "https://dashscope.aliyuncs.com/compatible-mode/v1";
 const bailianModels: readonly Model<Api>[] = [
 	{
-		id: "glm-5.2", name: "GLM-5.2", api: "openai-completions", baseUrl: BAILIAN_BASE,
-		provider: "bailian", reasoning: true, input: ["text"],
+		id: "glm-5.2",
+		name: "GLM-5.2",
+		api: "openai-completions",
+		baseUrl: BAILIAN_BASE,
+		provider: "bailian",
+		reasoning: true,
+		input: ["text"],
 		cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
-		contextWindow: 1048576, maxTokens: 16384,
-		thinkingLevelMap: { low: "high", medium: "high", high: "high", xhigh: "max", max: "max" },
+		contextWindow: 1048576,
+		maxTokens: 16384,
+		thinkingLevelMap: {
+			low: "high",
+			medium: "high",
+			high: "high",
+			xhigh: "max",
+			max: "max",
+		},
 		compat: { supportsDeveloperRole: false, supportsReasoningEffort: true },
 	},
 ];
 const bailianProvider = createProvider({
-	id: "bailian", name: "阿里云百炼 (DashScope)", baseUrl: BAILIAN_BASE,
+	id: "bailian",
+	name: "阿里云百炼 (DashScope)",
+	baseUrl: BAILIAN_BASE,
 	auth: { apiKey: envApiKeyAuth("阿里云百炼 API key", ["DASHSCOPE_API_KEY"]) },
 	models: bailianModels,
 	api: lazyApi(() =>
-		import("./node_modules/@earendil-works/pi-ai/dist/api/openai-completions.lazy.js").then(
-			(m) => m.openAICompletionsApi(),
-		),
+		import(
+			"./node_modules/@earendil-works/pi-ai/dist/api/openai-completions.lazy.js"
+		).then((m) => m.openAICompletionsApi()),
 	),
 });
-(modelRuntime as { registerNativeProvider(p: unknown): void }).registerNativeProvider(bailianProvider);
+(
+	modelRuntime as { registerNativeProvider(p: unknown): void }
+).registerNativeProvider(bailianProvider);
 interface RunInput {
 	requirement: string;
 	repoPath: string; // 绝对路径
@@ -151,7 +290,9 @@ interface RunInput {
 	commitSha?: string;
 }
 
-async function runDesign(input: RunInput): Promise<{ plan: Plan; critique: unknown }> {
+async function runDesign(
+	input: RunInput,
+): Promise<{ plan: Plan; critique: unknown }> {
 	const model = modelRuntime.getModel(PROVIDER, MODEL_ID);
 	if (!model) throw new Error(`model not found: ${PROVIDER}/${MODEL_ID}`);
 
@@ -164,26 +305,38 @@ async function runDesign(input: RunInput): Promise<{ plan: Plan; critique: unkno
 		parameters: PLAN_PARAMETERS,
 		execute: async (_id, params) => {
 			planFromTool = params as Plan;
-			return { content: [{ type: "text", text: "Plan submitted." }], details: {} };
+			return {
+				content: [{ type: "text", text: "Plan submitted." }],
+				details: {},
+			};
 		},
 	});
 
 	const sha = input.commitSha ?? "HEAD";
+	const evolverEnabled = process.env.BAIZE_EVOLVER === "1";
+	const archTools = ["read", "bash", "grep", "find", "ls", "submit_plan"];
+	if (evolverEnabled) archTools.push("evolver_recall");
+	const archCustom = evolverEnabled
+		? [submitPlanTool, evolverRecallTool]
+		: [submitPlanTool];
 	const { session } = await createAgentSession({
 		cwd: input.repoPath,
 		model,
 		modelRuntime,
 		resourceLoader,
-		tools: ["read", "bash", "grep", "find", "ls", "submit_plan"],
-		customTools: [submitPlanTool],
+		tools: archTools,
+		customTools: archCustom,
 		sessionManager: SessionManager.inMemory(input.repoPath),
 	});
 	try {
-		const prompt = [
-			`仓库: ${input.repoId} (commit ${sha})`,
-			`需求: ${input.requirement}`,
-			"请用 read/grep/find 分析仓库代码,参考 .pi/skills 各角色职责,然后调用 submit_plan 提交完整 plan。",
-		].join("\n");
+	const ev = loadEvidence(input.repoId);
+	const prompt = [
+		...(ev ? [evidenceToPromptBlock(ev), ""] : []),
+		`仓库: ${input.repoId} (commit ${sha})`,
+		`需求: ${input.requirement}`,
+		"请用 read/grep/find 分析仓库代码,参考 .pi/skills 各角色职责,然后调用 submit_plan 提交完整 plan.",
+		...(evolverEnabled ? ["可调用 evolver_recall 查可复用 gene(若有则参考复用)。"] : []),
+	].join("\n");
 		await session.prompt(prompt);
 	} finally {
 		try {
@@ -198,22 +351,35 @@ async function runDesign(input: RunInput): Promise<{ plan: Plan; critique: unkno
 	const recordCritiqueTool = defineTool({
 		name: "record_critique",
 		label: "Record Critique",
-		description: "提交对架构方案的独立评审发现(风险/遗漏/矛盾),含严重度与置信度。",
+		description:
+			"提交对架构方案的独立评审发现(风险/遗漏/矛盾),含严重度与置信度。",
 		parameters: Type.Object({
-			findings: Type.Array(Type.Object({
-				issue: Type.String(),
-				severity: Type.String({ description: "high|medium|low" }),
-				confidence: Type.String({ description: "high|medium|low" }),
-				suggestion: Type.String(),
-			})),
+			findings: Type.Array(
+				Type.Object({
+					issue: Type.String(),
+					severity: Type.String({ description: "high|medium|low" }),
+					confidence: Type.String({ description: "high|medium|low" }),
+					suggestion: Type.String(),
+				}),
+			),
 			overall: Type.String({ description: "总体评审意见" }),
 		}),
 		execute: async (_id, p) => {
 			critique = p;
-			return { content: [{ type: "text", text: "Critique recorded." }], details: {} };
+			return {
+				content: [{ type: "text", text: "Critique recorded." }],
+				details: {},
+			};
 		},
 	});
-	const plan = planFromTool ?? fallbackPlan(input.repoId, sha, input.requirement, "LLM 未调用 submit_plan");
+	const plan =
+		planFromTool ??
+		fallbackPlan(
+			input.repoId,
+			sha,
+			input.requirement,
+			"LLM 未调用 submit_plan",
+		);
 	const { session: criticSession } = await createAgentSession({
 		cwd: input.repoPath,
 		model,
@@ -224,12 +390,14 @@ async function runDesign(input: RunInput): Promise<{ plan: Plan; critique: unkno
 		sessionManager: SessionManager.inMemory(input.repoPath),
 	});
 	try {
-		await criticSession.prompt([
-			"角色: critic(设计评审)。参考 .pi/skills/critic 职责。",
-			`仓库: ${input.repoId} (commit ${sha})`,
-			`架构方案(architect 产出):\n${JSON.stringify(plan, null, 2)}`,
-			"请独立评审:需求覆盖完整性、证据充分性、风险/遗漏/矛盾。用 read/grep 复核证据真实后,调用 record_critique 提交发现。",
-		].join("\n"));
+		await criticSession.prompt(
+			[
+				"角色: critic(设计评审)。参考 .pi/skills/critic 职责。",
+				`仓库: ${input.repoId} (commit ${sha})`,
+				`架构方案(architect 产出):\n${JSON.stringify(plan, null, 2)}`,
+				"请独立评审:需求覆盖完整性、证据充分性、风险/遗漏/矛盾。用 read/grep 复核证据真实后,调用 record_critique 提交发现。",
+			].join("\n"),
+		);
 	} finally {
 		try {
 			await criticSession.dispose?.();
@@ -241,17 +409,32 @@ async function runDesign(input: RunInput): Promise<{ plan: Plan; critique: unkno
 }
 
 // ponytail: 最简 markdown 归档,不引模板引擎。git 版本由调用方(caller)或后续 archive.ts 接。
-function planToMarkdown(plan: Plan, critique?: unknown): string {
+function planToMarkdown(
+	plan: Plan,
+	critique?: unknown,
+	status = "accepted",
+): string {
 	const ev = (plan.evidenceCandidates as Array<Record<string, unknown>>) ?? [];
 	const req = plan.requirementContent as Record<string, unknown>;
 	const arch = plan.architectureContent as Record<string, unknown>;
 	const api = plan.restApiContent as Record<string, unknown>;
 	const data = plan.dataDesignContent as Record<string, unknown>;
-	const cfinds = ((critique as { findings?: Array<{ issue: string; severity: string; confidence: string; suggestion: string }> })?.findings) ?? [];
+	const cfinds =
+		(
+			critique as {
+				findings?: Array<{
+					issue: string;
+					severity: string;
+					confidence: string;
+					suggestion: string;
+				}>;
+			}
+		)?.findings ?? [];
 	const coverall = (critique as { overall?: string })?.overall ?? "";
 	const lines: string[] = [
 		`# ${String(plan.decisionTitle ?? "Design Decision")}`,
 		"",
+		`> 审批状态: ${status}`,
 		`> ${String(plan.findingTitle ?? "")}`,
 		"",
 		"## 上下文",
@@ -281,17 +464,30 @@ function planToMarkdown(plan: Plan, critique?: unknown): string {
 		),
 		"",
 		...(cfinds.length
-			? ["## 评审发现 (critic 独立 challenge)", ...cfinds.map((f) => `- [${f.severity}/${f.confidence}] ${f.issue} → ${f.suggestion}`), coverall ? `> ${coverall}` : "", ""]
+			? [
+					"## 评审发现 (critic 独立 challenge)",
+					...cfinds.map(
+						(f) =>
+							`- [${f.severity}/${f.confidence}] ${f.issue} → ${f.suggestion}`,
+					),
+					coverall ? `> ${coverall}` : "",
+					"",
+				]
 			: []),
 	];
 	return lines.join("\n");
 }
 
-async function writeDesignPackage(plan: Plan, critique: unknown, repoId: string): Promise<string> {
+async function writeDesignPackage(
+	plan: Plan,
+	critique: unknown,
+	repoId: string,
+	status: string,
+): Promise<string> {
 	await fs.mkdir(OUT_DIR, { recursive: true });
 	const ts = new Date().toISOString().replace(/[:.]/g, "-");
 	const file = path.join(OUT_DIR, `design-package-${repoId}-${ts}.md`);
-	await fs.writeFile(file, planToMarkdown(plan, critique), "utf8");
+	await fs.writeFile(file, planToMarkdown(plan, critique, status), "utf8");
 	return file;
 }
 
@@ -317,7 +513,7 @@ function parseArgs(argv: string[]): RunInput {
 			process.exit(0);
 		}
 	}
-	if (reqFile) requirement = (requireText(reqFile)) ?? requirement;
+	if (reqFile) requirement = requireText(reqFile) ?? requirement;
 	if (!requirement) {
 		console.error("错误: 缺少 --requirement 或 --requirement-file");
 		process.exit(2);
@@ -345,7 +541,21 @@ function requireText(file: string): string | undefined {
 }
 
 const input = parseArgs(process.argv);
-console.log(`[baize] repo=${input.repoId} cwd=${input.repoPath} model=${PROVIDER}/${MODEL_ID}`);
+console.log(
+	`[baize] repo=${input.repoId} cwd=${input.repoPath} model=${PROVIDER}/${MODEL_ID}`,
+);
 const { plan, critique } = await runDesign(input);
-const file = await writeDesignPackage(plan, critique, input.repoId);
+const autoApprove = process.env.BAIZE_AUTO_APPROVE !== "0";
+const file = await writeDesignPackage(
+	plan,
+	critique,
+	input.repoId,
+	autoApprove ? "accepted" : "pending",
+);
+console.log(
+	`[baize] 审批: ${autoApprove ? "auto-approved (BAIZE_AUTO_APPROVE=1)" : "pending (BAIZE_AUTO_APPROVE=0, 待外部 approve)"}`,
+);
 console.log(`[baize] Design Package 写入: ${file}`);
+// ponytail: 显式 exit — evolver-mcp 子进程 stdio 句柄 keep event loop,
+// 不显式 exit 容器不退(package 已写完,exit 安全)。
+process.exit(0);
