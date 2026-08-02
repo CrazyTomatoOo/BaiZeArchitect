@@ -5,3 +5,4 @@ _archived/
 .DS_Store
 *.tsbuildinfo
 out/*.pending.md
+test-repo-2/
