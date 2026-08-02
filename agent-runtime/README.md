@@ -1,60 +1,65 @@
-# BaiZe Agent Runtime (pi-backed)
+# BaiZe Agent Runtime
 
-A thin HTTP adapter that implements BaiZe's `POST /runtime/plan` contract using
-[pi](https://github.com/earendil-works/pi-coding-agent)'s SDK as the agent engine.
-BaiZe's `httpRuntimeAdapter` calls `{AGENT_RUNTIME_URL}/runtime/plan`; this service
-drives a real LLM agent (via Pi Core) over the evidence repo and returns the
-structured plan JSON BaiZe expects — replacing `deterministicRuntimeAdapter`.
+单进程设计 agent 入口(`cli.ts`),跑 architect + critic 两 phase 产出 Design Package。
+宿主 `codebase-memory-mcp` 预产结构化证据,evidence / gene 注入 architect prompt。
+**完整架构与用法见根 [`README.md`](../README.md)。**
 
-## Run
+## 运行(经根 `run.sh`,推荐)
 
-```bash
-cd agent-runtime
-npm install
-# uses ~/.pi/agent/auth.json for LLM keys (or ANTHROPIC_API_KEY)
-EVIDENCE_REPOSITORIES_ROOT=/Volumes/work/Project/BaiZeArchitect \
-npm run dev   # tsx watch server.ts, listens on :8081
+```sh
+cd .. && DASHSCOPE_API_KEY=... ./scripts/run.sh lws "你的需求"
 ```
 
-Point BaiZe at it:
+## 直接跑(容器,开发用)
 
-```bash
-cd platform-api
-AGENT_RUNTIME_URL=http://127.0.0.1:8081 \
-DATABASE_URL=... TEAM_TOKENS=... \
-go run ./cmd/platform-api
+```sh
+docker compose run --rm -v "$PWD/../lws:/repo:ro" \
+  baize --repo /repo --repo-id lws --requirement "需求"
 ```
 
-Now `POST /api/v1/design-runs/:id/runtime-runs` calls this service instead of the
-deterministic adapter.
+## CLI 参数
 
-## Env
-
-| Var | Default | Purpose |
-| ----- | --------- | --------- |
-| `PORT` | `8081` | HTTP listen port |
-| `EVIDENCE_REPOSITORIES_ROOT` | `cwd` | Root dir; repo checkout at `${ROOT}/${repositoryId}` |
-| `RUNTIME_MODEL_PROVIDER` | `anthropic` | LLM provider |
-| `RUNTIME_MODEL_ID` | `claude-sonnet-4-5` | LLM model id |
-
-## Contract
-
-Request (from BaiZe `httpRuntimeAdapter`):
-
-```json
-{"runId":"...","projectId":"...","requirementVersionId":"...","requirementContent":"...","repositoryId":"pilot-backend","branch":"main","commitSha":"3dc359fceb1f"}
+```
+baize --repo <path> [--repo-id id] [--requirement <text|--requirement-file f>] [--commit sha]
 ```
 
-Response must contain all of (or BaiZe errors `runtime adapter returned incomplete plan`):
-`contextSummary`, `evidenceCandidates[]`, `requirementContent`, `architectureContent`,
-`restApiContent`, `dataDesignContent`, `decisionTitle`, `findingTitle`.
+## 模块
 
-## Design
+| 文件 | 职责 |
+| --- | --- |
+| `cli.ts` | 入口:architect(`submit_plan`)+ critic(`record_critique`)两 phase + evidence/evolver 注入 + design-package 归档 |
+| `evolver-client.ts` | evolver-mcp stdio JSON-RPC 客户端(手写,未装 MCP SDK);`getEvolverClient` lazy-spawn(`BAIZE_EVOLVER=1`),`detached:true`+`SIGKILL` 进程组(防容器不退) |
+| `distill-gene.ts` | design-package → `evolver_distill_conversation` → gene 落 `EVOLVER_HOME/assets`(宿主跑,见根 `evolve.sh`) |
+| `Dockerfile` | `node:22-slim` + `npm install` pi SDK + COPY `.pi/skills` + `schemas` |
 
-- `createAgentSession({cwd: evidence repo, tools:["read","bash","grep"], systemPrompt, modelRuntime})`
-- `session.prompt(structured prompt)` — LLM analyzes repo, emits JSON
-- `extractJSON()` tolerates markdown fences + extracts `{...}`
-- `session.dispose()` in `finally`
+## 关键 env(继承 `compose.yaml`)
 
-Note: BaiZe's `httpRuntimeAdapter` has a 10s client timeout (too short for real LLM);
-the platform-api side needs that raised (see M2 plan 3.1).
+- `BAIZE_PROJECT_ROOT`(`/app`)— `.pi/skills` 所在
+- `BAIZE_OUT_DIR`(`/app/out`)— design package 产出
+- `BAIZE_EVIDENCE_DIR`(`/evidence`)— mcp `evidence.json`(挂载)
+- `RUNTIME_MODEL_PROVIDER` / `RUNTIME_MODEL_ID`(`bailian` / `glm-5.2`)
+- `BAIZE_EVOLVER=1` — 启用容器内 evolver-mcp(`evolver_recall` 工具)
+- `EVOLVER_HOME`(`/evolver-home`)— gene store(挂载 `./evolver-home`)
+
+## 设计要点
+
+- `createAgentSession({cwd: repoPath, model, modelRuntime, resourceLoader, tools, customTools})`
+  — pi SDK;architect 的 `customTools` 含 `submit_plan`(`defineTool`,8 字段 schema),LLM
+  调一次产结构化 plan(非 markdown 文本)。
+- LLM 未调 `submit_plan` → `fallbackPlan` 兜底(evidence 空)。
+- evidence 注入:`loadEvidence(repoId)` 读 `/evidence/<repoId>.json` →
+  `evidenceToPromptBlock` 渲染 hotspots/boundaries/clusters/layers + 历史 ADR → prepend
+  architect prompt。`read`/`grep` 仍负责行号精度(mcp 给结构,read/grep 给行)。
+- evolver:`evolverRecallTool`(`defineTool`)`execute` 调 `getEvolverClient()` →
+  `evolver_recall` → 返本机已审核 gene(空则提示先 `distill`)。
+- bailian provider 内联 `createProvider`+`registerNativeProvider`(绕过 extension
+  `registerProvider` 不可查 catalog);用 `modelRuntime.getModel`(非 deprecated `getModel`)。
+
+## 开发
+
+```sh
+npm install && npx tsc --noEmit   # 类型检查
+```
+
+> 旧 HTTP adapter(`server.ts`,`POST /runtime/plan`,anthropic)已废弃——见 git 历史与
+> 根 `README.md` 的 refactor 说明。
