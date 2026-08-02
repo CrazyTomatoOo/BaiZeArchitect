@@ -1,0 +1,25 @@
+# macOS AppleDouble 资源叉文件(在 /Volumes 外置盘上 xattr 会炸 build context)
+._*
+**/._*
+.DS_Store
+**/.DS_Store
+
+# 镜像内自己 npm install,不打入宿主 node_modules
+**/node_modules
+
+# 旧三服务已归档,不进镜像
+_archived
+backups
+
+# 无关目录(test-repo-2 由 compose volume 挂载,不进镜像)
+test-repo-2
+out
+docs
+.github
+.omo
+.codegraph
+.playwright-mcp
+examples
+scripts
+*.md
+!schemas/**

@@ -1,0 +1,62 @@
+- main [ref=f4e2]:
+  - generic [ref=f4e3]:
+    - heading "BaiZe Architect Workbench" [level=1] [ref=f4e4]
+    - paragraph [ref=f4e5]: Drive the current project, requirement, runtime, approval, confirmation, and SRS-readiness flow from one operator screen.
+  - generic [ref=f4e6]:
+    - region [ref=f4e7]:
+      - heading "Workflow inputs" [level=2] [ref=f4e8]
+      - generic [ref=f4e9]: Project name
+      - textbox "Project name" [ref=f4e10]: Pilot Storage Migration
+      - generic [ref=f4e11]: Change request
+      - textbox "Change request" [ref=f4e12]: Design the Volcano scheduler queue and pod allocation flow around repository evidence, human approval, and archived SRS readiness.
+      - generic [ref=f4e13]: Repository ID
+      - textbox "Repository ID" [ref=f4e14]: volcano-sh/volcano
+      - generic [ref=f4e15]: GitHub HTTPS URL
+      - textbox "GitHub HTTPS URL" [ref=f4e16]: https://github.com/volcano-sh/volcano.git
+      - generic [ref=f4e17]: Branch
+      - textbox "Branch" [ref=f4e18]: master
+      - generic [ref=f4e19]: Commit SHA
+      - textbox "Commit SHA" [ref=f4e20]:
+        - /placeholder: Optional; resolved from branch when blank
+      - generic [ref=f4e21]: API token
+      - textbox "API token" [ref=f4e22]:
+        - /placeholder: Required only when API_TOKEN is set
+        - text: operator-token
+      - generic [ref=f4e23]: Approval token
+      - textbox "Approval token" [ref=f4e24]:
+        - /placeholder: Required only when APPROVAL_TOKEN is set
+        - text: approver-token
+      - generic [ref=f4e25]:
+        - button "Run workflow" [ref=f4e26] [cursor=pointer]
+        - button "Approve decision" [disabled] [ref=f4e27]
+        - button "Confirm run" [disabled] [ref=f4e28]
+    - region [ref=f4e29]:
+      - heading "Live status" [level=2] [ref=f4e30]
+      - generic [ref=f4e31]:
+        - generic [ref=f4e32]:
+          - strong [ref=f4e33]: Project
+          - generic [ref=f4e34]: Not created
+        - generic [ref=f4e35]:
+          - strong [ref=f4e36]: Requirement
+          - generic [ref=f4e37]: Not baselined
+        - generic [ref=f4e38]:
+          - strong [ref=f4e39]: Run
+          - generic [ref=f4e40]: Not started
+        - generic [ref=f4e41]:
+          - strong [ref=f4e42]: Decision
+          - generic [ref=f4e43]: Awaiting runtime
+        - generic [ref=f4e44]:
+          - strong [ref=f4e45]: Run status
+          - generic [ref=f4e46]: Idle
+        - generic [ref=f4e47]:
+          - strong [ref=f4e48]: SRS ready
+          - generic [ref=f4e49]: "false"
+      - button "Load projects" [active] [ref=f4e51] [cursor=pointer]
+      - generic "Project and run history" [ref=f4e52]:
+        - generic [ref=f4e53]:
+          - strong [ref=f4e54]: Projects
+          - generic [ref=f4e55]: Pilot Storage Migration (project-2121facac4e908f6) Pilot Storage Migration (project-678ef9b778088ab9) Pilot Storage Migration (project-93d966c25dbbe35d) Pilot Storage Migration (project-a6789606abcd93c4) Pilot Storage Migration (project-ab912bf26235fec1)
+        - generic [ref=f4e56]:
+          - strong [ref=f4e57]: Runs
+          - generic [ref=f4e58]: run-d3a6c3c4c66510c5 COMPLETED
+      - generic [ref=f4e59]: Project history refreshed

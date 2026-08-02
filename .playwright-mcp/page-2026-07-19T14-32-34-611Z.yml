@@ -1,0 +1,52 @@
+- main [ref=f2e2]:
+  - generic [ref=f2e3]:
+    - heading "BaiZe Architect Workbench" [level=1] [ref=f2e4]
+    - paragraph [ref=f2e5]: Drive the current project, requirement, runtime, approval, confirmation, and SRS-readiness flow from one operator screen.
+  - generic [ref=f2e6]:
+    - region [ref=f2e7]:
+      - heading "Workflow inputs" [level=2] [ref=f2e8]
+      - generic [ref=f2e9]: Project name
+      - textbox "Project name" [ref=f2e10]: Pilot Storage Migration
+      - generic [ref=f2e11]: Change request
+      - textbox "Change request" [ref=f2e12]: Design the Volcano scheduler queue and pod allocation flow around repository evidence, human approval, and archived SRS readiness.
+      - generic [ref=f2e13]: Repository ID
+      - textbox "Repository ID" [ref=f2e14]: volcano-sh/volcano
+      - generic [ref=f2e15]: GitHub HTTPS URL
+      - textbox "GitHub HTTPS URL" [ref=f2e16]: https://github.com/volcano-sh/volcano.git
+      - generic [ref=f2e17]: Branch
+      - textbox "Branch" [ref=f2e18]: master
+      - generic [ref=f2e19]: Commit SHA
+      - textbox "Commit SHA" [ref=f2e20]:
+        - /placeholder: Optional; resolved from branch when blank
+      - generic [ref=f2e21]: API token
+      - textbox "API token" [ref=f2e22]:
+        - /placeholder: Required only when API_TOKEN is set
+      - generic [ref=f2e23]: Approval token
+      - textbox "Approval token" [ref=f2e24]:
+        - /placeholder: Required only when APPROVAL_TOKEN is set
+      - generic [ref=f2e25]:
+        - button "Run workflow" [ref=f2e26] [cursor=pointer]
+        - button "Approve decision" [disabled] [ref=f2e27]
+        - button "Confirm run" [disabled] [ref=f2e28]
+    - region [ref=f2e29]:
+      - heading "Live status" [level=2] [ref=f2e30]
+      - generic [ref=f2e31]:
+        - generic [ref=f2e32]:
+          - strong [ref=f2e33]: Project
+          - generic [ref=f2e34]: Not created
+        - generic [ref=f2e35]:
+          - strong [ref=f2e36]: Requirement
+          - generic [ref=f2e37]: Not baselined
+        - generic [ref=f2e38]:
+          - strong [ref=f2e39]: Run
+          - generic [ref=f2e40]: Not started
+        - generic [ref=f2e41]:
+          - strong [ref=f2e42]: Decision
+          - generic [ref=f2e43]: Awaiting runtime
+        - generic [ref=f2e44]:
+          - strong [ref=f2e45]: Run status
+          - generic [ref=f2e46]: Idle
+        - generic [ref=f2e47]:
+          - strong [ref=f2e48]: SRS ready
+          - generic [ref=f2e49]: "false"
+      - generic [ref=f2e50]: Ready.

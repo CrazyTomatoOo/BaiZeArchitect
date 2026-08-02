@@ -1,0 +1,30 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://baize-architect.local/schemas/code-evidence.schema.json",
+  "title": "CodeEvidence",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "repositoryId",
+    "commitSha",
+    "filePath",
+    "symbol",
+    "lineStart",
+    "lineEnd",
+    "evidenceType",
+    "claim"
+  ],
+  "properties": {
+    "repositoryId": { "type": "string", "minLength": 1 },
+    "commitSha": { "type": "string", "minLength": 7 },
+    "filePath": { "type": "string", "minLength": 1 },
+    "symbol": { "type": "string", "minLength": 1 },
+    "lineStart": { "type": "integer", "minimum": 1 },
+    "lineEnd": { "type": "integer", "minimum": 1 },
+    "evidenceType": {
+      "type": "string",
+      "enum": ["ROUTE", "SERVICE", "REPOSITORY", "CONFIG", "DATA_MODEL", "TEST", "DEPLOYMENT"]
+    },
+    "claim": { "type": "string", "minLength": 1 }
+  }
+}

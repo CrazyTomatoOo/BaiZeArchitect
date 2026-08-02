@@ -1,0 +1,62 @@
+- main [ref=f1e2]:
+  - generic [ref=f1e3]:
+    - heading "BaiZe Architect Workbench" [level=1] [ref=f1e4]
+    - paragraph [ref=f1e5]: Drive the current project, requirement, runtime, approval, confirmation, and SRS-readiness flow from one operator screen.
+  - generic [ref=f1e6]:
+    - region [ref=f1e7]:
+      - heading "Workflow inputs" [level=2] [ref=f1e8]
+      - generic [ref=f1e9]: Project name
+      - textbox "Project name" [ref=f1e10]: Pilot Storage Migration
+      - generic [ref=f1e11]: Change request
+      - textbox "Change request" [ref=f1e12]: Design the Volcano scheduler queue and pod allocation flow around repository evidence, human approval, and archived SRS readiness.
+      - generic [ref=f1e13]: Repository ID
+      - textbox "Repository ID" [ref=f1e14]: volcano-sh/volcano
+      - generic [ref=f1e15]: GitHub HTTPS URL
+      - textbox "GitHub HTTPS URL" [ref=f1e16]: https://github.com/volcano-sh/volcano.git
+      - generic [ref=f1e17]: Branch
+      - textbox "Branch" [ref=f1e18]: master
+      - generic [ref=f1e19]: Commit SHA
+      - textbox "Commit SHA" [ref=f1e20]:
+        - /placeholder: Optional; resolved from branch when blank
+      - generic [ref=f1e21]: API token
+      - textbox "API token" [ref=f1e22]:
+        - /placeholder: Required only when API_TOKEN is set
+        - text: operator-token
+      - generic [ref=f1e23]: Approval token
+      - textbox "Approval token" [ref=f1e24]:
+        - /placeholder: Required only when APPROVAL_TOKEN is set
+        - text: approver-token
+      - generic [ref=f1e25]:
+        - button "Run workflow" [ref=f1e26] [cursor=pointer]
+        - button "Approve decision" [ref=f1e27] [cursor=pointer]
+        - button "Confirm run" [ref=f1e28] [cursor=pointer]
+    - region [ref=f1e29]:
+      - heading "Live status" [level=2] [ref=f1e30]
+      - generic [ref=f1e31]:
+        - generic [ref=f1e32]:
+          - strong [ref=f1e33]: Project
+          - generic [ref=f1e34]: project-13c066de0652d21d
+        - generic [ref=f1e35]:
+          - strong [ref=f1e36]: Requirement
+          - generic [ref=f1e37]: requirement-7d2caefce094830a
+        - generic [ref=f1e38]:
+          - strong [ref=f1e39]: Run
+          - generic [ref=f1e40]: run-df7e57c96768ed62
+        - generic [ref=f1e41]:
+          - strong [ref=f1e42]: Decision
+          - generic [ref=f1e43]: DEC-2026-cf15b11984ec2b25
+        - generic [ref=f1e44]:
+          - strong [ref=f1e45]: Run status
+          - generic [ref=f1e46]: COMPLETED
+        - generic [ref=f1e47]:
+          - strong [ref=f1e48]: SRS ready
+          - generic [ref=f1e49]: "true"
+      - button "Load projects" [ref=f1e51] [cursor=pointer]
+      - generic "Project and run history" [ref=f1e52]:
+        - generic [ref=f1e53]:
+          - strong [ref=f1e54]: Projects
+          - generic [ref=f1e55]: Pilot Storage Migration (project-13c066de0652d21d) Direct Bind Retry (project-5764b8898130a99d) Pilot Storage Migration (project-f65ebd49f8aa2efe)
+        - generic [ref=f1e56]:
+          - strong [ref=f1e57]: Runs
+          - generic [ref=f1e58]: run-df7e57c96768ed62 COMPLETED
+      - generic [ref=f1e59]: "SRS acceptance refreshed { \"runId\": \"run-df7e57c96768ed62\", \"ready\": true, \"criteria\": [ { \"id\": \"java_go_backend_change_request\", \"ready\": true, \"evidence\": [ \"evidence-e45e328f5f719b77\" ] }, { \"id\": \"requirements_artifact\", \"ready\": true, \"evidence\": [ \"artifact-20a035ef8835382f\" ] }, { \"id\": \"architecture_artifact\", \"ready\": true, \"evidence\": [ \"artifact-cfd29a5c3e0690dc\" ] }, { \"id\": \"rest_api_artifact\", \"ready\": true, \"evidence\": [ \"artifact-7ce4af01f2eab87d\" ] }, { \"id\": \"postgresql_data_artifact\", \"ready\": true, \"evidence\": [ \"artifact-84044dd372f6726b\" ] }, { \"id\": \"decision_records_accepted\", \"ready\": true, \"evidence\": [ \"DEC-2026-cf15b11984ec2b25\" ] }, { \"id\": \"review_and_human_confirmation\", \"ready\": true, \"evidence\": [ \"finding-07cb7796539373ea\", \"event-11588eae1bcc74d2\" ] }, { \"id\": \"archived_design_package\", \"ready\": true, \"evidence\": [ \"design-package-545d5467976d6ff2\" ] } ], \"missing\": [] }"

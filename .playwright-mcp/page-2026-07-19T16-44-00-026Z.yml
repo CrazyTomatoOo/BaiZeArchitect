@@ -1,0 +1,94 @@
+- main [ref=f2e2]:
+  - generic [ref=f2e3]:
+    - generic [ref=f2e4]:
+      - generic [ref=f2e5]: Production workflow console
+      - heading "BaiZe Architect Workbench" [level=1] [ref=f2e6]
+      - paragraph [ref=f2e7]: Drive repository evidence, runtime design, approval, confirmation, and SRS readiness from one operator screen.
+    - generic "Deployment mode" [ref=f2e8]:
+      - strong [ref=f2e9]: Current surface
+      - generic [ref=f2e10]: GitHub evidence + team approval
+  - generic [ref=f2e11]:
+    - region [ref=f2e12]:
+      - generic [ref=f2e13]:
+        - generic [ref=f2e14]:
+          - heading "Workflow inputs" [level=2] [ref=f2e15]
+          - paragraph [ref=f2e16]: Start with a real repository and keep the run pinned to traceable evidence.
+        - generic [ref=f2e17]: Operator
+      - generic [ref=f2e18]:
+        - generic [ref=f2e19]: Project name
+        - textbox "Project name" [ref=f2e20]: Pilot Storage Migration
+      - generic [ref=f2e21]:
+        - generic [ref=f2e22]: Change request
+        - textbox "Change request" [ref=f2e23]: Design the Volcano scheduler queue and pod allocation flow around repository evidence, human approval, and archived SRS readiness.
+        - generic [ref=f2e24]: Describe the design decision the team needs to approve and archive.
+      - generic [ref=f2e25]:
+        - generic [ref=f2e26]: Repository ID
+        - textbox "Repository ID" [ref=f2e27]: volcano-sh/volcano
+      - generic [ref=f2e28]:
+        - generic [ref=f2e29]: GitHub HTTPS URL
+        - textbox "GitHub HTTPS URL" [ref=f2e30]: https://github.com/volcano-sh/volcano.git
+        - generic [ref=f2e31]: "Accepted shape: https://github.com/<owner>/<repo>.git"
+      - generic [ref=f2e32]:
+        - generic [ref=f2e33]: Branch
+        - textbox "Branch" [ref=f2e34]: master
+      - generic [ref=f2e35]:
+        - generic [ref=f2e36]: Commit SHA
+        - textbox "Commit SHA" [ref=f2e37]:
+          - /placeholder: Optional; resolved from branch when blank
+      - generic [ref=f2e38]:
+        - generic [ref=f2e39]: API token
+        - textbox "API token" [ref=f2e40]:
+          - /placeholder: Required only when API_TOKEN is set
+      - generic [ref=f2e41]:
+        - generic [ref=f2e42]: Approval token
+        - textbox "Approval token" [ref=f2e43]:
+          - /placeholder: Required only when APPROVAL_TOKEN is set
+      - generic [ref=f2e44]:
+        - button "Run workflow" [ref=f2e45] [cursor=pointer]
+        - button "Approve decision" [disabled] [ref=f2e46]
+        - button "Confirm run" [disabled] [ref=f2e47]
+    - region [ref=f2e48]:
+      - generic [ref=f2e49]:
+        - generic [ref=f2e50]:
+          - heading "Live status" [level=2] [ref=f2e51]
+          - paragraph [ref=f2e52]: Follow the run from evidence intake to archived SRS readiness.
+        - generic [ref=f2e53]: Ready
+      - generic "Workflow progress" [ref=f2e54]:
+        - generic [ref=f2e55]: Project
+        - generic [ref=f2e56]: Requirement
+        - generic [ref=f2e57]: Repository
+        - generic [ref=f2e58]: Runtime
+        - generic [ref=f2e59]: Approval
+        - generic [ref=f2e60]: Confirm
+        - generic [ref=f2e61]: SRS ready
+      - generic [ref=f2e62]:
+        - generic [ref=f2e63]:
+          - strong [ref=f2e64]: Project
+          - generic [ref=f2e65]: Not created
+        - generic [ref=f2e66]:
+          - strong [ref=f2e67]: Requirement
+          - generic [ref=f2e68]: Not baselined
+        - generic [ref=f2e69]:
+          - strong [ref=f2e70]: Run
+          - generic [ref=f2e71]: Not started
+        - generic [ref=f2e72]:
+          - strong [ref=f2e73]: Decision
+          - generic [ref=f2e74]: Awaiting runtime
+        - generic [ref=f2e75]:
+          - strong [ref=f2e76]: Run status
+          - generic [ref=f2e77]: Idle
+        - generic [ref=f2e78]:
+          - strong [ref=f2e79]: SRS ready
+          - generic [ref=f2e80]: "false"
+      - button "Load projects" [ref=f2e82] [cursor=pointer]
+      - generic "Project and run history" [ref=f2e83]:
+        - generic [ref=f2e84]:
+          - strong [ref=f2e85]: Projects
+          - generic [ref=f2e86]: Not loaded
+        - generic [ref=f2e87]:
+          - strong [ref=f2e88]: Runs
+          - generic [ref=f2e89]: Select or create a project
+      - generic [ref=f2e90]:
+        - strong [ref=f2e91]: Raw workflow response
+        - generic [ref=f2e92]: Idle
+      - generic [ref=f2e93]: Ready.

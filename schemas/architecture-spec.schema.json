@@ -1,0 +1,29 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://baize-architect.local/schemas/architecture-spec.schema.json",
+  "title": "ArchitectureSpecification",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "systemContext",
+    "componentChanges",
+    "runtimeFlow",
+    "dataFlow",
+    "deploymentImpact",
+    "qualityAttributeResponses",
+    "risks",
+    "evidenceRefs",
+    "decisionCandidates"
+  ],
+  "properties": {
+    "systemContext": { "type": "string", "minLength": 1 },
+    "componentChanges": { "type": "array", "items": { "type": "string" }, "minItems": 1 },
+    "runtimeFlow": { "type": "array", "items": { "type": "string" } },
+    "dataFlow": { "type": "array", "items": { "type": "string" } },
+    "deploymentImpact": { "type": "array", "items": { "type": "string" } },
+    "qualityAttributeResponses": { "type": "array", "items": { "type": "string" } },
+    "risks": { "type": "array", "items": { "type": "string" } },
+    "evidenceRefs": { "type": "array", "items": { "type": "string" }, "minItems": 2 },
+    "decisionCandidates": { "type": "array", "items": { "type": "string" } }
+  }
+}

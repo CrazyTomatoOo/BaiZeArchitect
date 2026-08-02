@@ -1,0 +1,67 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://baize-architect.local/schemas/decision-record.schema.json",
+  "title": "DecisionRecord",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "decisionId",
+    "type",
+    "title",
+    "status",
+    "significance",
+    "context",
+    "options",
+    "selectedOption",
+    "rationale",
+    "consequences",
+    "evidenceRefs",
+    "reviewTriggers"
+  ],
+  "properties": {
+    "decisionId": { "type": "string", "pattern": "^DEC-[0-9]{4}-[0-9]{4}$" },
+    "type": { "type": "string", "enum": ["ARCHITECTURE", "DATA", "API", "SECURITY", "OPERATIONS"] },
+    "title": { "type": "string", "minLength": 1 },
+    "status": { "type": "string", "enum": ["PROPOSED", "UNDER_REVIEW", "ACCEPTED", "REJECTED", "SUPERSEDED", "DEPRECATED"] },
+    "significance": { "type": "string", "enum": ["MINOR", "MAJOR", "CRITICAL"] },
+    "context": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["problem", "constraints", "qualityAttributes"],
+      "properties": {
+        "problem": { "type": "string", "minLength": 1 },
+        "constraints": { "type": "array", "items": { "type": "string" } },
+        "qualityAttributes": { "type": "array", "items": { "type": "string" } }
+      }
+    },
+    "options": {
+      "type": "array",
+      "minItems": 2,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "name", "pros", "cons"],
+        "properties": {
+          "id": { "type": "string", "minLength": 1 },
+          "name": { "type": "string", "minLength": 1 },
+          "pros": { "type": "array", "items": { "type": "string" } },
+          "cons": { "type": "array", "items": { "type": "string" } }
+        }
+      }
+    },
+    "selectedOption": { "type": "string" },
+    "rationale": { "type": "string" },
+    "consequences": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["positive", "negative", "risks"],
+      "properties": {
+        "positive": { "type": "array", "items": { "type": "string" } },
+        "negative": { "type": "array", "items": { "type": "string" } },
+        "risks": { "type": "array", "items": { "type": "string" } }
+      }
+    },
+    "evidenceRefs": { "type": "array", "items": { "type": "string" } },
+    "reviewTriggers": { "type": "array", "items": { "type": "string" } }
+  }
+}

@@ -1,0 +1,99 @@
+- main [ref=e2]:
+  - generic [ref=e3]:
+    - generic [ref=e4]:
+      - generic [ref=e5]: Production workflow console
+      - heading "BaiZe Architect Workbench" [level=1] [ref=e6]
+      - paragraph [ref=e7]: Drive repository evidence, runtime design, approval, confirmation, and SRS readiness from one operator screen.
+    - generic "Deployment mode" [ref=e8]:
+      - strong [ref=e9]: Current surface
+      - generic [ref=e10]: GitHub evidence + team approval
+  - generic [ref=e11]:
+    - region [ref=e12]:
+      - generic [ref=e13]:
+        - generic [ref=e14]:
+          - heading "Workflow inputs" [level=2] [ref=e15]
+          - paragraph [ref=e16]: Start with a real repository and keep the run pinned to traceable evidence.
+        - generic [ref=e17]: Operator
+      - generic [ref=e18]:
+        - generic [ref=e19]: Project name
+        - textbox "Project name" [ref=e20]: Pilot Storage Migration
+      - generic [ref=e21]:
+        - generic [ref=e22]: Change request
+        - textbox "Change request" [ref=e23]: Design the Volcano scheduler queue and pod allocation flow around repository evidence, human approval, and archived SRS readiness.
+        - generic [ref=e24]: Describe the design decision the team needs to approve and archive.
+      - generic [ref=e25]:
+        - generic [ref=e26]: Repository ID
+        - textbox "Repository ID" [ref=e27]: volcano-sh/volcano
+      - generic [ref=e28]:
+        - generic [ref=e29]: GitHub HTTPS URL
+        - textbox "GitHub HTTPS URL" [ref=e30]: https://github.com/volcano-sh/volcano.git
+        - generic [ref=e31]: "Accepted shape: https://github.com/<owner>/<repo>.git"
+      - generic [ref=e32]:
+        - generic [ref=e33]: Branch
+        - textbox "Branch" [ref=e34]: master
+      - generic [ref=e35]:
+        - generic [ref=e36]: Commit SHA
+        - textbox "Commit SHA" [ref=e37]:
+          - /placeholder: Optional commit SHA
+      - generic [ref=e38]:
+        - generic [ref=e39]: API token
+        - textbox "API token" [ref=e40]:
+          - /placeholder: Operator token
+        - generic [ref=e41]: Required for this deployment. Use your operator token before running workflow or loading history.
+      - generic [ref=e42]:
+        - generic [ref=e43]: Approval token
+        - textbox "Approval token" [ref=e44]:
+          - /placeholder: Approver token
+        - generic [ref=e45]: Required before approving or confirming a run.
+      - generic [ref=e46]:
+        - button "Run workflow" [ref=e47] [cursor=pointer]
+        - button "Approve decision" [disabled] [ref=e48]
+        - button "Confirm run" [disabled] [ref=e49]
+    - region [ref=e50]:
+      - generic [ref=e51]:
+        - generic [ref=e52]:
+          - heading "Live status" [level=2] [ref=e53]
+          - paragraph [ref=e54]: Follow the run from evidence intake to archived SRS readiness.
+        - generic [ref=e55]: Ready
+      - generic "Workflow progress" [ref=e56]:
+        - generic [ref=e57]: Project
+        - generic [ref=e58]: Requirement
+        - generic [ref=e59]: Repository
+        - generic [ref=e60]: Runtime
+        - generic [ref=e61]: Approval
+        - generic [ref=e62]: Confirm
+        - generic [ref=e63]: SRS ready
+      - generic [ref=e64]:
+        - generic [ref=e65]:
+          - strong [ref=e66]: Project
+          - generic [ref=e67]: Not created
+        - generic [ref=e68]:
+          - strong [ref=e69]: Requirement
+          - generic [ref=e70]: Not baselined
+        - generic [ref=e71]:
+          - strong [ref=e72]: Run
+          - generic [ref=e73]: Not started
+        - generic [ref=e74]:
+          - strong [ref=e75]: Decision
+          - generic [ref=e76]: Awaiting runtime
+        - generic [ref=e77]:
+          - strong [ref=e78]: Run status
+          - generic [ref=e79]: Idle
+        - generic [ref=e80]:
+          - strong [ref=e81]: SRS ready
+          - generic [ref=e82]: Not ready
+      - button "Load projects" [ref=e84] [cursor=pointer]
+      - generic [ref=e85]:
+        - heading "Approval review" [level=3] [ref=e86]
+        - paragraph [ref=e87]: Run the workflow to see the decision, options, and review findings before approving.
+      - generic "Project and run history" [ref=e88]:
+        - generic [ref=e89]:
+          - strong [ref=e90]: Projects
+          - generic [ref=e91]: Not loaded
+        - generic [ref=e92]:
+          - strong [ref=e93]: Runs
+          - generic [ref=e94]: Select or create a project
+      - generic [ref=e95]:
+        - strong [ref=e96]: Raw workflow response
+        - generic [ref=e97]: Idle
+      - generic [ref=e98]: Ready.

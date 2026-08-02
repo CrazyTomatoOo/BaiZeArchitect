@@ -1,0 +1,96 @@
+- main [ref=f1e2]:
+  - generic [ref=f1e3]:
+    - generic [ref=f1e4]:
+      - generic [ref=f1e5]: Production workflow console
+      - heading "BaiZe Architect Workbench" [level=1] [ref=f1e6]
+      - paragraph [ref=f1e7]: Drive repository evidence, runtime design, approval, confirmation, and SRS readiness from one operator screen.
+    - generic "Deployment mode" [ref=f1e8]:
+      - strong [ref=f1e9]: Current surface
+      - generic [ref=f1e10]: GitHub evidence + team approval
+  - generic [ref=f1e11]:
+    - region [ref=f1e12]:
+      - generic [ref=f1e13]:
+        - generic [ref=f1e14]:
+          - heading "Workflow inputs" [level=2] [ref=f1e15]
+          - paragraph [ref=f1e16]: Start with a real repository and keep the run pinned to traceable evidence.
+        - generic [ref=f1e17]: Operator
+      - generic [ref=f1e18]:
+        - generic [ref=f1e19]: Project name
+        - textbox "Project name" [ref=f1e20]: Pilot Storage Migration
+      - generic [ref=f1e21]:
+        - generic [ref=f1e22]: Change request
+        - textbox "Change request" [ref=f1e23]: Design the Volcano scheduler queue and pod allocation flow around repository evidence, human approval, and archived SRS readiness.
+        - generic [ref=f1e24]: Describe the design decision the team needs to approve and archive.
+      - generic [ref=f1e25]:
+        - generic [ref=f1e26]: Repository ID
+        - textbox "Repository ID" [ref=f1e27]: volcano-sh/volcano
+      - generic [ref=f1e28]:
+        - generic [ref=f1e29]: GitHub HTTPS URL
+        - textbox "GitHub HTTPS URL" [ref=f1e30]: https://github.com/volcano-sh/volcano.git
+        - generic [ref=f1e31]: "Accepted shape: https://github.com/<owner>/<repo>.git"
+      - generic [ref=f1e32]:
+        - generic [ref=f1e33]: Branch
+        - textbox "Branch" [ref=f1e34]: master
+      - generic [ref=f1e35]:
+        - generic [ref=f1e36]: Commit SHA
+        - textbox "Commit SHA" [ref=f1e37]:
+          - /placeholder: Optional commit SHA
+      - generic [ref=f1e38]:
+        - generic [ref=f1e39]: API token
+        - textbox "API token" [active] [ref=f1e40]:
+          - /placeholder: Operator token
+        - generic [ref=f1e41]: Required for this deployment. Use your operator token before running workflow or loading history.
+      - generic [ref=f1e42]:
+        - generic [ref=f1e43]: Approval token
+        - textbox "Approval token" [ref=f1e44]:
+          - /placeholder: Approver token
+        - generic [ref=f1e45]: Required before approving or confirming a run.
+      - generic [ref=f1e46]:
+        - button "Run workflow" [ref=f1e47] [cursor=pointer]
+        - button "Approve decision" [disabled] [ref=f1e48]
+        - button "Confirm run" [disabled] [ref=f1e49]
+    - region [ref=f1e50]:
+      - generic [ref=f1e51]:
+        - generic [ref=f1e52]:
+          - heading "Live status" [level=2] [ref=f1e53]
+          - paragraph [ref=f1e54]: Follow the run from evidence intake to archived SRS readiness.
+        - generic [ref=f1e55]: Blocked
+      - generic "Workflow progress" [ref=f1e56]:
+        - generic [ref=f1e57]: Project
+        - generic [ref=f1e58]: Requirement
+        - generic [ref=f1e59]: Repository
+        - generic [ref=f1e60]: Runtime
+        - generic [ref=f1e61]: Approval
+        - generic [ref=f1e62]: Confirm
+        - generic [ref=f1e63]: SRS ready
+      - generic [ref=f1e64]:
+        - generic [ref=f1e65]:
+          - strong [ref=f1e66]: Project
+          - generic [ref=f1e67]: Not created
+        - generic [ref=f1e68]:
+          - strong [ref=f1e69]: Requirement
+          - generic [ref=f1e70]: Not baselined
+        - generic [ref=f1e71]:
+          - strong [ref=f1e72]: Run
+          - generic [ref=f1e73]: Not started
+        - generic [ref=f1e74]:
+          - strong [ref=f1e75]: Decision
+          - generic [ref=f1e76]: Awaiting runtime
+        - generic [ref=f1e77]:
+          - strong [ref=f1e78]: Run status
+          - generic [ref=f1e79]: Idle
+        - generic [ref=f1e80]:
+          - strong [ref=f1e81]: SRS ready
+          - generic [ref=f1e82]: Not ready
+      - button "Load projects" [ref=f1e84] [cursor=pointer]
+      - generic "Project and run history" [ref=f1e85]:
+        - generic [ref=f1e86]:
+          - strong [ref=f1e87]: Projects
+          - generic [ref=f1e88]: Not loaded
+        - generic [ref=f1e89]:
+          - strong [ref=f1e90]: Runs
+          - generic [ref=f1e91]: Select or create a project
+      - generic [ref=f1e92]:
+        - strong [ref=f1e93]: Raw workflow response
+        - generic [ref=f1e94]: Needs attention
+      - generic [ref=f1e95]: "Workflow failed: API token is required for this secured deployment"

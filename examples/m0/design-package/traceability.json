@@ -1,0 +1,24 @@
+{
+  "items": [
+    {
+      "caseId": "M0-001",
+      "requirement": "服务端文件上传需完成鉴权、大小限制和对象存储落盘。",
+      "domainConcepts": ["UploadRequest", "ObjectStorage"],
+      "architectureComponents": ["FileController", "ObjectStorageClient"],
+      "apiRefs": ["FileController.upload"],
+      "dataRefs": [],
+      "decisionRefs": ["DEC-2026-0001"],
+      "evidenceRefs": ["M0-001:evidence[0]", "M0-001:evidence[1]"]
+    },
+    {
+      "caseId": "M0-005",
+      "requirement": "用户创建接口需支持 Idempotency-Key，避免客户端重试造成重复用户。",
+      "domainConcepts": ["CreateUserRequest", "Idempotency-Key", "User"],
+      "architectureComponents": ["UserController", "users", "user_idempotency_keys"],
+      "apiRefs": ["UserController.createUser"],
+      "dataRefs": ["users.email_unique", "user_idempotency_keys.idempotency_key"],
+      "decisionRefs": ["DEC-2026-0005"],
+      "evidenceRefs": ["M0-005:evidence[0]", "M0-005:evidence[1]"]
+    }
+  ]
+}

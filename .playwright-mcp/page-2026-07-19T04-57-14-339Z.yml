@@ -1,0 +1,43 @@
+- main [ref=f1e2]:
+  - generic [ref=f1e3]:
+    - heading "BaiZe Architect Workbench" [level=1] [ref=f1e4]
+    - paragraph [ref=f1e5]: Drive the current project, requirement, runtime, approval, confirmation, and SRS-readiness flow from one operator screen.
+  - generic [ref=f1e6]:
+    - region [ref=f1e7]:
+      - heading "Workflow inputs" [level=2] [ref=f1e8]
+      - generic [ref=f1e9]: Project name
+      - textbox "Project name" [ref=f1e10]
+      - generic [ref=f1e11]: Change request
+      - textbox "Change request" [ref=f1e12]: Design the storage upload flow around put object evidence, human approval, and archived SRS readiness.
+      - generic [ref=f1e13]: Repository ID
+      - textbox "Repository ID" [ref=f1e14]: pilot-backend
+      - generic [ref=f1e15]: Branch
+      - textbox "Branch" [ref=f1e16]: main
+      - generic [ref=f1e17]: Commit SHA
+      - textbox "Commit SHA" [ref=f1e18]: 3dc359fceb1f
+      - generic [ref=f1e19]:
+        - button "Run workflow" [ref=f1e20] [cursor=pointer]
+        - button "Approve decision" [disabled] [ref=f1e21]
+        - button "Confirm run" [disabled] [ref=f1e22]
+    - region [ref=f1e23]:
+      - heading "Live status" [level=2] [ref=f1e24]
+      - generic [ref=f1e25]:
+        - generic [ref=f1e26]:
+          - strong [ref=f1e27]: Project
+          - generic [ref=f1e28]: Not created
+        - generic [ref=f1e29]:
+          - strong [ref=f1e30]: Requirement
+          - generic [ref=f1e31]: Not baselined
+        - generic [ref=f1e32]:
+          - strong [ref=f1e33]: Run
+          - generic [ref=f1e34]: Not started
+        - generic [ref=f1e35]:
+          - strong [ref=f1e36]: Decision
+          - generic [ref=f1e37]: Awaiting runtime
+        - generic [ref=f1e38]:
+          - strong [ref=f1e39]: Run status
+          - generic [ref=f1e40]: Idle
+        - generic [ref=f1e41]:
+          - strong [ref=f1e42]: SRS ready
+          - generic [ref=f1e43]: "false"
+      - generic [ref=f1e44]: "Workflow failed: invalid_project_name"

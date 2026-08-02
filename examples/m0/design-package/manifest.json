@@ -1,0 +1,38 @@
+{
+  "packageId": "DESIGN-PACKAGE-M0-001",
+  "version": "0.1.0",
+  "status": "M0_VALIDATION",
+  "requirementBaseline": "examples/m0/cases.json",
+  "repositoryBaselines": [
+    {
+      "repositoryId": "pilot-backend",
+      "commitSha": "3dc359fceb1f",
+      "purpose": "M0 本地试点代码仓，提供真实代码证据。"
+    }
+  ],
+  "schemaRefs": [
+    "schemas/requirement-spec.schema.json",
+    "schemas/architecture-spec.schema.json",
+    "schemas/decision-record.schema.json",
+    "schemas/code-evidence.schema.json"
+  ],
+  "artifactRefs": [
+    "examples/m0/artifacts/M0-001.json",
+    "examples/m0/artifacts/M0-005.json"
+  ],
+  "traceabilityMatrix": "examples/m0/design-package/traceability.json",
+  "modelPolicyVersion": "m0-offline-no-model",
+  "skillVersions": {
+    "requirement-analysis": "m0.manual.1",
+    "architecture-design": "m0.manual.1",
+    "decision-record": "m0.manual.1"
+  },
+  "mcpVersions": {
+    "code-knowledge": "m0.local-file-git-validation"
+  },
+  "approvalRecords": [],
+  "validationCommands": [
+    "uv run scripts/validate_m0.py",
+    "uv run scripts/validate_m0_package.py"
+  ]
+}

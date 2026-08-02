@@ -1,0 +1,58 @@
+name: platform-api-ci
+
+on:
+  push:
+    paths:
+      - "platform-api/**"
+      - ".github/workflows/platform-api-ci.yml"
+  pull_request:
+    paths:
+      - "platform-api/**"
+      - ".github/workflows/platform-api-ci.yml"
+
+jobs:
+  test-build-compose:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_DB: baize_architect
+          POSTGRES_USER: baize
+          POSTGRES_PASSWORD: ci-password
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U baize -d baize_architect"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+    defaults:
+      run:
+        working-directory: platform-api
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: platform-api/go.mod
+          cache-dependency-path: platform-api/go.sum
+      - run: sudo apt-get update && sudo apt-get install -y postgresql-client
+        working-directory: .
+      - run: go test -race -shuffle=on -count=1 ./...
+        env:
+          DATABASE_URL: postgres://baize:ci-password@localhost:5432/baize_architect?sslmode=disable
+      - run: go build ./cmd/platform-api
+      - run: docker compose config
+        env:
+          POSTGRES_PASSWORD: ci-password
+          DATABASE_URL: postgres://baize:ci-password@postgres:5432/baize_architect?sslmode=disable
+          TEAM_TOKENS: ci-operator:operator-token:operator,ci-approver:approver-token:approver
+      - run: createdb -h localhost -U baize baize_restore_smoke
+        working-directory: .
+        env:
+          PGPASSWORD: ci-password
+      - run: scripts/backup_restore_smoke.sh
+        working-directory: .
+        env:
+          DATABASE_URL: postgres://baize:ci-password@localhost:5432/baize_architect?sslmode=disable
+          RESTORE_DATABASE_URL: postgres://baize:ci-password@localhost:5432/baize_restore_smoke?sslmode=disable

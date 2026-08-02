@@ -1,0 +1,43 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://baize-architect.local/schemas/requirement-spec.schema.json",
+  "title": "RequirementSpecification",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "businessGoal",
+    "scope",
+    "actors",
+    "useCases",
+    "functionalRequirements",
+    "nonFunctionalRequirements",
+    "constraints",
+    "acceptanceCriteria",
+    "glossary",
+    "assumptions",
+    "openQuestions",
+    "sourceRefs"
+  ],
+  "properties": {
+    "businessGoal": { "type": "string", "minLength": 1 },
+    "scope": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["included", "excluded"],
+      "properties": {
+        "included": { "type": "array", "items": { "type": "string" } },
+        "excluded": { "type": "array", "items": { "type": "string" } }
+      }
+    },
+    "actors": { "type": "array", "items": { "type": "string" } },
+    "useCases": { "type": "array", "items": { "type": "string" } },
+    "functionalRequirements": { "type": "array", "items": { "type": "string" } },
+    "nonFunctionalRequirements": { "type": "array", "items": { "type": "string" } },
+    "constraints": { "type": "array", "items": { "type": "string" } },
+    "acceptanceCriteria": { "type": "array", "items": { "type": "string" } },
+    "glossary": { "type": "array", "items": { "type": "string" } },
+    "assumptions": { "type": "array", "items": { "type": "string" } },
+    "openQuestions": { "type": "array", "items": { "type": "string" } },
+    "sourceRefs": { "type": "array", "items": { "type": "string" }, "minItems": 1 }
+  }
+}

@@ -1,0 +1,7 @@
+_archived/
+**/node_modules/
+**/dist/
+._*
+.DS_Store
+*.tsbuildinfo
+out/*.pending.md

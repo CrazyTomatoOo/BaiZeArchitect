@@ -1,0 +1,116 @@
+- main [ref=f2e2]:
+  - generic [ref=f2e3]:
+    - generic [ref=f2e4]:
+      - generic [ref=f2e5]: Production workflow console
+      - heading "BaiZe Architect Workbench" [level=1] [ref=f2e6]
+      - paragraph [ref=f2e7]: Drive repository evidence, runtime design, approval, confirmation, and SRS readiness from one operator screen.
+    - generic "Deployment mode" [ref=f2e8]:
+      - strong [ref=f2e9]: Current surface
+      - generic [ref=f2e10]: GitHub evidence + team approval
+  - generic [ref=f2e11]:
+    - region [ref=f2e12]:
+      - generic [ref=f2e13]:
+        - generic [ref=f2e14]:
+          - heading "Workflow inputs" [level=2] [ref=f2e15]
+          - paragraph [ref=f2e16]: Start with a real repository and keep the run pinned to traceable evidence.
+        - generic [ref=f2e17]: Operator
+      - generic [ref=f2e18]:
+        - generic [ref=f2e19]: Project name
+        - textbox "Project name" [ref=f2e20]: Pilot Storage Migration
+      - generic [ref=f2e21]:
+        - generic [ref=f2e22]: Change request
+        - textbox "Change request" [ref=f2e23]: Design the Volcano scheduler queue and pod allocation flow around repository evidence, human approval, and archived SRS readiness.
+        - generic [ref=f2e24]: Describe the design decision the team needs to approve and archive.
+      - generic [ref=f2e25]:
+        - generic [ref=f2e26]: Repository ID
+        - textbox "Repository ID" [ref=f2e27]: volcano-sh/volcano
+      - generic [ref=f2e28]:
+        - generic [ref=f2e29]: GitHub HTTPS URL
+        - textbox "GitHub HTTPS URL" [ref=f2e30]: https://github.com/volcano-sh/volcano.git
+        - generic [ref=f2e31]: "Accepted shape: https://github.com/<owner>/<repo>.git"
+      - generic [ref=f2e32]:
+        - generic [ref=f2e33]: Branch
+        - textbox "Branch" [ref=f2e34]: master
+      - generic [ref=f2e35]:
+        - generic [ref=f2e36]: Commit SHA
+        - textbox "Commit SHA" [ref=f2e37]:
+          - /placeholder: Optional commit SHA
+      - generic [ref=f2e38]:
+        - generic [ref=f2e39]: API token
+        - textbox "API token" [ref=f2e40]:
+          - /placeholder: Operator token
+          - text: operator-token
+        - generic [ref=f2e41]: Required for this deployment. Use your operator token before running workflow or loading history.
+      - generic [ref=f2e42]:
+        - generic [ref=f2e43]: Approval token
+        - textbox "Approval token" [ref=f2e44]:
+          - /placeholder: Approver token
+          - text: approver-token
+        - generic [ref=f2e45]: Required before approving or confirming a run.
+      - generic [ref=f2e46]:
+        - button "Run workflow" [ref=f2e47] [cursor=pointer]
+        - button "Approve decision" [ref=f2e48] [cursor=pointer]
+        - button "Confirm run" [ref=f2e49] [cursor=pointer]
+    - region [ref=f2e50]:
+      - generic [ref=f2e51]:
+        - generic [ref=f2e52]:
+          - heading "Live status" [level=2] [ref=f2e53]
+          - paragraph [ref=f2e54]: Follow the run from evidence intake to archived SRS readiness.
+        - generic [ref=f2e55]: Runtime workflow created; approve the decision next
+      - generic "Workflow progress" [ref=f2e56]:
+        - generic [ref=f2e57]: Project
+        - generic [ref=f2e58]: Requirement
+        - generic [ref=f2e59]: Repository
+        - generic [ref=f2e60]: Runtime
+        - generic [ref=f2e61]: Approval
+        - generic [ref=f2e62]: Confirm
+        - generic [ref=f2e63]: SRS ready
+      - generic [ref=f2e64]:
+        - generic [ref=f2e65]:
+          - strong [ref=f2e66]: Project
+          - generic [ref=f2e67]: project-a37d36c3fdc0b13e
+        - generic [ref=f2e68]:
+          - strong [ref=f2e69]: Requirement
+          - generic [ref=f2e70]: requirement-4b34b366fb4cc301
+        - generic [ref=f2e71]:
+          - strong [ref=f2e72]: Run
+          - generic [ref=f2e73]: run-7e4162bde1d592b0
+        - generic [ref=f2e74]:
+          - strong [ref=f2e75]: Decision
+          - generic [ref=f2e76]: DEC-2026-8b13bb83a7a776ba
+        - generic [ref=f2e77]:
+          - strong [ref=f2e78]: Run status
+          - generic [ref=f2e79]: FINAL_APPROVAL
+        - generic [ref=f2e80]:
+          - strong [ref=f2e81]: SRS ready
+          - generic [ref=f2e82]: Not ready
+      - button "Load projects" [ref=f2e84] [cursor=pointer]
+      - generic [ref=f2e85]:
+        - heading "Approval review" [level=3] [ref=f2e86]
+        - paragraph [ref=f2e87]: Review 1 decision and 1 finding before approving. If future runs produce multiple items, each one appears here.
+        - generic [ref=f2e99]:
+          - article [ref=f2e100]:
+            - strong [ref=f2e101]: Use evidence-backed design for requirement-4b34b366fb4cc301
+            - generic [ref=f2e102]: UNDER_REVIEW
+            - generic [ref=f2e103]: MAJOR
+            - generic [ref=f2e104]: ARCHITECTURE
+            - list [ref=f2e105]:
+              - listitem [ref=f2e106]: "OPT-1: Agent runtime adapter"
+              - listitem [ref=f2e107]: "OPT-2: Manual orchestration"
+          - article [ref=f2e108]:
+            - strong [ref=f2e109]: Traceability verified for volcano-sh/volcano
+            - generic [ref=f2e110]: LOW
+            - generic [ref=f2e111]: TRACEABILITY
+            - generic [ref=f2e112]: CLOSED
+            - paragraph [ref=f2e113]: Traceability included in generated design package
+      - generic "Project and run history" [ref=f2e88]:
+        - generic [ref=f2e89]:
+          - strong [ref=f2e90]: Projects
+          - generic [ref=f2e91]: Pilot Storage Migration (project-0c3bb72b15ebe4fe) Pilot Storage Migration (project-34a185ca00da6a0a) Pilot Storage Migration (project-97224d6aa979103b) Pilot Storage Migration (project-a37d36c3fdc0b13e) Pilot Storage Migration (project-a62390b208ffa7f7) Pilot Storage Migration (project-be0b2cf1c2491918) Pilot Storage Migration (project-e6e23394bb7e24ba)
+        - generic [ref=f2e92]:
+          - strong [ref=f2e93]: Runs
+          - generic [ref=f2e94]: run-7e4162bde1d592b0 FINAL_APPROVAL
+      - generic [ref=f2e95]:
+        - strong [ref=f2e96]: Raw workflow response
+        - generic [ref=f2e97]: Runtime workflow created; approve the decision next
+      - generic [ref=f2e98]: "Runtime workflow created; approve the decision next. { \"run\": { \"id\": \"run-7e4162bde1d592b0\", \"projectId\": \"project-a37d36c3fdc0b13e\", \"requirementVersionId\": \"requirement-4b34b366fb4cc301\", \"status\": \"FINAL_APPROVAL\" }, \"agentSteps\": [ { \"id\": \"agent-step-1ad4caca62989a30\", \"runId\": \"run-7e4162bde1d592b0\", \"role\": \"context-engineer\", \"skill\": \"code-knowledge\", \"version\": \"v1\", \"status\": \"COMPLETED\", \"summary\": \"Prepared volcano-sh/volcano context for requirement-4b34b366fb4cc301\" }, { \"id\": \"agent-step-96c26ff4a7f52008\", \"runId\": \"run-7e4162bde1d592b0\", \"role\": \"architect\", \"skill\": \"architecture-design\", \"version\": \"v1\", \"status\": \"COMPLETED\", \"summary\": \"Produced architecture artifact and decision\" }, { \"id\": \"agent-step-dbaf282b474bdc3b\", \"runId\": \"run-7e4162bde1d592b0\", \"role\": \"reviewer\", \"skill\": \"design-validation\", \"version\": \"v1\", \"status\": \"COMPLETED\", \"summary\": \"Validated traceability and closed review finding\" } ], \"artifact\": { \"id\": \"artifact-cf31e488e309fdff\", \"projectId\": \"project-a37d36c3fdc0b13e\", \"runId\": \"run-7e4162bde1d592b0\", \"type\": \"ARCHITECTURE_SPEC\", \"ownerRole\": \"architect\", \"status\": \"ACTIVE\" }, \"artifactVersion\": { \"artifactId\": \"artifact-cf31e488e309fdff\", \"version\": 1, \"content\": { \"evidence\": { \"symbol\": \"gang_test.volcano\", \"filePath\": \"benchmark/testcases/gang/gang_test.go\", \"evidenceId\": \"evidence-8ffe2d084e3cccb7\", \"codeExcerpt\": \"\\tQueue string // volcano queue name\\n\\n\\t// Job-level Network Topology\\n\\tEnableNetworkTopology bool\\n\\tNetworkTopologyMode string\\n\\tNetworkTopologyHighestTier int\\n\\tNetworkTopologyHighestTierName string\\n\\n\\tTasks []TaskConfig\\n}\\n\", \"repositoryId\": \"volcano-sh/volcano\" }, \"components\": [ \"legacy-backend\", \"platform-api\" ], \"repository\": \"volcano-sh/volcano\", \"changeRequest\": \"Design the Volcano scheduler queue and pod allocation flow around repository evidence, human approval, and archived SRS readiness.\", \"evidenceCommit\": \"0b6d4106b317f7104c532d146a3d77f13be078c8\" }, \"sourceRefs\": [ \"evidence-8ffe2d084e3cccb7\" ], \"evidenceRefs\": [ \"evidence-8ffe2d084e3cccb7\" ], \"locked\": true }, \"artifacts\": [ { \"artifactId\": \"artifact-cf31e488e309fdff\", \"version\": 1, \"content\": { \"evidence\": { \"symbol\": \"gang_test.volcano\", \"filePath\": \"benchmark/testcases/gang/gang_test.go\", \"evidenceId\": \"evidence-8ffe2d084e3cccb7\", \"codeExcerpt\": \"\\tQueue string // volcano queue name\\n\\n\\t// Job-level Network Topology\\n\\tEnableNetworkTopology bool\\n\\tNetworkTopologyMode string\\n\\tNetworkTopologyHighestTier int\\n\\tNetworkTopologyHighestTierName string\\n\\n\\tTasks []TaskConfig\\n}\\n\", \"repositoryId\": \"volcano-sh/volcano\" }, \"components\": [ \"legacy-backend\", \"platform-api\" ], \"repository\": \"volcano-sh/volcano\", \"changeRequest\": \"Design the Volcano scheduler queue and pod allocation flow around repository evidence, human approval, and archived SRS readiness.\", \"evidenceCommit\": \"0b6d4106b317f7104c532d146a3d77f13be078c8\" }, \"sourceRefs\": [ \"evidence-8ffe2d084e3cccb7\" ], \"evidenceRefs\": [ \"evidence-8ffe2d084e3cccb7\" ], \"locked\": true }, { \"artifactId\": \"artifact-b91dcd50dc109cda\", \"version\": 1, \"content\": { \"evidence\": { \"symbol\": \"gang_test.volcano\", \"filePath\": \"benchmark/testcases/gang/gang_test.go\", \"evidenceId\": \"evidence-8ffe2d084e3cccb7\", \"codeExcerpt\": \"\\tQueue string // volcano queue name\\n\\n\\t// Job-level Network Topology\\n\\tEnableNetworkTopology bool\\n\\tNetworkTopologyMode string\\n\\tNetworkTopologyHighestTier int\\n\\tNetworkTopologyHighestTierName string\\n\\n\\tTasks []TaskConfig\\n}\\n\", \"repositoryId\": \"volcano-sh/volcano\" }, \"commitSha\": \"0b6d4106b317f7104c532d146a3d77f13be078c8\", \"repository\": \"volcano-sh/volcano\", \"changeRequest\": \"Design the Volcano scheduler queue and pod allocation flow around repository evidence, human approval, and archived SRS readiness.\", \"acceptanceCriteria\": [ \"code evidence is cited\", \"human confirmation archives the design\" ] }, \"sourceRefs\": [ \"evidence-8ffe2d084e3cccb7\" ], \"evidenceRefs\": [ \"evidence-8ffe2d084e3cccb7\" ], \"locked\": true }, { \"artifactId\": \"artifact-0368831b771e1ac2\", \"version\": 1, \"content\": { \"evidence\": { \"symbol\": \"gang_test.volcano\", \"filePath\": \"benchmark/testcases/gang/gang_test.go\", \"evidenceId\": \"evidence-8ffe2d084e3cccb7\", \"codeExcerpt\": \"\\tQueue string // volcano queue name\\n\\n\\t// Job-level Network Topology\\n\\tEnableNetworkTopology bool\\n\\tNetworkTopologyMode string\\n\\tNetworkTopologyHighestTier int\\n\\tNetworkTopologyHighestTierName string\\n\\n\\tTasks []TaskConfig\\n}\\n\", \"repositoryId\": \"volcano-sh/volcano\" }, \"endpoints\": [ \"legacy endpoint derived from repository evidence\" ], \"repository\": \"volcano-sh/volcano\", \"changeRequest\": \"Design the Volcano scheduler queue and pod allocation flow around repository evidence, human approval, and archived SRS readiness.\", \"evidenceCommit\": \"0b6d4106b317f7104c532d146a3d77f13be078c8\" }, \"sourceRefs\": [ \"evidence-8ffe2d084e3cccb7\" ], \"evidenceRefs\": [ \"evidence-8ffe2d084e3cccb7\" ], \"locked\": true }, { \"artifactId\": \"artifact-ab1dc58c709056fd\", \"version\": 1, \"content\": { \"tables\": [ \"design_run\", \"artifact_version\", \"decision_record\", \"evidence_reference\", \"design_package\" ], \"database\": \"PostgreSQL\", \"evidence\": { \"symbol\": \"gang_test.volcano\", \"filePath\": \"benchmark/testcases/gang/gang_test.go\", \"evidenceId\": \"evidence-8ffe2d084e3cccb7\", \"codeExcerpt\": \"\\tQueue string // volcano queue name\\n\\n\\t// Job-level Network Topology\\n\\tEnableNetworkTopology bool\\n\\tNetworkTopologyMode string\\n\\tNetworkTopologyHighestTier int\\n\\tNetworkTopologyHighestTierName string\\n\\n\\tTasks []TaskConfig\\n}\\n\", \"repositoryId\": \"volcano-sh/volcano\" }, \"repository\": \"volcano-sh/volcano\", \"changeRequest\": \"Design the Volcano scheduler queue and pod allocation flow around repository evidence, human approval, and archived SRS readiness.\" }, \"sourceRefs\": [ \"evidence-8ffe2d084e3cccb7\" ], \"evidenceRefs\": [ \"evidence-8ffe2d084e3cccb7\" ], \"locked\": true } ], \"decision\": { \"id\": \"DEC-2026-8b13bb83a7a776ba\", \"runId\": \"run-7e4162bde1d592b0\", \"title\": \"Use evidence-backed design for requirement-4b34b366fb4cc301\", \"type\": \"ARCHITECTURE\", \"significance\": \"MAJOR\", \"options\": [ { \"id\": \"OPT-1\", \"name\": \"Agent runtime adapter\" }, { \"id\": \"OPT-2\", \"name\": \"Manual orchestration\" } ], \"status\": \"UNDER_REVIEW\", \"supersedesId\": \"\" }, \"finding\": { \"id\": \"finding-060158ea055f4c02\", \"runId\": \"run-7e4162bde1d592b0\", \"title\": \"Traceability verified for volcano-sh/volcano\", \"severity\": \"LOW\", \"category\": \"TRACEABILITY\", \"evidenceRefs\": [ \"evidence-8ffe2d084e3cccb7\" ], \"status\": \"CLOSED\", \"assignee\": \"\", \"resolution\": \"Traceability included in generated design package\" }, \"evidence\": { \"id\": \"evidence-8ffe2d084e3cccb7\", \"runId\": \"run-7e4162bde1d592b0\", \"repositoryId\": \"volcano-sh/volcano\", \"commitSha\": \"0b6d4106b317f7104c532d146a3d77f13be078c8\", \"filePath\": \"benchmark/testcases/gang/gang_test.go\", \"symbol\": \"gang_test.volcano\", \"lineStart\": 43, \"lineEnd\": 53, \"evidenceType\": \"ROUTE\", \"claim\": \"Repository evidence supports: Design the Volcano scheduler queue and pod allocation flow around repository evidence, human approval, and archived SRS readiness.\" }, \"package\": { \"id\": \"\", \"runId\": \"\", \"status\": \"\", \"manifest\": { \"packageSchema\": \"\", \"packageId\": \"\", \"version\": \"\", \"status\": \"\", \"runId\": \"\", \"schemaRefs\": null, \"artifactRefs\": null, \"decisionRefs\": null, \"findingRefs\": null, \"traceabilityMatrix\": \"\", \"validationCommands\": null }, \"traceability\": { \"items\": null } } }"

@@ -1,0 +1,49 @@
+- main [ref=f1e2]:
+  - generic [ref=f1e3]:
+    - heading "BaiZe Architect Workbench" [level=1] [ref=f1e4]
+    - paragraph [ref=f1e5]: Drive the current project, requirement, runtime, approval, confirmation, and SRS-readiness flow from one operator screen.
+  - generic [ref=f1e6]:
+    - region [ref=f1e7]:
+      - heading "Workflow inputs" [level=2] [ref=f1e8]
+      - generic [ref=f1e9]: Project name
+      - textbox "Project name" [ref=f1e10]: Pilot Storage Migration
+      - generic [ref=f1e11]: Change request
+      - textbox "Change request" [ref=f1e12]: Design the storage upload flow around put object evidence, human approval, and archived SRS readiness.
+      - generic [ref=f1e13]: Repository ID
+      - textbox "Repository ID" [ref=f1e14]: pilot-backend
+      - generic [ref=f1e15]: Branch
+      - textbox "Branch" [ref=f1e16]: main
+      - generic [ref=f1e17]: Commit SHA
+      - textbox "Commit SHA" [ref=f1e18]: 3dc359fceb1f
+      - generic [ref=f1e19]: API token
+      - textbox "API token" [ref=f1e20]:
+        - /placeholder: Required only when API_TOKEN is set
+      - generic [ref=f1e21]: Approval token
+      - textbox "Approval token" [ref=f1e22]:
+        - /placeholder: Required only when APPROVAL_TOKEN is set
+      - generic [ref=f1e23]:
+        - button "Run workflow" [ref=f1e24] [cursor=pointer]
+        - button "Approve decision" [disabled] [ref=f1e25]
+        - button "Confirm run" [disabled] [ref=f1e26]
+    - region [ref=f1e27]:
+      - heading "Live status" [level=2] [ref=f1e28]
+      - generic [ref=f1e29]:
+        - generic [ref=f1e30]:
+          - strong [ref=f1e31]: Project
+          - generic [ref=f1e32]: Not created
+        - generic [ref=f1e33]:
+          - strong [ref=f1e34]: Requirement
+          - generic [ref=f1e35]: Not baselined
+        - generic [ref=f1e36]:
+          - strong [ref=f1e37]: Run
+          - generic [ref=f1e38]: Not started
+        - generic [ref=f1e39]:
+          - strong [ref=f1e40]: Decision
+          - generic [ref=f1e41]: Awaiting runtime
+        - generic [ref=f1e42]:
+          - strong [ref=f1e43]: Run status
+          - generic [ref=f1e44]: Idle
+        - generic [ref=f1e45]:
+          - strong [ref=f1e46]: SRS ready
+          - generic [ref=f1e47]: "false"
+      - generic [ref=f1e48]: Ready.

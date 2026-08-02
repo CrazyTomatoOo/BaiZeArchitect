@@ -1,0 +1,179 @@
+{
+  "cases": [
+    {
+      "caseId": "M0-001",
+      "title": "已有 Java 服务新增文件上传能力",
+      "sourceRepo": "pilot-backend",
+      "requirement": "为现有业务对象增加文件上传接口，要求支持大小限制、鉴权、对象存储落盘和审计记录。",
+      "artifactTargets": ["RequirementSpecification", "ArchitectureSpecification", "DecisionRecord"],
+      "expectedCapabilities": [
+        {
+          "name": "定位现有上传入口或相邻 Controller",
+          "evidence": [
+            {
+              "repositoryId": "pilot-backend",
+              "commitSha": "3dc359fceb1f",
+              "filePath": "src/main/java/example/FileController.java",
+              "symbol": "FileController.upload",
+              "lineStart": 10,
+              "lineEnd": 20,
+              "evidenceType": "ROUTE",
+              "claim": "存在相邻文件上传 HTTP 入口，可复用鉴权与请求解析模式。"
+            },
+            {
+              "repositoryId": "pilot-backend",
+              "commitSha": "3dc359fceb1f",
+              "filePath": "src/main/java/example/ObjectStorageClient.java",
+              "symbol": "ObjectStorageClient.putObject",
+              "lineStart": 4,
+              "lineEnd": 11,
+              "evidenceType": "SERVICE",
+              "claim": "已有对象存储适配器，可作为新增上传流程的落盘实现。"
+            }
+          ]
+        }
+      ],
+      "decisionCandidate": "文件直接经服务端转存对象存储，还是使用预签名 URL。"
+    },
+    {
+      "caseId": "M0-002",
+      "title": "Go 后端新增异步导出任务",
+      "sourceRepo": "pilot-backend",
+      "requirement": "为报表模块增加异步导出，用户提交任务后轮询状态并下载生成文件。",
+      "artifactTargets": ["RequirementSpecification", "ArchitectureSpecification", "DecisionRecord"],
+      "expectedCapabilities": [
+        {
+          "name": "识别现有任务表与后台 worker 模式",
+          "evidence": [
+            {
+              "repositoryId": "pilot-backend",
+              "commitSha": "3dc359fceb1f",
+              "filePath": "internal/report/handler.go",
+              "symbol": "CreateExportTask",
+              "lineStart": 17,
+              "lineEnd": 27,
+              "evidenceType": "ROUTE",
+              "claim": "报表模块已有创建类接口风格，可沿用路由和错误处理。"
+            },
+            {
+              "repositoryId": "pilot-backend",
+              "commitSha": "3dc359fceb1f",
+              "filePath": "internal/job/worker.go",
+              "symbol": "Worker.Run",
+              "lineStart": 27,
+              "lineEnd": 37,
+              "evidenceType": "SERVICE",
+              "claim": "已有后台任务执行框架，可承载导出任务。"
+            }
+          ]
+        }
+      ],
+      "decisionCandidate": "导出任务使用现有任务表扩展，还是新增独立 export_task 表。"
+    },
+    {
+      "caseId": "M0-003",
+      "title": "模型推理服务增加灰度路由",
+      "sourceRepo": "pilot-backend",
+      "requirement": "为模型推理接口增加按租户灰度路由能力，支持指定租户切换到新模型版本。",
+      "artifactTargets": ["RequirementSpecification", "ArchitectureSpecification", "DecisionRecord"],
+      "expectedCapabilities": [
+        {
+          "name": "定位现有推理路由和租户上下文",
+          "evidence": [
+            {
+              "repositoryId": "pilot-backend",
+              "commitSha": "3dc359fceb1f",
+              "filePath": "src/main/java/example/InferenceController.java",
+              "symbol": "InferenceController.predict",
+              "lineStart": 10,
+              "lineEnd": 14,
+              "evidenceType": "ROUTE",
+              "claim": "推理入口集中在 predict 接口，可在调用模型前插入路由决策。"
+            },
+            {
+              "repositoryId": "pilot-backend",
+              "commitSha": "3dc359fceb1f",
+              "filePath": "src/main/java/example/TenantContext.java",
+              "symbol": "TenantContext.currentTenant",
+              "lineStart": 10,
+              "lineEnd": 16,
+              "evidenceType": "CONFIG",
+              "claim": "请求链路已有租户上下文，可作为灰度匹配输入。"
+            }
+          ]
+        }
+      ],
+      "decisionCandidate": "灰度规则存储在配置中心、数据库，还是模型平台注册表。"
+    },
+    {
+      "caseId": "M0-004",
+      "title": "Kubernetes 平台增加命名空间配额审计",
+      "sourceRepo": "pilot-backend",
+      "requirement": "在创建或更新命名空间配额时记录审计事件，并支持按租户查询最近变更。",
+      "artifactTargets": ["RequirementSpecification", "ArchitectureSpecification", "DecisionRecord"],
+      "expectedCapabilities": [
+        {
+          "name": "识别配额写入口与审计基础设施",
+          "evidence": [
+            {
+              "repositoryId": "pilot-backend",
+              "commitSha": "3dc359fceb1f",
+              "filePath": "internal/k8s/quota_handler.go",
+              "symbol": "UpdateNamespaceQuota",
+              "lineStart": 22,
+              "lineEnd": 39,
+              "evidenceType": "ROUTE",
+              "claim": "命名空间配额更新已有集中入口，可在成功写入后记录审计。"
+            },
+            {
+              "repositoryId": "pilot-backend",
+              "commitSha": "3dc359fceb1f",
+              "filePath": "internal/audit/repository.go",
+              "symbol": "Repository.Save",
+              "lineStart": 17,
+              "lineEnd": 20,
+              "evidenceType": "REPOSITORY",
+              "claim": "已有审计仓储接口，可复用事件落库模型。"
+            }
+          ]
+        }
+      ],
+      "decisionCandidate": "审计事件与业务事务强一致写入，还是异步 outbox 写入。"
+    },
+    {
+      "caseId": "M0-005",
+      "title": "用户接口增加幂等创建语义",
+      "sourceRepo": "pilot-backend",
+      "requirement": "为创建用户接口增加 Idempotency-Key 支持，避免客户端重试造成重复用户。",
+      "artifactTargets": ["RequirementSpecification", "ArchitectureSpecification", "DecisionRecord"],
+      "expectedCapabilities": [
+        {
+          "name": "定位用户创建接口与唯一约束",
+          "evidence": [
+            {
+              "repositoryId": "pilot-backend",
+              "commitSha": "3dc359fceb1f",
+              "filePath": "src/main/java/example/UserController.java",
+              "symbol": "UserController.createUser",
+              "lineStart": 10,
+              "lineEnd": 19,
+              "evidenceType": "ROUTE",
+              "claim": "用户创建入口是幂等控制的系统边界。"
+            },
+            {
+              "repositoryId": "pilot-backend",
+              "commitSha": "3dc359fceb1f",
+              "filePath": "src/main/resources/db/migration/V12__create_user.sql",
+              "symbol": "users.email_unique",
+              "lineStart": 1,
+              "lineEnd": 7,
+              "evidenceType": "DATA_MODEL",
+              "claim": "用户表已有邮箱唯一约束，需要与幂等键语义区分。"
+            }
+          ]
+        }
+      ],
+      "decisionCandidate": "幂等键存储为通用请求表，还是绑定用户创建业务表。"
+    }
+  ]
+}

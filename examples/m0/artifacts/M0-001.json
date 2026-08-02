@@ -1,0 +1,52 @@
+{
+  "caseId": "M0-001",
+  "requirementSpec": {
+    "businessGoal": "为现有业务对象增加受控文件上传能力，复用已有上传入口和对象存储适配器。",
+    "scope": {
+      "included": ["上传接口", "文件大小限制", "鉴权检查", "对象存储落盘", "审计记录"],
+      "excluded": ["前端上传组件", "多分片断点续传", "生产存储迁移"]
+    },
+    "actors": ["业务用户", "后端服务"],
+    "useCases": ["用户提交文件后获得对象存储引用"],
+    "functionalRequirements": ["服务端必须在写入对象存储前完成鉴权与大小限制检查"],
+    "nonFunctionalRequirements": ["普通上传状态事件 P95 应小于 2 秒"],
+    "constraints": ["生产环境写操作不属于 M0 验证范围"],
+    "acceptanceCriteria": ["上传入口能够复用现有鉴权和对象存储调用模式"],
+    "glossary": ["ObjectStorage：保存上传文件内容的对象存储适配器"],
+    "assumptions": ["M0 样例仓库代表试点仓库分层模式"],
+    "openQuestions": ["单文件大小上限是否固定为 100MiB"],
+    "sourceRefs": ["case:M0-001"]
+  },
+  "architectureSpec": {
+    "systemContext": "文件上传变更位于现有 Java 后端服务内，由 Controller 完成边界检查并调用对象存储适配器。",
+    "componentChanges": ["扩展 FileController.upload", "复用 ObjectStorageClient.putObject", "补充审计记录写入点"],
+    "runtimeFlow": ["请求进入上传接口", "校验鉴权与大小", "生成 objectKey", "写入对象存储", "返回 objectKey"],
+    "dataFlow": ["UploadRequest.content -> ObjectStorageClient.putObject"],
+    "deploymentImpact": ["无需新增独立服务"],
+    "qualityAttributeResponses": ["上传大小限制在服务端边界执行，避免大对象进入下游链路"],
+    "risks": ["大文件场景可能需要预签名 URL 或分片上传"],
+    "evidenceRefs": ["M0-001:evidence[0]", "M0-001:evidence[1]"],
+    "decisionCandidates": ["DEC-2026-0001"]
+  },
+  "decisionRecord": {
+    "decisionId": "DEC-2026-0001",
+    "type": "ARCHITECTURE",
+    "title": "文件上传采用服务端转存或预签名 URL",
+    "status": "PROPOSED",
+    "significance": "MAJOR",
+    "context": {
+      "problem": "上传链路需要在复用现有服务端能力和降低大文件流量压力之间取舍。",
+      "constraints": ["M0 仅验证设计证据链，不连接真实对象存储"],
+      "qualityAttributes": ["安全", "性能", "可审计性"]
+    },
+    "options": [
+      { "id": "OPT-1", "name": "服务端转存对象存储", "pros": ["复用现有鉴权和审计"], "cons": ["服务端承担文件流量压力"] },
+      { "id": "OPT-2", "name": "预签名 URL 直传", "pros": ["降低服务端带宽压力"], "cons": ["需要额外直传授权和回调确认"] }
+    ],
+    "selectedOption": "",
+    "rationale": "M0 阶段保留为人工评审决策，不自动选择。",
+    "consequences": { "positive": [], "negative": [], "risks": ["错误选择会影响大文件性能和审计完整性"] },
+    "evidenceRefs": ["M0-001:evidence[0]", "M0-001:evidence[1]"],
+    "reviewTriggers": ["单文件大小超过 100MiB", "上传并发超过试点基线"]
+  }
+}

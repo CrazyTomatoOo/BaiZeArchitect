@@ -1,0 +1,43 @@
+- main [ref=f2e2]:
+  - generic [ref=f2e3]:
+    - heading "BaiZe Architect Workbench" [level=1] [ref=f2e4]
+    - paragraph [ref=f2e5]: Drive the current project, requirement, runtime, approval, confirmation, and SRS-readiness flow from one operator screen.
+  - generic [ref=f2e6]:
+    - region [ref=f2e7]:
+      - heading "Workflow inputs" [level=2] [ref=f2e8]
+      - generic [ref=f2e9]: Project name
+      - textbox "Project name" [ref=f2e10]
+      - generic [ref=f2e11]: Change request
+      - textbox "Change request" [ref=f2e12]: Design the storage upload flow around put object evidence, human approval, and archived SRS readiness.
+      - generic [ref=f2e13]: Repository ID
+      - textbox "Repository ID" [ref=f2e14]: pilot-backend
+      - generic [ref=f2e15]: Branch
+      - textbox "Branch" [ref=f2e16]: main
+      - generic [ref=f2e17]: Commit SHA
+      - textbox "Commit SHA" [ref=f2e18]: 3dc359fceb1f
+      - generic [ref=f2e19]:
+        - button "Run workflow" [ref=f2e20] [cursor=pointer]
+        - button "Approve decision" [disabled] [ref=f2e21]
+        - button "Confirm run" [disabled] [ref=f2e22]
+    - region [ref=f2e23]:
+      - heading "Live status" [level=2] [ref=f2e24]
+      - generic [ref=f2e25]:
+        - generic [ref=f2e26]:
+          - strong [ref=f2e27]: Project
+          - generic [ref=f2e28]: Not created
+        - generic [ref=f2e29]:
+          - strong [ref=f2e30]: Requirement
+          - generic [ref=f2e31]: Not baselined
+        - generic [ref=f2e32]:
+          - strong [ref=f2e33]: Run
+          - generic [ref=f2e34]: Not started
+        - generic [ref=f2e35]:
+          - strong [ref=f2e36]: Decision
+          - generic [ref=f2e37]: Awaiting runtime
+        - generic [ref=f2e38]:
+          - strong [ref=f2e39]: Run status
+          - generic [ref=f2e40]: Idle
+        - generic [ref=f2e41]:
+          - strong [ref=f2e42]: SRS ready
+          - generic [ref=f2e43]: "false"
+      - generic [ref=f2e44]: "Workflow failed: Project name is required"

@@ -1,0 +1,52 @@
+{
+  "caseId": "M0-005",
+  "requirementSpec": {
+    "businessGoal": "为用户创建接口增加幂等语义，避免客户端重试造成重复用户。",
+    "scope": {
+      "included": ["Idempotency-Key", "用户创建边界", "邮箱唯一约束区分", "幂等键存储决策"],
+      "excluded": ["全站幂等网关", "历史数据迁移"]
+    },
+    "actors": ["API 客户端", "用户服务"],
+    "useCases": ["客户端重复提交同一创建请求时获得同一用户创建结果"],
+    "functionalRequirements": ["创建用户接口必须拒绝缺失 Idempotency-Key 的请求"],
+    "nonFunctionalRequirements": ["幂等判断不能破坏邮箱唯一约束"],
+    "constraints": ["M0 仅验证设计证据，不修改真实生产表"],
+    "acceptanceCriteria": ["设计能明确区分邮箱唯一约束与请求幂等语义"],
+    "glossary": ["Idempotency-Key：客户端为一次业务写操作生成的幂等标识"],
+    "assumptions": ["用户创建接口是幂等控制的系统边界"],
+    "openQuestions": ["幂等键保留周期需要业务负责人确认"],
+    "sourceRefs": ["case:M0-005"]
+  },
+  "architectureSpec": {
+    "systemContext": "用户创建幂等位于 UserController.createUser 边界，与 users.email 唯一约束协同但不混用。",
+    "componentChanges": ["扩展 UserController.createUser", "新增或复用幂等键存储", "保留 users.email 唯一约束"],
+    "runtimeFlow": ["读取 Idempotency-Key", "查询幂等记录", "不存在时创建用户", "记录幂等键与 userId", "重复请求返回既有结果"],
+    "dataFlow": ["CreateUserRequest.idempotencyKey -> user_idempotency_keys.idempotency_key"],
+    "deploymentImpact": ["需要数据库迁移或确认现有幂等表"],
+    "qualityAttributeResponses": ["幂等键避免网络重试造成重复写入"],
+    "risks": ["幂等键与邮箱唯一约束混用会导致语义错误"],
+    "evidenceRefs": ["M0-005:evidence[0]", "M0-005:evidence[1]"],
+    "decisionCandidates": ["DEC-2026-0005"]
+  },
+  "decisionRecord": {
+    "decisionId": "DEC-2026-0005",
+    "type": "DATA",
+    "title": "幂等键使用通用请求表或绑定用户创建业务表",
+    "status": "PROPOSED",
+    "significance": "MAJOR",
+    "context": {
+      "problem": "幂等键需要保存请求语义和创建结果，但不能替代用户邮箱唯一约束。",
+      "constraints": ["M0 样例仅验证 schema 与证据引用"],
+      "qualityAttributes": ["一致性", "可恢复性", "可审计性"]
+    },
+    "options": [
+      { "id": "OPT-1", "name": "通用 idempotency_request 表", "pros": ["可复用于多个写接口"], "cons": ["需要抽象请求结果存储格式"] },
+      { "id": "OPT-2", "name": "用户创建专用幂等表", "pros": ["语义直接，查询简单"], "cons": ["难以复用到其他接口"] }
+    ],
+    "selectedOption": "",
+    "rationale": "M0 阶段保留为人工评审决策，不自动选择。",
+    "consequences": { "positive": [], "negative": [], "risks": ["错误建模会造成重复创建或误拒绝合法请求"] },
+    "evidenceRefs": ["M0-005:evidence[0]", "M0-005:evidence[1]"],
+    "reviewTriggers": ["用户创建接口扩展到批量导入", "幂等键需要跨服务复用"]
+  }
+}

@@ -1,0 +1,24 @@
+# BaiZe Architect — 单进程本地 agent。
+# ponytail: out 挂 ./out(写项目目录可 git commit);build 前 find delete ._out 防 AppleDouble。
+services:
+  baize:
+    build:
+      context: .
+      dockerfile: agent-runtime/Dockerfile
+    volumes:
+      - ./test-repo-2:/repo:ro
+      - ./out:/app/out
+    environment:
+      - BAIZE_PROJECT_ROOT=/app
+      - BAIZE_OUT_DIR=/app/out
+      - RUNTIME_MODEL_PROVIDER=${PI_PROVIDER:-bailian}
+      - RUNTIME_MODEL_ID=${PI_MODEL:-glm-5.2}
+      - DASHSCOPE_API_KEY=${DASHSCOPE_API_KEY:-}
+      - BAIZE_AUTO_APPROVE=${BAIZE_AUTO_APPROVE:-1}
+    command:
+      - --repo
+      - /repo
+      - --repo-id
+      - test-repo-2
+      - --requirement
+      - 为订单服务新增一个支持条件过滤与游标分页的查询接口
