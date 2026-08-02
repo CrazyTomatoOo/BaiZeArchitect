@@ -9,5 +9,11 @@
     "outDir": "dist",
     "resolveJsonModule": true
   },
-  "include": ["cli.ts", "server.ts", "evolver-client.ts", "distill-gene.ts"]
+  "include": [
+    "cli.ts",
+    "server.ts",
+    "evolver-client.ts",
+    "distill-gene.ts",
+    "gateway.ts"
+  ]
 }

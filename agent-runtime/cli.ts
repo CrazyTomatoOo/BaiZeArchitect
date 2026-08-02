@@ -290,8 +290,16 @@ interface RunInput {
 	commitSha?: string;
 }
 
-async function runDesign(
+export type RunEvent =
+	| { type: "phase"; phase: "architect" | "critic" }
+	| { type: "plan"; plan: Plan }
+	| { type: "critique"; critique: unknown }
+	| { type: "done"; file: string }
+	| { type: "error"; error: string }
+
+export async function runDesign(
 	input: RunInput,
+	onEvent?: (e: RunEvent) => void,
 ): Promise<{ plan: Plan; critique: unknown }> {
 	const model = modelRuntime.getModel(PROVIDER, MODEL_ID);
 	if (!model) throw new Error(`model not found: ${PROVIDER}/${MODEL_ID}`);
@@ -313,6 +321,7 @@ async function runDesign(
 	});
 
 	const sha = input.commitSha ?? "HEAD";
+	onEvent?.({ type: "phase", phase: "architect" });
 	const evolverEnabled = process.env.BAIZE_EVOLVER === "1";
 	const archTools = ["read", "bash", "grep", "find", "ls", "submit_plan"];
 	if (evolverEnabled) archTools.push("evolver_recall");
@@ -380,6 +389,8 @@ async function runDesign(
 			input.requirement,
 			"LLM 未调用 submit_plan",
 		);
+	onEvent?.({ type: "plan", plan });
+	onEvent?.({ type: "phase", phase: "critic" });
 	const { session: criticSession } = await createAgentSession({
 		cwd: input.repoPath,
 		model,
@@ -405,6 +416,7 @@ async function runDesign(
 			/* ignore */
 		}
 	}
+	onEvent?.({ type: "critique", critique });
 	return { plan, critique };
 }
 
@@ -478,7 +490,7 @@ function planToMarkdown(
 	return lines.join("\n");
 }
 
-async function writeDesignPackage(
+export async function writeDesignPackage(
 	plan: Plan,
 	critique: unknown,
 	repoId: string,
@@ -540,22 +552,20 @@ function requireText(file: string): string | undefined {
 	}
 }
 
-const input = parseArgs(process.argv);
-console.log(
-	`[baize] repo=${input.repoId} cwd=${input.repoPath} model=${PROVIDER}/${MODEL_ID}`,
-);
-const { plan, critique } = await runDesign(input);
-const autoApprove = process.env.BAIZE_AUTO_APPROVE !== "0";
-const file = await writeDesignPackage(
-	plan,
-	critique,
-	input.repoId,
-	autoApprove ? "accepted" : "pending",
-);
-console.log(
-	`[baize] 审批: ${autoApprove ? "auto-approved (BAIZE_AUTO_APPROVE=1)" : "pending (BAIZE_AUTO_APPROVE=0, 待外部 approve)"}`,
-);
-console.log(`[baize] Design Package 写入: ${file}`);
-// ponytail: 显式 exit — evolver-mcp 子进程 stdio 句柄 keep event loop,
-// 不显式 exit 容器不退(package 已写完,exit 安全)。
-process.exit(0);
+async function main(): Promise<void> {
+	const input = parseArgs(process.argv);
+	console.log(`[baize] repo=${input.repoId} cwd=${input.repoPath} model=${PROVIDER}/${MODEL_ID}`);
+	const { plan, critique } = await runDesign(input);
+	const autoApprove = process.env.BAIZE_AUTO_APPROVE !== "0";
+	const status = autoApprove ? "accepted" : "pending";
+	const file = await writeDesignPackage(plan, critique, input.repoId, status);
+	console.log(`[baize] 审批: ${autoApprove ? "auto-approved" : "pending(待外部 approve)"}`);
+	console.log(`[baize] Design Package 写入: ${file}`);
+	// ponytail: 显式 exit — evolver-mcp 子进程 keep event loop,不退则容器不退。
+	process.exit(0);
+}
+
+// CLI 入口:被 gateway import 时(BAIZE_GATEWAY=1)跳过;直接跑 cli.ts 时执行。
+if (process.env.BAIZE_GATEWAY !== "1") {
+	await main();
+}
