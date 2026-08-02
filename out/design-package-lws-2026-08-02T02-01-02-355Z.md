@@ -1,0 +1,58 @@
+# 子域名感知滚动更新：将 per-replica headless service 生命周期从 leader Pod 解耦并复用 revision 机制
+
+> 审批状态: accepted
+> UniquePerReplica per-replica headless service 由 leader Pod 拥有，滚动更新中 Pod 重建触发 DNS 中断
+
+## 上下文
+仓库 lws (kubernetes-sigs/leader-worker-set) 在 commit eb27a21 实现 LeaderWorkerSet CRD。subdomainPolicy=UniquePerReplica 时,pod_controller 在 Reconcile 每个 leader Pod 时为该副本创建同名 headless Service,owner 设为该 leader Pod(pod_controller.go:116-118)。leader StatefulSet 滚动更新(partition 机制,leaderworkerset_controller.go rollingUpdateParameters)会逐个序号重建 leader Pod;旧 Pod 删除触发其拥有的 headless Service 被 GC,新 Pod 创建后再由 PodReconciler 重建,期间 `*.lws-N` 子域 DNS 记录消失,导致依赖 LWS_LEADER_ADDRESS / TPU_WORKER_HOSTNAMES 及 per-replica 子域的客户端中断。revision 机制(revision_utils.go: NewRevision/CreateRevision/ApplyRevision/GetRevisionKey,getPatch 已包含 NetworkConfig)已在 pod_controller.go:147 用于按 Pod 的 RevisionKey 选取 worker 模板;worker StatefulSet 的 serviceName=leaderPod.Name(pod_controller.go:429-432)序号稳定。需求:为 LeaderWorkerSet 增加子域名感知的滚动更新策略,复用 revision 机制避免滚动更新中的 DNS 中断。
+
+## 需求
+- 变更请求: 为 LeaderWorkerSet 增加子域名(subdomain)感知的滚动更新策略,复用 ControllerRevision 机制避免 UniquePerReplica 滚动更新期间的 DNS 中断。将 per-replica headless Service 的所有权与生命周期从 leader Pod 解耦到 LeaderWorkerSet 对象,使滚动更新重建 leader Pod 时 Service 不被 GC,子域 DNS 持续可解析。
+- 仓库: lws @ eb27a21ed60d21471761ded92be024e31ccf75e7
+### 验收条件
+- UniquePerReplica 下 per-replica headless Service 在 leader Pod 因滚动更新被重建期间持续存在(不被 GC),`*.lws-<ordinal>` DNS 不出现空窗
+- per-replica headless Service 由 LeaderWorkerSet 对象拥有(owner=LWS),在 LeaderWorkerSetReconciler.reconcileHeadlessServices 中按 leader StatefulSet 的序号(0..replicas-1,含 maxSurge 突增副本)创建与回收,而非在 PodReconciler 中创建
+- Service 选择器保持 revision 无关(set-name + group-index),使同一序号下旧/新 revision 的 Pod 均可被正确路由;revision 仅用于 worker 模板选取(pod_controller.go:147 现有逻辑)与触发滚动更新
+- worker StatefulSet 的 serviceName 继续使用 leaderPod.Name(序号稳定),worker Pod DNS 名稳定
+- Shared→UniquePerReplica 转换时共享 Service(lws.Name)保留;UniquePerReplica→Shared 时由 LWS reconciler 清理多余 per-replica Service
+- maxSurge 突增副本获得各自的 per-replica Service,回收突增副本时其 Service 一并清理
+- TruncateRevisions 行为不变,headless Service 不绑定到具体 revision
+- 新增单元测试:滚动更新/强制删除 leader Pod 期间 per-replica Service 不消失、DNS 选择器正确;集成测试:Service 数量随 replicas+surge 变化、Shared↔Unique 转换安全、env 变量注入不变
+
+## 架构
+- 组件: api/leaderworkerset/v1/leaderworkerset_types.go: 复用 NetworkConfig/SubdomainPolicy/SubdomainPolicyAnnotationKey 类型与常量,无需新增字段(策略为既有 RollingUpdate 的行为增强), pkg/controllers/leaderworkerset_controller.go: 扩展 reconcileHeadlessServices(213-220):UniquePerReplica 时按 leader StatefulSet.Spec.Replicas 枚举序号,调用 CreateHeadlessServiceIfNotExists 创建名为 lws-<ordinal> 的 headless Service,owner=LWS,selector={SetNameLabelKey, GroupIndexLabelKey=<ordinal>};并清理不再匹配的多余 Service(UniquePerReplica→Shared 转换/突增副本回收), pkg/controllers/pod_controller.go: 移除 116-118 的 per-replica headless Service 创建逻辑(所有权迁移到 LWS reconciler);保留 worker StatefulSet 构建(serviceName=leaderPod.Name 不变), pkg/utils/controller/controller_utils.go: CreateHeadlessServiceIfNotExists(33-62) 已支持自定义 owner;新增基于 SSA 的 selector/labels 更新路径以支持既有 Service 的 selector 演进,避免 CreateIfNotExists 语义下 selector 漂移, pkg/utils/revision/revision_utils.go: 不修改;revision 用于 (a) pod_controller.go:147 按 Pod RevisionKey ApplyRevision 选取 worker 模板,(b) leaderworkerset_controller 触发滚动更新(NewRevision/CreateRevision/getUpdatedRevision/TruncateRevisions), pkg/webhooks/pod_webhook.go: 不修改;leader Pod subdomain=pod.Name 注入(110-114)保持稳定,Pod 名序号化使其跨 revision 一致, pkg/webhooks/leaderworkerset_webhook.go: 不修改;subdomainPolicy 默认值与校验(74-82,111-113)保持
+- 质量属性: Availability: 滚动更新期间 per-replica 子域 DNS 零中断(PublishNotReadyAddresses=true + Service 不被 GC + 序号稳定名), BackwardCompatibility: Shared 默认行为不变;不新增 Pod 标签(避免触发跨版本滚动更新,见 KEP-238 约束);既有 Shared↔Unique 转换语义保留, Correctness: Service 选择器 revision 无关,避免新 revision Pod 路由错误;Service 由 LWS 拥有避免孤儿, Scalability: per-replica Service 数=replicas+surge,随 maxSurge 扩缩,清理逻辑覆盖突增回收, Maintainability: 复用现有 ControllerRevision 与 CreateHeadlessServiceIfNotExists,改动集中于两个 reconciler
+
+## REST API
+- leaderworkerset.leaderworkerset.x-k8s.io/v1 LeaderWorkerSet CRUD(verbs=get;list;watch;create;update;patch;delete) — Spec.NetworkConfig.SubdomainPolicy 触发滚动更新,无 API 形状变更
+- leaderworkerset.leaderworkerset.x-k8s.io/v1 LeaderWorkerSet/status 子资源(update;patch) — ReadyReplicas/UpdatedReplicas/ObservedGeneration 不变
+- leaderworkerset.leaderworkerset.x-k8s.io/v1 LeaderWorkerSet/scale 子资源(get;update;patch) — spec.replicas/status.replicas/status.hpaPodSelector 不变
+- apps/v1 ControllerRevision(get;list;watch;create;update;patch;delete) — 滚动更新按既有 revision 机制 NewRevision/CreateRevision/TruncateRevisions,无变更
+- core/v1 Service(get;list;watch;create;update;patch;delete) — per-replica headless Service 由 LWS reconciler 创建并以 LWS 为 owner(原由 pod_controller 创建以 Pod 为 owner)
+
+## 数据设计
+- 数据库: Kubernetes API server(etcd),无独立数据库
+- 表: ControllerRevision(apps/v1): Data.Raw = LeaderWorkerSet spec 的 strategic merge patch,包含 leaderWorkerTemplate 与 networkConfig(revision_utils.go getPatch:265-295);Labels={SetNameLabelKey, RevisionKey};OwnerRef=LWS。滚动更新时旧 revision 保留直至 TruncateRevisions 清理, LeaderWorkerSet(leaderworkerset/v1): Spec.NetworkConfig.SubdomainPolicy(Shared|UniquePerReplica)参与 revision hash;Status.ReadyReplicas/UpdatedReplicas/Replicas 反映滚动进度, StatefulSet(apps/v1, leader): name=lws.Name, Spec.ServiceName=lws.Name, Pod 模板带 RevisionKey 标签与 SubdomainPolicyAnnotationKey 注解(leaderworkerset_controller.go:805-807,842);Spec.UpdateStrategy.RollingUpdate.Partition 驱动逐序号滚动, StatefulSet(apps/v1, worker): name=leaderPod.Name, Spec.ServiceName=leaderPod.Name(UniquePerReplica)或 lws.Name(Shared)(pod_controller.go:429-432);owner=leader Pod;按 Pod 的 RevisionKey 经 ApplyRevision 取 worker 模板, Pod(core/v1, leader): name=lws-<ordinal> 跨 revision 稳定;Spec.Subdomain=pod.Name(pod_webhook.go:110-114);Labels={SetNameLabelKey, WorkerIndexLabelKey=0, GroupIndexLabelKey, RevisionKey}, Service(core/v1, headless per-replica): name=lws-<ordinal>(=leaderPod.Name),ClusterIP=None,PublishNotReadyAddresses=true,Selector={SetNameLabelKey, GroupIndexLabelKey=<ordinal>};**owner 由 leader Pod 改为 LeaderWorkerSet**(本次变更核心),随 replicas+surge 创建/回收
+
+## 证据
+- `api/leaderworkerset/v1/leaderworkerset_types.go` L246-266 (leaderworkerset_types.go.NetworkConfig_SubdomainPolicy)
+- `api/leaderworkerset/v1/leaderworkerset_types.go` L90-95 (leaderworkerset_types.go.SubdomainPolicyAnnotationKey)
+- `pkg/controllers/pod_controller.go` L116-118 (pod_controller.go.UniquePerReplica_headless_service_owned_by_pod)
+- `pkg/controllers/pod_controller.go` L427-437 (pod_controller.go.worker_sts_serviceName)
+- `pkg/controllers/pod_controller.go` L147-152 (pod_controller.go.GetRevision_ApplyRevision_worker_template)
+- `pkg/controllers/leaderworkerset_controller.go` L213-220 (leaderworkerset_controller.go.reconcileHeadlessServices_Shared_only)
+- `pkg/controllers/leaderworkerset_controller.go` L280-345 (leaderworkerset_controller.go.rollingUpdateParameters)
+- `pkg/controllers/leaderworkerset_controller.go` L803-843 (leaderworkerset_controller.go.constructLeaderStatefulSet_subdomain_serviceName)
+- `pkg/utils/controller/controller_utils.go` L33-62 (controller_utils.go.CreateHeadlessServiceIfNotExists_owner_ref)
+- `pkg/utils/revision/revision_utils.go` L265-295 (revision_utils.go.getPatch_includes_NetworkConfig)
+- `pkg/utils/revision/revision_utils.go` L52-110 (revision_utils.go.NewRevision_ApplyRevision_GetRevisionKey)
+- `pkg/webhooks/pod_webhook.go` L110-114 (pod_webhook.go.subdomain_injection)
+- `pkg/webhooks/leaderworkerset_webhook.go` L74-82 (leaderworkerset_webhook.go.subdomainPolicy_default_validate)
+
+## 评审发现 (critic 独立 challenge)
+- [high/high] OwnerRef 迁移缺口(核心问题未完全覆盖):现网已部署的 UniquePerReplica LWS,其 per-replica headless Service 由 pod_controller.go:116-118 以 owner=&pod 创建,ownerRef=leader Pod。架构方案将创建逻辑迁到 LWS reconciler 并以 owner=LWS 创建,但 controller_utils.go:33-62 的 CreateHeadlessServiceIfNotExists 仅在 Service 不存在时 Create,已存在的 Service 不会被 patch ownerRef(只新增 SSA selector/labels 更新路径)。因此控制器升级后,既有 per-replica Service 的 ownerRef 仍为 leader Pod,下一次滚动更新重建 leader Pod 时仍会被 GC,DNS 中断问题在升级后首次滚动更新时复发——直接违背验收条件 1。架构未明确给出对存量 Service 的 ownerRef 改写(re-owner)步骤。 → 明确要求在 reconcileHeadlessServices 中对已存在的 per-replica Service 做 ownerRef 修正:用 SSA(ServerSideApply with {kind: Service})或 Update 将 controller owner reference 从 leader Pod 改为 LWS,并在方案 components 中将 controller_utils.go 的改动从仅 selector/labels 扩展为 ownerRef+selector+labels 的幂等对齐。否则补充一次性迁移脚本/启动迁移逻辑。
+- [medium/high] reconcileHeadlessServices 调用点与签名缺少 leader StatefulSet / 实际 burst 副本上下文:leaderworkerset_controller.go:190 调用 r.reconcileHeadlessServices(ctx, lws),函数签名(213-220)只接收 lws。但验收要求‘按 leader StatefulSet 的序号(0..replicas-1,含 maxSurge 突增副本)创建与回收’,而 maxSurge 是上限,滚动期间实际 surge 数量随 wantReplicas 动态变化(rollingUpdateParameters:280-345 中 burstReplicas/stsReplicas)。架构未说明 reconcileHeadlessServices 如何获取当前 leader StatefulSet.Spec.Replicas(含活跃 surge)以决定创建/回收序号上界,也未说明是否需要在 rollingUpdateParameters 计算 replicas 之后调用。仅凭 lws.Spec.Replicas+maxSurge 上界固定创建会造成稳态下多余 Service(序号 replicas..replicas+surge-1 无对应 Pod),与‘Service 数量随 replicas+surge 变化’‘回收突增副本时其 Service 一并清理’存在实现歧义。 → 将 leader StatefulSet(或其当前 Spec.Replicas)传入 reconcileHeadlessServices,并在 rollingUpdateParameters 计算 replicas 之后调用;明确以 leaderSts.Spec.Replicas 作为序号上界,enumerate 0..leaderSts.Spec.Replicas-1 创建,回收序号 >= 该值的 per-replica Service。在架构 components 中补全函数签名与调用顺序。
+- [medium/medium] UniquePerReplica→Shared 转换时多余 per-replica Service 的清理路径未具体化:reconcileHeadlessServices 当前 Shared 分支(213-220)仅创建 lws.Name 后 return。验收要求‘UniquePerReplica→Shared 时由 LWS reconciler 清理多余 per-replica Service’。架构 components 仅一句‘清理不再匹配的多余 Service’,未描述如何 List(label SetNameLabelKey=lws.Name)并删除名为 lws-<ordinal> 的存量 per-replica Service,也未说明删除的判定条件(Shared 模式下应只保留 lws.Name)。存在实现遗漏风险。 → 在 reconcileHeadlessServices 中显式描述:List Services by label SetNameLabelKey=lws.Name;按当前 SubdomainPolicy 计算期望集合(Shared→{lws.Name};UniquePerReplica→{lws-0..lws-(curReplicas-1)}),删除不在期望集合内的 per-replica Service。补入 components 与测试用例。
+- [medium/medium] Shared→UniquePerReplica 转换期间 per-replica Service 选择器与旧 Shared Pod 的路由副作用未讨论:getPatch(265-295)包含 NetworkConfig,故 SubdomainPolicy 变更产生新 revision 触发全量滚动更新。转换期间旧 revision(Shared)leader Pod 仍带 SetNameLabelKey+GroupIndexLabelKey 标签,而新创建的 per-replica Service selector={SetName, GroupIndex=N}(架构所述 revision 无关)会选中旧 Shared Pod,使 lws-N 子域在旧 Pod subdomain=lws.Name(pod_webhook:110-114 仅 UniquePerReplica 注入 subdomain)的情况下仍生成 Endpoints 端点,可能将流量路由到旧 revision Pod。验收条件 3(选择器 revision 无关)与转换期路由正确性存在未澄清的张力。 → 明确转换期路由语义:接受‘过渡期 lws-N 可能指向旧 revision Pod 以维持 DNS 连续性’并写入设计说明,或通过滚动更新 partition 顺序保证旧 Pod 在新 per-replica Service 创建前已 NotReady/Terminating。补一条集成测试覆盖 Shared→Unique 转换期间的 Endpoints 构成。
+- [low/high] 证据符号标注与实际行号/内容存在小偏差:pod_controller.go:147-152 标注符号 'GetRevision_ApplyRevision_worker_template',但该行区间仅含 GetRevision(147),ApplyRevision 实际位于 pod_controller.go:387 与 revision_utils.go:168;leaderworkerset_controller.go rollingUpdateParameters 标 lineStart 280 实际定义起于 282。虽不影响结论,但 evidenceCandidates 的 symbol 描述与行号需更精确以通过证据校验。 → 修正 evidenceCandidates:将 pod_controller.go 的 ApplyRevision 证据拆分为两段(147-152 GetRevision 与 385-390 ApplyRevision 调用),rollingUpdateParameters lineStart 改为 282。
+> 架构方案的核心思路(将 per-replica headless Service 所有权从 leader Pod 解耦到 LWS、selector 保持 revision 无关、复用既有 revision 与命名稳定性)方向正确,13 项证据全部经复核真实存在,行号基本准确。但存在一个高危缺口:现网已部署 LWS 的存量 per-replica Service ownerRef 仍为 leader Pod,而 CreateHeadlessServiceIfNotExists 的 CreateIfNotExists 语义与方案仅新增的 SSA selector/labels 更新路径均不会改写既有 Service 的 ownerRef,导致升级后首次滚动更新仍会触发 GC、DNS 中断复发——这直接危及验收条件 1 的达成,必须在方案中显式补入 ownerRef 迁移(re-owner)步骤。中等问题集中在 reconcileHeadlessServices 的调用上下文(缺 leader StatefulSet 当前副本数)、UniquePerReplica→Shared 的存量 Service 清理路径未具体化、Shared→UniquePerReplica 转换期路由语义未澄清。低等问题为个别 evidenceCandidates 符号/行号标注偏差。建议补充上述四点后再进入人工审批。
