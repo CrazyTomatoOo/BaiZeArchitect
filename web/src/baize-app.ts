@@ -201,16 +201,20 @@ class BaizeApp extends LitElement {
 					${this.running ? "运行中…" : "提交设计"}
 				</button>
 			</form>
-			${this.events.length
-				? html`<h2>事件流</h2>
+			${
+				this.events.length
+					? html`<h2>事件流</h2>
 						<div class="events">
 							${this.events.map((e) => JSON.stringify(e)).join("\n")}
 						</div>`
-				: ""}
-			${this.plan
-				? html`<h2>Plan(architect 产出)</h2>
+					: ""
+			}
+			${
+				this.plan
+					? html`<h2>Plan(architect 产出)</h2>
 						<div class="plan">${JSON.stringify(this.plan, null, 2)}</div>`
-				: ""}
+					: ""
+			}
 			${this.file ? html`<div class="done">✓ 写入: ${this.file}</div>` : ""}
 		`;
 	}

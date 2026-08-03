@@ -177,8 +177,9 @@ class BaizeDashboard extends LitElement {
 			<div class="cols">
 				<div class="card">
 					<h3>高影响热点(fan_in)</h3>
-					${a?.hotspots?.length
-						? html`<ul>
+					${
+						a?.hotspots?.length
+							? html`<ul>
 								${a.hotspots.map(
 									(h) =>
 										html`<li>
@@ -187,10 +188,12 @@ class BaizeDashboard extends LitElement {
 										</li>`,
 								)}
 							</ul>`
-						: html`<div class="empty">无(先跑 scripts/evidence.sh)</div>`}
+							: html`<div class="empty">无(先跑 scripts/evidence.sh)</div>`
+					}
 					<h3>跨包边界</h3>
-					${a?.boundaries?.length
-						? html`<ul>
+					${
+						a?.boundaries?.length
+							? html`<ul>
 								${a.boundaries.map(
 									(b) =>
 										html`<li>
@@ -199,10 +202,12 @@ class BaizeDashboard extends LitElement {
 										</li>`,
 								)}
 							</ul>`
-						: html`<div class="empty">无</div>`}
+							: html`<div class="empty">无</div>`
+					}
 					<h3>真实模块(Leiden)</h3>
-					${a?.clusters?.length
-						? html`<ul>
+					${
+						a?.clusters?.length
+							? html`<ul>
 								${a.clusters.map(
 									(c) =>
 										html`<li>
@@ -213,16 +218,20 @@ class BaizeDashboard extends LitElement {
 										</li>`,
 								)}
 							</ul>`
-						: html`<div class="empty">无</div>`}
+							: html`<div class="empty">无</div>`
+					}
 				</div>
 				<div class="card">
 					<h3>历史决策(ADR,沉淀复用)</h3>
-					${adr
-						? html`<pre>${adr}</pre>`
-						: html`<div class="empty">无(先跑 scripts/evolve.sh)</div>`}
+					${
+						adr
+							? html`<pre>${adr}</pre>`
+							: html`<div class="empty">无(先跑 scripts/evolve.sh)</div>`
+					}
 					<h3>已蒸馏 gene(${this.genes.length})</h3>
-					${this.genes.length
-						? html`<ul>
+					${
+						this.genes.length
+							? html`<ul>
 								${this.genes.map(
 									(g) =>
 										html`<li>
@@ -230,7 +239,8 @@ class BaizeDashboard extends LitElement {
 										</li>`,
 								)}
 							</ul>`
-						: html`<div class="empty">无</div>`}
+							: html`<div class="empty">无</div>`
+					}
 				</div>
 			</div>
 		`;
