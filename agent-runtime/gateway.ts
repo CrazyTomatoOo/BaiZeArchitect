@@ -12,6 +12,7 @@ import { WebSocketServer, type WebSocket } from "ws";
 import { randomUUID } from "node:crypto";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
+import { readdir, readFile, writeFile } from "node:fs/promises";
 import type { RunEvent } from "./cli.js";
 
 // 必须在 import cli.ts 前设,否则 cli.ts 的 main 会跑(import 即执行)。
@@ -24,6 +25,7 @@ const ROOT =
 	join(dirname(fileURLToPath(import.meta.url)), "..");
 const PORT = Number(process.env.BAIZE_PORT ?? 18789);
 const REPOS_ROOT = process.env.BAIZE_REPOS_ROOT ?? ROOT;
+const OUT_DIR = process.env.BAIZE_OUT_DIR ?? join(ROOT, "out");
 
 interface Run {
 	id: string;
@@ -71,7 +73,8 @@ function startRun(
 				{ repoPath: join(REPOS_ROOT, repoId), repoId, requirement, commitSha },
 				(e) => broadcast(run, e),
 			);
-			const status = process.env.BAIZE_AUTO_APPROVE !== "0" ? "accepted" : "pending";
+			const status =
+				process.env.BAIZE_AUTO_APPROVE !== "0" ? "accepted" : "pending";
 			const file = await writeDesignPackage(plan, critique, repoId, status);
 			run.file = file;
 			run.status = "done";
@@ -91,57 +94,122 @@ async function readBody(req: IncomingMessage): Promise<string> {
 	return body;
 }
 
-const server = http.createServer(async (req: IncomingMessage, res: ServerResponse) => {
-	res.setHeader("access-control-allow-origin", "*");
-	res.setHeader("access-control-allow-headers", "content-type");
-	if (req.method === "OPTIONS") {
-		res.writeHead(204);
-		res.end();
-		return;
-	}
-	const url = new URL(req.url ?? "/", `http://${req.headers.host}`);
+interface PackageInfo {
+	name: string;
+	repoId: string;
+	status: string;
+}
 
-	if (url.pathname === "/" && req.method === "GET") {
-		res.writeHead(200, { "content-type": "application/json" });
-		res.end(JSON.stringify({ ok: true, service: "baize-gateway", runs: runs.size }));
-		return;
+async function listPackages(): Promise<PackageInfo[]> {
+	const files = await readdir(OUT_DIR);
+	const out: PackageInfo[] = [];
+	for (const f of files) {
+		if (!f.startsWith("design-package-") || !f.endsWith(".md")) continue;
+		const content = await readFile(join(OUT_DIR, f), "utf8");
+		const status = (content.match(/^> 审批状态: (.+)$/m) ?? [, "?"])[1].trim();
+		const repoId = f.replace(/^design-package-/, "").replace(/\.md$/, "");
+		out.push({ name: f, repoId, status });
 	}
+	out.sort((a, b) => (a.name < b.name ? 1 : -1));
+	return out;
+}
 
-	if (url.pathname === "/api/runs" && req.method === "POST") {
-		let parsed: { repoId?: string; requirement?: string; commitSha?: string };
-		try {
-			parsed = JSON.parse(await readBody(req));
-		} catch {
-			res.writeHead(400);
-			res.end(JSON.stringify({ error: "bad json" }));
+const server = http.createServer(
+	async (req: IncomingMessage, res: ServerResponse) => {
+		res.setHeader("access-control-allow-origin", "*");
+		res.setHeader("access-control-allow-headers", "content-type");
+		if (req.method === "OPTIONS") {
+			res.writeHead(204);
+			res.end();
 			return;
 		}
-		if (!parsed.repoId || !parsed.requirement) {
-			res.writeHead(400);
-			res.end(JSON.stringify({ error: "need repoId + requirement" }));
+		const url = new URL(req.url ?? "/", `http://${req.headers.host}`);
+
+		if (url.pathname === "/" && req.method === "GET") {
+			res.writeHead(200, { "content-type": "application/json" });
+			res.end(
+				JSON.stringify({ ok: true, service: "baize-gateway", runs: runs.size }),
+			);
 			return;
 		}
-		const id = startRun(parsed.repoId, parsed.requirement, parsed.commitSha);
-		res.writeHead(200, { "content-type": "application/json" });
-		res.end(JSON.stringify({ runId: id, status: "started" }));
-		return;
-	}
 
-	if (url.pathname === "/api/runs" && req.method === "GET") {
-		const list = [...runs.values()].map((r) => ({
-			id: r.id,
-			repoId: r.repoId,
-			status: r.status,
-			file: r.file,
-		}));
-		res.writeHead(200, { "content-type": "application/json" });
-		res.end(JSON.stringify(list));
-		return;
-	}
+		if (url.pathname === "/api/runs" && req.method === "POST") {
+			let parsed: { repoId?: string; requirement?: string; commitSha?: string };
+			try {
+				parsed = JSON.parse(await readBody(req));
+			} catch {
+				res.writeHead(400);
+				res.end(JSON.stringify({ error: "bad json" }));
+				return;
+			}
+			if (!parsed.repoId || !parsed.requirement) {
+				res.writeHead(400);
+				res.end(JSON.stringify({ error: "need repoId + requirement" }));
+				return;
+			}
+			const id = startRun(parsed.repoId, parsed.requirement, parsed.commitSha);
+			res.writeHead(200, { "content-type": "application/json" });
+			res.end(JSON.stringify({ runId: id, status: "started" }));
+			return;
+		}
 
-	res.writeHead(404);
-	res.end("not found");
-});
+		const seg = url.pathname.split("/");
+
+		if (
+			seg[1] === "api" &&
+			seg[2] === "packages" &&
+			seg.length === 3 &&
+			req.method === "GET"
+		) {
+			res.writeHead(200, { "content-type": "application/json" });
+			res.end(JSON.stringify(await listPackages()));
+			return;
+		}
+
+		if (
+			seg[1] === "api" &&
+			seg[2] === "packages" &&
+			seg.length === 4 &&
+			seg[3].startsWith("design-package-") &&
+			seg[3].endsWith(".md") &&
+			req.method === "GET"
+		) {
+			try {
+				const content = await readFile(join(OUT_DIR, seg[3]), "utf8");
+				res.writeHead(200, { "content-type": "text/markdown; charset=utf-8" });
+				res.end(content);
+			} catch {
+				res.writeHead(404);
+				res.end("not found");
+			}
+			return;
+		}
+
+		if (
+			seg[1] === "api" &&
+			seg[2] === "packages" &&
+			seg.length === 5 &&
+			seg[4] === "approve" &&
+			seg[3].startsWith("design-package-") &&
+			req.method === "POST"
+		) {
+			try {
+				const file = join(OUT_DIR, seg[3]);
+				const content = await readFile(file, "utf8");
+				const updated = content.replace(/^(> 审批状态:) .*$/m, "$1 accepted");
+				await writeFile(file, updated, "utf8");
+				res.writeHead(200, { "content-type": "application/json" });
+				res.end(JSON.stringify({ ok: true, status: "accepted" }));
+			} catch (e) {
+				res.writeHead(500);
+				res.end(JSON.stringify({ error: String(e) }));
+			}
+			return;
+		}
+		res.writeHead(404);
+		res.end("not found");
+	},
+);
 
 const wss = new WebSocketServer({ server, path: "/ws" });
 wss.on("connection", (ws: WebSocket, req: IncomingMessage) => {
@@ -162,5 +230,7 @@ wss.on("connection", (ws: WebSocket, req: IncomingMessage) => {
 });
 
 server.listen(PORT, () => {
-	console.log(`[baize-gateway] http://127.0.0.1:${PORT} (POST /api/runs, ws /ws?run=ID)`);
+	console.log(
+		`[baize-gateway] http://127.0.0.1:${PORT} (POST /api/runs, ws /ws?run=ID)`,
+	);
 });
