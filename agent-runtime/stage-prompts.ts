@@ -34,6 +34,12 @@ export const STAGE_METHODOLOGY: Record<StageName, string> = {
 		"- DDD 限界上下文→功能域(capability area);域内再拆功能项(cohesive 行为单元)。",
 		"- 用功能树/WBS 组织;避免跨域重复职责。",
 	].join("\n"),
+	design: [
+		"方法论(功能设计,基于已确认的功能分解):",
+		"- 逐项功能项给出可落地的设计:交互/处理流程、输入输出、数据与状态、边界与异常处理。",
+		"- 明确依赖(调用谁/被谁调用)、验收要点;标注需人工确认的假设与风险。",
+		"- 设计与上游用例/功能项一一对应,不新增范围外的功能。",
+	].join("\n"),
 };
 
 export const STAGE_OUTPUT_SHAPE: Record<StageName, string> = {
@@ -41,6 +47,7 @@ export const STAGE_OUTPUT_SHAPE: Record<StageName, string> = {
 	scenario: `{"scenarios":[{"title":"...","description":"参与者/目标/触发/步骤/结果"}]}`,
 	usecase: `{"useCases":[{"title":"actor+goal","scenarioTitle":"...","precondition":"...","mainFlow":"...","exceptions":"...","postcondition":"..."}]}`,
 	function: `{"domains":[{"name":"功能域","description":"...","items":[{"title":"功能项","description":"..."}]}]}`,
+	design: `{"designs":[{"functionItem":"功能项标题","domain":"所属功能域","flow":"处理流程","io":"输入/输出","dataState":"数据与状态","edgeException":"边界与异常","acceptance":"验收要点","assumptionsRisks":"假设与风险"}]}`,
 };
 
 export interface StagePromptConfig {

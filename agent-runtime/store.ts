@@ -7,8 +7,15 @@ import { dirname } from "node:path";
  * workspace=1 repo;资产(场景/用例/功能)为 workspace 级复用池。
  * ponytail: 单全局 DB(workspaceId 列分 scope),同步 API,小规模本地库足够。
  */
-export type Stage = "录入" | "分析" | "场景" | "用例" | "功能分解";
-export type StageStatus = "未开始" | "进行中" | "待审" | "完成";
+export type Stage =
+	| "录入"
+	| "分析"
+	| "场景"
+	| "用例"
+	| "功能分解"
+	| "功能设计"
+	| "归档";
+export type StageStatus = "未开始" | "进行中" | "待审" | "打回" | "完成";
 
 const SCHEMA = `
 create table if not exists workspaces(
@@ -28,6 +35,7 @@ create table if not exists stage_progress(
   stage text not null,
   status text not null default '未开始',
   artifact_refs text not null default '[]',
+  feedback text not null default '',
   updated_at text not null default (datetime('now')),
   primary key (requirement_id, stage)
 );
@@ -79,6 +87,14 @@ export class Store {
 		mkdirSync(dirname(dbPath), { recursive: true });
 		this.db = new Database(dbPath);
 		this.db.exec(SCHEMA);
+		// ponytail: 老库补 feedback 列;列已存在则忽略
+		try {
+			this.db.exec(
+				"alter table stage_progress add column feedback text not null default ''",
+			);
+		} catch {
+			/* already exists */
+		}
 	}
 
 	// workspaces
@@ -137,17 +153,19 @@ export class Store {
 		stage: Stage,
 		status: StageStatus,
 		artifactRefs: unknown[] = [],
+		feedback = "",
 	): void {
 		this.db
 			.prepare(
-				`insert into stage_progress(requirement_id, stage, status, artifact_refs, updated_at)
-				 values (?, ?, ?, ?, datetime('now'))
+				`insert into stage_progress(requirement_id, stage, status, artifact_refs, feedback, updated_at)
+				 values (?, ?, ?, ?, ?, datetime('now'))
 				 on conflict(requirement_id, stage)
 				 do update set status = excluded.status,
 				               artifact_refs = excluded.artifact_refs,
+				               feedback = excluded.feedback,
 				               updated_at = excluded.updated_at`,
 			)
-			.run(requirementId, stage, status, JSON.stringify(artifactRefs));
+			.run(requirementId, stage, status, JSON.stringify(artifactRefs), feedback);
 	}
 	getStages(requirementId: number): unknown[] {
 		return this.db
@@ -261,6 +279,24 @@ export class Store {
 				"insert or ignore into usecase_functions(usecase_id, function_item_id) values (?, ?)",
 			)
 			.run(usecaseId, functionItemId);
+	}
+
+	// 打回重跑前清理旧资产(避免复用池堆积重复项)
+	deleteScenario(id: number): void {
+		this.db.prepare("delete from requirement_scenarios where scenario_id = ?").run(id);
+		this.db.prepare("delete from scenarios where id = ?").run(id);
+	}
+	deleteUseCase(id: number): void {
+		this.db.prepare("delete from usecase_functions where usecase_id = ?").run(id);
+		this.db.prepare("delete from use_cases where id = ?").run(id);
+	}
+	deleteFunctionItem(id: number): void {
+		this.db.prepare("delete from usecase_functions where function_item_id = ?").run(id);
+		this.db.prepare("delete from function_items where id = ?").run(id);
+	}
+	deleteFunctionDomain(id: number): void {
+		this.db.prepare("delete from function_items where domain_id = ?").run(id);
+		this.db.prepare("delete from function_domains where id = ?").run(id);
 	}
 }
 

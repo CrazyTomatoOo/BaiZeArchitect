@@ -100,7 +100,10 @@ class BaizeWorkspaces extends LitElement {
 		await fetch("/api/workspaces", {
 			method: "POST",
 			headers: { "content-type": "application/json" },
-			body: JSON.stringify({ repoPath: this.repoPath, name: this.name || this.repoPath.split("/").pop() }),
+			body: JSON.stringify({
+				repoPath: this.repoPath,
+				name: this.name || this.repoPath.split("/").pop(),
+			}),
 		});
 		this.repoPath = "";
 		this.name = "";

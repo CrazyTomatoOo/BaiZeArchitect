@@ -1,8 +1,9 @@
 import { LitElement, html, css } from "lit";
 
 /**
- * baize-shell — app shell:header + tab 导航(Run / 历史包 / 复用仪表盘)。
- * 子视图保持挂载(hidden 切换)以保留状态。设计 token 由 :root 注入。
+ * baize-shell — app shell:header + tab 导航(需求 / 工作区 / 总览)。
+ * 旅程:新用户 工作区→需求;老用户直接进需求续做。默认落地「需求」。
+ * 子视图保持挂载(hidden 切换)以保留状态;子视图可派发 baize-goto 切 tab。
  */
 class BaizeShell extends LitElement {
 	static properties = { tab: { state: true } };
@@ -78,22 +79,23 @@ class BaizeShell extends LitElement {
 
 	constructor() {
 		super();
-		this.tab = "overview";
+		this.tab = "requirement";
+	}
+
+	connectedCallback(): void {
+		super.connectedCallback();
+		this.addEventListener("baize-goto", ((e: CustomEvent<{ tab: string }>) => {
+			this.tab = e.detail.tab;
+		}) as EventListener);
 	}
 
 	render() {
 		return html`
 			<header>
 				<h1><span class="dot">●</span> BaiZe Architect</h1>
-				<span class="sub">evidence-backed design agent</span>
+				<span class="sub">需求设计流水线 · 场景→用例→功能→设计→归档</span>
 			</header>
 			<nav>
-				<button
-					class=${this.tab === "overview" ? "active" : ""}
-					@click=${() => (this.tab = "overview")}
-				>
-					总览
-				</button>
 				<button
 					class=${this.tab === "requirement" ? "active" : ""}
 					@click=${() => (this.tab = "requirement")}
@@ -107,34 +109,19 @@ class BaizeShell extends LitElement {
 					工作区
 				</button>
 				<button
-					class=${this.tab === "decisions" ? "active" : ""}
-					@click=${() => (this.tab = "decisions")}
+					class=${this.tab === "overview" ? "active" : ""}
+					@click=${() => (this.tab = "overview")}
 				>
-					待决策
-				</button>
-				<button
-					class=${this.tab === "run" ? "active" : ""}
-					@click=${() => (this.tab = "run")}
-				>
-					设计 Run
-				</button>
-				<button
-					class=${this.tab === "packages" ? "active" : ""}
-					@click=${() => (this.tab = "packages")}
-				>
-					历史包
+					总览
 				</button>
 			</nav>
 			<main>
+				<baize-requirement ?hidden=${this.tab !== "requirement"}></baize-requirement>
+				<baize-workspaces ?hidden=${this.tab !== "workspaces"}></baize-workspaces>
 				<div ?hidden=${this.tab !== "overview"}>
 					<baize-overview></baize-overview>
 					<baize-dashboard></baize-dashboard>
 				</div>
-				<baize-requirement ?hidden=${this.tab !== "requirement"}></baize-requirement>
-				<baize-workspaces ?hidden=${this.tab !== "workspaces"}></baize-workspaces>
-				<baize-decisions ?hidden=${this.tab !== "decisions"}></baize-decisions>
-				<baize-app ?hidden=${this.tab !== "run"}></baize-app>
-				<baize-packages ?hidden=${this.tab !== "packages"}></baize-packages>
 			</main>
 		`;
 	}

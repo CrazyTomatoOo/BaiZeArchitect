@@ -10,5 +10,6 @@ lws/
 evidence/
 evolver-home/
 .evolver/
+.baize/
 web/node_modules/
 web/dist/

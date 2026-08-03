@@ -585,7 +585,12 @@ if (process.env.BAIZE_GATEWAY !== "1") {
 	await main();
 }
 
-export type StageName = "analysis" | "scenario" | "usecase" | "function";
+export type StageName =
+	| "analysis"
+	| "scenario"
+	| "usecase"
+	| "function"
+	| "design";
 
 export interface StageRunInput {
 	repoPath: string;
@@ -594,14 +599,9 @@ export interface StageRunInput {
 	requirementDesc: string;
 	upstream: string;
 	stage: StageName;
+	/** 打回意见:重跑时注入 prompt,驱动审核-修改循环 */
+	feedback?: string;
 }
-
-const STAGE_ASSET_HINT: Record<StageName, string> = {
-	analysis: `{"scope":["..."],"constraints":["..."],"risks":["..."]}`,
-	scenario: `{"scenarios":[{"title":"多副本滚动更新","description":"..."}]}`,
-	usecase: `{"useCases":[{"title":"主流程","scenarioTitle":"...","precondition":"...","mainFlow":"...","exceptions":"...","postcondition":"..."}]}`,
-	function: `{"domains":[{"name":"调度","description":"...","items":[{"title":"步骤计算","description":"..."}]}]}`,
-};
 
 function extractJson(text: string): unknown {
 	const fence = text.match(/```(?:json)?\s*([\s\S]*?)```/);
@@ -676,6 +676,12 @@ export async function runStage(
 				`需求:${input.requirementTitle} — ${input.requirementDesc}`,
 				`上游资产:${input.upstream || "(无)"}`,
 				`仓库:${input.repoId}。`,
+				...(input.feedback
+					? [
+							`上一版产物被审核打回,修改意见如下,必须逐条落实:`,
+							input.feedback,
+						]
+					: []),
 				getStageMethodology(input.stage),
 				`产出本阶段资产,形状:${getStageShape(input.stage)}`,
 				"优先调用 submit_stage_assets 提交;若无法调用工具,直接输出一个 JSON 代码块(形状同上)。",
