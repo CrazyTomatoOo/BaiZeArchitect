@@ -1,7 +1,7 @@
 # T05 — 总览仪表盘内容 `wayfinder:prototype`
 
-status: open
-assignee: (unclaimed)
+status: closed
+assignee: pi(UI built)
 blocked-by: T02
 
 ## Question

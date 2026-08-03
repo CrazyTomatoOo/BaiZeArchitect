@@ -1,7 +1,7 @@
 # T03 — 工作区管理页(1 repo = 1 workspace)`wayfinder:prototype`
 
-status: open
-assignee: (unclaimed)
+status: closed
+assignee: pi(UI built)
 blocked-by: T02
 
 ## Question

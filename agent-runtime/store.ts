@@ -119,6 +119,18 @@ export class Store {
 	getWorkspace(id: number): unknown {
 		return this.db.prepare("select * from workspaces where id = ?").get(id);
 	}
+	counts(): Record<string, number> {
+		const t = (name: string): number =>
+			(this.db.prepare(`select count(*) c from ${name}`).get() as { c: number }).c;
+		return {
+			workspaces: t("workspaces"),
+			requirements: t("requirements"),
+			scenarios: t("scenarios"),
+			use_cases: t("use_cases"),
+			function_domains: t("function_domains"),
+			function_items: t("function_items"),
+		};
+	}
 	// stage progress (upsert)
 	setStage(
 		requirementId: number,

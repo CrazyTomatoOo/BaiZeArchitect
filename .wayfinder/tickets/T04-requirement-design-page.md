@@ -1,7 +1,7 @@
 # T04 — 需求设计页:5 阶段进展 + 资产 + 逐阶段触发 `wayfinder:prototype`
 
-status: open
-assignee: (unclaimed)
+status: closed
+assignee: pi(UI built)
 blocked-by: T01, T02
 
 ## Question

@@ -411,6 +411,12 @@ const server = http.createServer(
 			return;
 		}
 
+		if (url.pathname === "/api/overview" && req.method === "GET") {
+			res.writeHead(200, { "content-type": "application/json" });
+			res.end(JSON.stringify(store.counts()));
+			return;
+		}
+
 		res.writeHead(404);
 		res.end("not found");
 	},

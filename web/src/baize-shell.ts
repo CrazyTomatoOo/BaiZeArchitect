@@ -78,7 +78,7 @@ class BaizeShell extends LitElement {
 
 	constructor() {
 		super();
-		this.tab = "run";
+		this.tab = "overview";
 	}
 
 	render() {
@@ -88,6 +88,30 @@ class BaizeShell extends LitElement {
 				<span class="sub">evidence-backed design agent</span>
 			</header>
 			<nav>
+				<button
+					class=${this.tab === "overview" ? "active" : ""}
+					@click=${() => (this.tab = "overview")}
+				>
+					总览
+				</button>
+				<button
+					class=${this.tab === "requirement" ? "active" : ""}
+					@click=${() => (this.tab = "requirement")}
+				>
+					需求设计
+				</button>
+				<button
+					class=${this.tab === "workspaces" ? "active" : ""}
+					@click=${() => (this.tab = "workspaces")}
+				>
+					工作区
+				</button>
+				<button
+					class=${this.tab === "decisions" ? "active" : ""}
+					@click=${() => (this.tab = "decisions")}
+				>
+					待决策
+				</button>
 				<button
 					class=${this.tab === "run" ? "active" : ""}
 					@click=${() => (this.tab = "run")}
@@ -100,17 +124,17 @@ class BaizeShell extends LitElement {
 				>
 					历史包
 				</button>
-				<button
-					class=${this.tab === "dashboard" ? "active" : ""}
-					@click=${() => (this.tab = "dashboard")}
-				>
-					复用仪表盘
-				</button>
 			</nav>
 			<main>
+				<div ?hidden=${this.tab !== "overview"}>
+					<baize-overview></baize-overview>
+					<baize-dashboard></baize-dashboard>
+				</div>
+				<baize-requirement ?hidden=${this.tab !== "requirement"}></baize-requirement>
+				<baize-workspaces ?hidden=${this.tab !== "workspaces"}></baize-workspaces>
+				<baize-decisions ?hidden=${this.tab !== "decisions"}></baize-decisions>
 				<baize-app ?hidden=${this.tab !== "run"}></baize-app>
 				<baize-packages ?hidden=${this.tab !== "packages"}></baize-packages>
-				<baize-dashboard ?hidden=${this.tab !== "dashboard"}></baize-dashboard>
 			</main>
 		`;
 	}
