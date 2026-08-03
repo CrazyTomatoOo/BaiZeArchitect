@@ -19,7 +19,7 @@
 
 - [Grilling 四答](#) — 资产=SQLite/JSON;workspace=1 repo;逐阶段人工触发;决策=critic+审批+人工。
 - [T09 node SQLite 选型](tickets/T09-sqlite-options.md) — better-sqlite3 v13(prebuilds,slim 零编译);node:sqlite 仍 experimental。
-## Not yet specified
+- [T01 领域模型](tickets/T01-domain-model.md) — 7 实体+关系链(需求→场景→用例→功能项→功能域);资产=workspace 复用池;阶段=待审→人工审→完成。
 
 - 资产复用/演化环:场景/用例/功能库如何反哺未来设计(与 gene/ADR 复用环的关系)。
 - 跨 workspace 的资产搜索/共享。
@@ -32,7 +32,7 @@
 
 ## Tickets(frontier = open+unblocked+unclaimed)
 
-- [T01 领域模型:需求/场景/用例/功能(域/项)实体+阶段态](tickets/T01-domain-model.md) `grilling` — frontier
+- [T01 领域模型](tickets/T01-domain-model.md) `grilling` — **closed**:7 实体+关系链+阶段态
 - [T09 node SQLite 选型](tickets/T09-sqlite-options.md) `research` — **closed**:better-sqlite3 v13
 - [T02 SQLite store schema+DB 位置](tickets/T02-store-schema.md) `prototype` — blocked by T01
 - [T03 工作区管理页(1 repo=1 ws)](tickets/T03-workspace-mgmt.md) `prototype` — blocked by T02
