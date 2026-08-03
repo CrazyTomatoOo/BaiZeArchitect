@@ -39,6 +39,7 @@ const PROVIDER =
 	"bailian";
 const MODEL_ID =
 	process.env.RUNTIME_MODEL_ID ?? process.env.PI_MODEL ?? "glm-5.2";
+const STAGE_MODEL_ID = process.env.BAIZE_STAGE_MODEL ?? "qwen-max";
 const OUT_DIR = process.env.BAIZE_OUT_DIR ?? path.join(PROJECT_ROOT, "out");
 const EVIDENCE_DIR = process.env.BAIZE_EVIDENCE_DIR ?? "/evidence";
 
@@ -266,6 +267,19 @@ const bailianModels: readonly Model<Api>[] = [
 			max: "max",
 		},
 		compat: { supportsDeveloperRole: false, supportsReasoningEffort: true },
+	},
+	{
+		id: "qwen-max",
+		name: "Qwen-Max",
+		api: "openai-completions",
+		baseUrl: BAILIAN_BASE,
+		provider: "bailian",
+		reasoning: false,
+		input: ["text"],
+		cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+		contextWindow: 131072,
+		maxTokens: 8192,
+		compat: { supportsDeveloperRole: false },
 	},
 ];
 const bailianProvider = createProvider({
@@ -621,8 +635,10 @@ export async function runStage(
 	input: StageRunInput,
 	onEvent?: (e: RunEvent) => void,
 ): Promise<unknown> {
-	const model = modelRuntime.getModel(PROVIDER, MODEL_ID);
-	if (!model) throw new Error(`model not found: ${PROVIDER}/${MODEL_ID}`);
+	const model =
+		modelRuntime.getModel(PROVIDER, STAGE_MODEL_ID) ??
+		modelRuntime.getModel(PROVIDER, MODEL_ID);
+	if (!model) throw new Error(`model not found: ${PROVIDER}/${STAGE_MODEL_ID}`);
 	let assets: unknown = null;
 	const submitTool = defineTool({
 		name: "submit_stage_assets",
@@ -630,7 +646,15 @@ export async function runStage(
 		description: "提交本阶段资产(结构化 JSON)。",
 		parameters: Type.Object({ assets: Type.Any() }),
 		execute: async (_id, p) => {
-			assets = (p as { assets: unknown }).assets;
+			let a = (p as { assets: unknown }).assets;
+			if (typeof a === "string") {
+				try {
+					a = JSON.parse(a);
+				} catch {
+					/* keep */
+				}
+			}
+			assets = a;
 			return { content: [{ type: "text", text: "Assets submitted." }], details: {} };
 		},
 	});
@@ -639,7 +663,7 @@ export async function runStage(
 		model,
 		modelRuntime,
 		resourceLoader,
-		tools: ["read", "bash", "grep", "find", "ls", "submit_stage_assets"],
+		tools: ["submit_stage_assets"],
 		customTools: [submitTool],
 		sessionManager: SessionManager.inMemory(input.repoPath),
 	});
@@ -650,7 +674,7 @@ export async function runStage(
 				`你是需求工程 agent,当前阶段:${input.stage}。`,
 				`需求:${input.requirementTitle} — ${input.requirementDesc}`,
 				`上游资产:${input.upstream || "(无)"}`,
-				`仓库:${input.repoId}。用 read/grep 看代码证据。`,
+				`仓库:${input.repoId}。`,
 				`产出本阶段资产,形状:${STAGE_ASSET_HINT[input.stage]}`,
 				"优先调用 submit_stage_assets 提交;若无法调用工具,直接输出一个 JSON 代码块(形状同上)。",
 			].join("\n"),

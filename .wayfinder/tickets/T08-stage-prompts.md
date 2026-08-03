@@ -16,7 +16,7 @@ blocked-by: T07
 产出:每阶段 prompt/skill 草案 + 抽取质量评估(用 lws 需求试跑)。/research。
 
 ## Resolution
-- 实测 5 种提取策略,glm-5.2 均不产出可解析阶段资产(refs 空):1 直接 tool call;2 nudge 追调;3 示例 JSON prompt;4 文本回退(extractJson 解析末条 assistant 文本);5 转换 pass(散文→JSON)。
-- 结论:glm-5.2 对阶段资产的结构化输出/工具调用不可靠,非 prompt 单点问题。
-- 建议:换结构化输出更稳的模型(JSON mode/强 tool-calling),或独立抽取 pipeline(阶段产 markdown→强模型转 JSON);T07 pipeline 已就绪,提取器可插拔。
-- cli.ts 已含 extractJson/lastAssistantText/转换 pass,换模型后即可生效。
+- 真根因(非模型能力):模型把 assets 当 **JSON 字符串**提交(双重编码),writeStageAssets 拿到 string→a.scenarios undefined→refs 空。
+- 修复:tool execute 里 typeof a==="string" 则 JSON.parse;阶段 run 用 qwen-max(BAIZE_STAGE_MODEL)+ 仅 submit_stage_assets 工具(强制调用)。
+- 验证:scenario 阶段 run 抓到 4 条场景入 store(场景=待审+refs)。模型问题解决。
+- 保留 extractJson/lastAssistantText/转换 pass 作兜底。
