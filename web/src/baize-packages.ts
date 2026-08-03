@@ -116,8 +116,9 @@ class BaizePackages extends LitElement {
 					(p) => html`<li @click=${() => this.view(p)}>
 						<span class="status ${p.status}">${p.status}</span>
 						<span>${p.name}</span>
-						${p.status !== "accepted"
-							? html`<button
+						${
+							p.status !== "accepted"
+								? html`<button
 									@click=${(e: Event) => {
 										e.stopPropagation();
 										this.approve(p);
@@ -125,14 +126,17 @@ class BaizePackages extends LitElement {
 								>
 									approve
 								</button>`
-							: ""}
+								: ""
+						}
 					</li>`,
 				)}
 			</ul>
-			${this.content
-				? html`<h2>${this.selected}</h2>
+			${
+				this.content
+					? html`<h2>${this.selected}</h2>
 						<pre>${this.content}</pre>`
-				: ""}
+					: ""
+			}
 		`;
 	}
 }

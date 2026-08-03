@@ -12,7 +12,7 @@ import { WebSocketServer, type WebSocket } from "ws";
 import { randomUUID } from "node:crypto";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
-import { readdir, readFile, writeFile } from "node:fs/promises";
+import { readdir, readFile, stat, writeFile } from "node:fs/promises";
 import type { RunEvent } from "./cli.js";
 
 // 必须在 import cli.ts 前设,否则 cli.ts 的 main 会跑(import 即执行)。
@@ -26,6 +26,7 @@ const ROOT =
 const PORT = Number(process.env.BAIZE_PORT ?? 18789);
 const REPOS_ROOT = process.env.BAIZE_REPOS_ROOT ?? ROOT;
 const OUT_DIR = process.env.BAIZE_OUT_DIR ?? join(ROOT, "out");
+const EVIDENCE_DIR = process.env.BAIZE_EVIDENCE_DIR ?? join(ROOT, "evidence");
 
 interface Run {
 	id: string;
@@ -113,6 +114,42 @@ async function listPackages(): Promise<PackageInfo[]> {
 	out.sort((a, b) => (a.name < b.name ? 1 : -1));
 	return out;
 }
+async function listRepos(): Promise<string[]> {
+	const dirs = await readdir(REPOS_ROOT, { withFileTypes: true });
+	const out: string[] = [];
+	for (const d of dirs) {
+		if (!d.isDirectory()) continue;
+		try {
+			await stat(join(REPOS_ROOT, d.name, ".git"));
+			out.push(d.name);
+		} catch {
+			/* not a git repo */
+		}
+	}
+	return out;
+}
+
+async function readEvidence(repoId: string): Promise<unknown> {
+	try {
+		return JSON.parse(await readFile(join(EVIDENCE_DIR, `${repoId}.json`), "utf8"));
+	} catch {
+		return null;
+	}
+}
+
+async function listGenes(): Promise<Array<Record<string, unknown>>> {
+	const file = join(
+		process.env.EVOLVER_HOME ?? join(ROOT, "evolver-home"),
+		"assets",
+		"genes.jsonl",
+	);
+	try {
+		const raw = await readFile(file, "utf8");
+		return raw.split("\n").filter(Boolean).map((l) => JSON.parse(l));
+	} catch {
+		return [];
+	}
+}
 
 const server = http.createServer(
 	async (req: IncomingMessage, res: ServerResponse) => {
@@ -124,6 +161,14 @@ const server = http.createServer(
 			return;
 		}
 		const url = new URL(req.url ?? "/", `http://${req.headers.host}`);
+		const baizeToken = process.env.BAIZE_TOKEN;
+		if (baizeToken && url.pathname.startsWith("/api")) {
+			if ((req.headers.authorization ?? "") !== `Bearer ${baizeToken}`) {
+				res.writeHead(401);
+				res.end(JSON.stringify({ error: "unauthorized" }));
+				return;
+			}
+		}
 
 		if (url.pathname === "/" && req.method === "GET") {
 			res.writeHead(200, { "content-type": "application/json" });
@@ -206,6 +251,29 @@ const server = http.createServer(
 			}
 			return;
 		}
+		if (url.pathname === "/api/repos" && req.method === "GET") {
+			res.writeHead(200, { "content-type": "application/json" });
+			res.end(JSON.stringify(await listRepos()));
+			return;
+		}
+
+		if (
+			seg[1] === "api" &&
+			seg[2] === "evidence" &&
+			seg.length === 4 &&
+			req.method === "GET"
+		) {
+			res.writeHead(200, { "content-type": "application/json" });
+			res.end(JSON.stringify(await readEvidence(seg[3])));
+			return;
+		}
+
+		if (url.pathname === "/api/genes" && req.method === "GET") {
+			res.writeHead(200, { "content-type": "application/json" });
+			res.end(JSON.stringify(await listGenes()));
+			return;
+		}
+
 		res.writeHead(404);
 		res.end("not found");
 	},
