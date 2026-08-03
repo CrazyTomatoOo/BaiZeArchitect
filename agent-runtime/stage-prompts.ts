@@ -1,4 +1,6 @@
 import type { StageName } from "./cli.js";
+import { readFileSync } from "node:fs";
+import { join, resolve } from "node:path";
 
 /**
  * stage-prompts — 业界需求工程方法论 → 各阶段模型提示词(T08 后续)。
@@ -40,3 +42,32 @@ export const STAGE_OUTPUT_SHAPE: Record<StageName, string> = {
 	usecase: `{"useCases":[{"title":"actor+goal","scenarioTitle":"...","precondition":"...","mainFlow":"...","exceptions":"...","postcondition":"..."}]}`,
 	function: `{"domains":[{"name":"功能域","description":"...","items":[{"title":"功能项","description":"..."}]}]}`,
 };
+
+export interface StagePromptConfig {
+	methodology?: string;
+	shape?: string;
+}
+
+// 配置化:config/stage-prompts.json(或 BAIZE_STAGE_PROMPTS 路径)按阶段替换,缺省回退内置方法论。
+function loadConfig(): Record<string, StagePromptConfig> {
+	const file =
+		process.env.BAIZE_STAGE_PROMPTS ??
+		join(
+			process.env.BAIZE_PROJECT_ROOT ?? resolve(process.cwd(), ".."),
+			"config",
+			"stage-prompts.json",
+		);
+	try {
+		return JSON.parse(readFileSync(file, "utf8")) as Record<string, StagePromptConfig>;
+	} catch {
+		return {};
+	}
+}
+
+export function getStageMethodology(s: StageName): string {
+	return loadConfig()[s]?.methodology ?? STAGE_METHODOLOGY[s];
+}
+
+export function getStageShape(s: StageName): string {
+	return loadConfig()[s]?.shape ?? STAGE_OUTPUT_SHAPE[s];
+}
