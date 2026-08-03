@@ -405,7 +405,13 @@ const server = http.createServer(
 			/^\/api\/requirements\/(\d+)\/stage\/(analysis|scenario|usecase|function)\/approve$/,
 		);
 		if (stageApprove && req.method === "POST") {
-			store.setStage(Number(stageApprove[1]), STAGE_CN[stageApprove[2] as StageName], "完成");
+			const rid = Number(stageApprove[1]);
+			const cn = STAGE_CN[stageApprove[2] as StageName];
+			const cur = (store.getStages(rid) as Array<{ stage: string; artifact_refs: string }>).find(
+				(x) => x.stage === cn,
+			);
+			const refs = cur ? (JSON.parse(cur.artifact_refs) as unknown[]) : [];
+			store.setStage(rid, cn, "完成", refs);
 			res.writeHead(200, { "content-type": "application/json" });
 			res.end(JSON.stringify({ ok: true }));
 			return;
