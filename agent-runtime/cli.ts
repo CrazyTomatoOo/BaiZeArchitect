@@ -569,3 +569,71 @@ async function main(): Promise<void> {
 if (process.env.BAIZE_GATEWAY !== "1") {
 	await main();
 }
+
+export type StageName = "analysis" | "scenario" | "usecase" | "function";
+
+export interface StageRunInput {
+	repoPath: string;
+	repoId: string;
+	requirementTitle: string;
+	requirementDesc: string;
+	upstream: string;
+	stage: StageName;
+}
+
+const STAGE_ASSET_HINT: Record<StageName, string> = {
+	analysis: "assets = { scope: string[], constraints: string[], risks: string[] }",
+	scenario: "assets = { scenarios: [{ title, description }] }",
+	usecase: "assets = { useCases: [{ title, scenarioTitle, precondition, mainFlow, exceptions, postcondition }] }",
+	function: "assets = { domains: [{ name, description, items: [{ title, description }] }] }",
+};
+
+// T07: 单阶段 agent run。submit_stage_assets 收本阶段资产,返回给调用方落 store。
+export async function runStage(
+	input: StageRunInput,
+	onEvent?: (e: RunEvent) => void,
+): Promise<unknown> {
+	const model = modelRuntime.getModel(PROVIDER, MODEL_ID);
+	if (!model) throw new Error(`model not found: ${PROVIDER}/${MODEL_ID}`);
+	let assets: unknown = null;
+	const submitTool = defineTool({
+		name: "submit_stage_assets",
+		label: "Submit Stage Assets",
+		description: "提交本阶段资产(结构化 JSON)。",
+		parameters: Type.Object({ assets: Type.Any() }),
+		execute: async (_id, p) => {
+			assets = (p as { assets: unknown }).assets;
+			return { content: [{ type: "text", text: "Assets submitted." }], details: {} };
+		},
+	});
+	const { session } = await createAgentSession({
+		cwd: input.repoPath,
+		model,
+		modelRuntime,
+		resourceLoader,
+		tools: ["read", "bash", "grep", "find", "ls", "submit_stage_assets"],
+		customTools: [submitTool],
+		sessionManager: SessionManager.inMemory(input.repoPath),
+	});
+	onEvent?.({ type: "phase", phase: "architect" });
+	try {
+		await session.prompt(
+			[
+				`你是需求工程 agent,当前阶段:${input.stage}。`,
+				`需求:${input.requirementTitle} — ${input.requirementDesc}`,
+				`上游资产:${input.upstream || "(无)"}`,
+				`仓库:${input.repoId}。用 read/grep 看代码证据。`,
+				`产出本阶段资产,形状:${STAGE_ASSET_HINT[input.stage]}`,
+				"调用 submit_stage_assets 提交,不要输出文本。",
+			].join("\n"),
+		);
+		if (assets == null) {
+			await session.prompt(
+				"你尚未调用 submit_stage_assets。立即调用它,提交本阶段资产 JSON,不要输出其它文本。",
+			);
+		}
+	} finally {
+		await session.dispose?.();
+	}
+	return assets;
+}

@@ -21,6 +21,10 @@
 - [T09 node SQLite 选型](tickets/T09-sqlite-options.md) — better-sqlite3 v13(prebuilds,slim 零编译);node:sqlite 仍 experimental。
 - [T01 领域模型](tickets/T01-domain-model.md) — 7 实体+关系链(需求→场景→用例→功能项→功能域);资产=workspace 复用池;阶段=待审→人工审→完成。
 - [T02 store schema](tickets/T02-store-schema.md) — store.ts(better-sqlite3 v13)9 表+CRUD,自测过;单全局 DB。
+- [T07 逐阶段 pipeline](tickets/T07-stage-pipeline.md) — runStage+gateway 端点全通;资产抽取可靠性→T08。
+
+## Not yet specified
+
 - 资产复用/演化环:场景/用例/功能库如何反哺未来设计(与 gene/ADR 复用环的关系)。
 - 跨 workspace 的资产搜索/共享。
 - 资产跨需求修订的版本化。
@@ -39,5 +43,5 @@
 - [T04 需求设计页(进展+资产+触发)](tickets/T04-requirement-design-page.md) `prototype` — blocked by T01,T02
 - [T05 总览仪表盘内容](tickets/T05-overview-dashboard.md) `prototype` — blocked by T02
 - [T06 待决策项页(critic+审批+人工)](tickets/T06-pending-decisions.md) `prototype` — blocked by T02
-- [T07 逐阶段 agent pipeline→store](tickets/T07-stage-pipeline.md) `task` — blocked by T01,T02
-- [T08 各阶段 LLM 抽取 prompts/skills](tickets/T08-stage-prompts.md) `research` — blocked by T07
+- [T07 逐阶段 pipeline](tickets/T07-stage-pipeline.md) `task` — **closed**:runStage+gateway 端点全通
+- [T08 各阶段 LLM 抽取 prompts/skills](tickets/T08-stage-prompts.md) `research` — frontier(让 glm 稳定调 submit_stage_assets)

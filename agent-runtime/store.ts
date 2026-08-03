@@ -113,7 +113,12 @@ export class Store {
 			.prepare("select * from requirements where workspace_id = ? order by id")
 			.all(workspaceId);
 	}
-
+	getRequirement(id: number): unknown {
+		return this.db.prepare("select * from requirements where id = ?").get(id);
+	}
+	getWorkspace(id: number): unknown {
+		return this.db.prepare("select * from workspaces where id = ?").get(id);
+	}
 	// stage progress (upsert)
 	setStage(
 		requirementId: number,
@@ -134,7 +139,9 @@ export class Store {
 	}
 	getStages(requirementId: number): unknown[] {
 		return this.db
-			.prepare("select * from stage_progress where requirement_id = ? order by stage")
+			.prepare(
+				"select * from stage_progress where requirement_id = ? order by stage",
+			)
 			.all(requirementId);
 	}
 
@@ -197,7 +204,11 @@ export class Store {
 	}
 
 	// function domains / items (域→项)
-	addFunctionDomain(workspaceId: number, name: string, description = ""): number {
+	addFunctionDomain(
+		workspaceId: number,
+		name: string,
+		description = "",
+	): number {
 		return Number(
 			this.db
 				.prepare(
@@ -208,7 +219,9 @@ export class Store {
 	}
 	listFunctionDomains(workspaceId: number): unknown[] {
 		return this.db
-			.prepare("select * from function_domains where workspace_id = ? order by id")
+			.prepare(
+				"select * from function_domains where workspace_id = ? order by id",
+			)
 			.all(workspaceId);
 	}
 	addFunctionItem(

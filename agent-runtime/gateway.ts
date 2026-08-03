@@ -13,7 +13,8 @@ import { randomUUID } from "node:crypto";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 import { readdir, readFile, stat, writeFile } from "node:fs/promises";
-import type { RunEvent } from "./cli.js";
+import { openStore, type Stage } from "./store.js";
+import type { RunEvent, StageName } from "./cli.js";
 
 // 必须在 import cli.ts 前设,否则 cli.ts 的 main 会跑(import 即执行)。
 process.env.BAIZE_GATEWAY = "1";
@@ -150,6 +151,55 @@ async function listGenes(): Promise<Array<Record<string, unknown>>> {
 		return [];
 	}
 }
+const store = openStore(join(ROOT, ".baize", "baize.db"));
+
+const STAGE_CN: Record<StageName, Stage> = {
+	analysis: "分析",
+	scenario: "场景",
+	usecase: "用例",
+	function: "功能分解",
+};
+
+function writeStageAssets(
+	wsId: number,
+	reqId: number,
+	stage: string,
+	assets: unknown,
+): unknown[] {
+	const a = (assets ?? {}) as Record<string, unknown[]>;
+	const refs: unknown[] = [];
+	if (stage === "scenario") {
+		for (const s of (a.scenarios ?? []) as Array<{ title?: string; description?: string }>) {
+			const sid = store.addScenario(wsId, s.title ?? "", s.description ?? "");
+			store.linkRequirementScenario(reqId, sid);
+			refs.push({ type: "scenario", id: sid, title: s.title });
+		}
+	} else if (stage === "usecase") {
+		const scens = store.listScenarios(wsId) as Array<{ id: number; title: string }>;
+		for (const u of (a.useCases ?? []) as Array<Record<string, unknown>>) {
+			const scen = scens.find((s) => s.title === u.scenarioTitle) ?? null;
+			const uid = store.addUseCase(wsId, scen ? scen.id : null, (u.title as string) ?? "", {
+				precondition: (u.precondition as string) ?? "",
+				mainFlow: (u.mainFlow as string) ?? "",
+				exceptions: (u.exceptions as string) ?? "",
+				postcondition: (u.postcondition as string) ?? "",
+			});
+			refs.push({ type: "usecase", id: uid, title: u.title });
+		}
+	} else if (stage === "function") {
+		for (const d of (a.domains ?? []) as Array<Record<string, unknown>>) {
+			const did = store.addFunctionDomain(wsId, (d.name as string) ?? "", (d.description as string) ?? "");
+			refs.push({ type: "domain", id: did, name: d.name });
+			for (const it of (d.items ?? []) as Array<{ title?: string; description?: string }>) {
+				const fid = store.addFunctionItem(wsId, did, it.title ?? "", it.description ?? "");
+				refs.push({ type: "function", id: fid, title: it.title });
+			}
+		}
+	} else {
+		refs.push(assets); // analysis 结论
+	}
+	return refs;
+}
 
 const server = http.createServer(
 	async (req: IncomingMessage, res: ServerResponse) => {
@@ -271,6 +321,93 @@ const server = http.createServer(
 		if (url.pathname === "/api/genes" && req.method === "GET") {
 			res.writeHead(200, { "content-type": "application/json" });
 			res.end(JSON.stringify(await listGenes()));
+			return;
+		}
+
+		if (url.pathname === "/api/workspaces" && req.method === "GET") {
+			res.writeHead(200, { "content-type": "application/json" });
+			res.end(JSON.stringify(store.listWorkspaces()));
+			return;
+		}
+
+		if (url.pathname === "/api/workspaces" && req.method === "POST") {
+			const b = JSON.parse(await readBody(req)) as { repoPath?: string; name?: string };
+			const id = store.addWorkspace(b.repoPath ?? "", b.name ?? "");
+			res.writeHead(200, { "content-type": "application/json" });
+			res.end(JSON.stringify({ id }));
+			return;
+		}
+
+		if (url.pathname === "/api/requirements" && req.method === "GET") {
+			const ws = Number(url.searchParams.get("workspace") ?? 0);
+			res.writeHead(200, { "content-type": "application/json" });
+			res.end(JSON.stringify(store.listRequirements(ws)));
+			return;
+		}
+
+		if (url.pathname === "/api/requirements" && req.method === "POST") {
+			const b = JSON.parse(await readBody(req)) as {
+				workspaceId?: number;
+				title?: string;
+				description?: string;
+			};
+			const id = store.addRequirement(b.workspaceId ?? 0, b.title ?? "", b.description ?? "");
+			store.setStage(id, "录入", "完成");
+			for (const st of ["分析", "场景", "用例", "功能分解"] as const) {
+				store.setStage(id, st, "未开始");
+			}
+			res.writeHead(200, { "content-type": "application/json" });
+			res.end(JSON.stringify({ id }));
+			return;
+		}
+
+		const stagesOf = url.pathname.match(/^\/api\/requirements\/(\d+)\/stages$/);
+		if (stagesOf && req.method === "GET") {
+			res.writeHead(200, { "content-type": "application/json" });
+			res.end(JSON.stringify(store.getStages(Number(stagesOf[1]))));
+			return;
+		}
+
+		const stageRun = url.pathname.match(
+			/^\/api\/requirements\/(\d+)\/stage\/(analysis|scenario|usecase|function)\/run$/,
+		);
+		if (stageRun && req.method === "POST") {
+			const reqId = Number(stageRun[1]);
+			const stage = stageRun[2] as StageName;
+			const requirement = store.getRequirement(reqId) as
+				| { workspace_id: number; title: string; description: string }
+				| undefined;
+			if (!requirement) {
+				res.writeHead(404);
+				res.end("not found");
+				return;
+			}
+			const ws = store.getWorkspace(requirement.workspace_id) as
+				| { repo_path: string }
+				| undefined;
+			const { runStage } = await import("./cli.js");
+			const assets = await runStage({
+				repoPath: ws?.repo_path ?? ROOT,
+				repoId: ws?.repo_path.split("/").pop() ?? "",
+				requirementTitle: requirement.title,
+				requirementDesc: requirement.description,
+				upstream: JSON.stringify(store.getStages(reqId)),
+				stage,
+			});
+			const refs = writeStageAssets(requirement.workspace_id, reqId, stage, assets);
+			store.setStage(reqId, STAGE_CN[stage], "待审", refs);
+			res.writeHead(200, { "content-type": "application/json" });
+			res.end(JSON.stringify({ ok: true, refs }));
+			return;
+		}
+
+		const stageApprove = url.pathname.match(
+			/^\/api\/requirements\/(\d+)\/stage\/(analysis|scenario|usecase|function)\/approve$/,
+		);
+		if (stageApprove && req.method === "POST") {
+			store.setStage(Number(stageApprove[1]), STAGE_CN[stageApprove[2] as StageName], "完成");
+			res.writeHead(200, { "content-type": "application/json" });
+			res.end(JSON.stringify({ ok: true }));
 			return;
 		}
 
