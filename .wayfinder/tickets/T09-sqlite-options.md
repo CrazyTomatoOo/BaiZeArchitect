@@ -1,7 +1,7 @@
 # T09 — node SQLite 选型(node:sqlite vs better-sqlite3)`wayfinder:research`
 
-status: open
-assignee: (unclaimed)
+status: closed
+assignee: research-subagent (b341357d)
 blocked-by: —
 
 ## Question
@@ -14,3 +14,7 @@ gateway(node 22)用哪个 SQLite:
 - 结论供 T02(store.ts)采用。
 
 产出:选型结论 + 理由 + 容器验证。/research。
+
+## Resolution
+- 选 **better-sqlite3 v13**:prebuilds 打进 tarball,node:22-slim 零编译;node:sqlite 仍 experimental(Stability 1.1)。
+- T02 store.ts 用 better-sqlite3,单点封装便于将来迁 node:sqlite。见 ../research/T09-sqlite-options.md。
