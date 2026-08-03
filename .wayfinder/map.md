@@ -22,7 +22,7 @@
 - [T01 领域模型](tickets/T01-domain-model.md) — 7 实体+关系链(需求→场景→用例→功能项→功能域);资产=workspace 复用池;阶段=待审→人工审→完成。
 - [T02 store schema](tickets/T02-store-schema.md) — store.ts(better-sqlite3 v13)9 表+CRUD,自测过;单全局 DB。
 - [T07 逐阶段 pipeline](tickets/T07-stage-pipeline.md) — runStage+gateway 端点全通;资产抽取可靠性→T08。
-
+- [T08 阶段抽取](tickets/T08-stage-prompts.md) — glm-5.2 结构化输出不可靠(5 策略全败);建议换模型/独立抽取 pipeline。
 ## Not yet specified
 
 - 资产复用/演化环:场景/用例/功能库如何反哺未来设计(与 gene/ADR 复用环的关系)。
@@ -44,4 +44,4 @@
 - [T05 总览仪表盘内容](tickets/T05-overview-dashboard.md) `prototype` — blocked by T02
 - [T06 待决策项页(critic+审批+人工)](tickets/T06-pending-decisions.md) `prototype` — blocked by T02
 - [T07 逐阶段 pipeline](tickets/T07-stage-pipeline.md) `task` — **closed**:runStage+gateway 端点全通
-- [T08 各阶段 LLM 抽取 prompts/skills](tickets/T08-stage-prompts.md) `research` — frontier(让 glm 稳定调 submit_stage_assets)
+- [T08 阶段抽取](tickets/T08-stage-prompts.md) `research` — **closed**:glm-5.2 不可靠,建议换模型/独立抽取

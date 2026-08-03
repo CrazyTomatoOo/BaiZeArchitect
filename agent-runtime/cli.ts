@@ -582,11 +582,39 @@ export interface StageRunInput {
 }
 
 const STAGE_ASSET_HINT: Record<StageName, string> = {
-	analysis: "assets = { scope: string[], constraints: string[], risks: string[] }",
-	scenario: "assets = { scenarios: [{ title, description }] }",
-	usecase: "assets = { useCases: [{ title, scenarioTitle, precondition, mainFlow, exceptions, postcondition }] }",
-	function: "assets = { domains: [{ name, description, items: [{ title, description }] }] }",
+	analysis: `{"scope":["..."],"constraints":["..."],"risks":["..."]}`,
+	scenario: `{"scenarios":[{"title":"多副本滚动更新","description":"..."}]}`,
+	usecase: `{"useCases":[{"title":"主流程","scenarioTitle":"...","precondition":"...","mainFlow":"...","exceptions":"...","postcondition":"..."}]}`,
+	function: `{"domains":[{"name":"调度","description":"...","items":[{"title":"步骤计算","description":"..."}]}]}`,
 };
+
+function extractJson(text: string): unknown {
+	const fence = text.match(/```(?:json)?\s*([\s\S]*?)```/);
+	const raw = fence ? fence[1] : text.slice(text.indexOf("{"), text.lastIndexOf("}") + 1);
+	if (!raw || !raw.trim().startsWith("{")) return null;
+	try {
+		return JSON.parse(raw);
+	} catch {
+		return null;
+	}
+}
+
+function lastAssistantText(session: unknown): string {
+	const msgs =
+		(session as { state?: { messages?: Array<{ role?: string; content?: unknown }> } })
+			.state?.messages ?? [];
+	for (let i = msgs.length - 1; i >= 0; i--) {
+		const m = msgs[i];
+		if (m.role !== "assistant") continue;
+		if (typeof m.content === "string") return m.content;
+		if (Array.isArray(m.content)) {
+			return (m.content as Array<{ type?: string; text?: string }>)
+				.map((c) => c.text ?? "")
+				.join("");
+		}
+	}
+	return "";
+}
 
 // T07: 单阶段 agent run。submit_stage_assets 收本阶段资产,返回给调用方落 store。
 export async function runStage(
@@ -624,13 +652,20 @@ export async function runStage(
 				`上游资产:${input.upstream || "(无)"}`,
 				`仓库:${input.repoId}。用 read/grep 看代码证据。`,
 				`产出本阶段资产,形状:${STAGE_ASSET_HINT[input.stage]}`,
-				"调用 submit_stage_assets 提交,不要输出文本。",
+				"优先调用 submit_stage_assets 提交;若无法调用工具,直接输出一个 JSON 代码块(形状同上)。",
 			].join("\n"),
 		);
 		if (assets == null) {
 			await session.prompt(
 				"你尚未调用 submit_stage_assets。立即调用它,提交本阶段资产 JSON,不要输出其它文本。",
 			);
+		}
+		if (assets == null) {
+			await session.prompt(
+				`把上面的分析转换为一个 JSON 代码块,形状:${STAGE_ASSET_HINT[input.stage]}。只输出 JSON,不要其它文本。`,
+			);
+			const parsed = extractJson(lastAssistantText(session));
+			if (parsed) assets = (parsed as { assets?: unknown }).assets ?? parsed;
 		}
 	} finally {
 		await session.dispose?.();
