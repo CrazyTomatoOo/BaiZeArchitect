@@ -28,6 +28,7 @@ import {
 } from "@earendil-works/pi-ai";
 import { Type } from "typebox";
 import { getEvolverClient } from "./evolver-client.js";
+import { STAGE_METHODOLOGY } from "./stage-prompts.js";
 
 // ponytail: PROJECT_ROOT 指向项目根(.pi/skills 所在),不是 agent-runtime 目录。
 // resourceLoader.cwd 用它发现 skills;createAgentSession.cwd 用目标仓库——两者分离。
@@ -675,6 +676,7 @@ export async function runStage(
 				`需求:${input.requirementTitle} — ${input.requirementDesc}`,
 				`上游资产:${input.upstream || "(无)"}`,
 				`仓库:${input.repoId}。`,
+				STAGE_METHODOLOGY[input.stage],
 				`产出本阶段资产,形状:${STAGE_ASSET_HINT[input.stage]}`,
 				"优先调用 submit_stage_assets 提交;若无法调用工具,直接输出一个 JSON 代码块(形状同上)。",
 			].join("\n"),
