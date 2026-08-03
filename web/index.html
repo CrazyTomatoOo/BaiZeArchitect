@@ -1,14 +1,49 @@
 <!doctype html>
 <html lang="zh-CN">
-  <head>
-    <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>BaiZe Architect</title>
-  </head>
-  <body>
-    <baize-app></baize-app>
-    <baize-packages></baize-packages>
-    <baize-dashboard></baize-dashboard>
-    <script type="module" src="/src/main.ts"></script>
-  </body>
+	<head>
+		<meta charset="utf-8" />
+		<meta name="viewport" content="width=device-width, initial-scale=1" />
+		<title>BaiZe Architect</title>
+		<link rel="preconnect" href="https://fonts.googleapis.com" />
+		<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+		<link
+			href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap"
+			rel="stylesheet"
+		/>
+		<style>
+			/* BaiZe design tokens — Dark Mode (OLED), code dark + run green */
+			:root {
+				--bg: #0f172a;
+				--surface: #1e293b;
+				--surface-2: #273042;
+				--border: #334155;
+				--text: #f8fafc;
+				--text-muted: #94a3b8;
+				--accent: #22c55e;
+				--accent-2: #38bdf8;
+				--warn: #f59e0b;
+				--destructive: #ef4444;
+				--radius: 8px;
+				--font-ui: "Inter", system-ui, sans-serif;
+				--font-mono: "JetBrains Mono", ui-monospace, monospace;
+			}
+			html,
+			body {
+				margin: 0;
+				background: var(--bg);
+				color: var(--text);
+				font-family: var(--font-ui);
+			}
+			@media (prefers-reduced-motion: reduce) {
+				* {
+					transition: none !important;
+					animation: none !important;
+				}
+			}
+		</style>
+	</head>
+	<body>
+		<baize-shell></baize-shell>
+		<script type="module" src="/src/main.ts"></script>
+	</body>
 </html>

@@ -1,9 +1,8 @@
 import { LitElement, html, css } from "lit";
 
 /**
- * baize-app — run/watch 页。表单(repoId + 需求)→ POST /api/runs → ws 实时流事件
- * (architect/critic phase、plan、critique、done)→ 渲染 emerging plan + 写入文件。
- * ponytail: 用 Lit static-properties API(无 decorators,需 declare 字段做 TS 类型)。
+ * baize-app — 设计 run/watch:表单(repoId+需求)→ POST /api/runs → ws 实时流事件。
+ * Dark Mode(OLED)token 化;events/plan 用 mono;run 按钮绿色 accent。
  */
 class BaizeApp extends LitElement {
 	static properties = {
@@ -25,59 +24,103 @@ class BaizeApp extends LitElement {
 	static styles = css`
 		:host {
 			display: block;
-			font-family: system-ui, sans-serif;
-			max-width: 960px;
-			margin: 0 auto;
-			padding: 1rem;
 		}
-		h1 { font-size: 1.1rem; margin: 0 0 1rem; }
-		form { display: grid; gap: .5rem; margin-bottom: 1rem; }
-		label { display: block; font-size: .85rem; }
+		form {
+			display: grid;
+			gap: .8rem;
+			background: var(--surface);
+			border: 1px solid var(--border);
+			border-radius: var(--radius);
+			padding: 1.2rem;
+		}
+		label {
+			display: block;
+			font-size: .76rem;
+			color: var(--text-muted);
+			margin-bottom: .3rem;
+			text-transform: uppercase;
+			letter-spacing: .05em;
+		}
 		input,
 		textarea {
 			width: 100%;
 			box-sizing: border-box;
+			background: var(--bg);
+			color: var(--text);
+			border: 1px solid var(--border);
+			border-radius: 6px;
+			padding: .55rem .7rem;
 			font: inherit;
-			padding: .4rem;
+			font-size: .88rem;
+			transition: border-color .2s;
+		}
+		input:focus,
+		textarea:focus {
+			outline: none;
+			border-color: var(--accent-2);
 		}
 		textarea {
 			resize: vertical;
+			font-family: var(--font-mono);
+			font-size: .82rem;
 		}
 		button {
-			padding: .5rem 1.2rem;
+			background: var(--accent);
+			color: #052e16;
+			border: none;
+			border-radius: 6px;
+			padding: .65rem 1.2rem;
+			font: inherit;
+			font-weight: 600;
+			font-size: .88rem;
 			cursor: pointer;
+			transition: filter .2s, transform .1s;
+		}
+		button:hover {
+			filter: brightness(1.12);
+		}
+		button:active {
+			transform: scale(.98);
 		}
 		button[disabled] {
 			opacity: .5;
 			cursor: default;
 		}
+		h2 {
+			font-size: .85rem;
+			color: var(--text-muted);
+			text-transform: uppercase;
+			letter-spacing: .06em;
+			margin: 1.4rem 0 .5rem;
+		}
 		.events {
-			font-family: ui-monospace, monospace;
-			font-size: .78rem;
-			background: #1a1a1a;
-			color: #eee;
-			padding: .6rem;
-			border-radius: 4px;
+			font-family: var(--font-mono);
+			font-size: .76rem;
+			background: var(--bg);
+			border: 1px solid var(--border);
+			color: var(--accent);
+			padding: .8rem;
+			border-radius: 6px;
 			max-height: 220px;
 			overflow: auto;
 			white-space: pre-wrap;
 		}
 		.plan {
 			white-space: pre-wrap;
-			background: #f5f5f5;
-			padding: .6rem;
-			border-radius: 4px;
-			font-size: .82rem;
-			max-height: 360px;
+			background: var(--bg);
+			border: 1px solid var(--border);
+			color: var(--text);
+			padding: .8rem;
+			border-radius: 6px;
+			font-size: .8rem;
+			font-family: var(--font-mono);
+			max-height: 380px;
 			overflow: auto;
 		}
-		h2 {
-			font-size: .95rem;
-			margin: 1rem 0 .4rem;
-		}
 		.done {
-			color: green;
+			color: var(--accent);
 			font-weight: 600;
+			margin-top: .8rem;
 		}
 	`;
 
@@ -129,45 +172,45 @@ class BaizeApp extends LitElement {
 
 	render() {
 		return html`
-			<h1>BaiZe Architect — 设计 run/watch</h1>
 			<form
 				@submit=${(e: Event) => {
 					e.preventDefault();
 					this.run();
 				}}
 			>
-				<label
-					>仓库 ID<input
+				<div>
+					<label for="repo">仓库 ID</label>
+					<input
+						id="repo"
 						.value=${this.repoId}
 						@input=${(e: Event) =>
 							(this.repoId = (e.target as HTMLInputElement).value)}
-				/></label>
-				<label
-					>设计需求<textarea
+					/>
+				</div>
+				<div>
+					<label for="req">设计需求</label>
+					<textarea
+						id="req"
 						rows="3"
 						placeholder="为 disaggregatedset webhook 增加 subdomainPolicy 校验…"
 						@input=${(e: Event) =>
 							(this.requirement = (e.target as HTMLTextAreaElement).value)}
-					></textarea></label
-				>
+					></textarea>
+				</div>
 				<button ?disabled=${this.running}>
 					${this.running ? "运行中…" : "提交设计"}
 				</button>
 			</form>
-			${
-				this.events.length
-					? html`<h2>事件流</h2>
+			${this.events.length
+				? html`<h2>事件流</h2>
 						<div class="events">
 							${this.events.map((e) => JSON.stringify(e)).join("\n")}
 						</div>`
-					: ""
-			}
-			${
-				this.plan
-					? html`<h2>Plan(architect 产出)</h2>
+				: ""}
+			${this.plan
+				? html`<h2>Plan(architect 产出)</h2>
 						<div class="plan">${JSON.stringify(this.plan, null, 2)}</div>`
-					: ""
-			}
+				: ""}
 			${this.file ? html`<div class="done">✓ 写入: ${this.file}</div>` : ""}
 		`;
 	}

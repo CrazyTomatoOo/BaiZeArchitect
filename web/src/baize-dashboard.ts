@@ -1,9 +1,8 @@
 import { LitElement, html, css } from "lit";
 
 /**
- * baize-dashboard — 复用可见性:repo 选择 → 该 repo 的 mcp 证据(hotspots/boundaries/
- * clusters)+ 历史 ADR(沉淀)+ 已蒸馏 gene。即"下次设计会注入什么"的仪表盘。
- * ponytail: 只读展示,不引图表库;hotspots/boundaries 用列表。
+ * baize-dashboard — 复用可见性:repo 选择 → mcp 证据(hotspots/boundaries/clusters)+
+ * 历史 ADR + 已蒸馏 gene。Dark token 化;数据用 mono。
  */
 interface Evidence {
 	repositoryId?: string;
@@ -36,53 +35,88 @@ class BaizeDashboard extends LitElement {
 	static styles = css`
 		:host {
 			display: block;
-			font-family: system-ui, sans-serif;
-			max-width: 960px;
-			margin: 0 auto;
-			padding: 1rem;
-		}
-		h2 {
-			font-size: 1rem;
-		}
-		h3 {
-			font-size: .85rem;
-			margin: .8rem 0 .3rem;
 		}
 		.repos {
 			display: flex;
 			gap: .4rem;
-			margin-bottom: .8rem;
+			margin-bottom: 1rem;
 		}
 		.repos button {
-			padding: .3rem .7rem;
+			background: var(--surface);
+			color: var(--text-muted);
+			border: 1px solid var(--border);
+			border-radius: 6px;
+			padding: .4rem .9rem;
+			font: inherit;
+			font-size: .8rem;
+			font-family: var(--font-mono);
 			cursor: pointer;
+			transition: color .2s, border-color .2s, background .2s;
+		}
+		.repos button:hover {
+			color: var(--text);
 		}
 		.repos button.active {
-			background: #2563eb;
-			color: #fff;
+			background: var(--accent);
+			border-color: var(--accent);
+			color: #052e16;
+			font-weight: 600;
 		}
 		.cols {
 			display: grid;
 			grid-template-columns: 1fr 1fr;
 			gap: 1rem;
 		}
+		@media (max-width: 768px) {
+			.cols {
+				grid-template-columns: 1fr;
+			}
+		}
+		.card {
+			background: var(--surface);
+			border: 1px solid var(--border);
+			border-radius: var(--radius);
+			padding: 1rem;
+		}
+		h3 {
+			font-size: .74rem;
+			color: var(--text-muted);
+			text-transform: uppercase;
+			letter-spacing: .06em;
+			margin: 0 0 .5rem;
+		}
+		h3 + h3,
+		ul + h3 {
+			margin-top: 1rem;
+		}
 		ul {
 			margin: 0;
 			padding-left: 1.1rem;
-			font-size: .8rem;
+			font-size: .78rem;
+			font-family: var(--font-mono);
+			color: var(--text);
+		}
+		li {
+			margin-bottom: .25rem;
+		}
+		li .num {
+			color: var(--accent-2);
 		}
 		pre {
 			white-space: pre-wrap;
-			background: #f5f5f5;
-			padding: .5rem;
-			border-radius: 4px;
-			font-size: .78rem;
-			max-height: 220px;
+			background: var(--bg);
+			border: 1px solid var(--border);
+			color: var(--text);
+			padding: .7rem;
+			border-radius: 6px;
+			font-size: .76rem;
+			font-family: var(--font-mono);
+			max-height: 240px;
 			overflow: auto;
 		}
 		.empty {
-			color: #888;
-			font-size: .8rem;
+			color: var(--text-muted);
+			font-size: .78rem;
 		}
 	`;
 
@@ -130,7 +164,6 @@ class BaizeDashboard extends LitElement {
 		const a = this.evidence?.architecture;
 		const adr = this.evidence?.priorAdr?.content?.trim();
 		return html`
-			<h2>复用仪表盘(evidence / ADR / gene)</h2>
 			<div class="repos">
 				${this.repos.map(
 					(r) => html`<button
@@ -142,12 +175,16 @@ class BaizeDashboard extends LitElement {
 				)}
 			</div>
 			<div class="cols">
-				<div>
+				<div class="card">
 					<h3>高影响热点(fan_in)</h3>
 					${a?.hotspots?.length
 						? html`<ul>
 								${a.hotspots.map(
-									(h) => html`<li>${h.qualified_name} (${h.fan_in})</li>`,
+									(h) =>
+										html`<li>
+											${h.qualified_name}
+											<span class="num">(${h.fan_in})</span>
+										</li>`,
 								)}
 							</ul>`
 						: html`<div class="empty">无(先跑 scripts/evidence.sh)</div>`}
@@ -156,7 +193,10 @@ class BaizeDashboard extends LitElement {
 						? html`<ul>
 								${a.boundaries.map(
 									(b) =>
-										html`<li>${b.from} → ${b.to} (${b.call_count})</li>`,
+										html`<li>
+											${b.from} → ${b.to}
+											<span class="num">(${b.call_count})</span>
+										</li>`,
 								)}
 							</ul>`
 						: html`<div class="empty">无</div>`}
@@ -167,13 +207,15 @@ class BaizeDashboard extends LitElement {
 									(c) =>
 										html`<li>
 											${(c.top_nodes ?? []).slice(0, 3).join("/")}
-											(cohesion ${Number(c.cohesion).toFixed(2)})
+											<span class="num"
+												>(cohesion ${Number(c.cohesion).toFixed(2)})</span
+											>
 										</li>`,
 								)}
 							</ul>`
 						: html`<div class="empty">无</div>`}
 				</div>
-				<div>
+				<div class="card">
 					<h3>历史决策(ADR,沉淀复用)</h3>
 					${adr
 						? html`<pre>${adr}</pre>`
@@ -183,7 +225,9 @@ class BaizeDashboard extends LitElement {
 						? html`<ul>
 								${this.genes.map(
 									(g) =>
-										html`<li>${String(g.summary ?? g.id ?? "").slice(0, 90)}</li>`,
+										html`<li>
+											${String(g.summary ?? g.id ?? "").slice(0, 90)}
+										</li>`,
 								)}
 							</ul>`
 						: html`<div class="empty">无</div>`}

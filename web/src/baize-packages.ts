@@ -1,9 +1,7 @@
 import { LitElement, html, css } from "lit";
 
 /**
- * baize-packages — 历史 Design Package 列表 + 查看 + 审批门。
- * GET /api/packages 列表;点击查看(GET markdown);pending 时 approve(POST)。
- * ponytail: <pre> 渲 markdown(不引 marked,无 XSS/依赖);markdown-render 后续 polish。
+ * baize-packages — 历史 Design Package 列表 + 查看 + 审批门。Dark token 化。
  */
 interface Pkg {
 	name: string;
@@ -25,55 +23,86 @@ class BaizePackages extends LitElement {
 	static styles = css`
 		:host {
 			display: block;
-			font-family: system-ui, sans-serif;
-			max-width: 960px;
-			margin: 0 auto;
-			padding: 1rem;
 		}
 		h2 {
-			font-size: 1rem;
+			font-size: .85rem;
+			color: var(--text-muted);
+			text-transform: uppercase;
+			letter-spacing: .06em;
+			margin: 0 0 .8rem;
 		}
 		ul {
 			list-style: none;
+			margin: 0;
 			padding: 0;
+			background: var(--surface);
+			border: 1px solid var(--border);
+			border-radius: var(--radius);
+			overflow: hidden;
 		}
 		li {
 			display: flex;
-			gap: .5rem;
+			gap: .6rem;
 			align-items: center;
-			padding: .3rem .4rem;
-			border-bottom: 1px solid #ddd;
+			padding: .55rem .9rem;
+			border-bottom: 1px solid var(--border);
 			cursor: pointer;
+			transition: background .15s;
+		}
+		li:last-child {
+			border-bottom: none;
 		}
 		li:hover {
-			background: #f0f0f0;
+			background: var(--surface-2);
+		}
+		.name {
+			font-family: var(--font-mono);
+			font-size: .78rem;
+			color: var(--text);
 		}
 		.status {
-			font-size: .72rem;
-			padding: .1rem .4rem;
-			border-radius: 3px;
-			background: #eee;
+			font-size: .68rem;
+			padding: .14rem .55rem;
+			border-radius: 999px;
+			font-weight: 600;
+			letter-spacing: .03em;
 		}
 		.status.accepted {
-			background: #d4f7d4;
-			color: #161;
+			background: rgba(34, 197, 94, .15);
+			color: var(--accent);
 		}
 		.status.pending {
-			background: #fde9c8;
-			color: #963;
+			background: rgba(245, 158, 11, .15);
+			color: var(--warn);
 		}
 		button {
-			padding: .2rem .6rem;
+			margin-left: auto;
+			background: var(--surface-2);
+			color: var(--text);
+			border: 1px solid var(--border);
+			border-radius: 6px;
+			padding: .28rem .8rem;
+			font: inherit;
+			font-size: .75rem;
 			cursor: pointer;
+			transition: border-color .2s, color .2s;
+		}
+		button:hover {
+			border-color: var(--accent);
+			color: var(--accent);
 		}
 		pre {
 			white-space: pre-wrap;
-			background: #f5f5f5;
-			padding: .6rem;
-			border-radius: 4px;
-			font-size: .8rem;
+			background: var(--bg);
+			border: 1px solid var(--border);
+			color: var(--text);
+			padding: .8rem;
+			border-radius: 6px;
+			font-size: .78rem;
+			font-family: var(--font-mono);
 			max-height: 420px;
 			overflow: auto;
+			margin-top: 1.2rem;
 		}
 	`;
 
@@ -115,10 +144,9 @@ class BaizePackages extends LitElement {
 				${this.packages.map(
 					(p) => html`<li @click=${() => this.view(p)}>
 						<span class="status ${p.status}">${p.status}</span>
-						<span>${p.name}</span>
-						${
-							p.status !== "accepted"
-								? html`<button
+						<span class="name">${p.name}</span>
+						${p.status !== "accepted"
+							? html`<button
 									@click=${(e: Event) => {
 										e.stopPropagation();
 										this.approve(p);
@@ -126,17 +154,13 @@ class BaizePackages extends LitElement {
 								>
 									approve
 								</button>`
-								: ""
-						}
+							: ""}
 					</li>`,
 				)}
 			</ul>
-			${
-				this.content
-					? html`<h2>${this.selected}</h2>
-						<pre>${this.content}</pre>`
-					: ""
-			}
+			${this.content
+				? html`<pre>${this.content}</pre>`
+				: ""}
 		`;
 	}
 }
