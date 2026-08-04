@@ -208,10 +208,10 @@ class BaizeChatIntake extends LitElement {
 
 	connectedCallback(): void {
 		super.connectedCallback();
-		this.addEventListener("baize-new-requirement", (() => {
+		window.addEventListener("baize-new-requirement", (() => {
 			this.open = true;
 		}) as EventListener);
-		this.addEventListener("baize-workspace-change", this.onWs as EventListener);
+		window.addEventListener("baize-workspace-change", this.onWs as EventListener);
 	}
 
 	private onWs = (e: CustomEvent<{ id: number }>) => {
@@ -288,7 +288,15 @@ class BaizeChatIntake extends LitElement {
 				this.busy = "";
 				return;
 			}
+			const created = (await r.json().catch(() => ({}))) as { id?: number };
 			this.reset();
+			this.dispatchEvent(
+				new CustomEvent("baize-requirements-changed", {
+					detail: { id: created.id },
+					bubbles: true,
+					composed: true,
+				}),
+			);
 			this.dispatchEvent(
 				new CustomEvent("baize-goto", {
 					detail: { tab: "requirement" },

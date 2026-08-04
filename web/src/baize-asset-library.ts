@@ -169,13 +169,13 @@ class BaizeAssetLibrary extends LitElement {
 
 	async connectedCallback(): Promise<void> {
 		super.connectedCallback();
-		this.addEventListener("baize-workspace-change", this.onWorkspaceChange as EventListener);
+		window.addEventListener("baize-workspace-change", this.onWorkspaceChange as EventListener);
 		if (this.ws) await this.load();
 	}
 
 	disconnectedCallback(): void {
 		super.disconnectedCallback();
-		this.removeEventListener("baize-workspace-change", this.onWorkspaceChange as EventListener);
+		window.removeEventListener("baize-workspace-change", this.onWorkspaceChange as EventListener);
 	}
 
 	private async load() {

@@ -1,38 +1,36 @@
 import { LitElement, html, css, nothing } from "lit";
+import "./baize-consent-modal.ts";
 
 /**
- * 需求设计 — 旅程主视图:工作区选择 → 需求列表(工作中/已完成)→ 阶段流水线。
- * 流水线:分析→场景→用例→功能分解→功能设计→归档;门禁串行,待审可 通过/打回(意见)→重跑。
+ * 需求设计 — 旅程主视图(master-detail):左需求列表,右设计流水线。
+ * ws 全局跟随(读 localStorage + 监听 baize-workspace-change);新建需求走 chat-intake(T05);
+ * 审批 consent gate(baize-consent-modal);打回带意见重跑。逻辑方法保留自原版。
  */
 interface Req {
 	id: number;
-	workspace_id: number;
 	title: string;
-	description: string;
 	done?: boolean;
 	current?: string;
 }
 interface StageRow {
-	requirement_id: number;
 	stage: string;
 	status: string;
-	artifact_refs: string;
-	feedback: string;
+	artifact_refs?: string;
+	feedback?: string;
 }
 interface Ref {
 	type?: string;
-	id?: number;
 	title?: string;
 	name?: string;
 	description?: string;
-	file?: string;
-	content?: unknown;
 	scenarioTitle?: string;
 	precondition?: string;
 	mainFlow?: string;
 	exceptions?: string;
 	postcondition?: string;
-	items?: Array<{ title?: string; description?: string }>;
+	items?: Array<{ title: string; description: string }>;
+	file?: string;
+	content?: unknown;
 }
 
 const STAGES: Array<{ cn: string; en: string }> = [
@@ -48,11 +46,8 @@ class BaizeRequirement extends LitElement {
 	static properties = {
 		reqs: { state: true },
 		workspaceId: { state: true },
-		workspaces: { state: true },
 		selected: { state: true },
 		stages: { state: true },
-		title: { state: true },
-		desc: { state: true },
 		busy: { state: true },
 		error: { state: true },
 		feedback: { state: true },
@@ -61,11 +56,8 @@ class BaizeRequirement extends LitElement {
 
 	declare reqs: Req[];
 	declare workspaceId: number;
-	declare workspaces: Array<{ id: number; name: string }>;
 	declare selected: number;
 	declare stages: StageRow[];
-	declare title: string;
-	declare desc: string;
 	declare busy: string;
 	declare error: string;
 	declare feedback: string;
@@ -74,211 +66,325 @@ class BaizeRequirement extends LitElement {
 	static styles = css`
 		:host {
 			display: block;
+			height: 100%;
 		}
-		.card {
+		.layout {
+			display: grid;
+			grid-template-columns: 300px 1fr;
+			gap: var(--gap);
+			height: 100%;
+			min-height: 0;
+		}
+		/* 左列:需求列表 */
+		.col-list {
+			display: flex;
+			flex-direction: column;
+			min-height: 0;
+		}
+		.col-head {
+			display: flex;
+			align-items: center;
+			margin-bottom: var(--gap);
+		}
+		.col-head h2 {
+			margin: 0;
+			font-size: 1.1rem;
+			font-weight: 650;
+		}
+		.btn-new {
+			margin-left: auto;
+			background: var(--accent);
+			color: var(--accent-fg);
+			border: none;
+			border-radius: var(--radius-sm);
+			padding: 6px 12px;
+			font: inherit;
+			font-size: 0.82rem;
+			font-weight: 600;
+			cursor: pointer;
+			transition: background 0.2s, transform 0.1s;
+		}
+		.btn-new:hover {
+			background: var(--info);
+		}
+		.btn-new:active {
+			transform: scale(0.96);
+		}
+		.req-list {
+			flex: 1;
+			overflow: auto;
+			display: flex;
+			flex-direction: column;
+			gap: 8px;
+			padding-right: 2px;
+		}
+		.req {
 			background: var(--surface);
 			border: 1px solid var(--border);
 			border-radius: var(--radius);
-			padding: 1rem;
-			margin-bottom: 1rem;
-		}
-		h3 {
-			margin: 0 0 .6rem;
-			font-size: .8rem;
-			color: var(--text-muted);
-			text-transform: uppercase;
-			letter-spacing: .06em;
-		}
-		select,
-		input,
-		textarea {
-			background: var(--bg);
-			color: var(--text);
-			border: 1px solid var(--border);
-			border-radius: 6px;
-			padding: .45rem .6rem;
-			font: inherit;
-			font-size: .82rem;
-		}
-		select,
-		input {
-			margin-right: .4rem;
-		}
-		textarea {
-			width: 100%;
-			box-sizing: border-box;
-			resize: vertical;
-			margin-top: .4rem;
-		}
-		.req {
-			display: flex;
-			align-items: center;
-			gap: .6rem;
-			padding: .45rem .6rem;
-			border: 1px solid var(--border);
-			border-radius: 6px;
-			margin-bottom: .3rem;
+			padding: 12px 14px;
 			cursor: pointer;
-			font-size: .82rem;
+			transition: border-color 0.2s, box-shadow 0.2s;
+		}
+		.req:hover {
+			border-color: var(--border-strong);
+			box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
 		}
 		.req.active {
 			border-color: var(--accent);
-			color: var(--accent);
+			background: var(--surface-2);
+		}
+		.req .badge {
+			font-size: 11px;
+			padding: 1px 8px;
+			border-radius: 99px;
+			font-weight: 600;
+		}
+		.badge.ok {
+			background: rgba(52, 211, 153, 0.15);
+			color: var(--ok);
+		}
+		.badge.warn {
+			background: rgba(251, 191, 36, 0.15);
+			color: var(--warn);
+		}
+		.req .t {
+			display: block;
+			font-weight: 600;
+			font-size: 0.9rem;
+			margin: 8px 0 4px;
 		}
 		.req .hint {
-			margin-left: auto;
-			font-size: .72rem;
-			color: var(--text-muted);
+			display: block;
+			color: var(--text-subtle);
+			font-size: 0.72rem;
+			font-family: var(--font-mono);
 		}
-		.stage {
+		/* 右列:详情 */
+		.col-detail {
+			min-height: 0;
+			overflow: auto;
+		}
+		.detail-card {
+			background: var(--surface);
 			border: 1px solid var(--border);
-			border-radius: 6px;
-			margin-bottom: .5rem;
-			padding: .55rem .7rem;
+			border-radius: var(--radius);
+			padding: 20px;
+		}
+		.detail-card h3 {
+			margin: 0 0 16px;
+			font-size: 1rem;
+			font-weight: 600;
+		}
+		.empty-state {
+			display: flex;
+			flex-direction: column;
+			align-items: center;
+			justify-content: center;
+			text-align: center;
+			padding: 56px 24px;
+			color: var(--text-muted);
+			background: var(--surface);
+			border: 1px dashed var(--border-strong);
+			border-radius: var(--radius);
+		}
+		.empty-state h2 {
+			margin: 0 0 8px;
+			font-size: 1.05rem;
+			font-weight: 600;
+			color: var(--text);
+		}
+		.empty-state p {
+			margin: 0 0 20px;
+			font-size: 0.86rem;
+			line-height: 1.6;
+		}
+		.empty-state .btn {
+			background: var(--accent);
+			color: var(--accent-fg);
+			border: none;
+			border-radius: var(--radius-sm);
+			padding: 8px 16px;
+			font: inherit;
+			font-weight: 600;
+			cursor: pointer;
+			transition: background 0.2s;
+		}
+		/* 流水线 stage */
+		.stage {
+			background: var(--surface-2);
+			border: 1px solid var(--border);
+			border-radius: var(--radius);
+			padding: 14px;
+			margin-bottom: 12px;
 		}
 		.stage .head {
 			display: flex;
 			align-items: center;
-			gap: .6rem;
+			gap: 10px;
 		}
 		.stage .name {
-			width: 4.8rem;
 			font-weight: 600;
-			font-size: .82rem;
+			font-size: 0.9rem;
 		}
 		.status {
-			font-size: .7rem;
-			padding: .12rem .5rem;
-			border-radius: 999px;
+			margin-left: auto;
+			font-size: 11px;
+			padding: 2px 9px;
+			border-radius: 99px;
 			font-weight: 600;
-			white-space: nowrap;
-		}
-		.status.完成 {
-			background: rgba(34, 197, 94, .15);
-			color: var(--accent);
-		}
-		.status.待审 {
-			background: rgba(245, 158, 11, .15);
-			color: var(--warn);
-		}
-		.status.打回 {
-			background: rgba(239, 68, 68, .15);
-			color: #f87171;
 		}
 		.status.未开始 {
-			background: var(--surface-2);
-			color: var(--text-muted);
+			color: var(--text-subtle);
+			background: var(--surface-hover);
+		}
+		.status.进行中 {
+			color: var(--run);
+			background: rgba(56, 189, 248, 0.15);
+		}
+		.status.待审 {
+			color: var(--warn);
+			background: rgba(251, 191, 36, 0.15);
+		}
+		.status.打回 {
+			color: var(--danger);
+			background: rgba(251, 113, 133, 0.15);
+		}
+		.status.完成 {
+			color: var(--ok);
+			background: rgba(52, 211, 153, 0.15);
 		}
 		button {
-			background: var(--surface-2);
-			color: var(--text);
-			border: 1px solid var(--border);
-			border-radius: 6px;
-			padding: .25rem .7rem;
 			font: inherit;
-			font-size: .74rem;
 			cursor: pointer;
+			background: var(--surface-hover);
+			color: var(--text);
+			border: 1px solid var(--border-strong);
+			border-radius: var(--radius-sm);
+			padding: 5px 12px;
+			font-size: 0.8rem;
+			transition: background 0.2s, border-color 0.2s;
 		}
-		button:hover:not([disabled]) {
-			border-color: var(--accent);
-			color: var(--accent);
-		}
-		button[disabled] {
-			opacity: .4;
-			cursor: default;
+		button:hover {
+			background: var(--surface-2);
 		}
 		button.primary {
 			background: var(--accent);
-			border-color: var(--accent);
-			color: #052e16;
+			color: var(--accent-fg);
+			border-color: transparent;
 			font-weight: 600;
 		}
-		.head button {
-			margin-left: auto;
+		button.primary:hover {
+			background: var(--info);
 		}
-		.refs {
-			margin-top: .5rem;
-			border-top: 1px dashed var(--border);
-			padding-top: .5rem;
-			font-size: .8rem;
+		button:disabled {
+			opacity: 0.5;
+			cursor: not-allowed;
 		}
-		.refs .item {
-			margin-bottom: .55rem;
-		}
-		.refs .item b {
-			font-size: .8rem;
-		}
-		.refs .item p {
-			margin: .15rem 0 0;
-			color: var(--text-muted);
-			font-size: .76rem;
-			white-space: pre-wrap;
-		}
-		.refs pre {
-			margin: .2rem 0 0;
+		textarea {
+			display: block;
+			width: 100%;
+			box-sizing: border-box;
+			margin-top: 10px;
 			background: var(--bg);
+			color: var(--text);
 			border: 1px solid var(--border);
-			border-radius: 6px;
-			padding: .5rem;
-			font-size: .72rem;
-			max-height: 260px;
-			overflow: auto;
-			white-space: pre-wrap;
+			border-radius: var(--radius-sm);
+			padding: 8px;
+			font: inherit;
+			font-size: 0.82rem;
+			resize: vertical;
+			transition: border-color 0.2s;
+		}
+		textarea:focus {
+			outline: none;
+			border-color: var(--accent);
 		}
 		.fb {
-			margin-top: .5rem;
-			padding: .5rem .6rem;
-			border-left: 3px solid var(--warn);
-			background: var(--surface-2);
-			border-radius: 0 6px 6px 0;
-			font-size: .76rem;
+			margin-top: 10px;
+			color: var(--danger);
+			font-size: 0.78rem;
+		}
+		.refs {
+			margin-top: 12px;
+		}
+		.refs .item {
+			background: var(--bg);
+			border: 1px solid var(--border);
+			border-radius: var(--radius-sm);
+			padding: 10px 12px;
+			margin-bottom: 8px;
+			font-size: 0.82rem;
+		}
+		.refs .item b {
+			display: block;
+			margin-bottom: 4px;
+			font-weight: 600;
+		}
+		.refs .item p {
+			margin: 2px 0;
 			color: var(--text-muted);
+			line-height: 1.5;
+		}
+		.refs .item pre {
+			margin: 0;
+			color: var(--text-muted);
+			font-family: var(--font-mono);
+			font-size: 0.74rem;
 			white-space: pre-wrap;
+			word-break: break-word;
 		}
 		.error {
-			margin-top: .6rem;
-			padding: .5rem .7rem;
-			border: 1px solid rgba(239, 68, 68, .4);
-			border-radius: 6px;
-			color: #f87171;
-			font-size: .78rem;
-		}
-		.empty {
-			color: var(--text-muted);
-			font-size: .8rem;
-			padding: .4rem 0;
+			color: var(--danger);
+			font-size: 0.82rem;
+			margin-top: 12px;
+			padding: 8px 12px;
+			background: rgba(251, 113, 133, 0.1);
+			border: 1px solid rgba(251, 113, 133, 0.3);
+			border-radius: var(--radius-sm);
 		}
 	`;
 
 	constructor() {
 		super();
 		this.reqs = [];
-		this.workspaceId = 0;
-		this.workspaces = [];
+		this.workspaceId = Number(localStorage.getItem("baize.ui.v1.workspace") ?? "0");
 		this.selected = 0;
 		this.stages = [];
-		this.title = "";
-		this.desc = "";
 		this.busy = "";
 		this.error = "";
 		this.feedback = "";
+		this.consent = null;
 	}
 
 	async connectedCallback(): Promise<void> {
 		super.connectedCallback();
-		await this.loadWorkspaces();
+		window.addEventListener("baize-workspace-change", this.onWsChange as EventListener);
+		window.addEventListener("baize-requirements-changed", this.onReqsChanged as EventListener);
+		if (this.workspaceId) await this.loadReqs();
 	}
 
-	async loadWorkspaces(): Promise<void> {
-		this.workspaces = (await (await fetch("/api/workspaces")).json()) as Array<{
-			id: number;
-			name: string;
-		}>;
-		if (this.workspaces.length && !this.workspaceId) {
-			this.workspaceId = this.workspaces[0].id;
-			await this.loadReqs();
-		}
+	disconnectedCallback(): void {
+		super.disconnectedCallback();
+		window.removeEventListener("baize-workspace-change", this.onWsChange as EventListener);
+		window.removeEventListener("baize-requirements-changed", this.onReqsChanged as EventListener);
 	}
+
+	private onWsChange = (e: CustomEvent<{ id: number }>) => {
+		this.workspaceId = e.detail.id;
+		this.selected = 0;
+		void this.loadReqs();
+	};
+
+	private onReqsChanged = (e: CustomEvent<{ id?: number }>) => {
+		void this.loadReqs().then(() => {
+			const id = e.detail?.id;
+			if (id) {
+				const r = this.reqs.find((x) => x.id === id);
+				if (r) void this.pick(r);
+			}
+		});
+	};
 
 	async loadReqs(): Promise<void> {
 		this.reqs = (await (
@@ -298,22 +404,8 @@ class BaizeRequirement extends LitElement {
 		).json()) as StageRow[];
 	}
 
-	async addReq(): Promise<void> {
-		if (!this.title) return;
-		await fetch("/api/requirements", {
-			method: "POST",
-			headers: { "content-type": "application/json" },
-			body: JSON.stringify({
-				workspaceId: this.workspaceId,
-				title: this.title,
-				description: this.desc,
-			}),
-		});
-		this.title = "";
-		this.desc = "";
-		await this.loadReqs();
-		const last = this.reqs[this.reqs.length - 1];
-		if (last) await this.pick(last); // 新需求直接进入流水线(新用户旅程第 2 步)
+	private newRequirement(): void {
+		this.dispatchEvent(new CustomEvent("baize-new-requirement", { bubbles: true, composed: true }));
 	}
 
 	// 门禁:该阶段是否可运行(前置全部完成 + 自身处于 未开始/打回)
@@ -488,12 +580,12 @@ class BaizeRequirement extends LitElement {
 	}
 
 	render() {
-		if (!this.workspaces.length) {
-			return html`<div class="card">
-				<h3>第一步:创建工作区</h3>
-				<p class="empty">还没有工作区。工作区对应一个代码仓库,是设计需求的载体。</p>
+		if (!this.workspaceId) {
+			return html`<div class="empty-state">
+				<h2>请先选择工作区</h2>
+				<p>工作区对应一个代码仓库,是设计需求的载体。在顶部切换,或先去创建一个。</p>
 				<button
-					class="primary"
+					class="btn"
 					@click=${() =>
 						this.dispatchEvent(
 							new CustomEvent("baize-goto", {
@@ -503,76 +595,54 @@ class BaizeRequirement extends LitElement {
 							}),
 						)}
 				>
-					去创建工作区 →
+					去工作区页 →
 				</button>
 			</div>`;
 		}
 		return html`
-			<div class="card">
-				<h3>需求列表</h3>
-				<select
-					.value=${String(this.workspaceId)}
-					@change=${(e: Event) => {
-						this.workspaceId = Number((e.target as HTMLSelectElement).value);
-						this.selected = 0;
-						this.loadReqs();
-					}}
-				>
-					${this.workspaces.map((w) => html`<option value=${w.id}>${w.name}</option>`)}
-				</select>
-				<div style="margin-top:.7rem">
-					${
-						this.reqs.length
+			<div class="layout">
+				<aside class="col-list">
+					<div class="col-head">
+						<h2>需求</h2>
+						<button class="btn-new" @click=${() => this.newRequirement()}>+ 新建需求</button>
+					</div>
+					<div class="req-list">
+						${this.reqs.length
 							? this.reqs.map(
 									(r) => html`<div
 										class="req ${r.id === this.selected ? "active" : ""}"
 										@click=${() => this.pick(r)}
 									>
-										<span class="status ${r.done ? "完成" : "待审"}">
-											${r.done ? "已完成" : "工作中"}
-										</span>
-										${r.title}
+										<span class="badge ${r.done ? "ok" : "warn"}">${r.done ? "已完成" : "工作中"}</span>
+										<span class="t">${r.title}</span>
 										<span class="hint">${r.done ? "已归档" : `当前:${r.current}`}</span>
 									</div>`,
 								)
-							: html`<div class="empty">本工作区还没有需求,先在下方录入。</div>`
-					}
-				</div>
-				<div style="margin-top:.8rem;display:flex;gap:.5rem">
-					<input
-						style="flex:1"
-						placeholder="需求标题"
-						.value=${this.title}
-						@input=${(e: Event) => (this.title = (e.target as HTMLInputElement).value)}
-					/>
-					<input
-						style="flex:2"
-						placeholder="需求描述(可选)"
-						.value=${this.desc}
-						@input=${(e: Event) => (this.desc = (e.target as HTMLInputElement).value)}
-					/>
-					<button class="primary" @click=${() => this.addReq()}>录入需求</button>
-				</div>
+							: html`<div class="empty-state" style="padding:32px 16px">
+									<p style="margin:0">本工作区还没有需求,点右上「新建需求」开始</p>
+								</div>`}
+					</div>
+				</aside>
+				<main class="col-detail">
+					${this.selected
+						? html`<div class="detail-card">
+								<h3>设计流水线(逐阶段审核,打回可带意见重跑)</h3>
+								${STAGES.map((s) => this.renderStage(s))}
+								${this.error ? html`<div class="error">${this.error}</div>` : nothing}
+							</div>`
+						: html`<div class="empty-state">
+								<h2>选择一个需求</h2>
+								<p style="margin:0">从左侧列表选择,查看设计流水线并逐阶段驱动</p>
+							</div>`}
+				</main>
 			</div>
-			${
-				this.selected
-					? html`<div class="card">
-						<h3>设计流水线(逐阶段审核,打回可带意见重跑)</h3>
-						${STAGES.map((s) => this.renderStage(s))} ${
-							this.error
-								? html`<div class="error">${this.error}</div>`
-								: nothing
-						}
-					</div>`
-					: nothing
-			}
-		<baize-consent-modal
-			.open=${this.consent != null}
-			.title=${this.consent ? `通过「${this.consent.cn}」阶段?` : ""}
-			.summary=${this.consent ? this.consentSummary(this.consent.cn, this.consent.refs) : ""}
-			@baize-consent-confirm=${() => this.confirmConsent()}
-			@baize-consent-cancel=${() => this.cancelConsent()}
-		></baize-consent-modal>
+			<baize-consent-modal
+				.open=${this.consent != null}
+				.title=${this.consent ? `通过「${this.consent.cn}」阶段?` : ""}
+				.summary=${this.consent ? this.consentSummary(this.consent.cn, this.consent.refs) : ""}
+				@baize-consent-confirm=${() => this.confirmConsent()}
+				@baize-consent-cancel=${() => this.cancelConsent()}
+			></baize-consent-modal>
 		`;
 	}
 }
