@@ -149,16 +149,31 @@ class BaizeShell extends LitElement {
 	connectedCallback(): void {
 		super.connectedCallback();
 		this.addEventListener("baize-goto", (this.onGoto as EventListener));
+		this.addEventListener("baize-fold-toggle", (this.onFoldToggle as EventListener));
+		this.addEventListener("baize-new-requirement", (this.onNewRequirement as EventListener));
 		addEventListener("keydown", this.onKey);
 	}
 
 	disconnectedCallback(): void {
 		super.disconnectedCallback();
+		this.removeEventListener("baize-goto", (this.onGoto as EventListener));
+		this.removeEventListener("baize-fold-toggle", (this.onFoldToggle as EventListener));
+		this.removeEventListener("baize-new-requirement", (this.onNewRequirement as EventListener));
 		removeEventListener("keydown", this.onKey);
 	}
 
 	private onGoto = (e: CustomEvent<{ tab: string }>) => {
 		this.goto(e.detail.tab);
+	};
+
+	private onFoldToggle = () => {
+		this.folded = !this.folded;
+		localStorage.setItem("baize.ui.v1.sidebarFolded", this.folded ? "1" : "0");
+	};
+
+	private onNewRequirement = () => {
+		// chat-intake(step3)接入前:先跳到需求页
+		this.goto("requirement");
 	};
 
 	private onKey = (e: KeyboardEvent) => {
@@ -230,6 +245,7 @@ class BaizeShell extends LitElement {
 						<baize-dashboard></baize-dashboard>
 					</div>
 				</main>
+			<baize-command-palette></baize-command-palette>
 			</div>
 		`;
 	}
