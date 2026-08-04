@@ -1,0 +1,47 @@
+# Wayfinder Map — BaiZe 需求工程工作台 `wayfinder:map`
+
+## Destination
+
+需求工程工作台 Web UI:总览仪表盘、需求管理页、需求设计页(看需求的设计进展)、
+待决策项、工作区管理;由 5 阶段工作流驱动(需求录入→需求分析→场景分析→用例分析→
+功能分解),并积累设计资产:场景库、用例库、功能库(功能域+功能项)。
+
+## Notes
+
+- Domain:requirements engineering / architecture design workbench。
+- Tracker:local-markdown(无 git remote);票在 `tickets/`,blocking 用 body 约定。
+- Skills:ui-ux-pro-max(UI)、domain-modeling、grilling、prototype。
+- Grilling 结论:资产存 SQLite/JSON store;workspace = 1 repo;工作流逐阶段人工触发;
+  待决策项 = critic findings + approval gate + 人工添加。
+- 现有基础:gateway.ts + web/(Vite+Lit dark,slices 1-4);evidence/ADR/gene 复用环。
+
+## Decisions so far
+
+- [Grilling 四答](#) — 资产=SQLite/JSON;workspace=1 repo;逐阶段人工触发;决策=critic+审批+人工。
+- [T09 node SQLite 选型](tickets/T09-sqlite-options.md) — better-sqlite3 v13(prebuilds,slim 零编译);node:sqlite 仍 experimental。
+- [T01 领域模型](tickets/T01-domain-model.md) — 7 实体+关系链(需求→场景→用例→功能项→功能域);资产=workspace 复用池;阶段=待审→人工审→完成。
+- [T02 store schema](tickets/T02-store-schema.md) — store.ts(better-sqlite3 v13)9 表+CRUD,自测过;单全局 DB。
+- [T07 逐阶段 pipeline](tickets/T07-stage-pipeline.md) — runStage+gateway 端点全通;资产抽取可靠性→T08。
+- [T08 阶段抽取](tickets/T08-stage-prompts.md) — glm-5.2 结构化输出不可靠(5 策略全败);建议换模型/独立抽取 pipeline。
+- [T03-T06 UI 页](tickets/T03-workspace-mgmt.md) — 工作区/需求设计(5 阶段 run/审)/总览(计数)/待决策(pending+approve)四页,接 store+gateway,总览验证(场景=4)。
+
+- 资产复用/演化环:场景/用例/功能库如何反哺未来设计(与 gene/ADR 复用环的关系)。
+- 跨 workspace 的资产搜索/共享。
+- 资产跨需求修订的版本化。
+
+## Out of scope
+
+- TUI(独立 surface,非本 Web 工作台)。
+- 鉴权/多用户硬化(token 门已存在,非本图核心)。
+
+## Tickets(frontier = open+unblocked+unclaimed)
+
+- [T01 领域模型](tickets/T01-domain-model.md) `grilling` — **closed**:7 实体+关系链+阶段态
+- [T09 node SQLite 选型](tickets/T09-sqlite-options.md) `research` — **closed**:better-sqlite3 v13
+- [T02 store schema](tickets/T02-store-schema.md) `prototype` — **closed**:store.ts 9 表+CRUD
+- [T03 工作区管理页](tickets/T03-workspace-mgmt.md) `prototype` — **closed**:baize-workspaces
+- [T04 需求设计页](tickets/T04-requirement-design-page.md) `prototype` — **closed**:baize-requirement(5 阶段 run/审)
+- [T05 总览仪表盘](tickets/T05-overview-dashboard.md) `prototype` — **closed**:baize-overview(计数)
+- [T06 待决策页](tickets/T06-pending-decisions.md) `prototype` — **closed**:baize-decisions(pending+approve)
+- [T07 逐阶段 pipeline](tickets/T07-stage-pipeline.md) `task` — **closed**:runStage+gateway 端点全通
+- [T08 阶段抽取](tickets/T08-stage-prompts.md) `research` — **closed**:glm-5.2 不可靠,建议换模型/独立抽取

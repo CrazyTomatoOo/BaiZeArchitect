@@ -1,47 +1,44 @@
-# Wayfinder Map — BaiZe 需求工程工作台 `wayfinder:map`
+# Wayfinder Map — BaiZe web 重构方案(仿 OpenClaw / Hermes) `wayfinder:map`
 
 ## Destination
 
-需求工程工作台 Web UI:总览仪表盘、需求管理页、需求设计页(看需求的设计进展)、
-待决策项、工作区管理;由 5 阶段工作流驱动(需求录入→需求分析→场景分析→用例分析→
-功能分解),并积累设计资产:场景库、用例库、功能库(功能域+功能项)。
+一份评审通过的《BaiZe web 重构方案》文档:从**视觉语言、信息架构/导航、交互模式、
+布局/组件**四个维度,借鉴 OpenClaw Control UI 与 Hermes Agent Dashboard 的页面设计,
+覆盖全部页面。本图只产决策与文档,不动代码(实施另起 effort)。
 
 ## Notes
 
-- Domain:requirements engineering / architecture design workbench。
-- Tracker:local-markdown(无 git remote);票在 `tickets/`,blocking 用 body 约定。
-- Skills:ui-ux-pro-max(UI)、domain-modeling、grilling、prototype。
-- Grilling 结论:资产存 SQLite/JSON store;workspace = 1 repo;工作流逐阶段人工触发;
-  待决策项 = critic findings + approval gate + 人工添加。
-- 现有基础:gateway.ts + web/(Vite+Lit dark,slices 1-4);evidence/ADR/gene 复用环。
+- Domain:需求工程工作台 web UI 重构(需求/场景/用例/功能资产 + 5 阶段工作流 + 审批)。
+- Tracker:local-markdown(无 git remote);票在 `tickets/`,blocking 用 body 约定;research 产出在 `research/`。
+- Skills:ui-ux-pro-max、grilling、prototype、research、domain-modeling。
+- Charting grilling 结论(2026-08-05):hermes = NousResearch/hermes-agent;终点 = 方案文档;借鉴维度 = 全 4 项;范围 = 全部页面。
+- 技术栈不变:Vite+Lit(与 OpenClaw Control UI 同栈),重构只动页面设计。
+- 现有基础:`web/`(5 组件 ~1156 行,tab 导航 需求/工作区/总览,CSS vars `--bg/--text/--border/--font-ui`);`gateway.ts`(node http+ws);旧 `baize-dashboard`(证据/ADR/gene 可视化)。
+- 已有调研:`docs/research-ui-agent-skill-refs.md`(架构级;T01/T02 做页面设计级深挖)。
+- 上一张图(需求工程工作台)已完成,归档于 `archive/2026-08-workbench/`。
 
 ## Decisions so far
 
-- [Grilling 四答](#) — 资产=SQLite/JSON;workspace=1 repo;逐阶段人工触发;决策=critic+审批+人工。
-- [T09 node SQLite 选型](tickets/T09-sqlite-options.md) — better-sqlite3 v13(prebuilds,slim 零编译);node:sqlite 仍 experimental。
-- [T01 领域模型](tickets/T01-domain-model.md) — 7 实体+关系链(需求→场景→用例→功能项→功能域);资产=workspace 复用池;阶段=待审→人工审→完成。
-- [T02 store schema](tickets/T02-store-schema.md) — store.ts(better-sqlite3 v13)9 表+CRUD,自测过;单全局 DB。
-- [T07 逐阶段 pipeline](tickets/T07-stage-pipeline.md) — runStage+gateway 端点全通;资产抽取可靠性→T08。
-- [T08 阶段抽取](tickets/T08-stage-prompts.md) — glm-5.2 结构化输出不可靠(5 策略全败);建议换模型/独立抽取 pipeline。
-- [T03-T06 UI 页](tickets/T03-workspace-mgmt.md) — 工作区/需求设计(5 阶段 run/审)/总览(计数)/待决策(pending+approve)四页,接 store+gateway,总览验证(场景=4)。
+<!-- one line per closed ticket: gist + link -->
 
-- 资产复用/演化环:场景/用例/功能库如何反哺未来设计(与 gene/ADR 复用环的关系)。
-- 跨 workspace 的资产搜索/共享。
-- 资产跨需求修订的版本化。
+## Not yet specified
+
+- 方案文档的章节结构与验收标准(T06 整合时明确)。
+- 重构后的视觉验证方式(如 agent_browser 截图基线对比)。
+- 旧 baize-dashboard(证据可视化)在新 IA 的归宿:合并/保留/下线。
+- 设计 tokens 落地形式(沿用 CSS vars 还是抽 theme 模块)。
 
 ## Out of scope
 
-- TUI(独立 surface,非本 Web 工作台)。
-- 鉴权/多用户硬化(token 门已存在,非本图核心)。
+- 实施写码 —— 本图只产方案文档。
+- gateway / 后端 API 变更(若 IA 需要新端点,记入方案,不实施)。
+- TUI(独立 surface)。
 
 ## Tickets(frontier = open+unblocked+unclaimed)
 
-- [T01 领域模型](tickets/T01-domain-model.md) `grilling` — **closed**:7 实体+关系链+阶段态
-- [T09 node SQLite 选型](tickets/T09-sqlite-options.md) `research` — **closed**:better-sqlite3 v13
-- [T02 store schema](tickets/T02-store-schema.md) `prototype` — **closed**:store.ts 9 表+CRUD
-- [T03 工作区管理页](tickets/T03-workspace-mgmt.md) `prototype` — **closed**:baize-workspaces
-- [T04 需求设计页](tickets/T04-requirement-design-page.md) `prototype` — **closed**:baize-requirement(5 阶段 run/审)
-- [T05 总览仪表盘](tickets/T05-overview-dashboard.md) `prototype` — **closed**:baize-overview(计数)
-- [T06 待决策页](tickets/T06-pending-decisions.md) `prototype` — **closed**:baize-decisions(pending+approve)
-- [T07 逐阶段 pipeline](tickets/T07-stage-pipeline.md) `task` — **closed**:runStage+gateway 端点全通
-- [T08 阶段抽取](tickets/T08-stage-prompts.md) `research` — **closed**:glm-5.2 不可靠,建议换模型/独立抽取
+- [T01 OpenClaw Control UI 页面设计调研](tickets/T01-openclaw-control-ui-design.md) `research` — open
+- [T02 Hermes Agent Dashboard 页面设计调研](tickets/T02-hermes-dashboard-design.md) `research` — open
+- [T03 新信息架构/导航结构](tickets/T03-ia-navigation.md) `grilling` — open(blocked-by: T01, T02)
+- [T04 视觉语言/设计 tokens 原型页](tickets/T04-visual-tokens-prototype.md) `prototype` — open(blocked-by: T01, T02)
+- [T05 交互模式](tickets/T05-interaction-patterns.md) `grilling` — open(blocked-by: T01, T02)
+- [T06 逐页设计要点+方案文档整合](tickets/T06-plan-doc-synthesis.md) `grilling` — open(blocked-by: T03, T04, T05)
