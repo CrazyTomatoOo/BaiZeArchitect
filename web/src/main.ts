@@ -8,3 +8,4 @@ import "./baize-consent-modal.ts";
 import "./baize-asset-library.ts";
 import "./baize-decisions.ts";
 import "./baize-run-rail.ts";
+import "./baize-system.ts";

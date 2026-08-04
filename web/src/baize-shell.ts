@@ -336,6 +336,7 @@ class BaizeShell extends LitElement {
 					<div class="nav-group">
 						<div class="label">管理</div>
 						<button class="nav-item ${this.tab === "workspaces" ? "active" : ""}" @click=${() => this.goto("workspaces")}>工作区</button>
+						<button class="nav-item ${this.tab === "system" ? "active" : ""}" @click=${() => this.goto("system")}>系统</button>
 					</div>
 				</nav>
 					<div class="status-foot">
@@ -351,9 +352,9 @@ class BaizeShell extends LitElement {
 						<baize-workspaces ?hidden=${this.tab !== "workspaces"}></baize-workspaces>
 						<baize-asset-library ?hidden=${this.tab !== "assets"}></baize-asset-library>
 						<baize-decisions ?hidden=${this.tab !== "decisions"}></baize-decisions>
+						<baize-system ?hidden=${this.tab !== "system"}></baize-system>
 					<div ?hidden=${this.tab !== "overview"}>
 						<baize-overview></baize-overview>
-						<baize-dashboard></baize-dashboard>
 					</div>
 				</main>
 			<baize-command-palette></baize-command-palette>
