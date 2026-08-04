@@ -6,3 +6,4 @@ import "./baize-workspaces.ts";
 import "./baize-command-palette.ts";
 import "./baize-consent-modal.ts";
 import "./baize-asset-library.ts";
+import "./baize-decisions.ts";

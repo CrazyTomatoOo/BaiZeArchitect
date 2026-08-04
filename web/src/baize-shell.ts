@@ -14,6 +14,7 @@ class BaizeShell extends LitElement {
 		wsName: { state: true },
 		workspaces: { state: true },
 		folded: { state: true },
+		decCount: { state: true },
 	};
 
 	declare tab: string;
@@ -21,6 +22,7 @@ class BaizeShell extends LitElement {
 	declare wsName: string;
 	declare workspaces: Array<{ id: number; name: string }>;
 	declare folded: boolean;
+	declare decCount: number;
 
 	static styles = css`
 		:host {
@@ -180,6 +182,7 @@ class BaizeShell extends LitElement {
 		this.wsName = localStorage.getItem("baize.ui.v1.workspaceName") ?? "";
 		this.workspaces = [];
 		this.folded = localStorage.getItem("baize.ui.v1.sidebarFolded") === "1";
+		this.decCount = 0;
 	}
 
 	async connectedCallback(): Promise<void> {
@@ -188,6 +191,7 @@ class BaizeShell extends LitElement {
 		this.addEventListener("baize-fold-toggle", this.onFoldToggle as EventListener);
 		this.addEventListener("baize-new-requirement", this.onNewRequirement as EventListener);
 		this.addEventListener("baize-workspaces-changed", this.onWorkspacesChanged as EventListener);
+		this.addEventListener("baize-decisions-count", this.onDecisionsCount as EventListener);
 		addEventListener("keydown", this.onKey);
 		await this.loadWorkspaces();
 	}
@@ -204,6 +208,7 @@ class BaizeShell extends LitElement {
 			this.onNewRequirement as EventListener,
 		);
 		this.removeEventListener("baize-workspaces-changed", this.onWorkspacesChanged as EventListener);
+		this.removeEventListener("baize-decisions-count", this.onDecisionsCount as EventListener);
 		removeEventListener("keydown", this.onKey);
 	}
 
@@ -289,6 +294,10 @@ class BaizeShell extends LitElement {
 		this.loadWorkspaces();
 	};
 
+	private onDecisionsCount = (e: CustomEvent<{ count: number }>) => {
+		this.decCount = e.detail.count;
+	};
+
 	render() {
 		return html`
 			<div class="app ${this.folded ? "folded" : ""}">
@@ -313,36 +322,22 @@ class BaizeShell extends LitElement {
 					</div>
 					<nav class="nav">
 						<div class="nav-group">
-							<div class="label">工作</div>
-							<button
-								class="nav-item ${this.tab === "requirement" ? "active" : ""}"
-								@click=${() => this.goto("requirement")}
-							>
-							需求
+						<div class="label">工作</div>
+						<button class="nav-item ${this.tab === "requirement" ? "active" : ""}" @click=${() => this.goto("requirement")}>需求</button>
+						<button class="nav-item ${this.tab === "assets" ? "active" : ""}" @click=${() => this.goto("assets")}>资产库</button>
+						<button class="nav-item ${this.tab === "overview" ? "active" : ""}" @click=${() => this.goto("overview")}>总览</button>
+					</div>
+					<div class="nav-group">
+						<div class="label">治理</div>
+						<button class="nav-item ${this.tab === "decisions" ? "active" : ""}" @click=${() => this.goto("decisions")}>
+							待决策${this.decCount ? html` <span class="chip">${this.decCount}</span>` : null}
 						</button>
-						<button
-							class="nav-item ${this.tab === "assets" ? "active" : ""}"
-							@click=${() => this.goto("assets")}
-						>
-							资产库
-						</button>
-							<button
-								class="nav-item ${this.tab === "overview" ? "active" : ""}"
-								@click=${() => this.goto("overview")}
-							>
-								总览
-							</button>
-						</div>
-						<div class="nav-group">
-							<div class="label">管理</div>
-							<button
-								class="nav-item ${this.tab === "workspaces" ? "active" : ""}"
-								@click=${() => this.goto("workspaces")}
-							>
-								工作区
-							</button>
-						</div>
-					</nav>
+					</div>
+					<div class="nav-group">
+						<div class="label">管理</div>
+						<button class="nav-item ${this.tab === "workspaces" ? "active" : ""}" @click=${() => this.goto("workspaces")}>工作区</button>
+					</div>
+				</nav>
 					<div class="status-foot">
 						<div><span class="live">●</span> ws 未连接</div>
 						<div>工作区:${this.ws ?? "—"}</div>
@@ -355,6 +350,7 @@ class BaizeShell extends LitElement {
 					<baize-requirement ?hidden=${this.tab !== "requirement"}></baize-requirement>
 						<baize-workspaces ?hidden=${this.tab !== "workspaces"}></baize-workspaces>
 						<baize-asset-library ?hidden=${this.tab !== "assets"}></baize-asset-library>
+						<baize-decisions ?hidden=${this.tab !== "decisions"}></baize-decisions>
 					<div ?hidden=${this.tab !== "overview"}>
 						<baize-overview></baize-overview>
 						<baize-dashboard></baize-dashboard>

@@ -596,6 +596,34 @@ const server = http.createServer(
 			return;
 		}
 
+		if (url.pathname === "/api/decisions" && req.method === "GET") {
+			const ws = Number(url.searchParams.get("workspace") ?? 0);
+			// ponytail: N+1 per requirement(getStages);workspace 小可接受
+			const cnToEn: Record<string, StageName> = {};
+			for (const en of STAGE_ORDER) cnToEn[STAGE_CN[en]] = en;
+			const out: Array<Record<string, unknown>> = [];
+			for (const r of store.listRequirements(ws) as Array<Record<string, unknown> & { id: number }>) {
+				const rows = store.getStages(r.id) as StageRow[];
+				for (const row of rows) {
+					if (row.status === "待审" || row.status === "打回") {
+						out.push({
+							requirementId: r.id,
+							requirementTitle: r.title,
+							stage: row.stage,
+							stageEn: cnToEn[row.stage],
+							status: row.status,
+							feedback: row.feedback,
+							refs: parseRefs(row),
+							updated_at: row.updated_at,
+						});
+					}
+				}
+			}
+			out.sort((a, b) => String(b.updated_at).localeCompare(String(a.updated_at)));
+			json(200, out);
+			return;
+		}
+
 	// 非 API GET → web/dist(SPA);生产部署唯一入口
 		if (req.method === "GET") {
 			await serveStatic(res, url.pathname);
