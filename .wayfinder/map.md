@@ -26,6 +26,7 @@
 - [T03 新信息架构/导航结构](tickets/T03-ia-navigation.md) — sidebar 三区 6 页(新增资产库页;旧 dashboard 收编系统页);workspace 单作用域 + 防歧义三连;localStorage 记住落地页、首访分流。
 - [T05 交互模式](tickets/T05-interaction-patterns.md) — ws 真流式 + run rail(gateway 需补 ws 基建);需求录入 chat 化;⌘K 面板 + ⌘B/Esc;审批 consent gate;UI 偏好 localStorage `baize.ui.v1.*`。
 - [T04 视觉语言/设计 tokens 原型页](tickets/T04-visual-tokens-prototype.md) — C(Graphite Indigo)胜出:石墨 + `#7c8cff` + 可见边框 + 6px + compact;tokens 沿用 CSS vars;原型 `web/redesign-mock.html`(3 变体可切)。
+- [T06 逐页设计要点+方案文档整合](tickets/T06-plan-doc-synthesis.md) — `docs/web-redesign-plan.md` 产出(10 章);F1 资产库三 tab/F2 录入全屏 chat+预览/F3 证据独立子页。destination 到达,待评审。
 
 ## Not yet specified
 
@@ -46,4 +47,4 @@
 - [T03 新信息架构/导航结构](tickets/T03-ia-navigation.md) `grilling` — **closed**:sidebar 三区 6 页 + workspace 单作用域
 - [T04 视觉语言/设计 tokens 原型页](tickets/T04-visual-tokens-prototype.md) `prototype` — **closed**:C Graphite Indigo 胜出(石墨+靛蓝+可见边框+6px+compact)
 - [T05 交互模式](tickets/T05-interaction-patterns.md) `grilling` — **closed**:ws 流式+rail、录入 chat 化、⌘K、consent gate、状态分界
-- [T06 逐页设计要点+方案文档整合](tickets/T06-plan-doc-synthesis.md) `grilling` — open(frontier:T03/T04/T05 全 closed,已解锁)
+- [T06 逐页设计要点+方案文档整合](tickets/T06-plan-doc-synthesis.md) `grilling` — **closed**:方案文档 docs/web-redesign-plan.md 产出;全图完成,frontier 空
