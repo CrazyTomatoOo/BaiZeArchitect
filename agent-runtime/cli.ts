@@ -704,3 +704,37 @@ export async function runStage(
 	}
 	return assets;
 }
+
+/** 需求录入 chat 化(T05):多轮澄清 → 收敛为 {title,description}。无 repo/工具,纯对话。 */
+export async function chatIntake(
+	history: Array<{ role: "user" | "assistant"; content: string }>,
+): Promise<string> {
+	const model = modelRuntime.getModel(PROVIDER, MODEL_ID);
+	if (!model) throw new Error(`model not found: ${PROVIDER}/${MODEL_ID}`);
+	const cwd = process.cwd();
+	const { session } = await createAgentSession({
+		cwd,
+		model,
+		modelRuntime,
+		resourceLoader,
+		tools: [],
+		sessionManager: SessionManager.inMemory(cwd),
+	});
+	try {
+		const sys =
+			"你是 BaiZe 的需求澄清助手。和用户对话澄清一个软件需求。每轮二选一:① 问一个聚焦的澄清问题(用户/边界/异常/约束/规模);② 信息足够时输出严格 JSON {\"title\":string,\"description\":string}(description 写完整需求,含边界与约束),且只输出该 JSON。";
+		const prompt =
+			sys +
+			"\n\n" +
+			history.map((m) => `${m.role === "user" ? "用户" : "助手"}: ${m.content}`).join("\n") +
+			"\n\n助手:";
+		await session.prompt(prompt);
+		return lastAssistantText(session);
+	} finally {
+		try {
+			await session.dispose?.();
+		} catch {
+			/* ignore */
+		}
+	}
+}

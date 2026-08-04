@@ -18,7 +18,7 @@ import type { StageName } from "./cli.js";
 
 // 必须在 import cli.ts 前设,否则 cli.ts 的 main 会跑(import 即执行)。
 process.env.BAIZE_GATEWAY = "1";
-const { runStage } = await import("./cli.js");
+const { runStage, chatIntake } = await import("./cli.js");
 
 const ROOT =
 	process.env.BAIZE_PROJECT_ROOT ??
@@ -649,6 +649,21 @@ const server = http.createServer(
 			sseClients.add(res);
 			res.write(": connected\n\n");
 			req.on("close", () => sseClients.delete(res));
+			return;
+		}
+
+		if (url.pathname === "/api/chat/intake" && req.method === "POST") {
+			const b = (await readJson(req)) as { messages?: Array<{ role: string; content: string }> } | null;
+			if (!b?.messages?.length) {
+				json(400, { error: "messages required" });
+				return;
+			}
+			try {
+				const reply = await chatIntake(b.messages as Array<{ role: "user" | "assistant"; content: string }>);
+				json(200, { reply });
+			} catch (e) {
+				json(500, { error: String((e as Error)?.message ?? e) });
+			}
 			return;
 		}
 
