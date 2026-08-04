@@ -352,6 +352,19 @@ async function serveStatic(res: ServerResponse, pathname: string): Promise<void>
 	}
 }
 
+// SSE:阶段 run 事件流(单向推送,无新依赖;替代 ws)。token 级流式待 runStage 仪器化。
+const sseClients = new Set<ServerResponse>();
+function broadcastRun(ev: Record<string, unknown>) {
+	const line = `data: ${JSON.stringify(ev)}\n\n`;
+	for (const c of sseClients) {
+		try {
+			c.write(line);
+		} catch {
+			sseClients.delete(c);
+		}
+	}
+}
+
 const server = http.createServer(
 	async (req: IncomingMessage, res: ServerResponse) => {
 		res.setHeader("access-control-allow-origin", "*");
@@ -494,7 +507,8 @@ const server = http.createServer(
 					name: string;
 				};
 				const refs = await runArchive(reqId, requirement, wsRow?.name ?? "");
-				store.setStage(reqId, "归档", "完成", refs);
+			store.setStage(reqId, "归档", "完成", refs);
+			broadcastRun({ type: "done", requirementId: reqId, stage: "归档" });
 				json(200, { ok: true, refs });
 				return;
 			}
@@ -517,6 +531,7 @@ const server = http.createServer(
 			const ws = store.getWorkspace(requirement.workspace_id) as
 				| { repo_path: string }
 				| undefined;
+			broadcastRun({ type: "start", requirementId: reqId, stage, requirementTitle: requirement.title });
 			const assets = await runStage({
 				repoPath: ws?.repo_path ?? ROOT,
 				repoId: ws?.repo_path.split("/").pop() ?? "",
@@ -534,6 +549,7 @@ const server = http.createServer(
 				parseRefs(cur),
 			);
 			store.setStage(reqId, STAGE_CN[stage], "待审", refs);
+			broadcastRun({ type: "done", requirementId: reqId, stage: STAGE_CN[stage] });
 			json(200, { ok: true, refs });
 			return;
 		}
@@ -621,6 +637,18 @@ const server = http.createServer(
 			}
 			out.sort((a, b) => String(b.updated_at).localeCompare(String(a.updated_at)));
 			json(200, out);
+			return;
+		}
+
+		if (url.pathname === "/api/runs/stream" && req.method === "GET") {
+			res.writeHead(200, {
+				"content-type": "text/event-stream",
+				"cache-control": "no-cache",
+				connection: "keep-alive",
+			});
+			sseClients.add(res);
+			res.write(": connected\n\n");
+			req.on("close", () => sseClients.delete(res));
 			return;
 		}
 

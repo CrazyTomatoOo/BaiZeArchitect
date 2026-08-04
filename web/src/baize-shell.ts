@@ -357,6 +357,7 @@ class BaizeShell extends LitElement {
 					</div>
 				</main>
 			<baize-command-palette></baize-command-palette>
+			<baize-run-rail></baize-run-rail>
 			</div>
 		`;
 	}
