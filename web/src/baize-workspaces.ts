@@ -26,6 +26,7 @@ class BaizeWorkspaces extends LitElement {
 		}
 		.page {
 			max-width: 720px;
+			margin: 0 auto;
 		}
 		.page-head h1 {
 			margin: 0;
@@ -207,7 +208,12 @@ class BaizeWorkspaces extends LitElement {
 		this.repoPath = "";
 		this.name = "";
 		await this.load();
-		this.dispatchEvent(new CustomEvent("baize-workspaces-changed", { bubbles: true, composed: true }));
+		this.dispatchEvent(
+			new CustomEvent("baize-workspaces-changed", {
+				bubbles: true,
+				composed: true,
+			}),
+		);
 	}
 
 	private renderForm(mode: "hero" | "card") {
@@ -251,14 +257,15 @@ class BaizeWorkspaces extends LitElement {
 					<h1>工作区</h1>
 					<p class="sub">每个工作区对应一个代码仓库,是需求设计的载体</p>
 				</header>
-				${empty
-					? html`<div class="empty">
+				${
+					empty
+						? html`<div class="empty">
 							<div class="empty-icon">${folderSvg}</div>
 							<h2>创建工作区开始设计</h2>
 							<p>一个工作区 = 一个代码仓库。创建后,即可在其中录入需求并驱动设计流水线。</p>
 							${this.renderForm("hero")}
 						</div>`
-					: html`<div class="list">
+						: html`<div class="list">
 								${this.list.map(
 									(w) => html`<div class="ws-card">
 										<div class="ws-top">
@@ -269,7 +276,8 @@ class BaizeWorkspaces extends LitElement {
 									</div>`,
 								)}
 							</div>
-							${this.renderForm("card")}`}
+							${this.renderForm("card")}`
+				}
 			</div>
 		`;
 	}

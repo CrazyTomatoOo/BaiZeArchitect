@@ -134,8 +134,6 @@ class BaizeShell extends LitElement {
 		}
 		main {
 			overflow: auto;
-			max-width: var(--content-max);
-			margin: 0 auto;
 			padding: var(--pad) calc(var(--pad) * 1.4) 3rem;
 		}
 		[hidden] {

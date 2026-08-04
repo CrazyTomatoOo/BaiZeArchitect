@@ -1,9 +1,8 @@
 import { LitElement, html, css } from "lit";
 
 /**
- * baize-overview — 总览仪表盘(T06 §6.3):计数卡片 + 各工作区进展条。
+ * baize-overview — 总览仪表盘(现代化):计数卡片 + 各工作区进展条。
  * 数据:GET /api/overview(counts)+ /api/workspaces + 每 ws /api/requirements(N+1,workspace 少可接受)。
- * 待决策计数 / 近期活动流待 step7(待决策页带 pending 端点)接入。
  */
 interface WsProgress {
 	id: number;
@@ -37,34 +36,65 @@ class BaizeOverview extends LitElement {
 		:host {
 			display: block;
 		}
-		h2 {
-			margin: 0 0 var(--gap);
-			font-size: 1rem;
+		.page-head h1 {
+			margin: 0;
+			font-size: 1.4rem;
+			font-weight: 650;
+			letter-spacing: -0.01em;
 		}
-		section + section {
-			margin-top: calc(var(--gap) * 2);
+		.page-head .sub {
+			margin: 4px 0 24px;
+			color: var(--text-muted);
+			font-size: 0.88rem;
 		}
-		.grid {
+		/* 计数卡片 */
+		.stats {
 			display: grid;
-			grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+			grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
 			gap: var(--gap);
+			margin-bottom: 32px;
 		}
-		.card {
+		.stat {
 			background: var(--surface);
 			border: 1px solid var(--border);
 			border-radius: var(--radius);
-			padding: var(--pad);
+			padding: 16px;
+			position: relative;
+			overflow: hidden;
+			transition: border-color 0.2s, box-shadow 0.2s, transform 0.15s;
 		}
-		.num {
-			font-size: 1.7rem;
+		.stat:hover {
+			border-color: var(--border-strong);
+			box-shadow: 0 6px 20px rgba(0, 0, 0, 0.3);
+			transform: translateY(-2px);
+		}
+		.stat::before {
+			content: "";
+			position: absolute;
+			left: 0;
+			top: 0;
+			bottom: 0;
+			width: 3px;
+			background: var(--accent);
+			opacity: 0.7;
+		}
+		.stat .num {
+			font-size: 1.9rem;
 			font-weight: 700;
-			color: var(--accent);
+			color: var(--text);
 			font-family: var(--font-mono);
+			line-height: 1.1;
 		}
-		.label {
+		.stat .label {
 			font-size: 0.76rem;
 			color: var(--text-muted);
-			margin-top: 0.2rem;
+			margin-top: 6px;
+		}
+		/* 工作区进展 */
+		.section-title {
+			margin: 0 0 14px;
+			font-size: 1rem;
+			font-weight: 600;
 		}
 		.ws-list {
 			display: flex;
@@ -75,23 +105,30 @@ class BaizeOverview extends LitElement {
 			background: var(--surface);
 			border: 1px solid var(--border);
 			border-radius: var(--radius);
-			padding: var(--pad);
+			padding: 16px;
+			transition: border-color 0.2s;
 		}
-		.ws-row .top {
+		.ws-row:hover {
+			border-color: var(--border-strong);
+		}
+		.ws-top {
 			display: flex;
 			align-items: center;
-			gap: var(--gap);
-			margin-bottom: 8px;
+			gap: 10px;
+			margin-bottom: 10px;
 		}
-		.ws-row .name {
+		.ws-name {
 			font-weight: 600;
-			font-size: 0.9rem;
+			font-size: 0.92rem;
 		}
-		.ws-row .meta {
-			color: var(--text-muted);
-			font-size: 0.8rem;
-			font-family: var(--font-mono);
+		.ws-meta {
 			margin-left: auto;
+			color: var(--text-muted);
+			font-size: 0.78rem;
+			font-family: var(--font-mono);
+		}
+		.ws-meta .running {
+			color: var(--run);
 		}
 		.bar {
 			height: 6px;
@@ -103,14 +140,18 @@ class BaizeOverview extends LitElement {
 			height: 100%;
 			background: var(--accent);
 			border-radius: 99px;
-		}
-		.running {
-			color: var(--run);
+			transition: width 0.4s ease;
 		}
 		.empty {
-			color: var(--text-subtle);
-			font-size: 0.85rem;
-			padding: var(--pad);
+			display: flex;
+			flex-direction: column;
+			align-items: center;
+			padding: 48px 24px;
+			color: var(--text-muted);
+			background: var(--surface);
+			border: 1px dashed var(--border-strong);
+			border-radius: var(--radius);
+			font-size: 0.86rem;
 		}
 	`;
 
@@ -133,7 +174,6 @@ class BaizeOverview extends LitElement {
 				Array<{ id: number; name: string }>,
 			];
 			this.counts = c;
-			// ponytail: N+1 per workspace(/api/requirements 每 ws);workspace 少可接受
 			const progress: WsProgress[] = [];
 			for (const w of ws) {
 				const reqs = (await (
@@ -156,48 +196,43 @@ class BaizeOverview extends LitElement {
 
 	render() {
 		return html`
-			<h2>总览</h2>
-			<section>
-				<div class="grid">
-					${COUNTS.map(
-						([k, label]) => html`
-							<div class="card">
-								<div class="num">${this.counts[k] ?? 0}</div>
-								<div class="label">${label}</div>
-							</div>
-						`,
-					)}
-				</div>
-			</section>
-			<section>
-				<h2>各工作区进展</h2>
-				${!this.wsProgress.length
-					? html`<div class="empty">
-							${this.busy ? "加载中…" : "还没有工作区。"}
-						</div>`
-					: html`<div class="ws-list">
-							${this.wsProgress.map((w) => {
-								const pct = w.total
-									? Math.round((w.done / w.total) * 100)
-									: 0;
-								return html`
-									<div class="ws-row">
-										<div class="top">
-											<span class="name">${w.name}</span>
-											<span class="meta">
-												${w.done}/${w.total} 完成${w.running
-													? html` · <span class="running">▶ ${w.running} 进行中</span>`
-													: ""}
-											</span>
-										</div>
-										<div class="bar">
-											<div class="fill" style="width:${pct}%"></div>
-										</div>
+			<header class="page-head">
+				<h1>总览</h1>
+				<p class="sub">跨工作区的资产与需求进展一览</p>
+			</header>
+			<div class="stats">
+				${COUNTS.map(
+					([k, label]) => html`
+						<div class="stat">
+							<div class="num">${this.counts[k] ?? 0}</div>
+							<div class="label">${label}</div>
+						</div>
+					`,
+				)}
+			</div>
+			<h3 class="section-title">各工作区进展</h3>
+			${!this.wsProgress.length
+				? html`<div class="empty">${this.busy ? "加载中…" : "还没有工作区,先去工作区页创建一个"}</div>`
+				: html`<div class="ws-list">
+						${this.wsProgress.map((w) => {
+							const pct = w.total ? Math.round((w.done / w.total) * 100) : 0;
+							return html`
+								<div class="ws-row">
+									<div class="ws-top">
+										<span class="ws-name">${w.name}</span>
+										<span class="ws-meta">
+											${w.done}/${w.total} 完成${w.running
+												? html` · <span class="running">▶ ${w.running} 进行中</span>`
+												: ""}
+										</span>
 									</div>
-								`;
-							})}
-						</div>`}
-			</section>
+									<div class="bar">
+										<div class="fill" style="width:${pct}%"></div>
+									</div>
+								</div>
+							`;
+						})}
+					</div>`}
 		`;
 	}
 }
