@@ -21,6 +21,9 @@
 
 <!-- one line per closed ticket: gist + link -->
 
+- [T01 OpenClaw Control UI 页面设计调研](tickets/T01-openclaw-control-ui-design.md) — Claw 深色 tokens(`#0e1015`/`#161920`/`#ff5c5c`/运行专色 `#14b8a6`)+ 亮度阶梯分层 + sidebar 导航 + attention chips/run rail;不借三主题与 33 页体量。findings: `research/T01-openclaw-control-ui-design.md`
+- [T02 Hermes Agent Dashboard 页面设计调研](tickets/T02-hermes-dashboard-design.md) — Hermes Teal(`#041c1c`/`#ffe6cb`)+ color-mix 透明度阶梯派生 + sidebar 底部常驻状态区 + profile/scope 防歧义三连 + schema 驱动表单 + `display:none` 保活 + pulse=live;不借 PTY/8 主题/换栈。findings: `research/T02-hermes-dashboard-design.md`
+
 ## Not yet specified
 
 - 方案文档的章节结构与验收标准(T06 整合时明确)。
@@ -36,8 +39,8 @@
 
 ## Tickets(frontier = open+unblocked+unclaimed)
 
-- [T01 OpenClaw Control UI 页面设计调研](tickets/T01-openclaw-control-ui-design.md) `research` — open
-- [T02 Hermes Agent Dashboard 页面设计调研](tickets/T02-hermes-dashboard-design.md) `research` — open
+- [T01 OpenClaw Control UI 页面设计调研](tickets/T01-openclaw-control-ui-design.md) `research` — **closed**:深色 tokens + IA/交互范式(findings 落盘)
+- [T02 Hermes Agent Dashboard 页面设计调研](tickets/T02-hermes-dashboard-design.md) `research` — **closed**:Teal tokens + color-mix 派生 + 常驻状态区/schema 表单(findings 落盘)
 - [T03 新信息架构/导航结构](tickets/T03-ia-navigation.md) `grilling` — open(blocked-by: T01, T02)
 - [T04 视觉语言/设计 tokens 原型页](tickets/T04-visual-tokens-prototype.md) `prototype` — open(blocked-by: T01, T02)
 - [T05 交互模式](tickets/T05-interaction-patterns.md) `grilling` — open(blocked-by: T01, T02)

@@ -1,6 +1,6 @@
 # T01 — OpenClaw Control UI 页面设计调研 `wayfinder:research`
 
-status: open
+status: closed
 assignee: pi(research)
 blocked-by:
 research: research/T01-openclaw-control-ui-design.md
@@ -18,3 +18,8 @@ OpenClaw Control UI 的**页面设计**是什么样的,哪些可借到 BaiZe?按
 (Vite+Lit,从源码抽真实 tokens)。起点见 `docs/research-ui-agent-skill-refs.md` §1。
 
 产出:`research/T01-openclaw-control-ui-design.md`(四维度 findings + 对 BaiZe 的可借鉴点 + 证据链接)。
+
+## Resolution(2026-08-05,research 子代理)
+
+findings 落盘:`research/T01-openclaw-control-ui-design.md`(145 行,四维度 + 可借鉴点 + 来源清单)。
+gist:Claw 深色全套 tokens(bg `#0e1015`/card `#161920`/accent `#ff5c5c`/运行中专色 `#14b8a6`,带 WCAG 审计);四级亮度阶梯代替边框;sidebar-only 导航 + 作用域切换;attention chips 审批提醒;run rail 400px 右列;⌘K/⌘B 键盘纪律;本地/服务端状态分界线。不借:三套主题、33 页体量。
