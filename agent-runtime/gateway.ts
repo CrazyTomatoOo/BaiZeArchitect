@@ -576,7 +576,27 @@ const server = http.createServer(
 			return;
 		}
 
-		// 非 API GET → web/dist(SPA);生产部署唯一入口
+		if (url.pathname === "/api/assets" && req.method === "GET") {
+			// ponytail: N+1 per scenario(listUseCases 按 scenarioId);workspace 小可接受,大时加 store.listUseCasesByWorkspace
+			const ws = Number(url.searchParams.get("workspace") ?? 0);
+			const scenarios = store.listScenarios(ws) as Array<Record<string, unknown>>;
+			const usecases: Array<Record<string, unknown>> = [];
+			for (const s of scenarios) {
+				const sid = s.id as number;
+				for (const u of store.listUseCases(sid) as Array<Record<string, unknown>>) {
+					usecases.push({ ...u, scenarioTitle: s.title });
+				}
+			}
+			const domains = store.listFunctionDomains(ws) as Array<Record<string, unknown>>;
+			const functions = domains.map((d) => ({
+				domain: d,
+				items: store.listFunctionItems(d.id as number),
+			}));
+			json(200, { scenarios, usecases, functions });
+			return;
+		}
+
+	// 非 API GET → web/dist(SPA);生产部署唯一入口
 		if (req.method === "GET") {
 			await serveStatic(res, url.pathname);
 			return;

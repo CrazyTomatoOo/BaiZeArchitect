@@ -148,17 +148,29 @@ class BaizeShell extends LitElement {
 
 	connectedCallback(): void {
 		super.connectedCallback();
-		this.addEventListener("baize-goto", (this.onGoto as EventListener));
-		this.addEventListener("baize-fold-toggle", (this.onFoldToggle as EventListener));
-		this.addEventListener("baize-new-requirement", (this.onNewRequirement as EventListener));
+		this.addEventListener("baize-goto", this.onGoto as EventListener);
+		this.addEventListener(
+			"baize-fold-toggle",
+			this.onFoldToggle as EventListener,
+		);
+		this.addEventListener(
+			"baize-new-requirement",
+			this.onNewRequirement as EventListener,
+		);
 		addEventListener("keydown", this.onKey);
 	}
 
 	disconnectedCallback(): void {
 		super.disconnectedCallback();
-		this.removeEventListener("baize-goto", (this.onGoto as EventListener));
-		this.removeEventListener("baize-fold-toggle", (this.onFoldToggle as EventListener));
-		this.removeEventListener("baize-new-requirement", (this.onNewRequirement as EventListener));
+		this.removeEventListener("baize-goto", this.onGoto as EventListener);
+		this.removeEventListener(
+			"baize-fold-toggle",
+			this.onFoldToggle as EventListener,
+		);
+		this.removeEventListener(
+			"baize-new-requirement",
+			this.onNewRequirement as EventListener,
+		);
 		removeEventListener("keydown", this.onKey);
 	}
 
@@ -178,13 +190,19 @@ class BaizeShell extends LitElement {
 
 	private onKey = (e: KeyboardEvent) => {
 		const t = e.target as HTMLElement | null;
-		if (t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.isContentEditable)) {
+		if (
+			t &&
+			(t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.isContentEditable)
+		) {
 			return;
 		}
 		if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "b") {
 			e.preventDefault();
 			this.folded = !this.folded;
-			localStorage.setItem("baize.ui.v1.sidebarFolded", this.folded ? "1" : "0");
+			localStorage.setItem(
+				"baize.ui.v1.sidebarFolded",
+				this.folded ? "1" : "0",
+			);
 		}
 	};
 
@@ -213,8 +231,14 @@ class BaizeShell extends LitElement {
 								class="nav-item ${this.tab === "requirement" ? "active" : ""}"
 								@click=${() => this.goto("requirement")}
 							>
-								需求
-							</button>
+							需求
+						</button>
+						<button
+							class="nav-item ${this.tab === "assets" ? "active" : ""}"
+							@click=${() => this.goto("assets")}
+						>
+							资产库
+						</button>
 							<button
 								class="nav-item ${this.tab === "overview" ? "active" : ""}"
 								@click=${() => this.goto("overview")}
@@ -239,7 +263,8 @@ class BaizeShell extends LitElement {
 				</aside>
 				<main>
 					<baize-requirement ?hidden=${this.tab !== "requirement"}></baize-requirement>
-					<baize-workspaces ?hidden=${this.tab !== "workspaces"}></baize-workspaces>
+						<baize-workspaces ?hidden=${this.tab !== "workspaces"}></baize-workspaces>
+						<baize-asset-library ?hidden=${this.tab !== "assets"}></baize-asset-library>
 					<div ?hidden=${this.tab !== "overview"}>
 						<baize-overview></baize-overview>
 						<baize-dashboard></baize-dashboard>
