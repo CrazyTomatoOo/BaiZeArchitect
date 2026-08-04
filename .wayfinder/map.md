@@ -25,12 +25,12 @@
 - [T02 Hermes Agent Dashboard 页面设计调研](tickets/T02-hermes-dashboard-design.md) — Hermes Teal(`#041c1c`/`#ffe6cb`)+ color-mix 透明度阶梯派生 + sidebar 底部常驻状态区 + profile/scope 防歧义三连 + schema 驱动表单 + `display:none` 保活 + pulse=live;不借 PTY/8 主题/换栈。findings: `research/T02-hermes-dashboard-design.md`
 - [T03 新信息架构/导航结构](tickets/T03-ia-navigation.md) — sidebar 三区 6 页(新增资产库页;旧 dashboard 收编系统页);workspace 单作用域 + 防歧义三连;localStorage 记住落地页、首访分流。
 - [T05 交互模式](tickets/T05-interaction-patterns.md) — ws 真流式 + run rail(gateway 需补 ws 基建);需求录入 chat 化;⌘K 面板 + ⌘B/Esc;审批 consent gate;UI 偏好 localStorage `baize.ui.v1.*`。
+- [T04 视觉语言/设计 tokens 原型页](tickets/T04-visual-tokens-prototype.md) — C(Graphite Indigo)胜出:石墨 + `#7c8cff` + 可见边框 + 6px + compact;tokens 沿用 CSS vars;原型 `web/redesign-mock.html`(3 变体可切)。
 
 ## Not yet specified
 
 - 方案文档的章节结构与验收标准(T06 整合时明确)。
 - 重构后的视觉验证方式(如 agent_browser 截图基线对比)。
-- 设计 tokens 落地形式(沿用 CSS vars 还是抽 theme 模块)。
 - chat 录入的澄清机制细节(澄清轮次、如何收敛为结构化需求)—— T06 逐页设计时定。
 
 ## Out of scope
@@ -44,6 +44,6 @@
 - [T01 OpenClaw Control UI 页面设计调研](tickets/T01-openclaw-control-ui-design.md) `research` — **closed**:深色 tokens + IA/交互范式(findings 落盘)
 - [T02 Hermes Agent Dashboard 页面设计调研](tickets/T02-hermes-dashboard-design.md) `research` — **closed**:Teal tokens + color-mix 派生 + 常驻状态区/schema 表单(findings 落盘)
 - [T03 新信息架构/导航结构](tickets/T03-ia-navigation.md) `grilling` — **closed**:sidebar 三区 6 页 + workspace 单作用域
-- [T04 视觉语言/设计 tokens 原型页](tickets/T04-visual-tokens-prototype.md) `prototype` — open(blocked-by: T01, T02)
+- [T04 视觉语言/设计 tokens 原型页](tickets/T04-visual-tokens-prototype.md) `prototype` — **closed**:C Graphite Indigo 胜出(石墨+靛蓝+可见边框+6px+compact)
 - [T05 交互模式](tickets/T05-interaction-patterns.md) `grilling` — **closed**:ws 流式+rail、录入 chat 化、⌘K、consent gate、状态分界
-- [T06 逐页设计要点+方案文档整合](tickets/T06-plan-doc-synthesis.md) `grilling` — open(blocked-by: T03, T04, T05)
+- [T06 逐页设计要点+方案文档整合](tickets/T06-plan-doc-synthesis.md) `grilling` — open(frontier:T03/T04/T05 全 closed,已解锁)

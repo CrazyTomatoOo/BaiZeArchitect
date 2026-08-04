@@ -1,0 +1,244 @@
+<!doctype html>
+<!-- PROTOTYPE — throwaway. T04 视觉语言/tokens 原型。
+     结构(IA/交互)已被 T03/T05 锁定;本原型隔离「视觉语言」这一个变量。
+     三变体 ?variant=A|B|C,浮动底栏 + ←/→ 切换。一个命令:open 此文件(file://)。
+     结构共享(同一 markup),只换 :root tokens —— 因结构已定,视觉语言是唯一开放变量。 -->
+<html lang="zh" data-variant="A">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>BaiZe web 重构 — 视觉原型</title>
+<style>
+/* ============ Variant A — Claw Neutral(冷暗,亮度阶梯无框,10px,comfortable) ============ */
+:root, html[data-variant="A"] {
+  --bg:#0e1015; --surface:#161920; --surface-2:#191c24; --surface-hover:#1f2330;
+  --border:#1e2028; --border-strong:#2a2d36;
+  --text:#e6e7eb; --text-muted:#8b8f9a; --text-subtle:#565a66;
+  --accent:#ff5c5c; --accent-fg:#0e1015;
+  --ok:#22c55e; --run:#14b8a6; --warn:#f59e0b; --danger:#ef4444; --info:#3b82f6; --muted:#6b7280;
+  --radius:10px; --radius-sm:6px;
+  --font-ui:-apple-system,"SF Pro Text",system-ui,sans-serif;
+  --font-mono:"SF Mono",ui-monospace,"JetBrains Mono",monospace;
+  --pad:20px; --gap:16px;
+}
+/* ============ Variant B — Hermes Warm(暖青绿,color-mix 透明层,16px,looser) ============ */
+html[data-variant="B"] {
+  --bg:#041c1c; --surface:#0a2828; --surface-2:#103030; --surface-hover:#163a3a;
+  --border:rgba(255,230,203,.08); --border-strong:rgba(255,230,203,.16);
+  --text:#ffe6cb; --text-muted:#b8a98f; --text-subtle:#7a6f5c;
+  --accent:#f5a623; --accent-fg:#041c1c;
+  --ok:#4ade80; --run:#2dd4bf; --warn:#fbbf24; --danger:#f87171; --info:#60a5fa; --muted:#9a8b72;
+  --radius:16px; --radius-sm:10px;
+  --pad:24px; --gap:20px;
+}
+/* ============ Variant C — Graphite Indigo(石墨,可见边框,6px,compact,BaiZe 签名) ============ */
+html[data-variant="C"] {
+  --bg:#111317; --surface:#1a1d23; --surface-2:#21242b; --surface-hover:#2a2e36;
+  --border:#2c3038; --border-strong:#3a3f49;
+  --text:#d8dbe0; --text-muted:#878c96; --text-subtle:#545862;
+  --accent:#7c8cff; --accent-fg:#111317;
+  --ok:#34d399; --run:#38bdf8; --warn:#fbbf24; --danger:#fb7185; --info:#818cf8; --muted:#6b7280;
+  --radius:6px; --radius-sm:4px;
+  --pad:14px; --gap:12px;
+}
+
+* { box-sizing:border-box; }
+html,body { margin:0; height:100%; }
+body {
+  background:var(--bg); color:var(--text); font-family:var(--font-ui);
+  font-size:14px; line-height:1.5; -webkit-font-smoothing:antialiased;
+}
+button { font:inherit; color:inherit; cursor:pointer; }
+
+.app { display:grid; grid-template-columns:258px 1fr 400px; height:100vh; }
+
+/* ---------- sidebar ---------- */
+.sidebar { background:var(--surface); border-right:1px solid var(--border); display:flex; flex-direction:column; }
+.ws-switch { display:flex; align-items:center; gap:8px; padding:14px var(--pad); border-bottom:1px solid var(--border); font-weight:600; }
+.ws-switch .dot { color:var(--accent); }
+.ws-switch .caret { margin-left:auto; color:var(--text-muted); }
+.nav { padding:var(--gap) 0; flex:1; overflow:auto; }
+.nav-group { padding:0 var(--pad) var(--gap); }
+.nav-group + .nav-group { border-top:1px solid var(--border); padding-top:var(--gap); }
+.nav-group .label { font-size:11px; text-transform:uppercase; letter-spacing:.06em; color:var(--text-subtle); margin-bottom:6px; }
+.nav-item { display:flex; align-items:center; gap:8px; padding:7px 8px; border-radius:var(--radius-sm); color:var(--text-muted); }
+.nav-item:hover { background:var(--surface-hover); color:var(--text); }
+.nav-item.active { background:var(--surface-2); color:var(--text); }
+.nav-item .chip { margin-left:auto; background:var(--warn); color:#000; font-size:11px; font-weight:700; padding:1px 7px; border-radius:99px; }
+.status-foot { padding:var(--pad); border-top:1px solid var(--border); font-size:12px; color:var(--text-muted); display:flex; flex-direction:column; gap:4px; }
+.status-foot .live { color:var(--ok); }
+
+/* ---------- main ---------- */
+.main { overflow:auto; padding:var(--pad) calc(var(--pad)*1.4); }
+.main h1 { margin:0 0 4px; font-size:18px; }
+.main .sub { color:var(--text-muted); font-size:13px; margin-bottom:var(--gap); }
+.pipeline { display:flex; gap:0; margin:var(--gap) 0; }
+.stage { flex:1; padding:10px 12px; background:var(--surface); border:1px solid var(--border); border-right:none; font-size:12px; display:flex; flex-direction:column; gap:6px; }
+.stage:first-child { border-radius:var(--radius-sm) 0 0 var(--radius-sm); }
+.stage:last-child { border-radius:0 var(--radius-sm) var(--radius-sm) 0; border-right:1px solid var(--border); }
+.stage .n { color:var(--text-subtle); font-family:var(--font-mono); font-size:11px; }
+.stage .s { display:flex; align-items:center; gap:6px; }
+.stage .sd { width:8px; height:8px; border-radius:99px; background:var(--muted); }
+.stage.done .sd { background:var(--ok); }
+.stage.run .sd { background:var(--run); animation:pulse 1.4s infinite; }
+.stage.todo .sd { background:var(--text-subtle); }
+@keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.35} }
+
+.card { background:var(--surface); border:1px solid var(--border); border-radius:var(--radius); padding:var(--pad); margin-top:var(--gap); }
+.card h2 { margin:0 0 12px; font-size:14px; display:flex; align-items:center; gap:8px; }
+.row { display:flex; align-items:center; gap:10px; padding:9px 0; border-bottom:1px solid var(--border); }
+.row:last-child { border-bottom:none; }
+.row .badge { font-size:11px; padding:1px 8px; border-radius:99px; font-weight:600; }
+.badge.run { background:rgba(20,184,166,.15); color:var(--run); }
+.badge.warn { background:rgba(245,158,11,.15); color:var(--warn); }
+.badge.ok { background:rgba(34,197,94,.15); color:var(--ok); }
+.row .mono { font-family:var(--font-mono); color:var(--text-muted); font-size:12px; margin-left:auto; }
+
+.approve { display:flex; gap:10px; margin-top:14px; }
+.btn { padding:7px 14px; border-radius:var(--radius-sm); border:1px solid var(--border-strong); background:var(--surface-2); color:var(--text); }
+.btn.primary { background:var(--accent); color:var(--accent-fg); border-color:transparent; font-weight:600; }
+.btn.ghost { background:transparent; }
+
+/* ---------- run rail ---------- */
+.rail { background:var(--surface); border-left:1px solid var(--border); display:flex; flex-direction:column; }
+.rail .head { padding:14px var(--pad); border-bottom:1px solid var(--border); }
+.rail .head .t { font-weight:600; display:flex; align-items:center; gap:8px; }
+.rail .head .t .sd { width:8px;height:8px;border-radius:99px;background:var(--run);animation:pulse 1.4s infinite; }
+.rail .head .m { color:var(--text-muted); font-size:12px; margin-top:4px; font-family:var(--font-mono); }
+.rail .body { padding:var(--pad); overflow:auto; flex:1; }
+.ev { font-family:var(--font-mono); font-size:12px; color:var(--text-muted); padding:4px 0; display:flex; gap:8px; }
+.ev .ts { color:var(--text-subtle); }
+.ev .k { color:var(--info); }
+.ev .k.ok { color:var(--ok); }
+.rail .foot { padding:var(--pad); border-top:1px solid var(--border); font-size:12px; color:var(--text-muted); }
+
+/* ---------- tokens panel ---------- */
+.tokens { margin-top:var(--gap); border-top:1px solid var(--border); padding-top:var(--gap); }
+.tokens h3 { margin:0 0 8px; font-size:12px; color:var(--text-subtle); text-transform:uppercase; letter-spacing:.06em; }
+.sw { display:flex; gap:6px; flex-wrap:wrap; }
+.sw i { width:22px;height:22px;border-radius:4px;border:1px solid var(--border-strong); display:inline-block; }
+
+/* ---------- floating switcher ---------- */
+.switcher { position:fixed; bottom:18px; left:50%; transform:translateX(-50%); display:flex; align-items:center; gap:14px; background:#000; color:#fff; border:1px solid #444; border-radius:99px; padding:8px 16px; font-size:13px; box-shadow:0 8px 24px rgba(0,0,0,.5); z-index:99; }
+.switcher button { background:none; border:none; color:#fff; font-size:16px; padding:2px 6px; }
+.switcher .lbl { font-weight:600; }
+.switcher .hint { color:#999; font-size:11px; }
+</style>
+</head>
+<body>
+<div class="app">
+  <!-- SIDEBAR -->
+  <aside class="sidebar">
+    <div class="ws-switch"><span class="dot">◇</span> 当前工作区 <span class="mono" style="margin-left:8px;color:var(--text-muted);font-family:var(--font-mono);font-size:12px">lws</span><span class="caret">▾</span></div>
+    <nav class="nav">
+      <div class="nav-group">
+        <div class="label">工作</div>
+        <div class="nav-item active">需求</div>
+        <div class="nav-item">资产库</div>
+        <div class="nav-item">总览</div>
+      </div>
+      <div class="nav-group">
+        <div class="label">治理</div>
+        <div class="nav-item">待决策 <span class="chip">2</span></div>
+      </div>
+      <div class="nav-group">
+        <div class="label">管理</div>
+        <div class="nav-item">工作区</div>
+        <div class="nav-item">系统</div>
+      </div>
+    </nav>
+    <div class="status-foot">
+      <span><span class="live">●</span> ws 已连接</span>
+      <span>▶ 1 run 进行中 · 场景分析</span>
+    </div>
+  </aside>
+
+  <!-- MAIN -->
+  <main class="main">
+    <h1>用户登录模块设计</h1>
+    <div class="sub">workspace: lws · 需求版本 v3 · 最后更新 2 分钟前</div>
+
+    <div class="pipeline">
+      <div class="stage done"><span class="n">01</span><span class="s"><span class="sd"></span>需求分析</span></div>
+      <div class="stage done"><span class="n">02</span><span class="s"><span class="sd"></span>场景分析</span></div>
+      <div class="stage run"><span class="n">03</span><span class="s"><span class="sd"></span>用例分析</span></div>
+      <div class="stage todo"><span class="n">04</span><span class="s"><span class="sd"></span>功能分解</span></div>
+      <div class="stage todo"><span class="n">05</span><span class="s"><span class="sd"></span>功能设计</span></div>
+      <div class="stage todo"><span class="n">06</span><span class="s"><span class="sd"></span>归档</span></div>
+    </div>
+
+    <div class="card">
+      <h2><span class="sd" style="width:8px;height:8px;border-radius:99px;background:var(--run);display:inline-block;animation:pulse 1.4s infinite"></span>用例分析 · 运行中</h2>
+      <div class="row"><span class="badge run">运行中</span> UC-01 正常登录 <span class="mono">00:42</span></div>
+      <div class="row"><span class="badge warn">待审</span> UC-02 密码错误锁定 <span class="mono">3 轮</span></div>
+      <div class="row"><span class="badge ok">完成</span> UC-03 第三方 OAuth <span class="mono">v1</span></div>
+      <div class="approve">
+        <button class="btn primary">通过(consent)</button>
+        <button class="btn ghost">打回(意见)</button>
+      </div>
+    </div>
+
+    <div class="tokens">
+      <h3>design tokens · 当前变体</h3>
+      <div class="sw">
+        <i style="background:var(--bg)" title="bg"></i>
+        <i style="background:var(--surface)" title="surface"></i>
+        <i style="background:var(--surface-2)" title="surface-2"></i>
+        <i style="background:var(--border)" title="border"></i>
+        <i style="background:var(--accent)" title="accent"></i>
+        <i style="background:var(--run)" title="run"></i>
+        <i style="background:var(--ok)" title="ok"></i>
+        <i style="background:var(--warn)" title="warn"></i>
+        <i style="background:var(--danger)" title="danger"></i>
+        <i style="background:var(--info)" title="info"></i>
+      </div>
+    </div>
+  </main>
+
+  <!-- RUN RAIL -->
+  <aside class="rail">
+    <div class="head">
+      <div class="t"><span class="sd"></span>用例分析 · run</div>
+      <div class="m">运行中 00:42 · workspace lws</div>
+    </div>
+    <div class="body">
+      <div class="ev"><span class="ts">00:03</span><span class="k">tool</span> read baize-requirement.ts</div>
+      <div class="ev"><span class="ts">00:08</span><span class="k">tool</span> grep 场景</div>
+      <div class="ev"><span class="ts">00:21</span><span class="k ok">submit</span> UC-01 正常登录</div>
+      <div class="ev"><span class="ts">00:28</span><span class="k ok">submit</span> UC-02 密码错误锁定</div>
+      <div class="ev"><span class="ts">00:42</span><span class="k">llm</span> 生成 UC-03…</div>
+    </div>
+    <div class="foot">已产 3 用例 · 窄屏收成 pill</div>
+  </aside>
+</div>
+
+<!-- FLOATING SWITCHER -->
+<div class="switcher">
+  <button id="prev">‹</button>
+  <span class="lbl" id="lbl">A — Claw Neutral</span>
+  <button id="next">›</button>
+  <span class="hint">← → 切换</span>
+</div>
+
+<script>
+const VARIANTS = [
+  { k:'A', name:'Claw Neutral', note:'冷暗·亮度阶梯无框·10px·comfortable' },
+  { k:'B', name:'Hermes Warm', note:'暖青绿·color-mix 透明层·16px·looser' },
+  { k:'C', name:'Graphite Indigo', note:'石墨·可见边框·6px·compact·BaiZe 签名' },
+];
+const html = document.documentElement;
+const lbl = document.getElementById('lbl');
+function cur(){ const v = new URLSearchParams(location.search).get('variant') || 'A'; return VARIANTS.find(x=>x.k===v) || VARIANTS[0]; }
+function apply(v){ html.setAttribute('data-variant', v.k); lbl.textContent = v.k + ' — ' + v.name; try { const u = new URL(location.href); u.searchParams.set('variant', v.k); history.replaceState(null,'',u); } catch(_) { /* file:// 或无 history 时静默 */ } }
+function cycle(dir){ const i = VARIANTS.findIndex(x=>x.k===cur().k); const n = VARIANTS[(i+dir+VARIANTS.length)%VARIANTS.length]; apply(n); }
+apply(cur());
+document.getElementById('next').onclick = ()=>cycle(1);
+document.getElementById('prev').onclick = ()=>cycle(-1);
+addEventListener('keydown', e=>{
+  const t = e.target; if (t && (t.tagName==='INPUT'||t.tagName==='TEXTAREA'||t.isContentEditable)) return;
+  if (e.key==='ArrowRight') cycle(1);
+  if (e.key==='ArrowLeft') cycle(-1);
+});
+</script>
+</body>
+</html>
