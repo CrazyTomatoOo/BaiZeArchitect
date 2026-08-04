@@ -25,3 +25,28 @@ services:
       - BAIZE_AUTO_APPROVE=${BAIZE_AUTO_APPROVE:-1}
       - EVOLVER_IPC_TOKEN=${EVOLVER_IPC_TOKEN:-}
       - EVOLVER_PROXY_URL=${EVOLVER_PROXY_URL:-}
+
+  gateway:
+    build:
+      context: .
+      dockerfile: agent-runtime/Dockerfile
+    entrypoint: ["npx", "tsx", "gateway.ts"]
+    working_dir: /app/agent-runtime
+    ports:
+      - "18789:18789"
+    volumes:
+      - ./evidence:/evidence:ro
+      - ./out:/app/out
+      - ./evolver-home:/evolver-home
+    environment:
+      - BAIZE_PROJECT_ROOT=/app
+      - BAIZE_OUT_DIR=/app/out
+      - BAIZE_EVIDENCE_DIR=/evidence
+      - BAIZE_EVOLVER=1
+      - EVOLVER_HOME=/evolver-home
+      - RUNTIME_MODEL_PROVIDER=${PI_PROVIDER:-bailian}
+      - RUNTIME_MODEL_ID=${PI_MODEL:-glm-5.2}
+      - DASHSCOPE_API_KEY=${DASHSCOPE_API_KEY:-}
+      - BAIZE_AUTO_APPROVE=${BAIZE_AUTO_APPROVE:-1}
+      - EVOLVER_IPC_TOKEN=${EVOLVER_IPC_TOKEN:-}
+      - EVOLVER_PROXY_URL=${EVOLVER_PROXY_URL:-}
