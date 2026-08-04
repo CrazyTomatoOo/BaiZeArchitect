@@ -11,11 +11,15 @@ class BaizeShell extends LitElement {
 	static properties = {
 		tab: { state: true },
 		ws: { state: true },
+		wsName: { state: true },
+		workspaces: { state: true },
 		folded: { state: true },
 	};
 
 	declare tab: string;
-	declare ws: string | null;
+	declare ws: number;
+	declare wsName: string;
+	declare workspaces: Array<{ id: number; name: string }>;
 	declare folded: boolean;
 
 	static styles = css`
@@ -135,29 +139,57 @@ class BaizeShell extends LitElement {
 		[hidden] {
 			display: none;
 		}
+		/* step6: workspace scope */
+		.ws-select {
+			background: transparent;
+			border: none;
+			color: var(--text);
+			font: inherit;
+			font-weight: 600;
+			font-size: 0.9rem;
+			max-width: 170px;
+		}
+		.ws-select option {
+			background: var(--surface);
+			color: var(--text);
+		}
+		.ws-switch .dot.active {
+			color: var(--accent);
+		}
+		.scope-banner {
+			background: rgba(245, 158, 11, 0.12);
+			color: var(--warn);
+			border: 1px solid rgba(245, 158, 11, 0.3);
+			border-radius: var(--radius-sm);
+			padding: 6px 12px;
+			font-size: 0.8rem;
+			margin-bottom: var(--gap);
+			display: inline-flex;
+			align-items: center;
+			gap: 6px;
+		}
 	`;
 
 	constructor() {
 		super();
 		const lastPage = localStorage.getItem("baize.ui.v1.lastPage");
-		const hasWs = !!localStorage.getItem("baize.ui.v1.workspace");
-		this.tab = lastPage ?? (hasWs ? "requirement" : "workspaces");
-		this.ws = localStorage.getItem("baize.ui.v1.workspace");
+		const wsParam = new URLSearchParams(location.search).get("workspace");
+		const wsId = wsParam ? Number(wsParam) : Number(localStorage.getItem("baize.ui.v1.workspace") ?? "0");
+		this.tab = lastPage ?? (wsId ? "requirement" : "workspaces");
+		this.ws = Number.isFinite(wsId) ? wsId : 0;
+		this.wsName = localStorage.getItem("baize.ui.v1.workspaceName") ?? "";
+		this.workspaces = [];
 		this.folded = localStorage.getItem("baize.ui.v1.sidebarFolded") === "1";
 	}
 
-	connectedCallback(): void {
+	async connectedCallback(): Promise<void> {
 		super.connectedCallback();
 		this.addEventListener("baize-goto", this.onGoto as EventListener);
-		this.addEventListener(
-			"baize-fold-toggle",
-			this.onFoldToggle as EventListener,
-		);
-		this.addEventListener(
-			"baize-new-requirement",
-			this.onNewRequirement as EventListener,
-		);
+		this.addEventListener("baize-fold-toggle", this.onFoldToggle as EventListener);
+		this.addEventListener("baize-new-requirement", this.onNewRequirement as EventListener);
+		this.addEventListener("baize-workspaces-changed", this.onWorkspacesChanged as EventListener);
 		addEventListener("keydown", this.onKey);
+		await this.loadWorkspaces();
 	}
 
 	disconnectedCallback(): void {
@@ -171,6 +203,7 @@ class BaizeShell extends LitElement {
 			"baize-new-requirement",
 			this.onNewRequirement as EventListener,
 		);
+		this.removeEventListener("baize-workspaces-changed", this.onWorkspacesChanged as EventListener);
 		removeEventListener("keydown", this.onKey);
 	}
 
@@ -211,17 +244,71 @@ class BaizeShell extends LitElement {
 		localStorage.setItem("baize.ui.v1.lastPage", tab);
 	}
 
+	private async loadWorkspaces() {
+		try {
+			this.workspaces = (await (
+				await fetch("/api/workspaces")
+			).json()) as Array<{ id: number; name: string }>;
+			if (this.ws && !this.wsName) {
+				this.wsName =
+					this.workspaces.find((w) => w.id === this.ws)?.name ?? "";
+			}
+		} catch {
+			this.workspaces = [];
+		}
+	}
+
+	private setWs(id: number) {
+		this.ws = id;
+		this.wsName = this.workspaces.find((w) => w.id === id)?.name ?? "";
+		if (id) {
+			localStorage.setItem("baize.ui.v1.workspace", String(id));
+			localStorage.setItem("baize.ui.v1.workspaceName", this.wsName);
+		} else {
+			localStorage.removeItem("baize.ui.v1.workspace");
+			localStorage.removeItem("baize.ui.v1.workspaceName");
+		}
+		try {
+			const u = new URL(location.href);
+			if (id) u.searchParams.set("workspace", String(id));
+			else u.searchParams.delete("workspace");
+			history.replaceState(null, "", u);
+		} catch {
+			// file:// 无 history 时静默
+		}
+		this.dispatchEvent(
+			new CustomEvent("baize-workspace-change", {
+				detail: { id, name: this.wsName },
+				bubbles: true,
+				composed: true,
+			}),
+		);
+	}
+
+	private onWorkspacesChanged = () => {
+		this.loadWorkspaces();
+	};
+
 	render() {
 		return html`
 			<div class="app ${this.folded ? "folded" : ""}">
 				<aside class="sidebar">
-					<div
-						class="ws-switch"
-						@click=${() => this.goto("workspaces")}
-						title="切换/管理工作区"
-					>
-						<span class="dot">◇</span>
-						<span class="name">${this.ws ?? "未选择工作区"}</span>
+					<div class="ws-switch" title="切换工作区(作用域)">
+						<span class="dot ${this.ws ? "active" : ""}">◇</span>
+						<select
+							class="ws-select"
+							.value=${String(this.ws)}
+							@change=${(e: Event) =>
+								this.setWs(Number((e.target as HTMLSelectElement).value))}
+						>
+							<option value="0" ?disabled=${this.workspaces.length > 0}>
+								未选择工作区
+							</option>
+							${this.workspaces.map(
+								(w) =>
+									html`<option value=${w.id} ?selected=${w.id === this.ws}>${w.name}</option>`,
+							)}
+						</select>
 						<span class="caret">▾</span>
 					</div>
 					<nav class="nav">
@@ -262,6 +349,9 @@ class BaizeShell extends LitElement {
 					</div>
 				</aside>
 				<main>
+					${this.ws
+						? html`<div class="scope-banner">作用域:${this.wsName}</div>`
+						: null}
 					<baize-requirement ?hidden=${this.tab !== "requirement"}></baize-requirement>
 						<baize-workspaces ?hidden=${this.tab !== "workspaces"}></baize-workspaces>
 						<baize-asset-library ?hidden=${this.tab !== "assets"}></baize-asset-library>

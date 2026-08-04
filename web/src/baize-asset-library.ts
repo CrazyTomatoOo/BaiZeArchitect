@@ -159,7 +159,7 @@ class BaizeAssetLibrary extends LitElement {
 
 	constructor() {
 		super();
-		this.ws = 0;
+		this.ws = Number(localStorage.getItem("baize.ui.v1.workspace") ?? "0");
 		this.workspaces = [];
 		this.tab = "scenario";
 		this.data = null;
@@ -169,17 +169,13 @@ class BaizeAssetLibrary extends LitElement {
 
 	async connectedCallback(): Promise<void> {
 		super.connectedCallback();
-		try {
-			this.workspaces = (await (
-				await fetch("/api/workspaces")
-			).json()) as Array<{ id: number; name: string }>;
-			if (this.workspaces.length) {
-				this.ws = this.workspaces[0].id;
-				await this.load();
-			}
-		} catch {
-			this.busy = "";
-		}
+		this.addEventListener("baize-workspace-change", this.onWorkspaceChange as EventListener);
+		if (this.ws) await this.load();
+	}
+
+	disconnectedCallback(): void {
+		super.disconnectedCallback();
+		this.removeEventListener("baize-workspace-change", this.onWorkspaceChange as EventListener);
 	}
 
 	private async load() {
@@ -194,11 +190,10 @@ class BaizeAssetLibrary extends LitElement {
 		this.busy = "";
 	}
 
-	private pickWs = async (e: Event) => {
-		this.ws = Number((e.target as HTMLSelectElement).value);
-		await this.load();
+	private onWorkspaceChange = (e: CustomEvent<{ id: number }>) => {
+		this.ws = e.detail.id;
+		this.load();
 	};
-
 	private list(): Array<Record<string, unknown>> {
 		if (!this.data) return [];
 		if (this.tab === "scenario") return this.data.scenarios;
@@ -208,19 +203,10 @@ class BaizeAssetLibrary extends LitElement {
 
 	render() {
 		return html`
-			<div class="head">
-				<h2>资产库</h2>
-				<select
-					.value=${String(this.ws)}
-					@change=${this.pickWs}
-					?disabled=${!this.workspaces.length}
-				>
-					${this.workspaces.map(
-						(w) => html`<option value=${w.id}>${w.name}</option>`,
-					)}
-				</select>
-				<span class="empty">${this.busy ? "加载中…" : ""}</span>
-			</div>
+		<div class="head">
+			<h2>资产库</h2>
+			<span class="empty">${this.busy ? "加载中…" : ""}</span>
+		</div>
 			<div class="tabs">
 				${TABS.map(
 					(t) => html`
@@ -236,24 +222,26 @@ class BaizeAssetLibrary extends LitElement {
 					`,
 				)}
 			</div>
-			${!this.workspaces.length
-				? html`<div class="empty">还没有工作区。工作区是资产库的载体。</div>`
-				: this.tab === "function"
-					? this.renderFunctions()
-					: this.renderListDetail()}
+			${
+			!this.ws
+				? html`<div class="empty">请先在顶部选择工作区。</div>`
+					: this.tab === "function"
+						? this.renderFunctions()
+						: this.renderListDetail()
+			}
 		`;
 	}
 
 	private renderListDetail() {
 		const items = this.list();
-		const sel =
-			items.find((x) => (x.id as number) === this.selectedId) ?? null;
+		const sel = items.find((x) => (x.id as number) === this.selectedId) ?? null;
 		return html`
 			<div class="body">
 				<div class="list">
-					${items.length
-						? items.map(
-								(x) => html`
+					${
+						items.length
+							? items.map(
+									(x) => html`
 									<div
 										class="item ${x.id === this.selectedId ? "active" : ""}"
 										@click=${() => (this.selectedId = x.id as number)}
@@ -261,13 +249,16 @@ class BaizeAssetLibrary extends LitElement {
 										${x.title ?? "(无标题)"}
 									</div>
 								`,
-							)
-						: html`<div class="empty">(无)</div>`}
+								)
+							: html`<div class="empty">(无)</div>`
+					}
 				</div>
 				<div class="detail">
-					${sel
-						? this.renderDetail(sel)
-						: html`<div class="empty">从左侧选择一项查看详情</div>`}
+					${
+						sel
+							? this.renderDetail(sel)
+							: html`<div class="empty">从左侧选择一项查看详情</div>`
+					}
 				</div>
 			</div>
 		`;
@@ -279,9 +270,11 @@ class BaizeAssetLibrary extends LitElement {
 		}
 		return html`
 			<h3>${x.title ?? ""}</h3>
-			${x.scenarioTitle
-				? html`<div class="k">所属场景</div><p>${x.scenarioTitle}</p>`
-				: null}
+			${
+				x.scenarioTitle
+					? html`<div class="k">所属场景</div><p>${x.scenarioTitle}</p>`
+					: null
+			}
 			<div class="k">前置条件</div><p>${x.precondition || "—"}</p>
 			<div class="k">主流程</div><p>${x.main_flow || "—"}</p>
 			<div class="k">异常</div><p>${x.exceptions || "—"}</p>
@@ -304,9 +297,10 @@ class BaizeAssetLibrary extends LitElement {
 		return html`
 			<div class="body">
 				<div class="list">
-					${groups.length
-						? groups.map(
-								(g) => html`
+					${
+						groups.length
+							? groups.map(
+									(g) => html`
 									<div class="fn-group">
 										<div class="gname">${g.domain.name ?? "(无域)"}</div>
 										${(g.items as Array<Record<string, unknown>>).map(
@@ -321,17 +315,22 @@ class BaizeAssetLibrary extends LitElement {
 										)}
 									</div>
 								`,
-							)
-						: html`<div class="empty">(无)</div>`}
+								)
+							: html`<div class="empty">(无)</div>`
+					}
 				</div>
 				<div class="detail">
-					${selItem
-						? html`<h3>${selItem.title ?? ""}</h3>
-								${selDomain
-									? html`<div class="k">所属功能域</div><p>${selDomain.name ?? "—"}</p>`
-									: null}
+					${
+						selItem
+							? html`<h3>${selItem.title ?? ""}</h3>
+								${
+									selDomain
+										? html`<div class="k">所属功能域</div><p>${selDomain.name ?? "—"}</p>`
+										: null
+								}
 								<div class="k">描述</div><p>${selItem.description || "—"}</p>`
-						: html`<div class="empty">从左侧选择功能项查看详情</div>`}
+							: html`<div class="empty">从左侧选择功能项查看详情</div>`
+					}
 				</div>
 			</div>
 		`;

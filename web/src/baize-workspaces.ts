@@ -108,6 +108,7 @@ class BaizeWorkspaces extends LitElement {
 		this.repoPath = "";
 		this.name = "";
 		await this.load();
+		this.dispatchEvent(new CustomEvent("baize-workspaces-changed", { bubbles: true, composed: true }));
 	}
 
 	render() {
