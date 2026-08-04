@@ -8,7 +8,7 @@ import { LitElement, html, css, type TemplateResult } from "lit";
  */
 class BaizeConsentModal extends LitElement {
 	static properties = {
-		open: { type: Boolean },
+		open: { type: Boolean, reflect: true },
 		title: { type: String },
 		summary: { attribute: false },
 	};
@@ -108,7 +108,11 @@ class BaizeConsentModal extends LitElement {
 	private onKey = (e: KeyboardEvent) => {
 		if (!this.open) return;
 		const t = e.target as HTMLElement | null;
-		const typing = t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.isContentEditable);
+		const typing =
+			t &&
+			(t.tagName === "INPUT" ||
+				t.tagName === "TEXTAREA" ||
+				t.isContentEditable);
 		if (e.key === "Escape") {
 			e.preventDefault();
 			this.cancel();
@@ -119,11 +123,21 @@ class BaizeConsentModal extends LitElement {
 	};
 
 	private cancel() {
-		this.dispatchEvent(new CustomEvent("baize-consent-cancel", { bubbles: true, composed: true }));
+		this.dispatchEvent(
+			new CustomEvent("baize-consent-cancel", {
+				bubbles: true,
+				composed: true,
+			}),
+		);
 	}
 
 	private confirm() {
-		this.dispatchEvent(new CustomEvent("baize-consent-confirm", { bubbles: true, composed: true }));
+		this.dispatchEvent(
+			new CustomEvent("baize-consent-confirm", {
+				bubbles: true,
+				composed: true,
+			}),
+		);
 	}
 
 	render() {

@@ -17,7 +17,7 @@ interface Cmd {
 
 class BaizeCommandPalette extends LitElement {
 	static properties = {
-		open: { state: true },
+		open: { type: Boolean, reflect: true },
 		query: { state: true },
 		sel: { state: true },
 	};
@@ -113,11 +113,61 @@ class BaizeCommandPalette extends LitElement {
 	connectedCallback(): void {
 		super.connectedCallback();
 		this.cmds = [
-			{ id: "goto-requirement", label: "跳到 需求", hint: "需求设计页", run: () => { this.dispatch("baize-goto", "requirement"); return true; } },
-			{ id: "goto-overview", label: "跳到 总览", hint: "总览仪表盘", run: () => { this.dispatch("baize-goto", "overview"); return true; } },
-			{ id: "goto-workspaces", label: "跳到 工作区", hint: "工作区管理", run: () => { this.dispatch("baize-goto", "workspaces"); return true; } },
-			{ id: "fold-sidebar", label: "折叠/展开 sidebar", hint: "⌘B", run: () => { this.dispatchEvent(new CustomEvent("baize-fold-toggle", { bubbles: true, composed: true })); return true; } },
-			{ id: "new-requirement", label: "新建需求", hint: "chat 录入", run: () => { this.dispatchEvent(new CustomEvent("baize-new-requirement", { bubbles: true, composed: true })); return true; } },
+			{
+				id: "goto-requirement",
+				label: "跳到 需求",
+				hint: "需求设计页",
+				run: () => {
+					this.dispatch("baize-goto", "requirement");
+					return true;
+				},
+			},
+			{
+				id: "goto-overview",
+				label: "跳到 总览",
+				hint: "总览仪表盘",
+				run: () => {
+					this.dispatch("baize-goto", "overview");
+					return true;
+				},
+			},
+			{
+				id: "goto-workspaces",
+				label: "跳到 工作区",
+				hint: "工作区管理",
+				run: () => {
+					this.dispatch("baize-goto", "workspaces");
+					return true;
+				},
+			},
+			{
+				id: "fold-sidebar",
+				label: "折叠/展开 sidebar",
+				hint: "⌘B",
+				run: () => {
+					this.dispatchEvent(
+						new CustomEvent("baize-fold-toggle", {
+							bubbles: true,
+							composed: true,
+						}),
+					);
+					return true;
+				},
+			},
+			{
+				id: "new-requirement",
+				label: "新建需求",
+				hint: "chat 录入",
+				run: () => {
+					this.dispatchEvent(
+						new CustomEvent("baize-new-requirement", {
+							bubbles: true,
+							composed: true,
+						}),
+					);
+					return true;
+				},
+			},
 		];
 		addEventListener("keydown", this.onKey);
 	}
@@ -128,12 +178,18 @@ class BaizeCommandPalette extends LitElement {
 	}
 
 	private dispatch(name: string, tab: string) {
-		this.dispatchEvent(new CustomEvent(name, { detail: { tab }, bubbles: true, composed: true }));
+		this.dispatchEvent(
+			new CustomEvent(name, { detail: { tab }, bubbles: true, composed: true }),
+		);
 	}
 
 	private onKey = (e: KeyboardEvent) => {
 		const t = e.target as HTMLElement | null;
-		const typing = t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.isContentEditable);
+		const typing =
+			t &&
+			(t.tagName === "INPUT" ||
+				t.tagName === "TEXTAREA" ||
+				t.isContentEditable);
 		if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") {
 			e.preventDefault();
 			this.toggle();
@@ -181,7 +237,9 @@ class BaizeCommandPalette extends LitElement {
 	private filtered(): Cmd[] {
 		const q = this.query.trim().toLowerCase();
 		if (!q) return this.cmds;
-		return this.cmds.filter((c) => c.label.toLowerCase().includes(q) || c.id.includes(q));
+		return this.cmds.filter(
+			(c) => c.label.toLowerCase().includes(q) || c.id.includes(q),
+		);
 	}
 
 	private onInput = (e: InputEvent) => {
@@ -205,7 +263,8 @@ class BaizeCommandPalette extends LitElement {
 					@input=${this.onInput}
 				/>
 				<ul>
-					${list.map((c, i) => html`
+					${list.map(
+						(c, i) => html`
 						<li
 							class=${i === this.sel ? "sel" : ""}
 							@mouseenter=${() => (this.sel = i)}
@@ -214,7 +273,8 @@ class BaizeCommandPalette extends LitElement {
 							<span>${c.label}</span>
 							${c.hint ? html`<span class="hint">${c.hint}</span>` : null}
 						</li>
-					`)}
+					`,
+					)}
 				</ul>
 				${list.length === 0 ? html`<div class="empty">无匹配命令</div>` : null}
 			</div>

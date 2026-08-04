@@ -17,7 +17,7 @@ interface Preview {
 
 class BaizeChatIntake extends LitElement {
 	static properties = {
-		open: { state: true },
+		open: { type: Boolean, reflect: true },
 		messages: { state: true },
 		input: { state: true },
 		preview: { state: true },
@@ -208,12 +208,9 @@ class BaizeChatIntake extends LitElement {
 
 	connectedCallback(): void {
 		super.connectedCallback();
-		this.addEventListener(
-			"baize-new-requirement",
-			(() => {
-				this.open = true;
-			}) as EventListener,
-		);
+		this.addEventListener("baize-new-requirement", (() => {
+			this.open = true;
+		}) as EventListener);
 		this.addEventListener("baize-workspace-change", this.onWs as EventListener);
 	}
 
@@ -327,9 +324,11 @@ class BaizeChatIntake extends LitElement {
 							${this.messages.map(
 								(m) => html`<div class="msg ${m.role}">${m.content}</div>`,
 							)}
-							${this.messages.length === 0
-								? html`<div class="empty">描述你要设计的需求,agent 会反问澄清…</div>`
-								: null}
+							${
+								this.messages.length === 0
+									? html`<div class="empty">描述你要设计的需求,agent 会反问澄清…</div>`
+									: null
+							}
 						</div>
 						${this.error ? html`<div class="err">${this.error}</div>` : null}
 						<div class="input">
@@ -352,8 +351,9 @@ class BaizeChatIntake extends LitElement {
 					</div>
 					<div class="preview">
 						<h3>结构化预览</h3>
-						${this.preview
-							? html`<div class="pv">
+						${
+							this.preview
+								? html`<div class="pv">
 									<div class="k">标题</div>
 									<p>${this.preview.title}</p>
 									<div class="k">描述</div>
@@ -363,16 +363,19 @@ class BaizeChatIntake extends LitElement {
 										?disabled=${!this.ws || !!this.busy}
 										@click=${() => this.confirm()}
 									>
-										${this.busy === "save"
-											? "保存中…"
-											: this.ws
-												? "确认创建"
-												: "先选工作区"}
+										${
+											this.busy === "save"
+												? "保存中…"
+												: this.ws
+													? "确认创建"
+													: "先选工作区"
+										}
 									</button>
 								</div>`
-							: html`<div class="empty">
+								: html`<div class="empty">
 									agent 收敛需求后会在此生成预览…
-								</div>`}
+								</div>`
+						}
 					</div>
 				</div>
 			</div>
