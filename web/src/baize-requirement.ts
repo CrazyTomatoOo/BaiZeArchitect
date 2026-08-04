@@ -56,6 +56,7 @@ class BaizeRequirement extends LitElement {
 		busy: { state: true },
 		error: { state: true },
 		feedback: { state: true },
+		consent: { state: true },
 	};
 
 	declare reqs: Req[];
@@ -68,6 +69,7 @@ class BaizeRequirement extends LitElement {
 	declare busy: string;
 	declare error: string;
 	declare feedback: string;
+	declare consent: { cn: string; en: string; refs: Ref[] } | null;
 
 	static styles = css`
 		:host {
@@ -424,7 +426,7 @@ class BaizeRequirement extends LitElement {
 				<span class="status ${st}">${st}</span>
 				${
 					st === "待审"
-						? html`<button @click=${() => this.approve(s.cn, s.en)}>通过</button>
+						? html`<button @click=${() => this.openConsent(s, refs)}>通过</button>
 							<button @click=${() => this.reject(s.en)}>打回(填意见)</button>`
 						: this.runnable(s.cn)
 							? html`<button
@@ -463,6 +465,26 @@ class BaizeRequirement extends LitElement {
 			}
 			${this.renderRefs(refs)}
 		</div>`;
+	}
+
+	private openConsent(s: { cn: string; en: string }, refs: Ref[]) {
+		this.consent = { cn: s.cn, en: s.en, refs };
+	}
+
+	private consentSummary(cn: string, refs: Ref[]) {
+		const items = refs.map((r) => html`<li>${r.title ?? r.name ?? r.type}</li>`);
+		return html`<p>即将通过「${cn}」阶段。本阶段产物 ${refs.length} 项:</p>${refs.length ? html`<ul>${items}</ul>` : html`<p style="color:var(--text-subtle)">(无结构化产物)</p>`}`;
+	}
+
+	private cancelConsent() {
+		this.consent = null;
+	}
+
+	private async confirmConsent() {
+		if (!this.consent) return;
+		const { cn, en } = this.consent;
+		this.consent = null;
+		await this.approve(cn, en);
 	}
 
 	render() {
@@ -544,6 +566,13 @@ class BaizeRequirement extends LitElement {
 					</div>`
 					: nothing
 			}
+		<baize-consent-modal
+			.open=${this.consent != null}
+			.title=${this.consent ? `通过「${this.consent.cn}」阶段?` : ""}
+			.summary=${this.consent ? this.consentSummary(this.consent.cn, this.consent.refs) : ""}
+			@baize-consent-confirm=${() => this.confirmConsent()}
+			@baize-consent-cancel=${() => this.cancelConsent()}
+		></baize-consent-modal>
 		`;
 	}
 }
