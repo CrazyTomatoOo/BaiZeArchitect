@@ -4,28 +4,42 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>BaiZe Architect</title>
-    <link rel="preconnect" href="https://fonts.googleapis.com" />
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <link
-      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap"
-      rel="stylesheet"
-    />
     <style>
-      /* BaiZe design tokens — Dark Mode (OLED), code dark + run green */
+      /* BaiZe design tokens — Graphite Indigo(T04 变体 C)。沿用 CSS vars,系统字体栈。 */
       :root {
-        --bg: #0f172a;
-        --surface: #1e293b;
-        --surface-2: #273042;
-        --border: #334155;
-        --text: #f8fafc;
-        --text-muted: #94a3b8;
-        --accent: #22c55e;
+        /* 基面:石墨 + 可见边框 */
+        --bg: #111317;
+        --surface: #1a1d23;
+        --surface-2: #21242b;
+        --surface-hover: #2a2e36;
+        --border: #2c3038;
+        --border-strong: #3a3f49;
+        /* 文字 */
+        --text: #d8dbe0;
+        --text-muted: #878c96;
+        --text-subtle: #545862;
+        /* accent + 状态(BaiZe 签名靛蓝;run 专色与 ok 显式区分) */
+        --accent: #7c8cff;
+        --accent-fg: #111317;
         --accent-2: #38bdf8;
-        --warn: #f59e0b;
-        --destructive: #ef4444;
-        --radius: 8px;
-        --font-ui: "Inter", system-ui, sans-serif;
-        --font-mono: "JetBrains Mono", ui-monospace, monospace;
+        --run: #38bdf8;
+        --ok: #34d399;
+        --warn: #fbbf24;
+        --danger: #fb7185;
+        --destructive: #fb7185;
+        --info: #818cf8;
+        --muted: #6b7280;
+        /* 几何 */
+        --radius: 6px;
+        --radius-sm: 4px;
+        --pad: 14px;
+        --gap: 12px;
+        --sidebar-w: 258px;
+        --rail-w: 400px;
+        --content-max: 1120px;
+        /* 字体:系统栈,无字体文件 */
+        --font-ui: -apple-system, "SF Pro Text", system-ui, sans-serif;
+        --font-mono: "SF Mono", ui-monospace, "JetBrains Mono", monospace;
       }
       html,
       body {
