@@ -322,22 +322,9 @@ class BaizeAssetLibrary extends LitElement {
 	render() {
 		return html`
 			<header class="page-head">
-				<h1>资产库</h1>
-				<p class="sub">workspace 复用池:场景 / 用例 / 功能,跨需求沉淀</p>
+				<h1>${TABS.find((t) => t.id === this.tab)?.cn ?? "资产库"}</h1>
+				<p class="sub">workspace 复用池,跨需求沉淀</p>
 			</header>
-			<div class="tabs">
-				${TABS.map(
-					(t) => html`<button
-						class="tab ${this.tab === t.id ? "active" : ""}"
-						@click=${() => {
-							this.tab = t.id;
-							this.selectedId = null;
-						}}
-					>
-						${t.cn}
-					</button>`,
-				)}
-			</div>
 			${
 				!this.ws
 					? html`<div class="empty">请先在顶部选择工作区</div>`
