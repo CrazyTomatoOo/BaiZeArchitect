@@ -379,36 +379,39 @@ class BaizeShell extends LitElement {
 					? html`<div class="app ${this.folded ? "folded" : ""}">
 							<aside class="sidebar">
 								<nav class="nav">
-									<div class="nav-group">
-										<div class="label">工作</div>
-										<button class="nav-item ${this.tab === "requirement" ? "active" : ""}" @click=${() => this.goto("requirement")}>需求</button>
-										<button class="nav-item ${this.tab === "assets" ? "active" : ""}" @click=${() => this.goto("assets")}>资产库</button>
-										<button class="nav-item ${this.tab === "overview" ? "active" : ""}" @click=${() => this.goto("overview")}>总览</button>
-									</div>
-									<div class="nav-group">
-										<div class="label">治理</div>
-										<button class="nav-item ${this.tab === "decisions" ? "active" : ""}" @click=${() => this.goto("decisions")}>
-											待决策${this.decCount ? html` <span class="chip">${this.decCount}</span>` : null}
-										</button>
-									</div>
-									<div class="nav-group">
-										<div class="label">管理</div>
-										<button class="nav-item ${this.tab === "system" ? "active" : ""}" @click=${() => this.goto("system")}>系统</button>
-									</div>
-								</nav>
+							<button class="nav-item ${this.tab === "overview" ? "active" : ""}" @click=${() => this.goto("overview")}>总览</button>
+							<div class="nav-group">
+								<div class="label">工作</div>
+								<button class="nav-item ${this.tab === "requirement" ? "active" : ""}" @click=${() => this.goto("requirement")}>需求</button>
+								<button class="nav-item ${this.tab === "decisions" ? "active" : ""}" @click=${() => this.goto("decisions")}>
+									待决策${this.decCount ? html` <span class="chip">${this.decCount}</span>` : null}
+								</button>
+							</div>
+							<div class="nav-group">
+								<div class="label">资产库</div>
+								<button class="nav-item ${this.tab === "assets-req" ? "active" : ""}" @click=${() => this.goto("assets-req")}>需求管理</button>
+								<button class="nav-item ${this.tab === "assets-scenario" ? "active" : ""}" @click=${() => this.goto("assets-scenario")}>场景库</button>
+								<button class="nav-item ${this.tab === "assets-usecase" ? "active" : ""}" @click=${() => this.goto("assets-usecase")}>用例库</button>
+								<button class="nav-item ${this.tab === "assets-function" ? "active" : ""}" @click=${() => this.goto("assets-function")}>功能库</button>
+							</div>
+							<div class="nav-group">
+								<div class="label">管理</div>
+								<button class="nav-item ${this.tab === "system" ? "active" : ""}" @click=${() => this.goto("system")}>系统</button>
+							</div>
 								<div class="status-foot">
 									<div><span class="live">●</span> ws 未连接</div>
 									<div>工作区:${this.wsName || "—"}</div>
 								</div>
 							</aside>
 							<main>
+								<baize-overview ?hidden=${this.tab !== "overview"}></baize-overview>
 								<baize-requirement ?hidden=${this.tab !== "requirement"}></baize-requirement>
-								<baize-asset-library ?hidden=${this.tab !== "assets"}></baize-asset-library>
 								<baize-decisions ?hidden=${this.tab !== "decisions"}></baize-decisions>
+								<baize-asset-library
+									.view=${this.tab.startsWith("assets-") ? this.tab.slice(7) : "req"}
+									?hidden=${!this.tab.startsWith("assets-")}
+								></baize-asset-library>
 								<baize-system ?hidden=${this.tab !== "system"}></baize-system>
-								<div ?hidden=${this.tab !== "overview"}>
-									<baize-overview></baize-overview>
-								</div>
 							</main>
 						</div>`
 					: html`<main class="entry-main">

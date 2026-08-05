@@ -343,6 +343,57 @@ class BaizeRequirement extends LitElement {
 			border: 1px solid rgba(251, 113, 133, 0.3);
 			border-radius: var(--radius-sm);
 		}
+		.stepper {
+			display: flex;
+			gap: 6px;
+			flex-wrap: wrap;
+			margin-bottom: 14px;
+		}
+		.step {
+			display: inline-flex;
+			align-items: center;
+			gap: 6px;
+			padding: 4px 10px;
+			border-radius: 99px;
+			border: 1px solid var(--border);
+			color: var(--text-subtle);
+			font-size: 0.75rem;
+		}
+		.step .dot {
+			width: 7px;
+			height: 7px;
+			border-radius: 99px;
+			background: var(--text-subtle);
+		}
+		.step.完成 {
+			color: var(--ok);
+			border-color: var(--ok);
+		}
+		.step.完成 .dot {
+			background: var(--ok);
+		}
+		.step.待审 {
+			color: var(--warn);
+			border-color: var(--warn);
+		}
+		.step.待审 .dot {
+			background: var(--warn);
+		}
+		.step.打回 {
+			color: var(--danger);
+			border-color: var(--danger);
+		}
+		.step.打回 .dot {
+			background: var(--danger);
+		}
+		.step.进行中 {
+			color: var(--run);
+			border-color: var(--run);
+		}
+		.step.进行中 .dot {
+			background: var(--run);
+			animation: pulse 1.4s infinite;
+		}
 	`;
 
 	constructor() {
@@ -651,6 +702,12 @@ class BaizeRequirement extends LitElement {
 						this.selected
 							? html`<div class="detail-card">
 								<h3>设计流水线(逐阶段审核,打回可带意见重跑)</h3>
+								<div class="stepper">
+									${STAGES.map((s) => {
+										const st = this.stages.find((x) => x.stage === s.cn)?.status ?? "未开始";
+										return html`<div class="step ${st}"><span class="dot"></span>${s.cn}</div>`;
+									})}
+								</div>
 								${STAGES.map((s) => this.renderStage(s))}
 								${this.error ? html`<div class="error">${this.error}</div>` : nothing}
 							</div>`

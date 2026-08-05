@@ -11,6 +11,7 @@ interface AssetData {
 }
 
 const TABS = [
+	{ id: "req", cn: "需求管理" },
 	{ id: "scenario", cn: "场景" },
 	{ id: "usecase", cn: "用例" },
 	{ id: "function", cn: "功能" },
@@ -22,6 +23,8 @@ class BaizeAssetLibrary extends LitElement {
 		tab: { state: true },
 		data: { state: true },
 		selectedId: { state: true },
+		view: { type: String },
+		reqs: { state: true },
 		busy: { state: true },
 	};
 
@@ -29,6 +32,8 @@ class BaizeAssetLibrary extends LitElement {
 	declare tab: (typeof TABS)[number]["id"];
 	declare data: AssetData | null;
 	declare selectedId: number | null;
+	declare view: string;
+	declare reqs: Array<Record<string, unknown>>;
 	declare busy: string;
 
 	static styles = css`
@@ -175,7 +180,9 @@ class BaizeAssetLibrary extends LitElement {
 	constructor() {
 		super();
 		this.ws = Number(localStorage.getItem("baize.ui.v1.workspace") ?? "0");
-		this.tab = "scenario";
+		this.tab = "req";
+		this.view = "req";
+		this.reqs = [];
 		this.data = null;
 		this.selectedId = null;
 		this.busy = "";
@@ -203,20 +210,28 @@ class BaizeAssetLibrary extends LitElement {
 		this.load();
 	};
 
+	protected updated(changed: Map<string, unknown>) {
+		if (changed.has("view") && this.view) this.tab = this.view as (typeof TABS)[number]["id"];
+	}
+
 	private async load() {
 		this.busy = "load";
 		this.selectedId = null;
 		try {
 			const r = await fetch(`/api/assets?workspace=${this.ws}`);
 			this.data = (await r.json()) as AssetData;
+			const rr = await fetch(`/api/requirements?workspace=${this.ws}`);
+			this.reqs = (await rr.json()) as Array<Record<string, unknown>>;
 		} catch {
 			this.data = null;
+			this.reqs = [];
 		}
 		this.busy = "";
 	}
 
 	private list(): Array<Record<string, unknown>> {
 		if (!this.data) return [];
+		if (this.tab === "req") return this.reqs ?? [];
 		if (this.tab === "scenario") return this.data.scenarios;
 		if (this.tab === "usecase") return this.data.usecases;
 		return [];
@@ -247,7 +262,7 @@ class BaizeAssetLibrary extends LitElement {
 	}
 
 	private renderDetail(x: Record<string, unknown>) {
-		if (this.tab === "scenario") {
+		if (this.tab === "scenario" || this.tab === "req") {
 			return html`<h3>${x.title ?? ""}</h3><p>${x.description ?? ""}</p>`;
 		}
 		return html`
