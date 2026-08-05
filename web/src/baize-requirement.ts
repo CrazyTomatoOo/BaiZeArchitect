@@ -348,7 +348,9 @@ class BaizeRequirement extends LitElement {
 	constructor() {
 		super();
 		this.reqs = [];
-		this.workspaceId = Number(localStorage.getItem("baize.ui.v1.workspace") ?? "0");
+		this.workspaceId = Number(
+			localStorage.getItem("baize.ui.v1.workspace") ?? "0",
+		);
 		this.selected = 0;
 		this.stages = [];
 		this.busy = "";
@@ -359,15 +361,27 @@ class BaizeRequirement extends LitElement {
 
 	async connectedCallback(): Promise<void> {
 		super.connectedCallback();
-		window.addEventListener("baize-workspace-change", this.onWsChange as EventListener);
-		window.addEventListener("baize-requirements-changed", this.onReqsChanged as EventListener);
+		window.addEventListener(
+			"baize-workspace-change",
+			this.onWsChange as EventListener,
+		);
+		window.addEventListener(
+			"baize-requirements-changed",
+			this.onReqsChanged as EventListener,
+		);
 		if (this.workspaceId) await this.loadReqs();
 	}
 
 	disconnectedCallback(): void {
 		super.disconnectedCallback();
-		window.removeEventListener("baize-workspace-change", this.onWsChange as EventListener);
-		window.removeEventListener("baize-requirements-changed", this.onReqsChanged as EventListener);
+		window.removeEventListener(
+			"baize-workspace-change",
+			this.onWsChange as EventListener,
+		);
+		window.removeEventListener(
+			"baize-requirements-changed",
+			this.onReqsChanged as EventListener,
+		);
 	}
 
 	private onWsChange = (e: CustomEvent<{ id: number }>) => {
@@ -405,7 +419,12 @@ class BaizeRequirement extends LitElement {
 	}
 
 	private newRequirement(): void {
-		this.dispatchEvent(new CustomEvent("baize-new-requirement", { bubbles: true, composed: true }));
+		this.dispatchEvent(
+			new CustomEvent("baize-new-requirement", {
+				bubbles: true,
+				composed: true,
+			}),
+		);
 	}
 
 	// 门禁:该阶段是否可运行(前置全部完成 + 自身处于 未开始/打回)
@@ -564,7 +583,9 @@ class BaizeRequirement extends LitElement {
 	}
 
 	private consentSummary(cn: string, refs: Ref[]) {
-		const items = refs.map((r) => html`<li>${r.title ?? r.name ?? r.type}</li>`);
+		const items = refs.map(
+			(r) => html`<li>${r.title ?? r.name ?? r.type}</li>`,
+		);
 		return html`<p>即将通过「${cn}」阶段。本阶段产物 ${refs.length} 项:</p>${refs.length ? html`<ul>${items}</ul>` : html`<p style="color:var(--text-subtle)">(无结构化产物)</p>`}`;
 	}
 
@@ -607,9 +628,10 @@ class BaizeRequirement extends LitElement {
 						<button class="btn-new" @click=${() => this.newRequirement()}>+ 新建需求</button>
 					</div>
 					<div class="req-list">
-						${this.reqs.length
-							? this.reqs.map(
-									(r) => html`<div
+						${
+							this.reqs.length
+								? this.reqs.map(
+										(r) => html`<div
 										class="req ${r.id === this.selected ? "active" : ""}"
 										@click=${() => this.pick(r)}
 									>
@@ -617,23 +639,26 @@ class BaizeRequirement extends LitElement {
 										<span class="t">${r.title}</span>
 										<span class="hint">${r.done ? "已归档" : `当前:${r.current}`}</span>
 									</div>`,
-								)
-							: html`<div class="empty-state" style="padding:32px 16px">
+									)
+								: html`<div class="empty-state" style="padding:32px 16px">
 									<p style="margin:0">本工作区还没有需求,点右上「新建需求」开始</p>
-								</div>`}
+								</div>`
+						}
 					</div>
 				</aside>
 				<main class="col-detail">
-					${this.selected
-						? html`<div class="detail-card">
+					${
+						this.selected
+							? html`<div class="detail-card">
 								<h3>设计流水线(逐阶段审核,打回可带意见重跑)</h3>
 								${STAGES.map((s) => this.renderStage(s))}
 								${this.error ? html`<div class="error">${this.error}</div>` : nothing}
 							</div>`
-						: html`<div class="empty-state">
+							: html`<div class="empty-state">
 								<h2>选择一个需求</h2>
 								<p style="margin:0">从左侧列表选择,查看设计流水线并逐阶段驱动</p>
-							</div>`}
+							</div>`
+					}
 				</main>
 			</div>
 			<baize-consent-modal

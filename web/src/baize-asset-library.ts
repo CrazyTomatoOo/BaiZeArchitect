@@ -183,13 +183,19 @@ class BaizeAssetLibrary extends LitElement {
 
 	connectedCallback(): void {
 		super.connectedCallback();
-		window.addEventListener("baize-workspace-change", this.onWs as EventListener);
+		window.addEventListener(
+			"baize-workspace-change",
+			this.onWs as EventListener,
+		);
 		if (this.ws) void this.load();
 	}
 
 	disconnectedCallback(): void {
 		super.disconnectedCallback();
-		window.removeEventListener("baize-workspace-change", this.onWs as EventListener);
+		window.removeEventListener(
+			"baize-workspace-change",
+			this.onWs as EventListener,
+		);
 	}
 
 	private onWs = (e: CustomEvent<{ id: number }>) => {
@@ -221,16 +227,18 @@ class BaizeAssetLibrary extends LitElement {
 		const sel = items.find((x) => (x.id as number) === this.selectedId) ?? null;
 		return html`
 			<div class="list">
-				${items.length
-					? items.map(
-							(x) => html`<div
+				${
+					items.length
+						? items.map(
+								(x) => html`<div
 								class="item ${x.id === this.selectedId ? "active" : ""}"
 								@click=${() => (this.selectedId = x.id as number)}
 							>
 								${x.title ?? "(无标题)"}
 							</div>`,
-						)
-					: html`<div class="empty">(无)</div>`}
+							)
+						: html`<div class="empty">(无)</div>`
+				}
 			</div>
 			<div class="detail">
 				${sel ? this.renderDetail(sel) : html`<div class="empty">从左侧选择一项查看详情</div>`}
@@ -266,9 +274,10 @@ class BaizeAssetLibrary extends LitElement {
 		}
 		return html`
 			<div class="list">
-				${groups.length
-					? groups.map(
-							(g) => html`<div class="fn-group">
+				${
+					groups.length
+						? groups.map(
+								(g) => html`<div class="fn-group">
 								<div class="gname">${g.domain.name ?? "(无域)"}</div>
 								${(g.items as Array<Record<string, unknown>>).map(
 									(it) => html`<div
@@ -279,15 +288,18 @@ class BaizeAssetLibrary extends LitElement {
 									</div>`,
 								)}
 							</div>`,
-						)
-					: html`<div class="empty">(无)</div>`}
+							)
+						: html`<div class="empty">(无)</div>`
+				}
 			</div>
 			<div class="detail">
-				${selItem
-					? html`<h3>${selItem.title ?? ""}</h3>
+				${
+					selItem
+						? html`<h3>${selItem.title ?? ""}</h3>
 							${selDomain ? html`<div class="k">所属功能域</div><p>${selDomain.name ?? "—"}</p>` : null}
 							<div class="k">描述</div><p>${selItem.description || "—"}</p>`
-					: html`<div class="empty">从左侧选择功能项查看详情</div>`}
+						: html`<div class="empty">从左侧选择功能项查看详情</div>`
+				}
 			</div>
 		`;
 	}
@@ -311,11 +323,13 @@ class BaizeAssetLibrary extends LitElement {
 					</button>`,
 				)}
 			</div>
-			${!this.ws
-				? html`<div class="empty">请先在顶部选择工作区</div>`
-				: this.tab === "function"
-					? html`<div class="body">${this.renderFunctions()}</div>`
-					: html`<div class="body">${this.renderListDetail()}</div>`}
+			${
+				!this.ws
+					? html`<div class="empty">请先在顶部选择工作区</div>`
+					: this.tab === "function"
+						? html`<div class="body">${this.renderFunctions()}</div>`
+						: html`<div class="body">${this.renderListDetail()}</div>`
+			}
 		`;
 	}
 }

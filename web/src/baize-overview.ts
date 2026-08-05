@@ -169,10 +169,7 @@ class BaizeOverview extends LitElement {
 			const [c, ws] = (await Promise.all([
 				fetch("/api/overview").then((r) => r.json()),
 				fetch("/api/workspaces").then((r) => r.json()),
-			])) as [
-				Record<string, number>,
-				Array<{ id: number; name: string }>,
-			];
+			])) as [Record<string, number>, Array<{ id: number; name: string }>];
 			this.counts = c;
 			const progress: WsProgress[] = [];
 			for (const w of ws) {
@@ -211,9 +208,10 @@ class BaizeOverview extends LitElement {
 				)}
 			</div>
 			<h3 class="section-title">各工作区进展</h3>
-			${!this.wsProgress.length
-				? html`<div class="empty">${this.busy ? "加载中…" : "还没有工作区,先去工作区页创建一个"}</div>`
-				: html`<div class="ws-list">
+			${
+				!this.wsProgress.length
+					? html`<div class="empty">${this.busy ? "加载中…" : "还没有工作区,先去工作区页创建一个"}</div>`
+					: html`<div class="ws-list">
 						${this.wsProgress.map((w) => {
 							const pct = w.total ? Math.round((w.done / w.total) * 100) : 0;
 							return html`
@@ -221,9 +219,11 @@ class BaizeOverview extends LitElement {
 									<div class="ws-top">
 										<span class="ws-name">${w.name}</span>
 										<span class="ws-meta">
-											${w.done}/${w.total} 完成${w.running
-												? html` · <span class="running">▶ ${w.running} 进行中</span>`
-												: ""}
+											${w.done}/${w.total} 完成${
+												w.running
+													? html` · <span class="running">▶ ${w.running} 进行中</span>`
+													: ""
+											}
 										</span>
 									</div>
 									<div class="bar">
@@ -232,7 +232,8 @@ class BaizeOverview extends LitElement {
 								</div>
 							`;
 						})}
-					</div>`}
+					</div>`
+			}
 		`;
 	}
 }

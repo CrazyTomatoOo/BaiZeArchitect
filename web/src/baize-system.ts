@@ -204,9 +204,10 @@ class BaizeSystem extends LitElement {
 					设置
 				</button>
 			</div>
-			${this.tab === "evidence"
-				? html`<baize-dashboard></baize-dashboard>`
-				: html`<div class="card">
+			${
+				this.tab === "evidence"
+					? html`<baize-dashboard></baize-dashboard>`
+					: html`<div class="card">
 						<h3>模型配置</h3>
 						<p class="desc">
 							新增需求/阶段流水线调用 LLM 时使用此配置。保存后立即生效(无需重启)。
@@ -242,7 +243,8 @@ class BaizeSystem extends LitElement {
 						</div>
 						<button class="btn" @click=${() => this.saveConfig()}>保存配置</button>
 						<span class="saved">${this.cfgSaved}</span>
-					</div>`}
+					</div>`
+			}
 		`;
 	}
 }

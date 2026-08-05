@@ -192,13 +192,19 @@ class BaizeDecisions extends LitElement {
 
 	connectedCallback(): void {
 		super.connectedCallback();
-		window.addEventListener("baize-workspace-change", this.onWs as EventListener);
+		window.addEventListener(
+			"baize-workspace-change",
+			this.onWs as EventListener,
+		);
 		if (this.ws) void this.load();
 	}
 
 	disconnectedCallback(): void {
 		super.disconnectedCallback();
-		window.removeEventListener("baize-workspace-change", this.onWs as EventListener);
+		window.removeEventListener(
+			"baize-workspace-change",
+			this.onWs as EventListener,
+		);
 	}
 
 	private onWs = (e: CustomEvent<{ id: number }>) => {
@@ -272,11 +278,13 @@ class BaizeDecisions extends LitElement {
 		return html`<p>
 				${it.requirementTitle} ·「${it.stage}」(${it.status})。本阶段产物 ${refs.length} 项:
 			</p>
-			${refs.length
-				? html`<ul>
+			${
+				refs.length
+					? html`<ul>
 						${refs.map((r) => html`<li>${r.title ?? r.name ?? r.type}</li>`)}
 					</ul>`
-				: html`<p style="color:var(--text-subtle)">(无结构化产物)</p>`}`;
+					: html`<p style="color:var(--text-subtle)">(无结构化产物)</p>`
+			}`;
 	}
 
 	render() {
@@ -285,9 +293,10 @@ class BaizeDecisions extends LitElement {
 				<h1>待决策</h1>
 				<p class="sub">跨需求聚合的待审批/打回阶段,逐条处理</p>
 			</header>
-			${!this.items.length
-				? html`<div class="empty">${this.busy ? "加载中…" : "无待决策项,一切顺利"}</div>`
-				: html`<div class="list">
+			${
+				!this.items.length
+					? html`<div class="empty">${this.busy ? "加载中…" : "无待决策项,一切顺利"}</div>`
+					: html`<div class="list">
 						${this.items.map((it) => {
 							const k = this.key(it);
 							const open = this.openKey === k;
@@ -299,18 +308,24 @@ class BaizeDecisions extends LitElement {
 										<span class="t">${it.requirementTitle}</span>
 										<span class="s">${it.stage}</span>
 									</div>
-									${open
-										? html`<div class="detail">
-												${it.status === "打回" && it.feedback
-													? html`<div class="fb">上次打回意见:${it.feedback}</div>`
-													: null}
-												${refs.length
-													? html`<div class="refs">
+									${
+										open
+											? html`<div class="detail">
+												${
+													it.status === "打回" && it.feedback
+														? html`<div class="fb">上次打回意见:${it.feedback}</div>`
+														: null
+												}
+												${
+													refs.length
+														? html`<div class="refs">
 															${refs.map(
-																(r) => html`<div class="r">${r.title ?? r.name ?? r.type}</div>`,
+																(r) =>
+																	html`<div class="r">${r.title ?? r.name ?? r.type}</div>`,
 															)}
 														</div>`
-													: null}
+														: null
+												}
 												<div class="actions">
 													<button class="btn primary" @click=${() => (this.consent = it)}>
 														通过(consent)
@@ -319,16 +334,20 @@ class BaizeDecisions extends LitElement {
 														placeholder="打回意见(必填)"
 														.value=${this.feedback}
 														@input=${(e: Event) =>
-															(this.feedback = (e.target as HTMLTextAreaElement).value)}
+															(this.feedback = (
+																e.target as HTMLTextAreaElement
+															).value)}
 													></textarea>
 													<button class="btn" @click=${() => this.reject(it)}>打回</button>
 												</div>
 											</div>`
-										: null}
+											: null
+									}
 								</div>
 							`;
 						})}
-					</div>`}
+					</div>`
+			}
 			<baize-consent-modal
 				.open=${this.consent != null}
 				.title=${this.consent ? `通过「${this.consent.stage}」?` : ""}
