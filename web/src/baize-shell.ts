@@ -15,6 +15,7 @@ class BaizeShell extends LitElement {
 		workspaces: { state: true },
 		folded: { state: true },
 		decCount: { state: true },
+		wsConnected: { state: true },
 	};
 
 	declare tab: string;
@@ -23,6 +24,9 @@ class BaizeShell extends LitElement {
 	declare workspaces: Array<{ id: number; name: string }>;
 	declare folded: boolean;
 	declare decCount: number;
+	declare wsConnected: boolean;
+
+	private es: EventSource | null = null;
 
 	static styles = css`
 		:host {
@@ -133,6 +137,9 @@ class BaizeShell extends LitElement {
 		.status-foot .live {
 			color: var(--muted);
 		}
+		.status-foot .live.on {
+			color: var(--ok);
+		}
 		main {
 			overflow: auto;
 			padding: var(--pad) calc(var(--pad) * 1.4) 3rem;
@@ -232,6 +239,7 @@ class BaizeShell extends LitElement {
 		this.workspaces = [];
 		this.folded = localStorage.getItem("baize.ui.v1.sidebarFolded") === "1";
 		this.decCount = 0;
+		this.wsConnected = false;
 	}
 
 	async connectedCallback(): Promise<void> {
@@ -243,6 +251,18 @@ class BaizeShell extends LitElement {
 		this.addEventListener("baize-decisions-count", this.onDecisionsCount as EventListener);
 		this.addEventListener("baize-select-workspace", this.onSelectWorkspace as EventListener);
 		addEventListener("keydown", this.onKey);
+		try {
+			this.es = new EventSource("/api/runs/stream");
+			this.es.onopen = () => {
+				this.wsConnected = true;
+			};
+			this.es.onerror = () => {
+				this.wsConnected = false;
+			};
+		} catch {
+			this.es = null;
+			this.wsConnected = false;
+		}
 		await this.loadWorkspaces();
 	}
 
@@ -261,6 +281,7 @@ class BaizeShell extends LitElement {
 		this.removeEventListener("baize-decisions-count", this.onDecisionsCount as EventListener);
 		this.removeEventListener("baize-select-workspace", this.onSelectWorkspace as EventListener);
 		removeEventListener("keydown", this.onKey);
+		this.es?.close();
 	}
 
 	private onGoto = (e: CustomEvent<{ tab: string }>) => {
@@ -399,7 +420,7 @@ class BaizeShell extends LitElement {
 								<button class="nav-item ${this.tab === "system" ? "active" : ""}" @click=${() => this.goto("system")}>系统</button>
 							</div>
 								<div class="status-foot">
-									<div><span class="live">●</span> ws 未连接</div>
+									<div><span class="live ${this.wsConnected ? "on" : ""}">●</span> ws ${this.wsConnected ? "已连接" : "未连接"}</div>
 									<div>工作区:${this.wsName || "—"}</div>
 								</div>
 							</aside>
