@@ -13,6 +13,7 @@ import http, { type IncomingMessage, type ServerResponse } from "node:http";
 import { fileURLToPath } from "node:url";
 import { dirname, join, resolve } from "node:path";
 import { mkdir, readdir, readFile, stat, writeFile } from "node:fs/promises";
+import { execFile } from "node:child_process";
 import { openStore, type Stage } from "./store.js";
 import type { StageName } from "./cli.js";
 
@@ -69,6 +70,38 @@ async function readEvidence(repoId: string): Promise<unknown> {
 		);
 	} catch {
 		return null;
+	}
+}
+
+// 容器内自动索引(GitNexus)→ evidence/<repoId>.json。gitnexus 输出映射待确认,先写带标记的 evidence。
+async function generateEvidence(repoPath: string, repoId: string): Promise<void> {
+	try {
+		await new Promise<void>((resolve, reject) =>
+			execFile("gitnexus", ["analyze", repoPath], { timeout: 600000 }, (err) =>
+				err ? reject(err) : resolve(),
+			),
+		);
+		let stats: Record<string, unknown> = {};
+		try {
+			stats = (
+				JSON.parse(
+					await readFile(join(repoPath, ".gitnexus", "gitnexus.json"), "utf8"),
+				) as { stats?: Record<string, unknown> }
+			).stats ?? {};
+		} catch {
+			stats = {};
+		}
+		const evidence = {
+			repositoryId: repoId,
+			generatedBy: "gitnexus",
+			stats,
+			architecture: { hotspots: [], boundaries: [], clusters: [] },
+			note: "graph 已索引(<repo>/.gitnexus/lbug);hotspots/boundaries/clusters 提取待接 gitnexus serve/Cypher",
+		};
+		await mkdir(EVIDENCE_DIR, { recursive: true });
+		await writeFile(join(EVIDENCE_DIR, `${repoId}.json`), JSON.stringify(evidence, null, 2));
+	} catch (e) {
+		console.warn("[evidence] gitnexus generate failed:", (e as Error).message);
 	}
 }
 
@@ -406,6 +439,20 @@ const server = http.createServer(
 			return;
 		}
 
+		if (
+			seg[1] === "api" &&
+			seg[2] === "evidence" &&
+			seg[3] === "generate" &&
+			req.method === "POST"
+		) {
+			const b = (await readJson(req)) as { repoPath?: string; repoId?: string } | null;
+			const repoPath = b?.repoPath ?? "";
+			const repoId = b?.repoId || repoPath.split("/").filter(Boolean).pop() || "repo";
+			void generateEvidence(repoPath, repoId);
+			json(202, { ok: true, repoId });
+			return;
+		}
+
 		if (url.pathname === "/api/genes" && req.method === "GET") {
 			json(200, await listGenes());
 			return;
@@ -449,6 +496,11 @@ const server = http.createServer(
 				return;
 			}
 			const id = store.addWorkspace(b.repoPath ?? "", b.name ?? "");
+			// 自动化:创建工作区时后台索引产证据(GitNexus)
+			void generateEvidence(
+				b.repoPath ?? "",
+				(b.repoPath ?? "").split("/").filter(Boolean).pop() || (b.name ?? "repo"),
+			);
 			json(200, { id });
 			return;
 		}

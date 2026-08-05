@@ -15,6 +15,9 @@ RUN cd agent-runtime && npm install && \
 	cd node_modules/better-sqlite3 && npm run build-release && rm -rf prebuilds && \
 	cd /app/agent-runtime
 
+# 容器内仓库索引(自动化证据生成):GitNexus(node,tree-sitter native,预计算聚类/impact)
+RUN npm install -g gitnexus
+
 # 源码 + .pi(skills) + schemas
 COPY agent-runtime ./agent-runtime
 COPY .pi ./.pi

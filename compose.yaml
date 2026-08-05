@@ -35,9 +35,11 @@ services:
     ports:
       - "18789:18789"
     volumes:
-      - ./evidence:/evidence:ro
+      - ./evidence:/evidence
       - ./out:/app/out
       - ./evolver-home:/evolver-home
+      # 仓库挂载(自动化证据索引用;宿主项目目录→容器同路径,repoPath 原样可用)
+      - ${BAIZE_REPOS_ROOT:-/Volumes/work/Project}:${BAIZE_REPOS_ROOT:-/Volumes/work/Project}
     environment:
       - BAIZE_PROJECT_ROOT=/app
       - BAIZE_OUT_DIR=/app/out
