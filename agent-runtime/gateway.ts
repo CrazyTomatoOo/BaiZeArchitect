@@ -24,6 +24,7 @@ const { runStage, chatIntake, readModelConfig, writeModelConfig, currentModelCon
 const ROOT =
 	process.env.BAIZE_PROJECT_ROOT ??
 	join(dirname(fileURLToPath(import.meta.url)), "..");
+const AGENT_RUNTIME_DIR = dirname(fileURLToPath(import.meta.url));
 const PORT = Number(process.env.BAIZE_PORT ?? 18789);
 const REPOS_ROOT = process.env.BAIZE_REPOS_ROOT ?? ROOT;
 const OUT_DIR = process.env.BAIZE_OUT_DIR ?? join(ROOT, "out");
@@ -49,18 +50,16 @@ async function readJson(
 }
 
 async function listRepos(): Promise<string[]> {
-	const dirs = await readdir(REPOS_ROOT, { withFileTypes: true });
-	const out: string[] = [];
-	for (const d of dirs) {
-		if (!d.isDirectory()) continue;
-		try {
-			await stat(join(REPOS_ROOT, d.name, ".git"));
-			out.push(d.name);
-		} catch {
-			/* not a git repo */
-		}
+	// 列出已有证据的仓库(evidence/<repoId>.json)—— 这是真实"可见"的仓库,
+	// 而非扫描文件系统找 .git(容器挂载路径与宿主不同,扫描不可靠)。
+	try {
+		const files = await readdir(EVIDENCE_DIR);
+		return files
+			.filter((f) => f.endsWith(".json"))
+			.map((f) => f.slice(0, -".json".length));
+	} catch {
+		return [];
 	}
-	return out;
 }
 
 async function readEvidence(repoId: string): Promise<unknown> {
@@ -73,7 +72,8 @@ async function readEvidence(repoId: string): Promise<unknown> {
 	}
 }
 
-// 容器内自动索引(GitNexus)→ evidence/<repoId>.json。gitnexus 输出映射待确认,先写带标记的 evidence。
+// 容器内自动索引:gitnexus analyze → 查 LadybugDB 提取架构证据 → evidence/<repoId>.json。
+// 合并既有 evidence(保留设计流水线沉淀的 priorAdr 等),仅替换 architecture。
 async function generateEvidence(repoPath: string, repoId: string): Promise<void> {
 	try {
 		await new Promise<void>((resolve, reject) =>
@@ -81,23 +81,34 @@ async function generateEvidence(repoPath: string, repoId: string): Promise<void>
 				err ? reject(err) : resolve(),
 			),
 		);
-		let stats: Record<string, unknown> = {};
-		try {
-			stats = (
-				JSON.parse(
-					await readFile(join(repoPath, ".gitnexus", "gitnexus.json"), "utf8"),
-				) as { stats?: Record<string, unknown> }
-			).stats ?? {};
-		} catch {
-			stats = {};
-		}
-		const evidence = {
-			repositoryId: repoId,
-			generatedBy: "gitnexus",
-			stats,
-			architecture: { hotspots: [], boundaries: [], clusters: [] },
-			note: "graph 已索引(<repo>/.gitnexus/lbug);hotspots/boundaries/clusters 提取待接 gitnexus serve/Cypher",
+		// 查图提取 hotspots/boundaries/clusters(+ 统计);失败退空骨架,不阻断。
+		let architecture: Record<string, unknown> = {
+			hotspots: [],
+			boundaries: [],
+			clusters: [],
 		};
+		try {
+			architecture = JSON.parse(
+				await new Promise<string>((resolveStdout, rejectStdout) =>
+					execFile(
+						"node",
+						[join(AGENT_RUNTIME_DIR, "extract-architecture.cjs"), repoPath],
+						{ timeout: 120000, maxBuffer: 1 << 24 },
+						(err, stdout) => (err ? rejectStdout(err) : resolveStdout(stdout)),
+					),
+				),
+			);
+		} catch (e) {
+			console.warn("[evidence] extract-architecture failed:", (e as Error).message);
+		}
+		// 保留既有 evidence 的非架构字段(priorAdr 等),仅刷新 architecture。
+		let existing: Record<string, unknown> = {};
+		try {
+			existing = JSON.parse(await readFile(join(EVIDENCE_DIR, `${repoId}.json`), "utf8"));
+		} catch {
+			/* 首次生成 */
+		}
+		const evidence = { ...existing, repositoryId: repoId, generatedBy: "gitnexus", architecture };
 		await mkdir(EVIDENCE_DIR, { recursive: true });
 		await writeFile(join(EVIDENCE_DIR, `${repoId}.json`), JSON.stringify(evidence, null, 2));
 	} catch (e) {

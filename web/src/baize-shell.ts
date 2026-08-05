@@ -417,7 +417,8 @@ class BaizeShell extends LitElement {
 							</div>
 							<div class="nav-group">
 								<div class="label">管理</div>
-								<button class="nav-item ${this.tab === "system" ? "active" : ""}" @click=${() => this.goto("system")}>系统</button>
+							<button class="nav-item ${this.tab === "system" ? "active" : ""}" @click=${() => this.goto("system")}>系统</button>
+							<button class="nav-item ${this.tab === "evidence" ? "active" : ""}" @click=${() => this.goto("evidence")}>证据</button>
 							</div>
 								<div class="status-foot">
 									<div><span class="live ${this.wsConnected ? "on" : ""}">●</span> ws ${this.wsConnected ? "已连接" : "未连接"}</div>
@@ -432,7 +433,8 @@ class BaizeShell extends LitElement {
 									.view=${this.tab.startsWith("assets-") ? this.tab.slice(7) : "req"}
 									?hidden=${!this.tab.startsWith("assets-")}
 								></baize-asset-library>
-								<baize-system ?hidden=${this.tab !== "system"}></baize-system>
+							<baize-system ?hidden=${this.tab !== "system"}></baize-system>
+							<baize-dashboard ?hidden=${this.tab !== "evidence"}></baize-dashboard>
 							</main>
 						</div>`
 					: html`<main class="entry-main">
