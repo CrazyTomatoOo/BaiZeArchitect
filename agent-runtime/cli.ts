@@ -725,10 +725,33 @@ export async function runStage(
 		modelRuntime,
 		resourceLoader,
 		tools: ["submit_stage_assets"],
-		customTools: [submitTool],
-		sessionManager: SessionManager.inMemory(input.repoPath),
+			customTools: [submitTool],
+			sessionManager: SessionManager.inMemory(input.repoPath),
+		});
+	const unsubscribe = (
+		session as unknown as {
+			subscribe?: (cb: (ev: unknown) => void) => () => void;
+		}
+	).subscribe?.((ev) => {
+		const e = ev as {
+			type?: string;
+			delta?: string;
+			text?: string;
+			message?: { content?: Array<{ type?: string; text?: string; delta?: string }> };
+		};
+		let text = "";
+		if (typeof e.delta === "string") text = e.delta;
+		else if (typeof e.text === "string") text = e.text;
+		else if (Array.isArray(e.message?.content)) {
+			for (const part of e.message.content) {
+				if (part && (part.type === "text" || part.type === "text_delta"))
+					text += part.text ?? part.delta ?? "";
+			}
+		}
+		if (text) onEvent?.({ type: "token", text } as unknown as RunEvent);
 	});
-	onEvent?.({ type: "phase", phase: "architect" });
+	void unsubscribe;
+		onEvent?.({ type: "phase", phase: "architect" });
 	try {
 		await session.prompt(
 			[

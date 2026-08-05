@@ -10,6 +10,7 @@ interface RunEvt {
 	requirementId?: number;
 	stage?: string;
 	requirementTitle?: string;
+	text?: string;
 }
 
 class BaizeRunRail extends LitElement {
@@ -17,11 +18,13 @@ class BaizeRunRail extends LitElement {
 		active: { state: true },
 		events: { state: true },
 		open: { state: true },
+		liveText: { state: true },
 	};
 
 	declare active: RunEvt[];
 	declare events: RunEvt[];
 	declare open: boolean;
+	declare liveText: string;
 
 	private es: EventSource | null = null;
 
@@ -121,6 +124,11 @@ class BaizeRunRail extends LitElement {
 			width: 7px;
 			height: 7px;
 		}
+		.ev.live {
+			color: var(--text-muted);
+			white-space: pre-wrap;
+			word-break: break-word;
+		}
 	`;
 
 	constructor() {
@@ -128,6 +136,7 @@ class BaizeRunRail extends LitElement {
 		this.active = [];
 		this.events = [];
 		this.open = true;
+		this.liveText = "";
 	}
 
 	connectedCallback(): void {
@@ -156,10 +165,13 @@ class BaizeRunRail extends LitElement {
 		if (ev.type === "start") {
 			this.active = [...this.active, ev];
 			this.open = true;
+			this.liveText = "";
 		} else if (ev.type === "done") {
 			this.active = this.active.filter(
 				(a) => !(a.requirementId === ev.requirementId && a.stage === ev.stage),
 			);
+		} else if (ev.type === "token") {
+			this.liveText = (this.liveText + (ev.text ?? "")).slice(-400);
 		}
 	}
 
@@ -188,6 +200,9 @@ class BaizeRunRail extends LitElement {
 						<span class="pulse"></span>${a.requirementTitle ?? ""} · ${a.stage ?? ""}
 					</div>`,
 				)}
+				${this.liveText
+					? html`<div class="ev live">${this.liveText}</div>`
+					: null}
 				${this.events.slice(0, 8).map(
 					(e) => html`<div class="ev">
 						<span class="k ${e.type === "done" ? "done" : ""}">${e.type}</span>

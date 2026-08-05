@@ -581,7 +581,10 @@ const server = http.createServer(
 				upstream: JSON.stringify(rows),
 				stage,
 				feedback: cur?.feedback || undefined,
-			});
+			},
+			(e) =>
+				broadcastRun({ ...e, requirementId: reqId, stage: STAGE_CN[stage] }),
+			);
 			const refs = writeStageAssets(
 				requirement.workspace_id,
 				reqId,
