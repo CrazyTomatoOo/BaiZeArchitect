@@ -35,7 +35,8 @@ class BaizeShell extends LitElement {
 		.app {
 			display: grid;
 			grid-template-columns: var(--sidebar-w) 1fr;
-			min-height: 100vh;
+			flex: 1;
+			min-height: 0;
 		}
 		.app.folded {
 			grid-template-columns: 56px 1fr;
@@ -168,6 +169,56 @@ class BaizeShell extends LitElement {
 			align-items: center;
 			gap: 6px;
 		}
+		.shell {
+			display: flex;
+			flex-direction: column;
+			min-height: 100vh;
+		}
+		.topbar {
+			display: flex;
+			align-items: center;
+			gap: 12px;
+			padding: 10px 20px;
+			border-bottom: 1px solid var(--border);
+			background: var(--surface);
+		}
+		.logo {
+			display: flex;
+			align-items: center;
+			gap: 8px;
+			font-weight: 650;
+			font-size: 1rem;
+		}
+		.logo .dot {
+			color: var(--accent);
+		}
+		.topbar-right {
+			margin-left: auto;
+			display: flex;
+			align-items: center;
+			gap: 10px;
+		}
+		.manage {
+			background: transparent;
+			border: 1px solid var(--border-strong);
+			color: var(--text-muted);
+			border-radius: var(--radius-sm);
+			padding: 6px 12px;
+			font: inherit;
+			font-size: 0.82rem;
+			cursor: pointer;
+			transition: color 0.2s, border-color 0.2s;
+		}
+		.manage:hover {
+			color: var(--text);
+			border-color: var(--accent);
+		}
+		.entry-main {
+			flex: 1;
+			overflow: auto;
+			width: 100%;
+			padding: var(--pad) calc(var(--pad) * 1.4) 3rem;
+		}
 	`;
 
 	constructor() {
@@ -175,7 +226,7 @@ class BaizeShell extends LitElement {
 		const lastPage = localStorage.getItem("baize.ui.v1.lastPage");
 		const wsParam = new URLSearchParams(location.search).get("workspace");
 		const wsId = wsParam ? Number(wsParam) : Number(localStorage.getItem("baize.ui.v1.workspace") ?? "0");
-		this.tab = lastPage ?? (wsId ? "requirement" : "workspaces");
+		this.tab = lastPage && lastPage !== "workspaces" ? lastPage : "requirement";
 		this.ws = Number.isFinite(wsId) ? wsId : 0;
 		this.wsName = localStorage.getItem("baize.ui.v1.workspaceName") ?? "";
 		this.workspaces = [];
@@ -190,6 +241,7 @@ class BaizeShell extends LitElement {
 		this.addEventListener("baize-new-requirement", this.onNewRequirement as EventListener);
 		this.addEventListener("baize-workspaces-changed", this.onWorkspacesChanged as EventListener);
 		this.addEventListener("baize-decisions-count", this.onDecisionsCount as EventListener);
+		this.addEventListener("baize-select-workspace", this.onSelectWorkspace as EventListener);
 		addEventListener("keydown", this.onKey);
 		await this.loadWorkspaces();
 	}
@@ -207,6 +259,7 @@ class BaizeShell extends LitElement {
 		);
 		this.removeEventListener("baize-workspaces-changed", this.onWorkspacesChanged as EventListener);
 		this.removeEventListener("baize-decisions-count", this.onDecisionsCount as EventListener);
+		this.removeEventListener("baize-select-workspace", this.onSelectWorkspace as EventListener);
 		removeEventListener("keydown", this.onKey);
 	}
 
@@ -214,6 +267,9 @@ class BaizeShell extends LitElement {
 		this.goto(e.detail.tab);
 	};
 
+	private onSelectWorkspace = (e: CustomEvent<{ id: number }>) => {
+		this.setWs(e.detail.id);
+	};
 	private onFoldToggle = () => {
 		this.folded = !this.folded;
 		localStorage.setItem("baize.ui.v1.sidebarFolded", this.folded ? "1" : "0");
@@ -263,6 +319,7 @@ class BaizeShell extends LitElement {
 
 	private setWs(id: number) {
 		this.ws = id;
+		if (id && this.tab === "workspaces") this.tab = "requirement";
 		this.wsName = this.workspaces.find((w) => w.id === id)?.name ?? "";
 		if (id) {
 			localStorage.setItem("baize.ui.v1.workspace", String(id));
@@ -298,66 +355,69 @@ class BaizeShell extends LitElement {
 
 	render() {
 		return html`
-			<div class="app ${this.folded ? "folded" : ""}">
-				<aside class="sidebar">
-					<div class="ws-switch" title="切换工作区(作用域)">
-						<span class="dot ${this.ws ? "active" : ""}">◇</span>
+			<div class="shell">
+				<header class="topbar">
+					<span class="logo"><span class="dot">◇</span> BaiZe Architect</span>
+					<div class="topbar-right">
 						<select
 							class="ws-select"
 							.value=${String(this.ws)}
 							@change=${(e: Event) =>
 								this.setWs(Number((e.target as HTMLSelectElement).value))}
 						>
-							<option value="0" ?disabled=${this.workspaces.length > 0}>
-								未选择工作区
-							</option>
+							<option value="0">未选择工作区</option>
 							${this.workspaces.map(
 								(w) =>
 									html`<option value=${w.id} ?selected=${w.id === this.ws}>${w.name}</option>`,
 							)}
 						</select>
-						<span class="caret">▾</span>
+						${this.ws
+							? html`<button class="manage" @click=${() => this.setWs(0)}>管理工作区</button>`
+							: null}
 					</div>
-					<nav class="nav">
-						<div class="nav-group">
-						<div class="label">工作</div>
-						<button class="nav-item ${this.tab === "requirement" ? "active" : ""}" @click=${() => this.goto("requirement")}>需求</button>
-						<button class="nav-item ${this.tab === "assets" ? "active" : ""}" @click=${() => this.goto("assets")}>资产库</button>
-						<button class="nav-item ${this.tab === "overview" ? "active" : ""}" @click=${() => this.goto("overview")}>总览</button>
-					</div>
-					<div class="nav-group">
-						<div class="label">治理</div>
-						<button class="nav-item ${this.tab === "decisions" ? "active" : ""}" @click=${() => this.goto("decisions")}>
-							待决策${this.decCount ? html` <span class="chip">${this.decCount}</span>` : null}
-						</button>
-					</div>
-					<div class="nav-group">
-						<div class="label">管理</div>
-						<button class="nav-item ${this.tab === "workspaces" ? "active" : ""}" @click=${() => this.goto("workspaces")}>工作区</button>
-						<button class="nav-item ${this.tab === "system" ? "active" : ""}" @click=${() => this.goto("system")}>系统</button>
-					</div>
-				</nav>
-					<div class="status-foot">
-						<div><span class="live">●</span> ws 未连接</div>
-						<div>工作区:${this.ws ?? "—"}</div>
-					</div>
-				</aside>
-				<main>
-					${this.ws
-						? html`<div class="scope-banner">作用域:${this.wsName}</div>`
-						: null}
-					<baize-requirement ?hidden=${this.tab !== "requirement"}></baize-requirement>
-						<baize-workspaces ?hidden=${this.tab !== "workspaces"}></baize-workspaces>
-						<baize-asset-library ?hidden=${this.tab !== "assets"}></baize-asset-library>
-						<baize-decisions ?hidden=${this.tab !== "decisions"}></baize-decisions>
-						<baize-system ?hidden=${this.tab !== "system"}></baize-system>
-					<div ?hidden=${this.tab !== "overview"}>
-						<baize-overview></baize-overview>
-					</div>
-				</main>
-			<baize-command-palette></baize-command-palette>
-			<baize-run-rail></baize-run-rail>
-			<baize-chat-intake></baize-chat-intake>
+				</header>
+				${this.ws
+					? html`<div class="app ${this.folded ? "folded" : ""}">
+							<aside class="sidebar">
+								<nav class="nav">
+									<div class="nav-group">
+										<div class="label">工作</div>
+										<button class="nav-item ${this.tab === "requirement" ? "active" : ""}" @click=${() => this.goto("requirement")}>需求</button>
+										<button class="nav-item ${this.tab === "assets" ? "active" : ""}" @click=${() => this.goto("assets")}>资产库</button>
+										<button class="nav-item ${this.tab === "overview" ? "active" : ""}" @click=${() => this.goto("overview")}>总览</button>
+									</div>
+									<div class="nav-group">
+										<div class="label">治理</div>
+										<button class="nav-item ${this.tab === "decisions" ? "active" : ""}" @click=${() => this.goto("decisions")}>
+											待决策${this.decCount ? html` <span class="chip">${this.decCount}</span>` : null}
+										</button>
+									</div>
+									<div class="nav-group">
+										<div class="label">管理</div>
+										<button class="nav-item ${this.tab === "system" ? "active" : ""}" @click=${() => this.goto("system")}>系统</button>
+									</div>
+								</nav>
+								<div class="status-foot">
+									<div><span class="live">●</span> ws 未连接</div>
+									<div>工作区:${this.wsName || "—"}</div>
+								</div>
+							</aside>
+							<main>
+								<baize-requirement ?hidden=${this.tab !== "requirement"}></baize-requirement>
+								<baize-asset-library ?hidden=${this.tab !== "assets"}></baize-asset-library>
+								<baize-decisions ?hidden=${this.tab !== "decisions"}></baize-decisions>
+								<baize-system ?hidden=${this.tab !== "system"}></baize-system>
+								<div ?hidden=${this.tab !== "overview"}>
+									<baize-overview></baize-overview>
+								</div>
+							</main>
+						</div>`
+					: html`<main class="entry-main">
+							<baize-workspaces></baize-workspaces>
+						</main>`}
+				<baize-command-palette></baize-command-palette>
+				<baize-run-rail></baize-run-rail>
+				<baize-chat-intake></baize-chat-intake>
 			</div>
 		`;
 	}

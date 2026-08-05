@@ -147,7 +147,7 @@ class BaizeWorkspaces extends LitElement {
 			border: 1px solid var(--border);
 			border-radius: var(--radius);
 			padding: 16px;
-			cursor: default;
+			cursor: pointer;
 			transition: border-color 0.2s, box-shadow 0.2s, transform 0.15s;
 		}
 		.ws-card:hover {
@@ -176,6 +176,12 @@ class BaizeWorkspaces extends LitElement {
 			font-size: 0.76rem;
 			word-break: break-all;
 			line-height: 1.5;
+		}
+		.enter {
+			margin-top: 8px;
+			color: var(--accent);
+			font-size: 0.78rem;
+			font-weight: 600;
 		}
 	`;
 
@@ -249,13 +255,17 @@ class BaizeWorkspaces extends LitElement {
 		`;
 	}
 
+	private select(w: Ws): void {
+		this.dispatchEvent(new CustomEvent("baize-select-workspace", { detail: { id: w.id }, bubbles: true, composed: true }));
+	}
+
 	render() {
 		const empty = this.list.length === 0;
 		return html`
 			<div class="page">
 				<header class="page-head">
-					<h1>工作区</h1>
-					<p class="sub">每个工作区对应一个代码仓库,是需求设计的载体</p>
+					<h1>选择工作区</h1>
+					<p class="sub">点击工作区进入;创建 / 管理在下方</p>
 				</header>
 				${
 					empty
@@ -267,12 +277,13 @@ class BaizeWorkspaces extends LitElement {
 						</div>`
 						: html`<div class="list">
 								${this.list.map(
-									(w) => html`<div class="ws-card">
+									(w) => html`<div class="ws-card" @click=${() => this.select(w)} title="点击进入">
 										<div class="ws-top">
 											<span class="ws-name">${w.name}</span>
 											<span class="ws-id">#${w.id}</span>
 										</div>
 										<div class="ws-path">${w.repo_path}</div>
+										<div class="enter">进入 →</div>
 									</div>`,
 								)}
 							</div>
