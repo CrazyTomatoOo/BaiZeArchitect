@@ -18,7 +18,7 @@ import type { StageName } from "./cli.js";
 
 // 必须在 import cli.ts 前设,否则 cli.ts 的 main 会跑(import 即执行)。
 process.env.BAIZE_GATEWAY = "1";
-const { runStage, chatIntake } = await import("./cli.js");
+const { runStage, chatIntake, readModelConfig, writeModelConfig, currentModelConfig, applyModelConfig } = await import("./cli.js");
 
 const ROOT =
 	process.env.BAIZE_PROJECT_ROOT ??
@@ -413,6 +413,29 @@ const server = http.createServer(
 
 		if (url.pathname === "/api/workspaces" && req.method === "GET") {
 			json(200, store.listWorkspaces());
+			return;
+		}
+
+		if (url.pathname === "/api/config" && req.method === "GET") {
+			const c = currentModelConfig();
+			json(200, { provider: c.provider, modelId: c.modelId, hasKey: !!c.apiKey });
+			return;
+		}
+		if (url.pathname === "/api/config" && req.method === "PUT") {
+			const b = (await readJson(req)) as { provider?: string; modelId?: string; apiKey?: string } | null;
+			if (!b) {
+				json(400, { error: "bad json" });
+				return;
+			}
+			const cur = currentModelConfig();
+			const cfg = {
+				provider: b.provider || cur.provider,
+				modelId: b.modelId || cur.modelId,
+				apiKey: b.apiKey || cur.apiKey,
+			};
+			writeModelConfig(cfg);
+			applyModelConfig(cfg);
+			json(200, { ok: true });
 			return;
 		}
 

@@ -10,7 +10,7 @@
  */
 import path from "node:path";
 import fs from "node:fs/promises";
-import { readFileSync } from "node:fs";
+import { readFileSync, writeFileSync, mkdirSync } from "node:fs";
 import {
 	createAgentSession,
 	defineTool,
@@ -298,6 +298,68 @@ const bailianProvider = createProvider({
 (
 	modelRuntime as { registerNativeProvider(p: unknown): void }
 ).registerNativeProvider(bailianProvider);
+
+// 模型配置入口:设置页可改 provider/modelId/apiKey,写 .baize/model-config.json 并运行时生效。
+export interface ModelConfig {
+	provider?: string;
+	modelId?: string;
+	apiKey?: string;
+}
+let activeProvider = PROVIDER;
+let activeModelId = MODEL_ID;
+
+export function applyModelConfig(cfg: ModelConfig): void {
+	if (cfg.provider) activeProvider = cfg.provider;
+	if (cfg.modelId) activeModelId = cfg.modelId;
+	if (cfg.apiKey) process.env.DASHSCOPE_API_KEY = cfg.apiKey;
+	// 以 activeProvider 的 id 重新注册原生 provider(envApiKeyAuth 读 DASHSCOPE_API_KEY,运行时生效)
+	const p = createProvider({
+		id: activeProvider,
+		name: activeProvider,
+		baseUrl: BAILIAN_BASE,
+		auth: { apiKey: envApiKeyAuth("API key", ["DASHSCOPE_API_KEY"]) },
+		models: bailianModels,
+		api: lazyApi(() =>
+			import(
+				"./node_modules/@earendil-works/pi-ai/dist/api/openai-completions.lazy.js"
+			).then((m) => m.openAICompletionsApi()),
+		),
+	});
+	(modelRuntime as { registerNativeProvider(p: unknown): void }).registerNativeProvider(p);
+}
+
+function resolveModel() {
+	return (
+		modelRuntime.getModel(activeProvider, activeModelId) ??
+		modelRuntime.getModel("bailian", activeModelId) ??
+		modelRuntime.getModel("bailian", MODEL_ID)
+	);
+}
+
+const MODEL_CONFIG_PATH = path.join(PROJECT_ROOT, ".baize", "model-config.json");
+
+export function readModelConfig(): ModelConfig | null {
+	try {
+		return JSON.parse(readFileSync(MODEL_CONFIG_PATH, "utf8")) as ModelConfig;
+	} catch {
+		return null;
+	}
+}
+
+export function writeModelConfig(cfg: ModelConfig): void {
+	mkdirSync(path.dirname(MODEL_CONFIG_PATH), { recursive: true });
+	writeFileSync(MODEL_CONFIG_PATH, JSON.stringify(cfg, null, 2));
+}
+
+export function currentModelConfig(): ModelConfig {
+	return { provider: activeProvider, modelId: activeModelId, apiKey: process.env.DASHSCOPE_API_KEY ?? "" };
+}
+
+// 模块加载时应用已存配置
+{
+	const saved = readModelConfig();
+	if (saved) applyModelConfig(saved);
+}
 interface RunInput {
 	requirement: string;
 	repoPath: string; // 绝对路径
@@ -316,7 +378,7 @@ export async function runDesign(
 	input: RunInput,
 	onEvent?: (e: RunEvent) => void,
 ): Promise<{ plan: Plan; critique: unknown }> {
-	const model = modelRuntime.getModel(PROVIDER, MODEL_ID);
+	const model = resolveModel();
 	if (!model) throw new Error(`model not found: ${PROVIDER}/${MODEL_ID}`);
 
 	let planFromTool: Plan | null = null;
@@ -636,9 +698,7 @@ export async function runStage(
 	input: StageRunInput,
 	onEvent?: (e: RunEvent) => void,
 ): Promise<unknown> {
-	const model =
-		modelRuntime.getModel(PROVIDER, STAGE_MODEL_ID) ??
-		modelRuntime.getModel(PROVIDER, MODEL_ID);
+	const model = resolveModel();
 	if (!model) throw new Error(`model not found: ${PROVIDER}/${STAGE_MODEL_ID}`);
 	let assets: unknown = null;
 	const submitTool = defineTool({
@@ -709,7 +769,7 @@ export async function runStage(
 export async function chatIntake(
 	history: Array<{ role: "user" | "assistant"; content: string }>,
 ): Promise<string> {
-	const model = modelRuntime.getModel(PROVIDER, MODEL_ID);
+	const model = resolveModel();
 	if (!model) throw new Error(`model not found: ${PROVIDER}/${MODEL_ID}`);
 	const cwd = process.cwd();
 	const { session } = await createAgentSession({
