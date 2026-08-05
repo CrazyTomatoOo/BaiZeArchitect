@@ -118,6 +118,23 @@ class BaizeDashboard extends LitElement {
 			color: var(--text-muted);
 			font-size: .78rem;
 		}
+		.page-head h1 {
+			margin: 0;
+			font-size: 1.4rem;
+			font-weight: 650;
+			font-family: var(--font-display);
+		}
+		.page-head .sub {
+			margin: 4px 0 16px;
+			color: var(--text-muted);
+			font-size: 0.88rem;
+		}
+		.desc {
+			margin: 0 0 10px;
+			color: var(--text-subtle);
+			font-size: 0.78rem;
+			line-height: 1.5;
+		}
 	`;
 
 	constructor() {
@@ -164,6 +181,10 @@ class BaizeDashboard extends LitElement {
 		const a = this.evidence?.architecture;
 		const adr = this.evidence?.priorAdr?.content?.trim();
 		return html`
+			<div class="page-head">
+				<h1>设计依据(证据)</h1>
+				<p class="sub">AI 架构师设计时读取的真实代码证据 —— 用它审核 AI 的设计是否有代码依据,而非凭空。</p>
+			</div>
 			<div class="repos">
 				${this.repos.map(
 					(r) => html`<button
@@ -177,6 +198,7 @@ class BaizeDashboard extends LitElement {
 			<div class="cols">
 				<div class="card">
 					<h3>高影响热点(fan_in)</h3>
+					<p class="desc">被最多模块依赖的函数(fan_in = 被引用次数)。改动它们影响面最大 —— 设计时优先复用、避免重写。</p>
 					${
 						a?.hotspots?.length
 							? html`<ul>
@@ -191,6 +213,7 @@ class BaizeDashboard extends LitElement {
 							: html`<div class="empty">无(先跑 scripts/evidence.sh)</div>`
 					}
 					<h3>跨包边界</h3>
+					<p class="desc">模块间调用最频繁的边界(call_count)。跨边界调用是耦合点 —— 设计时应明确接口或谨慎拆分。</p>
 					${
 						a?.boundaries?.length
 							? html`<ul>
@@ -205,6 +228,7 @@ class BaizeDashboard extends LitElement {
 							: html`<div class="empty">无</div>`
 					}
 					<h3>真实模块(Leiden)</h3>
+					<p class="desc">代码实际形成的模块聚类(cohesion = 内聚度)。对比你设计的模块划分是否符合代码现实。</p>
 					${
 						a?.clusters?.length
 							? html`<ul>
@@ -223,12 +247,14 @@ class BaizeDashboard extends LitElement {
 				</div>
 				<div class="card">
 					<h3>历史决策(ADR,沉淀复用)</h3>
+					<p class="desc">过往的设计决策记录 —— 避免重复决策或与历史冲突。</p>
 					${
 						adr
 							? html`<pre>${adr}</pre>`
 							: html`<div class="empty">无(先跑 scripts/evolve.sh)</div>`
 					}
 					<h3>已蒸馏 gene(${this.genes.length})</h3>
+					<p class="desc">从历史设计蒸馏的可复用经验 —— 新设计可直接复用。</p>
 					${
 						this.genes.length
 							? html`<ul>
