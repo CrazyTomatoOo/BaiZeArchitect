@@ -210,7 +210,7 @@ class BaizeDashboard extends LitElement {
 										</li>`,
 								)}
 							</ul>`
-							: html`<div class="empty">无(先跑 scripts/evidence.sh)</div>`
+						: html`<div class="empty">暂无 —— 跑一次需求设计工作流(run.sh)会自动生成证据</div>`
 					}
 					<h3>跨包边界</h3>
 					<p class="desc">模块间调用最频繁的边界(call_count)。跨边界调用是耦合点 —— 设计时应明确接口或谨慎拆分。</p>
@@ -251,7 +251,7 @@ class BaizeDashboard extends LitElement {
 					${
 						adr
 							? html`<pre>${adr}</pre>`
-							: html`<div class="empty">无(先跑 scripts/evolve.sh)</div>`
+						: html`<div class="empty">暂无 —— 完成一次设计后会自动沉淀 ADR/gene</div>`
 					}
 					<h3>已蒸馏 gene(${this.genes.length})</h3>
 					<p class="desc">从历史设计蒸馏的可复用经验 —— 新设计可直接复用。</p>
