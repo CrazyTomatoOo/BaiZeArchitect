@@ -430,6 +430,24 @@ const server = http.createServer(
 			return;
 		}
 
+		const wsAct = url.pathname.match(/^\/api\/workspaces\/(\d+)$/);
+		if (wsAct && (req.method === "PUT" || req.method === "DELETE")) {
+			const id = Number(wsAct[1]);
+			if (req.method === "PUT") {
+				const b = (await readJson(req)) as { name?: string } | null;
+				if (!b?.name?.trim()) {
+					json(400, { error: "name required" });
+					return;
+				}
+				store.renameWorkspace(id, b.name.trim());
+				json(200, { ok: true });
+			} else {
+				store.deleteWorkspace(id);
+				json(200, { ok: true });
+			}
+			return;
+		}
+
 		if (url.pathname === "/api/requirements" && req.method === "GET") {
 			const ws = Number(url.searchParams.get("workspace") ?? 0);
 			const reqs = store.listRequirements(ws) as Array<

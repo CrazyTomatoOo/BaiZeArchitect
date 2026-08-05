@@ -365,7 +365,6 @@ class BaizeShell extends LitElement {
 							@change=${(e: Event) =>
 								this.setWs(Number((e.target as HTMLSelectElement).value))}
 						>
-							<option value="0">未选择工作区</option>
 							${this.workspaces.map(
 								(w) =>
 									html`<option value=${w.id} ?selected=${w.id === this.ws}>${w.name}</option>`,

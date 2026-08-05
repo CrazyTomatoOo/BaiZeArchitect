@@ -14,11 +14,15 @@ class BaizeWorkspaces extends LitElement {
 		list: { state: true },
 		repoPath: { state: true },
 		name: { state: true },
+		editingId: { state: true },
+		editName: { state: true },
 	};
 
 	declare list: Ws[];
 	declare repoPath: string;
 	declare name: string;
+	declare editingId: number;
+	declare editName: string;
 
 	static styles = css`
 		:host {
@@ -143,12 +147,74 @@ class BaizeWorkspaces extends LitElement {
 			margin-bottom: 20px;
 		}
 		.ws-card {
+			display: flex;
+			flex-direction: column;
 			background: var(--surface);
 			border: 1px solid var(--border);
 			border-radius: var(--radius);
 			padding: 16px;
 			cursor: pointer;
 			transition: border-color 0.2s, box-shadow 0.2s, transform 0.15s;
+		}
+		.ws-card.create {
+			cursor: default;
+		}
+		.ws-card.create input {
+			display: block;
+			width: 100%;
+			box-sizing: border-box;
+			margin-bottom: 10px;
+			background: var(--bg);
+			border: 1px solid var(--border);
+			color: var(--text);
+			border-radius: var(--radius-sm);
+			padding: 7px 9px;
+			font: inherit;
+			font-size: 0.82rem;
+		}
+		.ws-card.create h3 {
+			margin: 0 0 12px;
+			font-size: 0.95rem;
+			font-weight: 600;
+		}
+		.ws-actions {
+			display: flex;
+			gap: 6px;
+			margin-top: 10px;
+		}
+		.mini {
+			background: transparent;
+			border: 1px solid var(--border-strong);
+			color: var(--text-muted);
+			border-radius: var(--radius-sm);
+			padding: 3px 10px;
+			font: inherit;
+			font-size: 0.74rem;
+			cursor: pointer;
+			transition: color 0.2s, border-color 0.2s;
+		}
+		.mini:hover {
+			color: var(--text);
+			border-color: var(--accent);
+		}
+		.mini.danger:hover {
+			color: var(--danger);
+			border-color: var(--danger);
+		}
+		.rename {
+			display: flex;
+			gap: 6px;
+			margin-top: 10px;
+		}
+		.rename input {
+			flex: 1;
+			background: var(--bg);
+			border: 1px solid var(--border);
+			color: var(--text);
+			border-radius: var(--radius-sm);
+			padding: 4px 8px;
+			font: inherit;
+			font-size: 0.8rem;
 		}
 		.ws-card:hover {
 			border-color: var(--border-strong);
@@ -259,6 +325,30 @@ class BaizeWorkspaces extends LitElement {
 		this.dispatchEvent(new CustomEvent("baize-select-workspace", { detail: { id: w.id }, bubbles: true, composed: true }));
 	}
 
+	private startRename(w: Ws): void {
+		this.editingId = w.id;
+		this.editName = w.name;
+	}
+
+	private async saveRename(w: Ws): Promise<void> {
+		if (!this.editName.trim()) return;
+		await fetch(`/api/workspaces/${w.id}`, {
+			method: "PUT",
+			headers: { "content-type": "application/json" },
+			body: JSON.stringify({ name: this.editName.trim() }),
+		});
+		this.editingId = 0;
+		await this.load();
+		this.dispatchEvent(new CustomEvent("baize-workspaces-changed", { bubbles: true, composed: true }));
+	}
+
+	private async removeWs(w: Ws): Promise<void> {
+		if (!confirm(`删除工作区「${w.name}」?其下需求/资产将一并删除。`)) return;
+		await fetch(`/api/workspaces/${w.id}`, { method: "DELETE" });
+		await this.load();
+		this.dispatchEvent(new CustomEvent("baize-workspaces-changed", { bubbles: true, composed: true }));
+	}
+
 	render() {
 		const empty = this.list.length === 0;
 		return html`
@@ -283,11 +373,25 @@ class BaizeWorkspaces extends LitElement {
 											<span class="ws-id">#${w.id}</span>
 										</div>
 										<div class="ws-path">${w.repo_path}</div>
-										<div class="enter">进入 →</div>
+										<div class="ws-actions">
+											<button class="mini" @click=${(e: Event) => { e.stopPropagation(); this.startRename(w); }}>改名</button>
+											<button class="mini danger" @click=${(e: Event) => { e.stopPropagation(); this.removeWs(w); }}>删除</button>
+										</div>
+										${this.editingId === w.id
+											? html`<div class="rename">
+													<input .value=${this.editName} @input=${(e: Event) => (this.editName = (e.target as HTMLInputElement).value)} @click=${(e: Event) => e.stopPropagation()} />
+													<button class="mini" @click=${(e: Event) => { e.stopPropagation(); this.saveRename(w); }}>保存</button>
+												</div>`
+											: html`<div class="enter">进入 →</div>`}
 									</div>`,
 								)}
-							</div>
-							${this.renderForm("card")}`
+								<div class="ws-card create">
+									<h3>新建工作区</h3>
+									<input placeholder="repo 路径(如 /Volumes/.../lws)" .value=${this.repoPath} @input=${(e: Event) => (this.repoPath = (e.target as HTMLInputElement).value)} />
+									<input placeholder="名称(可选,默认取目录名)" .value=${this.name} @input=${(e: Event) => (this.name = (e.target as HTMLInputElement).value)} />
+									<button class="btn" @click=${(e: Event) => { e.stopPropagation(); this.add(); }}>创建</button>
+								</div>
+							</div>`
 				}
 			</div>
 		`;

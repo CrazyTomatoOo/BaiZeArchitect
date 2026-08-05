@@ -109,6 +109,28 @@ export class Store {
 		return this.db.prepare("select * from workspaces order by id").all();
 	}
 
+	renameWorkspace(id: number, name: string): void {
+		this.db.prepare("update workspaces set name = ? where id = ?").run(name, id);
+	}
+
+	deleteWorkspace(id: number): void {
+		const reqIds = (this.db.prepare("select id from requirements where workspace_id = ?").all(id) as Array<{ id: number }>).map((r) => r.id);
+		for (const rid of reqIds) {
+			this.db.prepare("delete from stage_progress where requirement_id = ?").run(rid);
+			this.db.prepare("delete from requirement_scenarios where requirement_id = ?").run(rid);
+		}
+		this.db.prepare("delete from requirements where workspace_id = ?").run(id);
+		const ucIds = (this.db.prepare("select id from use_cases where workspace_id = ?").all(id) as Array<{ id: number }>).map((r) => r.id);
+		for (const u of ucIds) this.db.prepare("delete from usecase_functions where usecase_id = ?").run(u);
+		const fnIds = (this.db.prepare("select id from function_items where workspace_id = ?").all(id) as Array<{ id: number }>).map((r) => r.id);
+		for (const f of fnIds) this.db.prepare("delete from usecase_functions where function_item_id = ?").run(f);
+		this.db.prepare("delete from use_cases where workspace_id = ?").run(id);
+		this.db.prepare("delete from function_items where workspace_id = ?").run(id);
+		this.db.prepare("delete from function_domains where workspace_id = ?").run(id);
+		this.db.prepare("delete from scenarios where workspace_id = ?").run(id);
+		this.db.prepare("delete from workspaces where id = ?").run(id);
+	}
+
 	// requirements
 	addRequirement(
 		workspaceId: number,
