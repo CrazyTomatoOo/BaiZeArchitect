@@ -93,7 +93,7 @@ async function listRepos(): Promise<string[]> {
 	try {
 		const files = await readdir(EVIDENCE_DIR);
 		return files
-			.filter((f) => f.endsWith(".json"))
+			.filter((f) => f.endsWith(".json") && !f.endsWith(".c4.json"))
 			.map((f) => f.slice(0, -".json".length));
 	} catch {
 		return [];
@@ -169,6 +169,35 @@ async function listGenes(): Promise<Array<Record<string, unknown>>> {
 	} catch {
 		return [];
 	}
+}
+
+async function gitnexusStatus(): Promise<{ available: boolean; version?: string }> {
+	return new Promise((resolve) => {
+		execFile("gitnexus", ["--version"], { timeout: 10000 }, (err, stdout) => {
+			if (err) resolve({ available: false });
+			else resolve({ available: true, version: stdout.trim() });
+		});
+	});
+}
+
+async function systemStatus(): Promise<Record<string, unknown>> {
+	const [workspaces, evidenceRepositories, genes, gitnexus] = await Promise.all([
+		Promise.resolve(store.listWorkspaces() as Array<{ id: number; name?: string }>),
+		listRepos(),
+		listGenes(),
+		gitnexusStatus(),
+	]);
+	const config = currentModelConfig();
+	return {
+		ok: true,
+		checkedAt: new Date().toISOString(),
+		server: { sseClients: sseClients.size },
+		model: { provider: config.provider, modelId: config.modelId, hasKey: Boolean(config.apiKey) },
+		workspaces: workspaces.map((w) => ({ id: w.id, name: w.name ?? "" })),
+		evidenceRepositories,
+		geneCount: genes.length,
+		gitnexus,
+	};
 }
 
 function geneIdOf(gene: Record<string, unknown>): string {
@@ -702,6 +731,29 @@ const server = http.createServer(
 
 		if (url.pathname === "/api/genes" && req.method === "GET") {
 			json(200, await listGenes());
+			return;
+		}
+
+		if (url.pathname === "/api/system/status" && req.method === "GET") {
+			json(200, await systemStatus());
+			return;
+		}
+
+		if (url.pathname === "/api/system/reindex" && req.method === "POST") {
+			const body = await readJson(req);
+			const workspaceId = Number(body?.workspaceId ?? url.searchParams.get("workspace") ?? 0);
+			if (!Number.isInteger(workspaceId) || workspaceId <= 0) {
+				json(400, { error: "workspaceId required" });
+				return;
+			}
+			const workspace = store.getWorkspace(workspaceId) as { repo_path?: string; name?: string } | undefined;
+			if (!workspace?.repo_path) {
+				json(404, { error: "workspace not found" });
+				return;
+			}
+			const repoId = workspace.repo_path.split("/").filter(Boolean).pop() || workspace.name || `workspace-${workspaceId}`;
+			void generateEvidence(workspace.repo_path, repoId);
+			json(202, { ok: true, status: "started", repoId });
 			return;
 		}
 

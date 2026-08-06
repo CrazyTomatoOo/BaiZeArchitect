@@ -60,6 +60,7 @@ class BaizeArchitectureBrowser extends LitElement {
 
 	static styles = css`
 		:host { display: block; min-height: 100%; }
+		:host([hidden]) { display: none; }
 		.page-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 1rem; margin-bottom: 1rem; }
 		.page-head h1 { margin: 0; font: 650 1.4rem var(--font-display); }
 		.sub { margin: 4px 0 0; color: var(--text-muted); font-size: .86rem; line-height: 1.5; }
