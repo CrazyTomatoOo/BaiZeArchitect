@@ -664,6 +664,8 @@ export interface StageRunInput {
 	stage: StageName;
 	/** 打回意见:重跑时注入 prompt,驱动审核-修改循环 */
 	feedback?: string;
+	/** 需求上下文中已选/自动推荐的 gene JSON,注入阶段 prompt */
+	geneContext?: string;
 }
 
 function extractJson(text: string): unknown {
@@ -772,6 +774,9 @@ export async function runStage(
 							`上一版产物被审核打回,修改意见如下,必须逐条落实:`,
 							input.feedback,
 						]
+					: []),
+				...(input.geneContext
+					? [`可复用经验 gene(已由需求设计自动推荐或人工选择),必须结合当前需求判断后再用:`, input.geneContext]
 					: []),
 				getStageMethodology(input.stage),
 				`产出本阶段资产,形状:${getStageShape(input.stage)}`,

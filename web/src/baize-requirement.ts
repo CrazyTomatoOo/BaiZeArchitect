@@ -1,5 +1,6 @@
 import { LitElement, html, css, nothing } from "lit";
 import "./baize-consent-modal.ts";
+import "./baize-markdown.ts";
 
 /**
  * 需求设计 — 旅程主视图(master-detail):左需求列表,右设计流水线。
@@ -9,9 +10,11 @@ import "./baize-consent-modal.ts";
 interface Req {
 	id: number;
 	title: string;
+	description?: string;
 	done?: boolean;
 	current?: string;
 }
+
 interface StageRow {
 	stage: string;
 	status: string;
@@ -33,6 +36,22 @@ interface Ref {
 	content?: unknown;
 }
 
+interface EvidenceSnapshot {
+	architecture?: Record<string, unknown>;
+	head_sha?: string;
+	captured_at?: string;
+}
+
+interface DesignPackage {
+	title?: string;
+	content?: string;
+	adr?: string;
+	archived_at?: string;
+}
+
+type GeneRecord = Record<string, unknown>;
+type GeneRef = { gene_id: string; source: string };
+
 const STAGES: Array<{ cn: string; en: string }> = [
 	{ cn: "分析", en: "analysis" },
 	{ cn: "场景", en: "scenario" },
@@ -52,6 +71,10 @@ class BaizeRequirement extends LitElement {
 		error: { state: true },
 		feedback: { state: true },
 		consent: { state: true },
+		evidenceSnapshot: { state: true },
+		designPackage: { state: true },
+		geneRefs: { state: true },
+		geneCatalog: { state: true },
 	};
 
 	declare reqs: Req[];
@@ -62,6 +85,10 @@ class BaizeRequirement extends LitElement {
 	declare error: string;
 	declare feedback: string;
 	declare consent: { cn: string; en: string; refs: Ref[] } | null;
+	declare evidenceSnapshot: EvidenceSnapshot | null;
+	declare designPackage: DesignPackage | null;
+	declare geneRefs: GeneRef[];
+	declare geneCatalog: GeneRecord[];
 
 	static styles = css`
 		:host {
@@ -354,6 +381,58 @@ class BaizeRequirement extends LitElement {
 			border: 1px solid rgba(251, 113, 133, 0.3);
 			border-radius: var(--radius-sm);
 		}
+		.design-context {
+			display: grid;
+			grid-template-columns: repeat(3, minmax(0, 1fr));
+			gap: var(--gap);
+			margin-bottom: var(--gap);
+		}
+		.context-card {
+			background: var(--surface-2);
+			border: 1px solid var(--border);
+			border-radius: var(--radius);
+			padding: 14px;
+			min-width: 0;
+		}
+		.context-head {
+			display: flex;
+			align-items: center;
+			gap: 8px;
+			margin-bottom: 8px;
+		}
+		.context-head h3 { margin: 0; font-size: 0.86rem; }
+		.context-badge {
+			margin-left: auto;
+			color: var(--info);
+			font-size: 0.7rem;
+		}
+		.context-note {
+			margin: 0;
+			color: var(--text-muted);
+			font-size: 0.74rem;
+			line-height: 1.5;
+		}
+		.context-stats {
+			display: flex;
+			gap: 10px;
+			margin-top: 12px;
+			flex-wrap: wrap;
+		}
+		.context-stats b { color: var(--text); font-size: 1rem; }
+		.context-stats small { display: block; color: var(--text-subtle); font-size: 0.64rem; font-weight: 400; }
+		.gene-row {
+			display: flex;
+			align-items: center;
+			gap: 6px;
+			padding: 6px 0;
+			border-top: 1px solid var(--border);
+			font-size: 0.76rem;
+		}
+		.gene-row span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+		.gene-row small { color: var(--text-subtle); font-family: var(--font-mono); }
+		.gene-row button { margin-left: auto; padding: 3px 7px; font-size: 0.7rem; }
+		.suggested-label { margin-top: 10px; color: var(--accent); font-size: 0.72rem; }
+		@media (max-width: 900px) { .design-context { grid-template-columns: 1fr; } }
 		.stepper {
 			display: flex;
 			gap: 6px;
@@ -419,6 +498,10 @@ class BaizeRequirement extends LitElement {
 		this.error = "";
 		this.feedback = "";
 		this.consent = null;
+		this.evidenceSnapshot = null;
+		this.designPackage = null;
+		this.geneRefs = [];
+		this.geneCatalog = [];
 	}
 
 	async connectedCallback(): Promise<void> {
@@ -449,6 +532,10 @@ class BaizeRequirement extends LitElement {
 	private onWsChange = (e: CustomEvent<{ id: number }>) => {
 		this.workspaceId = e.detail.id;
 		this.selected = 0;
+		this.evidenceSnapshot = null;
+		this.designPackage = null;
+		this.geneRefs = [];
+		this.geneCatalog = [];
 		void this.loadReqs();
 	};
 
@@ -472,12 +559,35 @@ class BaizeRequirement extends LitElement {
 		this.selected = r.id;
 		this.error = "";
 		await this.reloadStages();
+		await this.loadDesignContext();
 	}
 
 	async reloadStages(): Promise<void> {
 		this.stages = (await (
 			await fetch(`/api/requirements/${this.selected}/stages`)
 		).json()) as StageRow[];
+	}
+
+	private async loadDesignContext(): Promise<void> {
+		if (!this.selected) return;
+		const getJson = async (url: string): Promise<unknown> => {
+			const response = await fetch(url);
+			return response.ok ? response.json() : null;
+		};
+		try {
+			const [snapshot, pkg, refs, catalog] = await Promise.all([
+				getJson(`/api/requirements/${this.selected}/evidence-snapshot`),
+				getJson(`/api/requirements/${this.selected}/design-package`),
+				getJson(`/api/requirements/${this.selected}/genes`),
+				getJson("/api/genes"),
+			]);
+			this.evidenceSnapshot = snapshot && typeof snapshot === "object" ? (snapshot as EvidenceSnapshot) : null;
+			this.designPackage = pkg && typeof pkg === "object" ? (pkg as DesignPackage) : null;
+			this.geneRefs = Array.isArray(refs) ? (refs as GeneRef[]) : [];
+			this.geneCatalog = Array.isArray(catalog) ? (catalog as GeneRecord[]) : [];
+		} catch {
+			this.error = "加载设计依据失败";
+		}
 	}
 
 	private newRequirement(): void {
@@ -524,6 +634,7 @@ class BaizeRequirement extends LitElement {
 		this.busy = "";
 		if (ok) await this.reloadStages();
 		await this.loadReqs();
+		await this.loadDesignContext();
 	}
 
 	async approve(cn: string, en: string): Promise<void> {
@@ -532,6 +643,7 @@ class BaizeRequirement extends LitElement {
 		);
 		if (ok) await this.reloadStages();
 		await this.loadReqs();
+		await this.loadDesignContext();
 	}
 
 	async reject(en: string): Promise<void> {
@@ -546,8 +658,67 @@ class BaizeRequirement extends LitElement {
 		if (ok) {
 			this.feedback = "";
 			await this.reloadStages();
+			await this.loadDesignContext();
 		}
 	}
+
+private geneId(gene: GeneRecord): string {
+	return String(gene.id ?? gene.gene_id ?? gene.name ?? "");
+}
+
+private geneLabel(gene: GeneRecord): string {
+	return String(gene.summary ?? gene.title ?? gene.name ?? this.geneId(gene));
+}
+
+private recommendedGenes(): GeneRecord[] {
+	const req = this.reqs.find((item) => item.id === this.selected);
+	if (!req) return [];
+	const query = new Set(`${req.title} ${req.description ?? ""}`.toLowerCase().match(/[\u4e00-\u9fff]{2,}|[a-z0-9_][a-z0-9_-]{1,}/g) ?? []);
+	const selected = new Set(this.geneRefs.map((ref) => ref.gene_id));
+	return this.geneCatalog
+		.map((gene) => ({ gene, score: [...query].filter((token) => JSON.stringify(gene).toLowerCase().includes(token)).length }))
+		.filter((item) => !selected.has(this.geneId(item.gene)) && item.score > 0)
+		.sort((a, b) => b.score - a.score)
+		.slice(0, 3)
+		.map((item) => item.gene);
+}
+
+private async toggleGene(geneId: string, add: boolean, source = "manual"): Promise<void> {
+	const response = await fetch(`/api/requirements/${this.selected}/genes`, {
+		method: add ? "POST" : "DELETE",
+		headers: { "content-type": "application/json" },
+		body: JSON.stringify({ geneId, source }),
+	});
+	if (response.ok) await this.loadDesignContext();
+}
+
+private renderDesignContext() {
+	const arch = this.evidenceSnapshot?.architecture;
+	const architecture = arch as Record<string, unknown> | undefined;
+	const hotspots = Array.isArray(architecture?.hotspots) ? (architecture.hotspots as Array<Record<string, unknown>>) : [];
+	const boundaries = Array.isArray(architecture?.boundaries) ? (architecture.boundaries as Array<Record<string, unknown>>) : [];
+	const clusters = Array.isArray(architecture?.clusters) ? (architecture.clusters as Array<Record<string, unknown>>) : [];
+	const selectedIds = new Set(this.geneRefs.map((ref) => ref.gene_id));
+	const selectedGenes = this.geneCatalog.filter((gene) => selectedIds.has(this.geneId(gene)));
+	const suggested = this.recommendedGenes();
+	return html`<section class="design-context">
+		<div class="context-card evidence-context">
+			<div class="context-head"><h3>本次设计依据</h3><span class="context-badge">${this.evidenceSnapshot ? "已固化" : "待分析"}</span></div>
+			${this.evidenceSnapshot ? html`<p class="context-note">分析阶段时保存的代码事实 · head ${this.evidenceSnapshot.head_sha || "unknown"}</p>
+				<div class="context-stats"><b>${Number(architecture?.total_nodes ?? 0).toLocaleString()}<small>代码节点</small></b><b>${Number(architecture?.total_edges ?? 0).toLocaleString()}<small>关系边</small></b><b>${hotspots.length}<small>热点</small></b><b>${boundaries.length}<small>边界</small></b><b>${clusters.length}<small>模块</small></b></div>` : html`<p class="context-note">运行「分析」阶段后,这里会保存 AI 当时看到的代码架构事实。</p>`}
+		</div>
+		<div class="context-card package-context">
+			<div class="context-head"><h3>设计包</h3><span class="context-badge">${this.designPackage ? "已归档" : "归档后生成"}</span></div>
+			${this.designPackage?.content ? html`<baize-markdown .text=${this.designPackage.content}></baize-markdown>` : html`<p class="context-note">完成「归档」阶段后,设计包会在这里渲染为可读文档。</p>`}
+		</div>
+		<div class="context-card gene-context">
+			<div class="context-head"><h3>复用经验</h3><span class="context-badge">${this.geneRefs.length} 个已选</span></div>
+			<p class="context-note">运行分析时会自动匹配经验;也可以手动增减,选择结果会注入后续阶段 prompt。</p>
+			${selectedGenes.length ? selectedGenes.map((gene) => html`<div class="gene-row"><span>${this.geneLabel(gene)}</span><small>${this.geneRefs.find((ref) => ref.gene_id === this.geneId(gene))?.source ?? "manual"}</small><button @click=${() => this.toggleGene(this.geneId(gene), false)}>移除</button></div>`) : html`<p class="context-note">尚未绑定经验。</p>`}
+			${suggested.length ? html`<div class="suggested-label">推荐加入</div>${suggested.map((gene) => html`<div class="gene-row suggested"><span>${this.geneLabel(gene)}</span><button @click=${() => this.toggleGene(this.geneId(gene), true)}>加入</button></div>`)}` : nothing}
+		</div>
+	</section>`;
+}
 
 	renderRefs(refs: Ref[]) {
 		if (!refs.length) return nothing;
@@ -712,6 +883,7 @@ class BaizeRequirement extends LitElement {
 					${
 						this.selected
 						? html`<div class="detail-row"><div class="detail-card">
+								${this.renderDesignContext()}
 								<h3>设计流水线(逐阶段审核,打回可带意见重跑)</h3>
 								<div class="stepper">
 									${STAGES.map((s) => {

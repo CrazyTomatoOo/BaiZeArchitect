@@ -171,6 +171,41 @@ async function listGenes(): Promise<Array<Record<string, unknown>>> {
 	}
 }
 
+function geneIdOf(gene: Record<string, unknown>): string {
+	return String(gene.id ?? gene.gene_id ?? gene.name ?? "");
+}
+
+function geneTokens(text: string): Set<string> {
+	return new Set(text.toLowerCase().match(/[\u4e00-\u9fff]{2,}|[a-z0-9_][a-z0-9_-]{1,}/g) ?? []);
+}
+
+function recommendGeneIds(requirement: Record<string, unknown>, genes: Array<Record<string, unknown>>): string[] {
+	const query = geneTokens(`${String(requirement.title ?? "")} ${String(requirement.description ?? "")}`);
+	return genes
+		.map((gene) => {
+			const id = geneIdOf(gene);
+			const text = geneTokens(JSON.stringify(gene));
+			const score = [...query].filter((token) => text.has(token)).length;
+			return { id, score };
+		})
+		.filter((x) => x.id && x.score > 0)
+		.sort((a, b) => b.score - a.score)
+		.slice(0, 3)
+		.map((x) => x.id);
+}
+
+async function geneContextForRequirement(reqId: number, requirement: Record<string, unknown>, autoRecommend: boolean): Promise<string> {
+	const genes = await listGenes();
+	let refs = store.listRequirementGenes(reqId) as Array<{ gene_id: string; source: string }>;
+	if (autoRecommend && refs.length === 0) {
+		for (const geneId of recommendGeneIds(requirement, genes)) store.addRequirementGene(reqId, geneId, "auto");
+		refs = store.listRequirementGenes(reqId) as Array<{ gene_id: string; source: string }>;
+	}
+	if (!refs.length) return "";
+	const byId = new Map(genes.map((gene) => [geneIdOf(gene), gene]));
+	return JSON.stringify(refs.map((ref) => ({ id: ref.gene_id, source: ref.source, gene: byId.get(ref.gene_id) ?? null })), null, 2);
+}
+
 	interface DirectoryNode {
 		name: string;
 		path: string;
@@ -859,7 +894,8 @@ const server = http.createServer(
 					store.captureEvidenceSnapshot(reqId, arch, sha);
 				}
 			}
-		broadcastRun({ type: "start", requirementId: reqId, stage: STAGE_CN[stage], requirementTitle: requirement.title });
+			const geneContext = await geneContextForRequirement(reqId, requirement as unknown as Record<string, unknown>, stage === "analysis");
+			broadcastRun({ type: "start", requirementId: reqId, stage: STAGE_CN[stage], requirementTitle: requirement.title });
 			const assets = await runStage({
 				repoPath: ws?.repo_path ?? ROOT,
 				repoId: ws?.repo_path.split("/").pop() ?? "",
@@ -868,6 +904,7 @@ const server = http.createServer(
 				upstream: JSON.stringify(rows),
 				stage,
 				feedback: cur?.feedback || undefined,
+				geneContext,
 			},
 			(e) =>
 				broadcastRun({ ...e, requirementId: reqId, stage: STAGE_CN[stage] }),
