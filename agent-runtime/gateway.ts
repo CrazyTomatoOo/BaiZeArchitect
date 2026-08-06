@@ -111,7 +111,7 @@ async function readEvidence(repoId: string): Promise<unknown> {
 }
 
 // 容器内自动索引:gitnexus analyze → 查 LadybugDB 提取架构证据 → evidence/<repoId>.json。
-// 合并既有 evidence(保留设计流水线沉淀的 priorAdr 等),仅替换 architecture。
+// 合并既有 evidence 的兼容元数据,仅替换 architecture;设计输入的历史决策从资产库读取。
 async function generateEvidence(repoPath: string, repoId: string): Promise<void> {
 	try {
 		await new Promise<void>((resolve, reject) =>
@@ -139,7 +139,7 @@ async function generateEvidence(repoPath: string, repoId: string): Promise<void>
 		} catch (e) {
 			console.warn("[evidence] extract-architecture failed:", (e as Error).message);
 		}
-		// 保留既有 evidence 的非架构字段(priorAdr 等),仅刷新 architecture。
+		// 保留既有 evidence 的兼容元数据,仅刷新 architecture;prior 输入不再消费 repo priorAdr。
 		let existing: Record<string, unknown> = {};
 		try {
 			existing = JSON.parse(await readFile(join(EVIDENCE_DIR, `${repoId}.json`), "utf8"));
@@ -946,6 +946,12 @@ const server = http.createServer(
 					store.captureEvidenceSnapshot(reqId, arch, sha);
 				}
 			}
+			const archivedPrior = stage === "analysis"
+				? (store.listDesignPackages(requirement.workspace_id) as Array<{ title?: string; content?: string }>)
+					.slice(-5)
+					.map((pkg) => `### ${pkg.title ?? "历史设计"}\n${pkg.content ?? ""}`)
+					.join("\n\n")
+				: "";
 			const geneContext = await geneContextForRequirement(reqId, requirement as unknown as Record<string, unknown>, stage === "analysis");
 			broadcastRun({ type: "start", requirementId: reqId, stage: STAGE_CN[stage], requirementTitle: requirement.title });
 			const assets = await runStage({
@@ -953,7 +959,7 @@ const server = http.createServer(
 				repoId: ws?.repo_path.split("/").pop() ?? "",
 				requirementTitle: requirement.title,
 				requirementDesc: requirement.description,
-				upstream: JSON.stringify(rows),
+				upstream: JSON.stringify({ stages: rows, archivedDecisions: archivedPrior || "(无已归档决策)" }),
 				stage,
 				feedback: cur?.feedback || undefined,
 				geneContext,

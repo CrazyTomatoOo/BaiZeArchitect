@@ -28,6 +28,7 @@ import {
 } from "@earendil-works/pi-ai";
 import { Type } from "typebox";
 import { getEvolverClient } from "./evolver-client.js";
+import { openStore } from "./store.js";
 import { getStageMethodology, getStageShape } from "./stage-prompts.js";
 
 // ponytail: PROJECT_ROOT 指向项目根(.pi/skills 所在),不是 agent-runtime 目录。
@@ -147,7 +148,6 @@ interface EvidenceDoc {
 		layers?: Array<{ name: string; layer: string; reason: string }>;
 		clusters?: Array<{ id: number; label: string; members: number; cohesion: number; top_nodes: string[] }>;
 	};
-	priorAdr?: { content?: string; status?: string };
 }
 
 function loadEvidence(repoId: string): EvidenceDoc | null {
@@ -160,12 +160,28 @@ function loadEvidence(repoId: string): EvidenceDoc | null {
 	}
 }
 
+function loadArchivedPrior(repoId: string): string {
+	let store: ReturnType<typeof openStore> | null = null;
+	try {
+		store = openStore(process.env.BAIZE_DB_PATH ?? path.join(PROJECT_ROOT, ".baize", "baize.db"));
+		const workspaces = store.listWorkspaces() as Array<{ id: number; repo_path?: string; name?: string }>;
+		const workspace = workspaces.find((w) => w.repo_path?.split("/").filter(Boolean).pop() === repoId || w.name === repoId);
+		if (!workspace) return "";
+		const packages = store.listDesignPackages(workspace.id) as Array<{ title?: string; content?: string }>;
+		return packages.slice(-5).map((pkg) => `### ${pkg.title ?? "历史设计"}\n${pkg.content ?? ""}`).join("\n\n").slice(0, 8000);
+	} catch {
+		return "";
+	} finally {
+		if (store?.db.open) store.db.close();
+	}
+}
+
 function stripProj(qn: string, proj?: string): string {
 	if (proj && qn.startsWith(proj + ".")) return qn.slice(proj.length + 1);
 	return qn;
 }
 
-function evidenceToPromptBlock(ev: EvidenceDoc): string {
+function evidenceToPromptBlock(ev: EvidenceDoc, archivedPrior: string): string {
 	const a = ev.architecture;
 	const lines: string[] = ["## 仓库架构证据 (codebase-memory-mcp 结构化 — 定位真实符号与影响面)"];
 	if (a) {
@@ -184,9 +200,9 @@ function evidenceToPromptBlock(ev: EvidenceDoc): string {
 		if (cl) lines.push(`- 真实模块(Leiden 社区): ${cl}`);
 		lines.push("- 基于以上结构,用 read/grep 精确定位热点符号真实行号;evidenceCandidates 必须是真实路径+行号(禁止编造).");
 	}
-	const adr = ev.priorAdr?.content?.trim();
-	lines.push("## 历史决策 (复用 — 上次设计沉淀,避免重复决策)");
-	lines.push(adr && adr.length > 0 ? adr.slice(0, 2000) : "(无历史 ADR,首次设计)");
+	const adr = archivedPrior.trim();
+	lines.push("## 历史决策 (复用资产库沉淀,避免重复决策)");
+	lines.push(adr && adr.length > 0 ? adr.slice(0, 8000) : "(无已归档设计决策,首次设计)");
 	return lines.join("\n");
 }
 // #9b: evolver_recall 自定义工具 — BAIZE_EVOLVER=1 时 architect mid-design 查本机已审核 gene。
@@ -416,9 +432,11 @@ export async function runDesign(
 		sessionManager: SessionManager.inMemory(input.repoPath),
 	});
 	try {
-	const ev = loadEvidence(input.repoId);
-	const prompt = [
-		...(ev ? [evidenceToPromptBlock(ev), ""] : []),
+		const ev = loadEvidence(input.repoId);
+		const archivedPrior = loadArchivedPrior(input.repoId);
+		const evidenceBlock = ev ? evidenceToPromptBlock(ev, archivedPrior) : archivedPrior ? `## 历史决策 (复用资产库沉淀,避免重复决策)\n${archivedPrior}` : "";
+		const prompt = [
+			...(evidenceBlock ? [evidenceBlock, ""] : []),
 		`仓库: ${input.repoId} (commit ${sha})`,
 		`需求: ${input.requirement}`,
 		"请用 read/grep/find 分析仓库代码,参考 .pi/skills 各角色职责,然后调用 submit_plan 提交完整 plan.",

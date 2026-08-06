@@ -432,8 +432,8 @@ class BaizeShell extends LitElement {
 							<div class="nav-group">
 								<div class="label">管理</div>
 							<button class="nav-item ${this.tab === "system" ? "active" : ""}" @click=${() => this.goto("system")}>系统</button>
-							<button class="nav-item ${this.tab === "evidence" ? "active" : ""}" @click=${() => this.goto("evidence")}>证据</button>
-							</div>
+							<button class="nav-item ${this.tab === "evidence" ? "active" : ""}" @click=${() => this.goto("evidence")}>架构</button>
+						</div>
 								<div class="status-foot">
 									<div><span class="live ${this.wsConnected ? "on" : ""}">●</span> ws ${this.wsConnected ? "已连接" : "未连接"}</div>
 									<div>工作区:${this.wsName || "—"}</div>
