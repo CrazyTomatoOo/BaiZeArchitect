@@ -172,3 +172,13 @@ gitnexus lbug schema(从 evidence 推断)节点:Section/Function/Property/File/M
 - 实样:`evidence/lws.json`(architecture 仅 3 数组 + 统计;priorAdr.content 含 ADR markdown;generatedBy:"gitnexus")
 - 全仓 grep `c4` → 0 命中(web/agent-runtime/schemas/docs/.wayfinder,过滤函数名误报后)
 - wayfinder 上下文:`.wayfinder/map.md`(B=架构浏览含目录/架构图/C4;E03 blocked-by E02)
+
+## Correction(2026-08-06,post-user-feedback)
+
+本 findings 的 C4 映射(Component=clusters 近似 / Container=K8s INFRA_MAPS / Context=LLM actor)有误,已被 E03 Resolution 订正:
+
+- **Container ≠ Docker/K8s** —— 是可独立运行/部署单元(web/API/DB 等),从构建配置 + 目录结构抽取。
+- **Component ≠ Leiden clusters** —— 是 interface 后的职责块,从代码反推 + LLM 命名。
+- **四层是嵌套缩放**(Context⊃Container⊃Component⊃Code),非可挑并列视图。
+
+「两系统无原生 C4」结论仍成立。映射以 E03 为准(Context+Container 深度,不做 Component/Code)。
