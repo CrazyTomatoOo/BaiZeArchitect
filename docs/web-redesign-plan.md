@@ -139,7 +139,7 @@
 
 - [x] 6 页 + sidebar shell 按 T04 变体 C 渲染,截图对照 mock(2026-08-06 视觉验收通过,8 截图见 §11.3)。
 - [x] 状态色语义一致:绿=连/成、青=运行、琥珀=待审(截图核对一致)。
-- [x] run 流切页不丢:SSE + `?hidden`(display:none)保活已接线;token 级 live 流需真实 run 端到端。
+- [x] run 流切页不丢:SSE + `?hidden`(display:none)保活;**token 级 live 流已验**(真实 run analysis:29 个 `{type:token}` delta 经 SSE 推送,见 §11.4)。
 - [x] ⌘K / ⌘B / Esc 键盘可用(live 实测:命令面板开/关、sidebar 折叠/展开)。
 - [x] 审批 consent gate:live 验(种子「场景」为待审 → 通过弹摘要 modal + 确认通过/取消,见 acc-02)。
 - [x] workspace 切换防歧义三连(switcher 变色 + amber banner + URL):banner 原为死 CSS 未渲染,2026-08-06 补实现;live 验(2 工作区,acc-09-scope-banner)。
@@ -180,3 +180,15 @@
 ### 11.3 验收快照(9 张,`docs/acceptance-2026-08-06/`)
 
 workspaces / requirement-detail / overview / asset-scenarios / decisions / system / evidence / mock-variantC / scope-banner。视觉基线对照(§9 第 1 条)已通过(2026-08-06)。
+
+### 11.4 真实 run 端到端验证(2026-08-06,docker + bailian/glm-5.2)
+
+经 API 触发 `POST /api/requirements/1/stage/analysis/run`(DASHSCOPE_API_KEY 透传容器):
+- **token 实时流已验**:SSE `/api/runs/stream` 捕获 29 个 `{type:"token",text:...}` 真 delta 事件 + start/phase/done;run 15.4s 返回 `{ok,refs:[{type:analysis,content:{scope:[...]}}]}`(真实设计内容)。
+- **阶段状态机已验**:未开始 --run--> 待审 --approve--> 完成(analysis 经 `POST .../approve` → 完成,HTTP 200)。
+- **§9 第 3 条 token 级 live 流由此闭环**(此前仅结构性)。核心设计流水线 run→token流→待审→approve→完成 全链 live 验证通过。
+- evolve(ADR+gene)/archive 为独立脚本(evolve.sh/archive.sh),不在 UI 流内,本轮未验。
+
+### 11.5 待修:需求列表 reload 后空(ui bug,2026-08-06 验收发现)
+
+reload `?workspace=1` 后,baize-requirement 列表显示「本工作区还没有需求」,但 `GET /api/requirements?workspace=1` 返回 req 1;且 footer wsName 滞留上个工作区。疑似 shell 读 ws 优先 localStorage 而非 URL `?workspace=`,或 requirement 组件在 ws 确立前即 fetch 且不重试。正常流程可能不显现(本场景由防歧义测试切换 ws=2 触发)。待修。
