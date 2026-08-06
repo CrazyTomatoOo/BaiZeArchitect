@@ -171,7 +171,140 @@ async function listGenes(): Promise<Array<Record<string, unknown>>> {
 	}
 }
 
-const store = openStore(join(ROOT, ".baize", "baize.db"));
+	interface DirectoryNode {
+		name: string;
+		path: string;
+		kind: "directory" | "file";
+		children?: DirectoryNode[];
+	}
+
+	const TREE_IGNORES = new Set([".git", ".gitnexus", "node_modules", "dist", "build", "coverage", ".baize", "out", "evolver-home"]);
+
+	async function repoPathForId(repoId: string): Promise<string | null> {
+		const rows = store.listWorkspaces() as Array<{ repo_path?: string; name?: string }>;
+		const row = rows.find((w) => {
+			const pathName = w.repo_path?.split("/").filter(Boolean).pop();
+			return pathName === repoId || w.name === repoId;
+		});
+		if (row?.repo_path) return row.repo_path;
+		const root = resolve(REPOS_ROOT);
+		const fallback = resolve(root, repoId);
+		return fallback === root || !fallback.startsWith(`${root}/`) ? null : fallback;
+	}
+
+	async function readTextIfExists(file: string): Promise<string | null> {
+		try {
+			return await readFile(file, "utf8");
+		} catch {
+			return null;
+		}
+	}
+
+	async function readJsonIfExists(file: string): Promise<Record<string, unknown> | null> {
+		const raw = await readTextIfExists(file);
+		if (!raw) return null;
+		try {
+			return JSON.parse(raw) as Record<string, unknown>;
+		} catch {
+			return null;
+		}
+	}
+
+	async function buildDirectoryTree(repoPath: string, relative = "", depth = 0): Promise<DirectoryNode[]> {
+		if (depth > 5) return [];
+		try {
+			const absolute = resolve(repoPath, relative);
+			const entries = await readdir(absolute, { withFileTypes: true });
+			const visible = entries
+				.filter((entry) => !TREE_IGNORES.has(entry.name) && entry.name !== ".DS_Store")
+				.sort((a, b) => Number(b.isDirectory()) - Number(a.isDirectory()) || a.name.localeCompare(b.name))
+				.slice(0, 300);
+			const nodes: DirectoryNode[] = [];
+			for (const entry of visible) {
+				const path = relative ? `${relative}/${entry.name}` : entry.name;
+				if (entry.isDirectory()) {
+					nodes.push({ name: entry.name, path, kind: "directory", children: await buildDirectoryTree(repoPath, path, depth + 1) });
+				} else {
+					nodes.push({ name: entry.name, path, kind: "file" });
+				}
+			}
+			return nodes;
+		} catch {
+			return [];
+		}
+	}
+
+	async function readC4Cache(repoId: string): Promise<Record<string, unknown> | null> {
+		return readJsonIfExists(join(EVIDENCE_DIR, `${repoId}.c4.json`));
+	}
+
+	async function generateC4(repoId: string, repoPath: string): Promise<Record<string, unknown>> {
+		const headSha = (await gitHeadSha(repoPath)) || "untracked";
+		const cached = await readC4Cache(repoId);
+		if (cached && cached.head_sha === headSha) return { ...cached, cached: true };
+
+		const architecture = (await readEvidenceArchitecture(repoId)) ?? {};
+		const rootPackage = await readJsonIfExists(join(repoPath, "package.json"));
+		const packageDirs = ["", "agent-runtime", "web"];
+		const containers: Array<Record<string, unknown>> = [];
+		for (const dir of packageDirs) {
+			const pkg = await readJsonIfExists(join(repoPath, dir, "package.json"));
+			if (!pkg) continue;
+			const name = String(pkg.name ?? (dir ? `${repoId}/${dir}` : repoId));
+			containers.push({
+				id: dir ? dir.replace(/[^a-zA-Z0-9]/g, "-") : "app",
+				name,
+				description: String(pkg.description ?? (dir ? `${dir} package` : "repository application")),
+				technology: "Node.js / TypeScript",
+				source: dir ? `${dir}/package.json` : "package.json",
+			});
+		}
+		const composeFiles = ["compose.yaml", "compose.yml", "docker-compose.yml"];
+		for (const file of composeFiles) {
+			const text = await readTextIfExists(join(repoPath, file));
+			if (!text) continue;
+			for (const match of text.matchAll(/^  ([A-Za-z0-9_-]+):\s*$/gm)) {
+				const name = match[1];
+				if (name === "services" || containers.some((c) => c.name === name)) continue;
+				containers.push({ id: `compose-${name}`, name, description: `compose service ${name}`, technology: "Docker", source: file });
+			}
+			break;
+		}
+		const clusters = Array.isArray((architecture as { clusters?: unknown }).clusters) ? (architecture as { clusters: Array<Record<string, unknown>> }).clusters : [];
+		const components = clusters.map((cluster, index) => ({
+			id: `component-${index + 1}`,
+			name: String(cluster.label ?? `Component ${index + 1}`),
+			description: "从代码聚类反推的职责块(draft)",
+			containerId: containers[0]?.id ?? "app",
+			members: Number(cluster.members ?? 0),
+			cohesion: Number(cluster.cohesion ?? 0),
+			topNodes: cluster.top_nodes ?? [],
+		}));
+		const dependencies = Object.keys((rootPackage?.dependencies as Record<string, unknown>) ?? {}).slice(0, 12);
+		const payload: Record<string, unknown> = {
+			repositoryId: repoId,
+			head_sha: headSha,
+			generatedAt: new Date().toISOString(),
+			generation: "heuristic-draft",
+			context: {
+				name: String(rootPackage?.name ?? repoId),
+				description: String(rootPackage?.description ?? "当前仓库的系统上下文(draft)"),
+				externalSystems: dependencies.map((name) => ({ name, kind: "dependency" })),
+			},
+			containers,
+			components,
+			code: {
+				hotspots: (architecture as { hotspots?: unknown }).hotspots ?? [],
+				boundaries: (architecture as { boundaries?: unknown }).boundaries ?? [],
+				clusters,
+			},
+		};
+		await mkdir(EVIDENCE_DIR, { recursive: true });
+		await writeFile(join(EVIDENCE_DIR, `${repoId}.c4.json`), JSON.stringify(payload, null, 2));
+		return payload;
+	}
+
+	const store = openStore(join(ROOT, ".baize", "baize.db"));
 
 // 阶段流水线(LLM 阶段,按序门禁);归档单独处理。
 const STAGE_ORDER: StageName[] = [
@@ -499,6 +632,36 @@ const server = http.createServer(
 			const repoId = b?.repoId || repoPath.split("/").filter(Boolean).pop() || "repo";
 			void generateEvidence(repoPath, repoId);
 			json(202, { ok: true, repoId });
+			return;
+		}
+
+		const architectureRoute = url.pathname.match(/^\/api\/architecture\/([^/]+)\/(tree|c4)(?:\/generate)?$/);
+		if (architectureRoute) {
+			const repoId = decodeURIComponent(architectureRoute[1]);
+			const kind = architectureRoute[2];
+			const repoPath = await repoPathForId(repoId);
+			if (!repoPath) {
+				json(404, { error: `repository not found: ${repoId}` });
+				return;
+			}
+			if (kind === "tree" && req.method === "GET") {
+				json(200, { repositoryId: repoId, tree: await buildDirectoryTree(repoPath) });
+				return;
+			}
+			if (kind === "c4" && req.method === "GET") {
+				const cached = await readC4Cache(repoId);
+				if (!cached) {
+					json(404, { error: "C4 draft not generated", repositoryId: repoId });
+					return;
+				}
+				json(200, cached);
+				return;
+			}
+			if (kind === "c4" && req.method === "POST") {
+				json(200, await generateC4(repoId, repoPath));
+				return;
+			}
+			json(405, { error: "method not allowed" });
 			return;
 		}
 

@@ -197,11 +197,12 @@ class BaizeMarkdown extends LitElement {
 
 	/** DOMParser 注入 SVG(不执行脚本,避免 innerHTML XSS)。 */
 	private _injectSvg(node: HTMLElement, svg: string) {
-		const doc = new DOMParser().parseFromString(svg, "image/svg+xml");
-		if (doc.querySelector("parsererror")) {
-			throw new Error("mermaid SVG parse error");
+		const doc = new DOMParser().parseFromString(svg, "text/html");
+		const root = doc.body.firstElementChild;
+		if (!root || root.tagName.toLowerCase() !== "svg") {
+			throw new Error("mermaid SVG root parse error");
 		}
-		const imported = this.ownerDocument.importNode(doc.documentElement, true);
+		const imported = this.ownerDocument.importNode(root, true);
 		node.replaceChildren(imported);
 	}
 

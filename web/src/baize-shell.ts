@@ -448,7 +448,7 @@ class BaizeShell extends LitElement {
 									?hidden=${!this.tab.startsWith("assets-")}
 								></baize-asset-library>
 							<baize-system ?hidden=${this.tab !== "system"}></baize-system>
-							<baize-dashboard ?hidden=${this.tab !== "evidence"}></baize-dashboard>
+							<baize-architecture-browser .repo=${this.wsName} ?hidden=${this.tab !== "evidence"}></baize-architecture-browser>
 							</main>
 						</div>`
 					: html`<main class="entry-main">
