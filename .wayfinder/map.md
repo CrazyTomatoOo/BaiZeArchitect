@@ -25,13 +25,12 @@
 - [E02 架构浏览器 C4 数据源调研](tickets/E02-arch-browser-c4-source.md) — 两系统均无原生 C4(codebase-memory/gitnexus 只到 function/community/boundary);gateway 扩展点 generateC4。**C4 映射订正于 E03(Container≠K8s/Component≠clusters,以 E03 为准)**。findings: research/E02-arch-browser-c4-source.md
 - [E05 markdown/mermaid 渲染方案](tickets/E05-markdown-mermaid-render.md) — marked + `mermaid.render(id,code)` 注入 shadow DOM(非 `run()`,跨不了 shadow 边界);主题 hex 映射(themeVariables 只收 hex,运行时 getComputedStyle 解 CSS vars);共享 `baize-markdown` 组件。findings: research/E05-markdown-mermaid-render.md
 - [E01 证据/决策绑需求 + 归档资产化](tickets/E01-evidence-decision-requirement-binding.md) — 证据=设计时快照(req-keyed,新增绑定);决策记录=设计包绑 req id(不再只 repo+ts),归档入资产库后**喂下次设计替代 repo 级 priorAdr**成闭环;页面织入流水线(依据区 + 归档阶段产物 rendered);归档=archive 阶段 approve 触发,扩资产库 tab(划分交 E04/E06)。
-- [E03 架构浏览器范围与形态](tickets/E03-arch-browser-scope.md) — 视图=目录树+代码结构图(非C4)+C4 嵌套缩放;C4 深度=Context+Container(不做 Component/Code;Container 从构建配置/目录结构抽取非 K8s、Context LLM 生成缓存 .c4.json);落位=取代「证据」nav 改名「架构」(管理:系统·架构),baize-dashboard 退役证据角色。订正 E02 的 C4 误读。
+- [E03 架构浏览器范围与形态](tickets/E03-arch-browser-scope.md) — 视图=目录树+C4 全四层(Context⊃Container⊃Component⊃Code 嵌套缩放,**Code 取代代码结构图**,clusters/boundaries/hotspots 并入 Component/Code);C4 深度=全四层(用户修订,原仅 Context+Container;Container 从构建配置/目录结构抽取非 K8s、Context/Component LLM 生成缓存 .c4.json);落位=取代「证据」nav 改名「架构」(管理:系统·架构),baize-dashboard 退役证据角色。订正 E02 的 C4 误读。
+- [E04 gene 展示重构](tickets/E04-gene-display.md) — 展示=列表-详情(摘要+信号 chips+质量分 / preconditions+strategy+validation+constraints+source 全显,baize-markdown 渲染);落位=合「沉淀」tab(决策记录+gene 两段,资产库→5 tab);检索复用=混合(设计 run 按 signals 调 evolver_search_assets 自动推荐 N + 人工增减,依据区显示)。
 
 ## Not yet specified
 
-- 逐页布局(待 E04 定):gene 卡片形态。(架构浏览器页面形态已由 E03 定:取代证据 nav 改名架构,目录树+代码结构图+C4 Context/Container;证据在详情里的呈现已由 E01 定:织入流水线)
-- 资产 tab 划分(待 E04/E06):决策记录 + gene 各一 tab or 合「沉淀」tab。(扩资产库 + 归档=archive approve 已由 E01 定)
-- prior 决策输入选择(待资产库有决策记录后):下次设计读哪些归档决策记录作 prior(全部?同 workspace?最新 N?)——依赖 E04/E06 资产库形态,暂不 sharp。
+- prior 决策输入选择(待资产库有决策记录后):下次设计读哪些归档决策记录作 prior(全部?同 workspace?最新 N?)——gene 检索机制已由 E04 定(混合:evolver_search_assets 自动推荐+人工增减),决策记录或可复用同机制,待实施时定。
 
 ## Out of scope
 
@@ -44,6 +43,6 @@
 - [E01 证据/决策绑需求 + 归档资产化](tickets/E01-evidence-decision-requirement-binding.md) `grilling` — **closed**:证据=设计时快照(req-keyed);决策记录=设计包绑 req、归档喂下次设计;页面织入流水线;归档=archive approve、扩资产库 tab。
 - [E02 架构浏览器 C4 数据源调研](tickets/E02-arch-browser-c4-source.md) `research` — **closed**:无原生 C4;C4 映射订正于 E03。findings 落盘
 - [E03 架构浏览器范围与形态](tickets/E03-arch-browser-scope.md) `grilling` — **closed**:目录树 + C4 全四层(Code 取代代码结构图);取代证据 nav 改名架构。
-- [E04 gene 展示重构](tickets/E04-gene-display.md) `grilling` — 怎么让 gene 传达"经验"(可取)
+- [E04 gene 展示重构](tickets/E04-gene-display.md) `grilling` — **closed**:列表-详情(全显 preconditions/strategy/validation)+ 合「沉淀」tab + 混合检索(evolver_search_assets 自动推荐+人工增减)。
 - [E05 markdown/mermaid 渲染方案](tickets/E05-markdown-mermaid-render.md) `research` — **closed**:marked + mermaid.render 注入 shadow DOM + 主题 hex 映射。findings 落盘
-- [E06 IA 重构](tickets/E06-ia-restructure.md) `grilling` — 证据拆分 + ADR/gene 进资产 + sidebar/系统页(blocked: E04)
+- [E06 IA 重构](tickets/E06-ia-restructure.md) `grilling` — 证据拆分 + ADR/gene 进资产 + sidebar/系统页(**可取**:E01/E04 已闭环)
