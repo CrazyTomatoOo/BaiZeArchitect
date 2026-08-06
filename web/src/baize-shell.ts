@@ -157,6 +157,9 @@ class BaizeShell extends LitElement {
 			font-size: 0.9rem;
 			max-width: 170px;
 		}
+		.ws-select.non-default {
+			color: var(--warn);
+		}
 		.ws-select option {
 			background: var(--surface);
 			color: var(--text);
@@ -381,7 +384,7 @@ class BaizeShell extends LitElement {
 					<span class="logo"><span class="dot">◇</span> BaiZe Architect</span>
 					<div class="topbar-right">
 						<select
-							class="ws-select"
+							class="ws-select ${this.ws && this.workspaces.length && this.ws !== this.workspaces[0].id ? "non-default" : ""}"
 							.value=${String(this.ws)}
 							@change=${(e: Event) =>
 								this.setWs(Number((e.target as HTMLSelectElement).value))}
@@ -396,6 +399,9 @@ class BaizeShell extends LitElement {
 							: null}
 					</div>
 				</header>
+				${this.ws && this.workspaces.length && this.ws !== this.workspaces[0].id
+					? html`<div class="scope-banner">⚠ 当前工作区:${this.wsName}(非默认)—— 页面数据仅属此工作区</div>`
+					: null}
 				${this.ws
 					? html`<div class="app ${this.folded ? "folded" : ""}">
 							<aside class="sidebar">

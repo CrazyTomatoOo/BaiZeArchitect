@@ -141,8 +141,8 @@
 - [x] 状态色语义一致:绿=连/成、青=运行、琥珀=待审(截图核对一致)。
 - [x] run 流切页不丢:SSE + `?hidden`(display:none)保活已接线;token 级 live 流需真实 run 端到端。
 - [x] ⌘K / ⌘B / Esc 键盘可用(live 实测:命令面板开/关、sidebar 折叠/展开)。
-- [x] 审批 consent gate:modal + 门禁逻辑已接线;live 触发需待审阶段(真实 run)。
-- [x] workspace 切换防歧义三连:`.scope-banner`(amber)已接线;live 需 ≥2 工作区。
+- [x] 审批 consent gate:live 验(种子「场景」为待审 → 通过弹摘要 modal + 确认通过/取消,见 acc-02)。
+- [x] workspace 切换防歧义三连(switcher 变色 + amber banner + URL):banner 原为死 CSS 未渲染,2026-08-06 补实现;live 验(2 工作区,acc-09-scope-banner)。
 - [x] 落地页 localStorage 记忆(live 实测 reload 停原页)+ 首访分流。
 - [x] 现有功能不退化:6 阶段流水线/资产库/证据/ADR/gene 各页渲染正常(docker 验收)。
 
@@ -177,6 +177,6 @@
 - **决策(2026-08-06,用户拍板)**:保留实施现状,文档对齐实现 —— §4 已回写为四区、§6.2 已回写为四 tab(含需求管理)。「需求管理」作为需求资产化浅视图留在资产库,与「工作→需求」流水线页分工(浏览复用 vs 设计工作面)。
 - 接受的概念取舍:需求兼具「工作面」与「可浏览资产」双重身份;双入口(工作→需求 / 资产库→需求管理)按上述分工共存,不视为冗余。
 
-### 11.3 验收快照(8 张,`docs/acceptance-2026-08-06/`)
+### 11.3 验收快照(9 张,`docs/acceptance-2026-08-06/`)
 
-workspaces / requirement-detail / overview / asset-scenarios / decisions / system / evidence / mock-variantC。视觉基线对照(§9 第 1 条)待人工看图。
+workspaces / requirement-detail / overview / asset-scenarios / decisions / system / evidence / mock-variantC / scope-banner。视觉基线对照(§9 第 1 条)已通过(2026-08-06)。
