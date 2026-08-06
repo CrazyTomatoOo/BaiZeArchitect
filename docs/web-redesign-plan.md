@@ -149,3 +149,32 @@
 - 原型:`web/redesign-mock.html`(`?variant=A|B|C`,C 为胜出方案)。
 - 调研:`.wayfinder/research/T01-openclaw-control-ui-design.md`、`T02-hermes-dashboard-design.md`。
 - 决策票:`.wayfinder/tickets/T01`~`T06`。
+
+## 11. 实施偏离记录(2026-08-06 验收)
+
+> 实施已完成(13 组件 / 4248 行,9 步迁移基本落地)。以下偏离方案原文,记此备查。
+
+### 11.1 SSE 替代 ws(§5 实时性 / §8 步骤 9)
+
+- 原文:T05/§5 决定「gateway 新建 **ws** 通道」广播阶段事件。
+- 实施:改用 **SSE(EventSource)** —— `agent-runtime/gateway.ts` `broadcastRun()` + `sseClients`,`/api/runs/stream` 单向推送。
+- 理由:本场景只需服务端→客户端单向推送(阶段 run 进度 / token 流),SSE 无新依赖、够用;ws 的双向能力未用到。
+- 验收影响:§9 第 3 条「ws run 流切页不丢」由 SSE + `display:none` 保活满足,行为等价。不回退。
+
+### 11.2 sidebar IA 与 §4 的漂移(待决策)
+
+验收截图(2026-08-06)显示 live sidebar 与 §4 规划不一致:
+
+| §4 规划 | 实际实施 |
+| --- | --- |
+| 工作:需求 · 资产库 · 总览 | 总览(独立置顶)+ 工作:需求 · 待决策 |
+| 治理:待决策 | (无「治理」组,待决策并入「工作」) |
+| 资产库 = 单页 3 tab(场景/用例/功能,§6.2) | 资产库组 = 4 个独立 nav:**需求管理** · 场景库 · 用例库 · 功能库 |
+| 管理:系统 | 管理:系统 · 证据(证据独立 nav,符合 §6.6 子页决策) |
+
+- **疑似 bug**:「需求管理」挂在「资产库」组下 —— 需求不是资产,与 §6.2(资产库=场景/用例/功能)冲突。需决策:是 nav 标签错位,还是有意把需求管理归入资产库(若是,§4/§6.2 需改)。
+- 其余漂移(资产库拆 sub-nav、待决策归工作、证据独立 nav)可视为实施演进,可回写 §4 使文档与实现一致。
+
+### 11.3 验收快照(8 张,`docs/acceptance-2026-08-06/`)
+
+workspaces / requirement-detail / overview / asset-scenarios / decisions / system / evidence / mock-variantC。视觉基线对照(§9 第 1 条)待人工看图。
