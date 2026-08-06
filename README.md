@@ -11,22 +11,16 @@ Package),经独立 critic 评审 + 审批门后归档。设计经验双沉淀(AD
 ## 快速开始
 
 ```sh
-# 1. 跑一次设计(~5-6min,glm-5.2 两 phase)
+# 跑一次设计(~5-6min,glm-5.2 两 phase)
 DASHSCOPE_API_KEY=... ./scripts/run.sh lws "你的设计需求"
 # → out/design-package-lws-<ts>.md(真实证据 + critic 发现),容器自退
-
-# 2. 沉淀经验(ADR + gene,供下次复用)
-./scripts/evolve.sh lws
-# → manage_adr 存 ADR + distill gene 到 ./evolver-home
-
-# 3. 归档到 git
-./scripts/archive.sh
+# 归档:git add out/*.md && git commit(原 archive.sh 已移除,按需手动)
 ```
 
 下次 `run.sh lws` 时,architect prompt 自动注入三层复用:
 
 - **mcp 结构化证据**(hotspots/boundaries/clusters/layers)— `evidence.sh` 预产
-- **历史 ADR**(复用,避免重复决策)— `evolve.sh` 沉淀
+- **历史 ADR**(复用,避免重复决策)— `manage_adr(update)` 手动沉淀(原 `evolve.sh` 已移除)
 - **可复用 gene**(经 `evolver_recall` mid-design 查)— 容器 evolver-mcp
 
 ## 架构
@@ -35,8 +29,6 @@ DASHSCOPE_API_KEY=... ./scripts/run.sh lws "你的设计需求"
 宿主 (mac, 有 codebase-memory-mcp binary)          容器 (baizearchitect-baize, linux)
 ─────────────────────────────────────────         ─────────────────────────────────────────
 evidence.sh ──get_architecture/manage_adr──►      /evidence/<repo>.json        (ro 挂载)
-evolve.sh ────manage_adr(update)──────────►       codebase-memory-mcp 知识图谱(宿主侧)
-evolve.sh ────distill-gene────────────────►       /evolver-home/assets          (挂载,共享 store)
                                                        │
                                 docker run ──────►   cli.ts
                                                      ├ architect phase (submit_plan)
@@ -45,8 +37,6 @@ evolve.sh ────distill-gene───────────────�
                                                      └ read/grep 定位真实行号
                                                        ▼
                                                 out/design-package-<repo>-<ts>.md
-                                                       │
-                                archive.sh ◄────   git commit (baize@local)
 ```
 
 - **单进程**:`docker run` → `agent-runtime/cli.ts`(pi SDK `createAgentSession` + 内联
@@ -63,8 +53,8 @@ evolve.sh ────distill-gene───────────────�
 | 层 | 沉淀 | 复用注入 | 工具 |
 | --- | --- | --- | --- |
 | mcp 证据 | — | `evidence.sh` `get_architecture` → cli.ts prompt | codebase-memory-mcp(宿主 mac binary) |
-| ADR | `evolve.sh` `manage_adr(update)` | `evidence.sh` `manage_adr(get)` → cli.ts "历史决策" | codebase-memory-mcp |
-| gene | `evolve.sh` `distill-gene` → `./evolver-home/assets` | 容器 `evolver_recall`(`listApprovedGenes`,mid-design) | `@evomap/evolver-mcp`(stdio) |
+| ADR | `manage_adr(update)` 手动(原 `evolve.sh` 已移除) | `evidence.sh` `manage_adr(get)` → cli.ts "历史决策" | codebase-memory-mcp |
+| gene | `distill-gene.ts` 手动 → `./evolver-home/assets`(原 `evolve.sh` 已移除) | 容器 `evolver_recall`(`listApprovedGenes`,mid-design) | `@evomap/evolver-mcp`(stdio) |
 
 ## 脚本
 
@@ -72,8 +62,9 @@ evolve.sh ────distill-gene───────────────�
 | --- | --- |
 | `scripts/run.sh <repo-dir> <requirement>` | 先 `evidence.sh`,再 `docker compose run` 跑 architect+critic |
 | `scripts/evidence.sh <repo-path> [repo-id]` | codebase-memory-mcp → `evidence/<repo-id>.json` |
-| `scripts/evolve.sh <repo-path> [pkg.md]` | `manage_adr(update)` + `distill-gene` 沉淀 |
-| `scripts/archive.sh` | `git add out/*.md` + commit(baize@local) |
+
+> 经验沉淀(ADR/gene)原由 `evolve.sh` 一键完成,已移除;改为直接调
+> `manage_adr(update)` 与 `agent-runtime/distill-gene.ts`(按需,非必需)。
 
 ## 环境变量 (compose.yaml)
 
@@ -96,7 +87,7 @@ agent-runtime/
   distill-gene.ts     design-package → evolver_distill_conversation → gene
   Dockerfile          node:22-slim + pi SDK + .pi/skills
 compose.yaml          baize 服务(evidence/out/evolver-home 挂载 + env)
-scripts/              run.sh / evidence.sh / evolve.sh / archive.sh
+scripts/              run.sh / evidence.sh
 .pi/skills/           6 角色(architect/critic/orchestrator/analyst/reviewer/translator)
 schemas/              design artifact JSON schemas
 ```

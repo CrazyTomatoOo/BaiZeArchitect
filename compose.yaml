@@ -1,5 +1,5 @@
 # BaiZe Architect — 单进程本地 agent。
-# ponytail: out 挂 ./out 可 git commit(archive.sh);evidence 挂 /evidence:ro
+# ponytail: out 挂 ./out 可 git commit(手动);evidence 挂 /evidence:ro
 # (#5: evidence.sh 宿主 codebase-memory-mcp 预产结构化证据,cli.ts 注入)。
 # evolver-home 挂 /evolver-home (#9b: evolver-mcp 本地 gene store 持久)。
 # 目标仓库由 run.sh -v <repo>:/repo:ro 挂入(lws/test-repo-2);

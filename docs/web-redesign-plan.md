@@ -187,8 +187,12 @@ workspaces / requirement-detail / overview / asset-scenarios / decisions / syste
 - **token 实时流已验**:SSE `/api/runs/stream` 捕获 29 个 `{type:"token",text:...}` 真 delta 事件 + start/phase/done;run 15.4s 返回 `{ok,refs:[{type:analysis,content:{scope:[...]}}]}`(真实设计内容)。
 - **阶段状态机已验**:未开始 --run--> 待审 --approve--> 完成(analysis 经 `POST .../approve` → 完成,HTTP 200)。
 - **§9 第 3 条 token 级 live 流由此闭环**(此前仅结构性)。核心设计流水线 run→token流→待审→approve→完成 全链 live 验证通过。
-- evolve(ADR+gene)/archive 为独立脚本(evolve.sh/archive.sh),不在 UI 流内,本轮未验。
+- evolve(ADR+gene)/archive 原为独立脚本(evolve.sh/archive.sh),已移除;经验沉淀改 manage_adr + distill-gene 手动,archive 改 git 手动。不在 UI 流内。
 
-### 11.5 待修:需求列表 reload 后空(ui bug,2026-08-06 验收发现)
+### 11.5 已修:需求列表 reload 后空(ui bug,2026-08-06 发现并修复)
 
-reload `?workspace=1` 后,baize-requirement 列表显示「本工作区还没有需求」,但 `GET /api/requirements?workspace=1` 返回 req 1;且 footer wsName 滞留上个工作区。疑似 shell 读 ws 优先 localStorage 而非 URL `?workspace=`,或 requirement 组件在 ws 确立前即 fetch 且不重试。正常流程可能不显现(本场景由防歧义测试切换 ws=2 触发)。待修。
+reload `?workspace=1` 后,baize-requirement 列表显示「本工作区还没有需求」,但 `GET /api/requirements?workspace=1` 返回 req 1;且 footer wsName 滞留上个工作区。
+
+**根因**:shell 构造器从 URL `?workspace=` 读 ws,但**不写回 localStorage**;而 baize-requirement 构造器从 **localStorage** 读 workspaceId(不从 URL、不从 shell)→ reload 时 localStorage 仍是上个 ws,fetch 错 ws → 列表空。footer wsName 因 connectedCallback 仅在**空**时回填、不纠错 stale 值而滞留。
+
+**修复**(`baize-shell.ts`):① 构造器 URL ws 优先时同步写 localStorage(子组件读即正确)+ 清 stale wsName;② `loadWorkspaces` 始终用 workspaces 真值回填 wsName(非仅空时补)。setWs 的 dispatch(`bubbles+composed`)本来就到 window,用户切 ws 路径无此 bug。

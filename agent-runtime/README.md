@@ -29,7 +29,7 @@ baize --repo <path> [--repo-id id] [--requirement <text|--requirement-file f>] [
 | --- | --- |
 | `cli.ts` | 入口:architect(`submit_plan`)+ critic(`record_critique`)两 phase + evidence/evolver 注入 + design-package 归档 |
 | `evolver-client.ts` | evolver-mcp stdio JSON-RPC 客户端(手写,未装 MCP SDK);`getEvolverClient` lazy-spawn(`BAIZE_EVOLVER=1`),`detached:true`+`SIGKILL` 进程组(防容器不退) |
-| `distill-gene.ts` | design-package → `evolver_distill_conversation` → gene 落 `EVOLVER_HOME/assets`(宿主跑,见根 `evolve.sh`) |
+| `distill-gene.ts` | design-package → `evolver_distill_conversation` → gene 落 `EVOLVER_HOME/assets`(手动跑,原 `evolve.sh` 已移除) |
 | `Dockerfile` | `node:22-slim` + `npm install` pi SDK + COPY `.pi/skills` + `schemas` |
 
 ## 关键 env(继承 `compose.yaml`)

@@ -133,7 +133,7 @@ function fallbackPlan(
 // boundaries/clusters + 历史 ADR),容器挂 /evidence 读取。architect 用结构化证据定位真实符号,
 // read/grep 仍负责行号精度——mcp 给结构,read/grep 给行。
 // ponytail: 容器内 evolver-mcp stdio(agent mid-design gene-search)非沉淀路径,speculative,
-// 按需再加;宿主 evolve.sh + manage_adr 已闭环 #9 经验沉淀→复用。
+// 按需再加;经验沉淀(ADR/gene)原 evolve.sh 已移除,改 manage_adr + distill-gene 手动(按需)。
 interface EvidenceDoc {
 	repositoryId: string;
 	project?: string;

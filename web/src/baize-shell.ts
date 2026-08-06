@@ -238,7 +238,14 @@ class BaizeShell extends LitElement {
 		const wsId = wsParam ? Number(wsParam) : Number(localStorage.getItem("baize.ui.v1.workspace") ?? "0");
 		this.tab = lastPage && lastPage !== "workspaces" ? lastPage : "requirement";
 		this.ws = Number.isFinite(wsId) ? wsId : 0;
-		this.wsName = localStorage.getItem("baize.ui.v1.workspaceName") ?? "";
+		// URL ?workspace= 优先并同步 localStorage:子组件 baize-requirement 构造时从 localStorage 读 workspaceId,
+		// 不同步则 reload 时拿到 stale 的上个 workspace → 列表空(§11.5)。wsName 留空由 loadWorkspaces 回填真值。
+		if (wsParam && Number.isFinite(wsId)) {
+			localStorage.setItem("baize.ui.v1.workspace", String(wsId));
+			this.wsName = "";
+		} else {
+			this.wsName = localStorage.getItem("baize.ui.v1.workspaceName") ?? "";
+		}
 		this.workspaces = [];
 		this.folded = localStorage.getItem("baize.ui.v1.sidebarFolded") === "1";
 		this.decCount = 0;
@@ -332,10 +339,10 @@ class BaizeShell extends LitElement {
 			this.workspaces = (await (
 				await fetch("/api/workspaces")
 			).json()) as Array<{ id: number; name: string }>;
-			if (this.ws && !this.wsName) {
-				this.wsName =
-					this.workspaces.find((w) => w.id === this.ws)?.name ?? "";
-			}
+			// 始终用 workspaces 真值回填 wsName(纠 stale,非仅空时补;§11.5)
+			this.wsName = this.workspaces.find((w) => w.id === this.ws)?.name ?? "";
+			// 持久化真值,避免 localStorage.wsName 滞留上个 ws(§11.5)
+			if (this.ws) localStorage.setItem("baize.ui.v1.workspaceName", this.wsName);
 		} catch {
 			this.workspaces = [];
 		}
