@@ -43,7 +43,7 @@
 
 - [E01 证据/决策绑需求 + 归档资产化](tickets/E01-evidence-decision-requirement-binding.md) `grilling` — **closed**:证据=设计时快照(req-keyed);决策记录=设计包绑 req、归档喂下次设计;页面织入流水线;归档=archive approve、扩资产库 tab。
 - [E02 架构浏览器 C4 数据源调研](tickets/E02-arch-browser-c4-source.md) `research` — **closed**:无原生 C4;C4 映射订正于 E03。findings 落盘
-- [E03 架构浏览器范围与形态](tickets/E03-arch-browser-scope.md) `grilling` — **closed**:目录树+代码结构图(非C4)+C4 Context+Container;取代证据 nav 改名架构。
+- [E03 架构浏览器范围与形态](tickets/E03-arch-browser-scope.md) `grilling` — **closed**:目录树 + C4 全四层(Code 取代代码结构图);取代证据 nav 改名架构。
 - [E04 gene 展示重构](tickets/E04-gene-display.md) `grilling` — 怎么让 gene 传达"经验"(可取)
 - [E05 markdown/mermaid 渲染方案](tickets/E05-markdown-mermaid-render.md) `research` — **closed**:marked + mermaid.render 注入 shadow DOM + 主题 hex 映射。findings 落盘
 - [E06 IA 重构](tickets/E06-ia-restructure.md) `grilling` — 证据拆分 + ADR/gene 进资产 + sidebar/系统页(blocked: E04)
