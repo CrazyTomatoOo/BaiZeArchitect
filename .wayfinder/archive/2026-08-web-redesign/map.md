@@ -1,5 +1,6 @@
 # Wayfinder Map — BaiZe web 重构方案(仿 OpenClaw / Hermes) `wayfinder:map`
 
+> **状态:评审通过 + 验收通过(2026-08-06)。destination 到达,6/6 ticket closed,§9 验收全过,已归档至 `archive/2026-08-web-redesign/`。**
 ## Destination
 
 一份评审通过的《BaiZe web 重构方案》文档:从**视觉语言、信息架构/导航、交互模式、

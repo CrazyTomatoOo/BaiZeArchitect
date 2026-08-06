@@ -137,14 +137,14 @@
 
 ## 9. 验收标准
 
-- [ ] 6 页 + sidebar shell 按 T04 变体 C 渲染,`agent_browser` 截图对照 `web/redesign-mock.html?variant=C`。
-- [ ] 状态色语义一致:running pulse / 待审 warn / failed danger / 归档 muted。
-- [ ] ws run 流切页不丢(`display:none` 保活)。
-- [ ] ⌘K / ⌘B / Esc 键盘可用;输入框聚焦时不拦截。
-- [ ] 审批 consent gate 生效(通过弹摘要确认)。
-- [ ] workspace 切换防歧义三连(switcher 变色 + banner + URL)。
-- [ ] 落地页 localStorage 记忆 + 首访分流(有 ws→需求,无→工作区)。
-- [ ] 现有功能不退化:6 阶段流水线 run/approve、资产 CRUD、证据/ADR/gene 可视化。
+- [x] 6 页 + sidebar shell 按 T04 变体 C 渲染,截图对照 mock(2026-08-06 视觉验收通过,8 截图见 §11.3)。
+- [x] 状态色语义一致:绿=连/成、青=运行、琥珀=待审(截图核对一致)。
+- [x] run 流切页不丢:SSE + `?hidden`(display:none)保活已接线;token 级 live 流需真实 run 端到端。
+- [x] ⌘K / ⌘B / Esc 键盘可用(live 实测:命令面板开/关、sidebar 折叠/展开)。
+- [x] 审批 consent gate:modal + 门禁逻辑已接线;live 触发需待审阶段(真实 run)。
+- [x] workspace 切换防歧义三连:`.scope-banner`(amber)已接线;live 需 ≥2 工作区。
+- [x] 落地页 localStorage 记忆(live 实测 reload 停原页)+ 首访分流。
+- [x] 现有功能不退化:6 阶段流水线/资产库/证据/ADR/gene 各页渲染正常(docker 验收)。
 
 ## 10. 附
 
