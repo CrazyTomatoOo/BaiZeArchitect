@@ -49,10 +49,11 @@
 
 **入口页(未选工作区)**:进入即显示工作区列表(选择/创建/管理),无 sidebar;点选工作区进入工作台。管理工作区(增删)始终回此入口页。
 
-**工作台(已选工作区)**:顶部栏左 logo、**右上角** workspace 切换器(下拉)+「管理工作区」按钮(回入口);左侧 sidebar 三区:
-- 工作:需求 · 资产库 · 总览
-- 治理:待决策(有待审批显琥珀 chip `n`)
-- 管理:系统
+**工作台(已选工作区)**:顶部栏左 logo、**右上角** workspace 切换器(下拉)+「管理工作区」按钮(回入口);左侧 sidebar 四区(实施演进,2026-08-06 对齐实现):
+- 总览(独立置顶)
+- 工作:需求 · 待决策(有待审批显琥珀 chip `n`)
+- 资产库:需求管理 · 场景库 · 用例库 · 功能库(各独立 nav,非单页 tab)
+- 管理:系统 · 证据(证据独立 nav,见 §6.6 子页)
 (工作区管理不放 sidebar,统一在入口页)
 
 **作用域**:workspace 单作用域,工作台各页随之过滤;切换经右上角切换器,`?workspace=` URL 深链。
@@ -77,11 +78,12 @@
 - **详情**:6 阶段 pipeline 条(状态点)→ 当前阶段卡片(产物列表 + consent 审批)→ run rail 右列(ws 事件流/产物/耗时)。
 - **数据**:gateway `GET /api/requirements?ws=`、`POST /api/requirements/:id/stage/:stage/run`、`POST .../approve`。
 
-### 6.2 资产库页(三 tab 分库 — T06 F1)
+### 6.2 资产库页(四 tab 分库 — T06 F1,实施演进含需求管理)
 
-- 三 tab:场景 / 用例 / 功能,每 tab = 列表(左)+ 详情(右)。workspace 复用池,跨需求可见。
+- 四 tab(各独立 nav 项,列表+详情):**需求管理** · 场景库 · 用例库 · 功能库。workspace 复用池,跨需求可见。
+- 需求管理 tab:需求作资产化浅视图(list-detail 标题+描述);与「工作→需求」流水线页分工——后者是设计工作面(6 阶段+run rail),本 tab 是跨需求浏览/复用入口。
 - 场景详情:前置/主流程/异常;用例详情:前置/步骤/后置;功能详情:功能域归属/输入输出。
-- **数据**:store `getScenarios/getUsecases/getFunctions(workspaceId)`。
+- **数据**:store `listRequirements/getScenarios/getUsecases/getFunctions(workspaceId)`。
 
 ### 6.3 总览页
 
@@ -108,8 +110,8 @@
 
 | 组件 | 说明 |
 | --- | --- |
-| `baize-shell` | sidebar(workspace switcher + 三区 nav + status footer)+ 命令面板挂载点 + run rail 挂载点 + 路由 + 落地页记忆 |
-| `baize-run-rail` | 400px dock / 窄屏 pill;ws 事件流;切页保活(display:none) |
+| `baize-shell` | sidebar(workspace switcher + 四区 nav + status footer)+ 命令面板挂载点 + run rail 挂载点 + 路由 + 落地页记忆 |
+| `baize-run-rail` | 400px dock / 窄屏 pill;SSE 事件流;切页保活(display:none);column 变体(详情页全列) |
 | `baize-command-palette` | ⌘K;切页/切 workspace/新建需求/触发阶段 run |
 | `baize-consent-modal` | 审批摘要确认;打回意见框 |
 | `baize-chat-intake` | 全屏 chat + 右侧结构化预览;确认落库 |
@@ -126,7 +128,7 @@
 1. **tokens 落地**:`baize-shell` `:root` 加 T04 C 变量集(替换现有 `--bg/--text/--border/--font-ui` 值,新增 `--surface/--accent/--run` 等)。一处改,全站跟随。
 2. **`baize-shell` 重写**:tab → sidebar(T03 结构)+ status footer + palette/rail 挂载点 + localStorage 落地页记忆。
 3. **`baize-requirement` 拆**:列表视图 + 详情视图;详情接 run rail + consent;新建需求 → `baize-chat-intake`。
-4. **新增 `baize-asset-library`**(三 tab)。
+4. **新增 `baize-asset-library`**(四 tab:需求管理/场景/用例/功能)。
 5. **`baize-overview` 重做**(计数卡片 + 活动流)。
 6. **`baize-workspaces` 适配**:workspace 单作用域 + 防歧义三连。
 7. **`baize-dashboard` 拆 → `baize-system` + 证据子页**;新增 `baize-decisions`(待决策页,从 requirement 内审批抽出独立页)。
@@ -161,19 +163,19 @@
 - 理由:本场景只需服务端→客户端单向推送(阶段 run 进度 / token 流),SSE 无新依赖、够用;ws 的双向能力未用到。
 - 验收影响:§9 第 3 条「ws run 流切页不丢」由 SSE + `display:none` 保活满足,行为等价。不回退。
 
-### 11.2 sidebar IA 与 §4 的漂移(待决策)
+### 11.2 sidebar IA 与 §4 的漂移(已决策:保留,文档对齐)
 
-验收截图(2026-08-06)显示 live sidebar 与 §4 规划不一致:
+验收截图(2026-08-06)显示 live sidebar 与原 §4 规划(对齐前)不一致:
 
-| §4 规划 | 实际实施 |
+| 原 §4 规划(对齐前) | 实际实施 |
 | --- | --- |
 | 工作:需求 · 资产库 · 总览 | 总览(独立置顶)+ 工作:需求 · 待决策 |
 | 治理:待决策 | (无「治理」组,待决策并入「工作」) |
 | 资产库 = 单页 3 tab(场景/用例/功能,§6.2) | 资产库组 = 4 个独立 nav:**需求管理** · 场景库 · 用例库 · 功能库 |
 | 管理:系统 | 管理:系统 · 证据(证据独立 nav,符合 §6.6 子页决策) |
 
-- **疑似 bug**:「需求管理」挂在「资产库」组下 —— 需求不是资产,与 §6.2(资产库=场景/用例/功能)冲突。需决策:是 nav 标签错位,还是有意把需求管理归入资产库(若是,§4/§6.2 需改)。
-- 其余漂移(资产库拆 sub-nav、待决策归工作、证据独立 nav)可视为实施演进,可回写 §4 使文档与实现一致。
+- **决策(2026-08-06,用户拍板)**:保留实施现状,文档对齐实现 —— §4 已回写为四区、§6.2 已回写为四 tab(含需求管理)。「需求管理」作为需求资产化浅视图留在资产库,与「工作→需求」流水线页分工(浏览复用 vs 设计工作面)。
+- 接受的概念取舍:需求兼具「工作面」与「可浏览资产」双重身份;双入口(工作→需求 / 资产库→需求管理)按上述分工共存,不视为冗余。
 
 ### 11.3 验收快照(8 张,`docs/acceptance-2026-08-06/`)
 
