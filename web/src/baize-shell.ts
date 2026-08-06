@@ -427,6 +427,7 @@ class BaizeShell extends LitElement {
 								<button class="nav-item ${this.tab === "assets-scenario" ? "active" : ""}" @click=${() => this.goto("assets-scenario")}>场景库</button>
 								<button class="nav-item ${this.tab === "assets-usecase" ? "active" : ""}" @click=${() => this.goto("assets-usecase")}>用例库</button>
 								<button class="nav-item ${this.tab === "assets-function" ? "active" : ""}" @click=${() => this.goto("assets-function")}>功能库</button>
+								<button class="nav-item ${this.tab === "assets-sediment" ? "active" : ""}" @click=${() => this.goto("assets-sediment")}>沉淀</button>
 							</div>
 							<div class="nav-group">
 								<div class="label">管理</div>

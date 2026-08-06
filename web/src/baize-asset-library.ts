@@ -1,4 +1,5 @@
 import { LitElement, html, css } from "lit";
+import "./baize-markdown.js";
 
 /**
  * baize-asset-library — 资产库(现代化):三 tab 分库(场景/用例/功能),列表+详情。
@@ -15,6 +16,7 @@ const TABS = [
 	{ id: "scenario", cn: "场景" },
 	{ id: "usecase", cn: "用例" },
 	{ id: "function", cn: "功能" },
+	{ id: "sediment", cn: "沉淀" },
 ] as const;
 
 class BaizeAssetLibrary extends LitElement {
@@ -26,6 +28,9 @@ class BaizeAssetLibrary extends LitElement {
 		view: { type: String },
 		reqs: { state: true },
 		busy: { state: true },
+		sediment: { state: true },
+		sedSub: { state: true },
+		selGene: { state: true },
 	};
 
 	declare ws: number;
@@ -35,6 +40,12 @@ class BaizeAssetLibrary extends LitElement {
 	declare view: string;
 	declare reqs: Array<Record<string, unknown>>;
 	declare busy: string;
+	declare sediment: {
+		packages: Array<Record<string, unknown>>;
+		genes: Array<Record<string, unknown>>;
+	} | null;
+	declare sedSub: "pkg" | "gene";
+	declare selGene: string | null;
 
 	static styles = css`
 		:host {
@@ -186,6 +197,9 @@ class BaizeAssetLibrary extends LitElement {
 		this.data = null;
 		this.selectedId = null;
 		this.busy = "";
+		this.sediment = null;
+		this.sedSub = "pkg";
+		this.selGene = null;
 	}
 
 	connectedCallback(): void {
@@ -222,6 +236,7 @@ class BaizeAssetLibrary extends LitElement {
 			this.data = (await r.json()) as AssetData;
 			const rr = await fetch(`/api/requirements?workspace=${this.ws}`);
 			this.reqs = (await rr.json()) as Array<Record<string, unknown>>;
+			await this.loadSediment();
 		} catch {
 			this.data = null;
 			this.reqs = [];
@@ -319,6 +334,97 @@ class BaizeAssetLibrary extends LitElement {
 		`;
 	}
 
+	private async loadSediment() {
+		try {
+			const [sp, sg] = await Promise.all([
+				fetch(`/api/sedimentation?workspace=${this.ws}`).then((r) => r.json()),
+				fetch(`/api/genes`).then((r) => r.json()),
+			]);
+			this.sediment = {
+				packages: (sp?.packages ?? []) as Array<Record<string, unknown>>,
+				genes: (Array.isArray(sg) ? sg : (sg?.genes ?? [])) as Array<Record<string, unknown>>,
+			};
+		} catch {
+			this.sediment = { packages: [], genes: [] };
+		}
+	}
+
+	private renderSediment() {
+		const s = this.sediment;
+		if (!s) return html`<div class="empty">加载中…</div>`;
+		return html`
+			<div class="tabs">
+				<button class="tab ${this.sedSub === "pkg" ? "active" : ""}" @click=${() => (this.sedSub = "pkg")}>决策记录</button>
+				<button class="tab ${this.sedSub === "gene" ? "active" : ""}" @click=${() => (this.sedSub = "gene")}>gene</button>
+			</div>
+			<div class="body">
+				${this.sedSub === "pkg" ? this.renderPkgListDetail(s.packages) : this.renderGeneListDetail(s.genes)}
+			</div>
+		`;
+	}
+
+	private renderPkgListDetail(pkgs: Array<Record<string, unknown>>) {
+		const sel = pkgs.find((x) => (x.id as number) === this.selectedId) ?? null;
+		return html`
+			<div class="list">
+				${
+					pkgs.length
+						? pkgs.map(
+								(x) => html`<div
+								class="item ${x.id === this.selectedId ? "active" : ""}"
+								@click=${() => (this.selectedId = x.id as number)}
+							>
+								${x.title ?? "(无标题)"}
+							</div>`,
+							)
+						: html`<div class="empty">(暂无归档决策记录)</div>`
+				}
+			</div>
+			<div class="detail">
+				${
+					sel
+						? html`<h3>${sel.title ?? ""}</h3><baize-markdown .text=${String(sel.content ?? "")}></baize-markdown>`
+						: html`<div class="empty">从左侧选择一项查看详情</div>`
+				}
+			</div>
+		`;
+	}
+
+	private renderGeneListDetail(genes: Array<Record<string, unknown>>) {
+		const sel = genes.find((x) => String(x.id) === this.selGene) ?? null;
+		return html`
+			<div class="list">
+				${
+					genes.length
+						? genes.map(
+								(g) => html`<div
+								class="item ${String(g.id) === this.selGene ? "active" : ""}"
+								@click=${() => (this.selGene = String(g.id))}
+							>
+								${g.summary ?? g.id ?? "(无)"}
+							</div>`,
+							)
+						: html`<div class="empty">(暂无 gene)</div>`
+				}
+			</div>
+			<div class="detail">
+				${sel ? this.renderGeneDetail(sel) : html`<div class="empty">从左侧选择 gene 查看详情</div>`}
+			</div>
+		`;
+	}
+
+	private renderGeneDetail(g: Record<string, unknown>) {
+		const md = (v: unknown) => String(v ?? "—");
+		return html`
+			<h3>${g.summary ?? g.id ?? ""}</h3>
+			<div class="k">前置条件</div><baize-markdown .text=${md(g.preconditions)}></baize-markdown>
+			<div class="k">策略</div><baize-markdown .text=${md(g.strategy)}></baize-markdown>
+			<div class="k">验证</div><baize-markdown .text=${md(g.validation)}></baize-markdown>
+			<div class="k">约束</div><baize-markdown .text=${md(g.constraints)}></baize-markdown>
+			${g._source ? html`<div class="k">来源</div><p>${String(g._source)}</p>` : null}
+		`;
+	}
+
 	render() {
 		return html`
 			<header class="page-head">
@@ -330,7 +436,9 @@ class BaizeAssetLibrary extends LitElement {
 					? html`<div class="empty">请先在顶部选择工作区</div>`
 					: this.tab === "function"
 						? html`<div class="body">${this.renderFunctions()}</div>`
-						: html`<div class="body">${this.renderListDetail()}</div>`
+						: this.tab === "sediment"
+							? html`${this.renderSediment()}`
+							: html`<div class="body">${this.renderListDetail()}</div>`
 			}
 		`;
 	}

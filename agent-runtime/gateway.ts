@@ -32,6 +32,44 @@ const EVIDENCE_DIR = process.env.BAIZE_EVIDENCE_DIR ?? join(ROOT, "evidence");
 // 生产部署:单进程服务 web/dist(SPA);dev 用 vite(:5173)代理 /api。
 const WEB_DIST = process.env.BAIZE_WEB_DIST ?? join(ROOT, "web", "dist");
 
+// —— 数据层接线(spec §2):证据快照 + 设计包落库 ——
+function gitHeadSha(repoPath: string): Promise<string> {
+	return new Promise((res) => {
+		execFile("git", ["-C", repoPath, "rev-parse", "HEAD"], (err, out) =>
+			res(err ? "" : out.trim()),
+		);
+	});
+}
+
+async function readEvidenceArchitecture(
+	repoId: string,
+): Promise<Record<string, unknown> | null> {
+	try {
+		const raw = await readFile(join(EVIDENCE_DIR, `${repoId}.json`), "utf8");
+		const j = JSON.parse(raw) as { architecture?: Record<string, unknown> };
+		return j.architecture ?? null;
+	} catch {
+		return null;
+	}
+}
+
+async function latestDesignPackage(
+	repoId: string,
+): Promise<{ title: string; content: string } | null> {
+	try {
+		const files = (await readdir(OUT_DIR))
+			.filter(
+				(f) => f.startsWith(`design-package-${repoId}-`) && f.endsWith(".md"),
+			)
+			.sort();
+		if (!files.length) return null;
+		const content = await readFile(join(OUT_DIR, files[files.length - 1]), "utf8");
+		const m = content.match(/^#\s+(.+)$/m);
+		return { title: m?.[1] ?? repoId, content };
+	} catch {
+		return null;
+	}
+}
 async function readBody(req: IncomingMessage): Promise<string> {
 	let body = "";
 	for await (const chunk of req) body += chunk;
@@ -611,6 +649,20 @@ const server = http.createServer(
 					name: string;
 				};
 				const refs = await runArchive(reqId, requirement, wsRow?.name ?? "");
+				// 设计包落库(spec §2.2/2.3):归档时把本需求设计包存入资产库,闭环喂下次 prior
+				const archWs = store.getWorkspace(requirement.workspace_id) as
+					| { repo_path?: string }
+					| undefined;
+				const pkgRepoId = archWs?.repo_path?.split("/").pop() ?? "";
+				const pkg = await latestDesignPackage(pkgRepoId);
+				if (pkg)
+					store.saveDesignPackage(
+						reqId,
+						requirement.workspace_id,
+						pkg.title,
+						pkg.content,
+						"",
+					);
 			store.setStage(reqId, "归档", "完成", refs);
 			broadcastRun({ type: "done", requirementId: reqId, stage: "归档" });
 				json(200, { ok: true, refs });
@@ -635,6 +687,15 @@ const server = http.createServer(
 			const ws = store.getWorkspace(requirement.workspace_id) as
 				| { repo_path: string }
 				| undefined;
+			// 证据快照(spec §2.1):analysis 首阶段固化设计时架构事实,审核看 AI 当时看到的
+			if (stage === "analysis") {
+				const repoId = ws?.repo_path.split("/").pop() ?? "";
+				const arch = await readEvidenceArchitecture(repoId);
+				if (arch) {
+					const sha = await gitHeadSha(ws?.repo_path ?? ROOT);
+					store.captureEvidenceSnapshot(reqId, arch, sha);
+				}
+			}
 		broadcastRun({ type: "start", requirementId: reqId, stage: STAGE_CN[stage], requirementTitle: requirement.title });
 			const assets = await runStage({
 				repoPath: ws?.repo_path ?? ROOT,
@@ -694,6 +755,57 @@ const server = http.createServer(
 			return;
 		}
 
+		// —— 数据层读端点(spec §2)——
+		const evSnap = url.pathname.match(
+			/^\/api\/requirements\/(\d+)\/evidence-snapshot$/,
+		);
+		if (evSnap && req.method === "GET") {
+			json(200, store.getEvidenceSnapshot(Number(evSnap[1])) ?? null);
+			return;
+		}
+		const dPkg = url.pathname.match(
+			/^\/api\/requirements\/(\d+)\/design-package$/,
+		);
+		if (dPkg && req.method === "GET") {
+			json(200, store.getDesignPackageByReq(Number(dPkg[1])) ?? null);
+			return;
+		}
+		const rGenes = url.pathname.match(/^\/api\/requirements\/(\d+)\/genes$/);
+		if (rGenes) {
+			const rid = Number(rGenes[1]);
+			if (req.method === "GET") {
+				json(200, store.listRequirementGenes(rid));
+				return;
+			}
+			if (req.method === "POST") {
+				const b = (await readJson(req)) as {
+					geneId?: string;
+					source?: string;
+				} | null;
+				if (!b?.geneId) {
+					json(400, { error: "geneId required" });
+					return;
+				}
+				store.addRequirementGene(rid, b.geneId, b.source ?? "manual");
+				json(200, { ok: true });
+				return;
+			}
+			if (req.method === "DELETE") {
+				const b = (await readJson(req)) as { geneId?: string } | null;
+				if (!b?.geneId) {
+					json(400, { error: "geneId required" });
+					return;
+				}
+				store.removeRequirementGene(rid, b.geneId);
+				json(200, { ok: true });
+				return;
+			}
+		}
+		if (url.pathname === "/api/sedimentation" && req.method === "GET") {
+			const ws = Number(url.searchParams.get("workspace") ?? 0);
+			json(200, { packages: store.listDesignPackages(ws) });
+			return;
+		}
 		if (url.pathname === "/api/overview" && req.method === "GET") {
 			json(200, store.counts());
 			return;

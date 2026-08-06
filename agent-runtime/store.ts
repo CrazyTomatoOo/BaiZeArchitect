@@ -78,6 +78,27 @@ create table if not exists usecase_functions(
   function_item_id integer not null references function_items(id),
   primary key (usecase_id, function_item_id)
 );
+create table if not exists evidence_snapshots(
+  requirement_id integer primary key references requirements(id),
+  architecture text not null default '{}',
+  head_sha text not null default '',
+  captured_at text not null default (datetime('now'))
+);
+create table if not exists design_packages(
+  id integer primary key autoincrement,
+  requirement_id integer not null references requirements(id),
+  workspace_id integer not null references workspaces(id),
+  title text not null default '',
+  content text not null default '',
+  adr text not null default '',
+  archived_at text not null default (datetime('now'))
+);
+create table if not exists requirement_genes(
+  requirement_id integer not null references requirements(id),
+  gene_id text not null,
+  source text not null default 'auto',
+  primary key (requirement_id, gene_id)
+);
 `;
 
 export class Store {
@@ -319,6 +340,42 @@ export class Store {
 	deleteFunctionDomain(id: number): void {
 		this.db.prepare("delete from function_items where domain_id = ?").run(id);
 		this.db.prepare("delete from function_domains where id = ?").run(id);
+	}
+
+	// ---- evidence snapshot / design package / requirement genes(evidence-redesign §2)----
+	captureEvidenceSnapshot(requirementId: number, architecture: unknown, headSha: string): void {
+		this.db
+			.prepare(
+				"insert into evidence_snapshots(requirement_id, architecture, head_sha) values (?, ?, ?) on conflict(requirement_id) do update set architecture=excluded.architecture, head_sha=excluded.head_sha, captured_at=datetime('now')",
+			)
+			.run(requirementId, JSON.stringify(architecture ?? {}), headSha);
+	}
+	getEvidenceSnapshot(requirementId: number): unknown {
+		return this.db.prepare("select * from evidence_snapshots where requirement_id = ?").get(requirementId);
+	}
+	saveDesignPackage(requirementId: number, workspaceId: number, title: string, content: string, adr: string): number {
+		return Number(
+			this.db
+				.prepare(
+					"insert into design_packages(requirement_id, workspace_id, title, content, adr) values (?, ?, ?, ?, ?)",
+				)
+				.run(requirementId, workspaceId, title, content, adr).lastInsertRowid,
+		);
+	}
+	getDesignPackageByReq(requirementId: number): unknown {
+		return this.db.prepare("select * from design_packages where requirement_id = ? order by id desc limit 1").get(requirementId);
+	}
+	listDesignPackages(workspaceId: number): unknown[] {
+		return this.db.prepare("select * from design_packages where workspace_id = ? order by id desc").all(workspaceId);
+	}
+	addRequirementGene(requirementId: number, geneId: string, source: string): void {
+		this.db.prepare("insert or ignore into requirement_genes(requirement_id, gene_id, source) values (?, ?, ?)").run(requirementId, geneId, source);
+	}
+	removeRequirementGene(requirementId: number, geneId: string): void {
+		this.db.prepare("delete from requirement_genes where requirement_id = ? and gene_id = ?").run(requirementId, geneId);
+	}
+	listRequirementGenes(requirementId: number): unknown[] {
+		return this.db.prepare("select * from requirement_genes where requirement_id = ? order by rowid").all(requirementId);
 	}
 }
 
