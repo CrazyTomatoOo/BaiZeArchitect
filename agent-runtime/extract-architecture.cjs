@@ -132,7 +132,10 @@ async function main() {
 			label: Array.isArray(r.label) ? r.label.join("|") : String(r.label),
 			count: Number(r.count),
 		})),
-		edge_types: edgeTypes.map((r) => ({ type: r.type, count: Number(r.count) })),
+		edge_types: edgeTypes.map((r) => ({
+			type: r.type,
+			count: Number(r.count),
+		})),
 		hotspots,
 		boundaries,
 		clusters,
@@ -146,7 +149,12 @@ main().catch((e) => {
 	console.error("[extract-architecture]", e?.message ?? e);
 	process.stdout.write(
 		JSON.stringify(
-			{ hotspots: [], boundaries: [], clusters: [], error: String(e?.message ?? e) },
+			{
+				hotspots: [],
+				boundaries: [],
+				clusters: [],
+				error: String(e?.message ?? e),
+			},
 			null,
 			2,
 		),

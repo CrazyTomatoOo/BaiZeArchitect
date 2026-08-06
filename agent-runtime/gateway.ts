@@ -396,7 +396,7 @@ async function serveStatic(res: ServerResponse, pathname: string): Promise<void>
 	}
 }
 
-// SSE:阶段 run 事件流(单向推送,无新依赖;替代 ws)。token 级流式待 runStage 仪器化。
+// SSE:阶段 run 事件流(单向推送,无新依赖;替代 ws)。token 级流式已仪器化:runStage 追踪 prevTextLen,从 message_update 发真 delta,经此转发到前端 append 滚动。
 const sseClients = new Set<ServerResponse>();
 function broadcastRun(ev: Record<string, unknown>) {
 	const line = `data: ${JSON.stringify(ev)}\n\n`;
@@ -635,7 +635,7 @@ const server = http.createServer(
 			const ws = store.getWorkspace(requirement.workspace_id) as
 				| { repo_path: string }
 				| undefined;
-			broadcastRun({ type: "start", requirementId: reqId, stage, requirementTitle: requirement.title });
+		broadcastRun({ type: "start", requirementId: reqId, stage: STAGE_CN[stage], requirementTitle: requirement.title });
 			const assets = await runStage({
 				repoPath: ws?.repo_path ?? ROOT,
 				repoId: ws?.repo_path.split("/").pop() ?? "",

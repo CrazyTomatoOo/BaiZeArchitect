@@ -5,7 +5,7 @@ import { LitElement, html, css } from "lit";
  * sidebar:顶部 workspace 切换器(跳工作区页)+ 三区 nav + 底部状态区。
  * 落地页:localStorage `baize.ui.v1.lastPage` 记忆;首次有 workspace→需求,无→工作区。
  * ⌘B 折叠 sidebar(persist)。子视图 ?hidden 挂载保活;子视图可派发 baize-goto 切页。
- * 注:资产库/待决策/系统页、workspace 单作用域、ws run rail、⌘K 面板待各自 step 落地后接入。
+ * 注:资产库/待决策/系统页、ws run rail、⌘K 面板均已挂载接入(原「待落地后接入」已兑现);workspace 单作用域(1 repo = 1 ws)。
  */
 class BaizeShell extends LitElement {
 	static properties = {
@@ -441,7 +441,7 @@ class BaizeShell extends LitElement {
 							<baize-workspaces></baize-workspaces>
 						</main>`}
 				<baize-command-palette></baize-command-palette>
-				<baize-run-rail></baize-run-rail>
+			<baize-run-rail .suppress=${this.tab === "requirement"}></baize-run-rail>
 				<baize-chat-intake></baize-chat-intake>
 			</div>
 		`;

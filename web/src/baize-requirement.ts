@@ -165,6 +165,17 @@ class BaizeRequirement extends LitElement {
 			min-height: 0;
 			overflow: auto;
 		}
+		.detail-row {
+			display: flex;
+			gap: var(--gap);
+			height: 100%;
+			min-height: 0;
+		}
+		.detail-row > .detail-card {
+			flex: 1 1 auto;
+			min-width: 0;
+			overflow: auto;
+		}
 		.detail-card {
 			background: var(--surface);
 			border: 1px solid var(--border);
@@ -700,7 +711,7 @@ class BaizeRequirement extends LitElement {
 				<main class="col-detail">
 					${
 						this.selected
-							? html`<div class="detail-card">
+						? html`<div class="detail-row"><div class="detail-card">
 								<h3>设计流水线(逐阶段审核,打回可带意见重跑)</h3>
 								<div class="stepper">
 									${STAGES.map((s) => {
@@ -710,7 +721,7 @@ class BaizeRequirement extends LitElement {
 								</div>
 								${STAGES.map((s) => this.renderStage(s))}
 								${this.error ? html`<div class="error">${this.error}</div>` : nothing}
-							</div>`
+						</div><baize-run-rail variant="column" .requirementId=${this.selected}></baize-run-rail></div>`
 							: html`<div class="empty-state">
 								<h2>选择一个需求</h2>
 								<p style="margin:0">从左侧列表选择,查看设计流水线并逐阶段驱动</p>

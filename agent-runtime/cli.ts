@@ -372,6 +372,7 @@ export type RunEvent =
 	| { type: "plan"; plan: Plan }
 	| { type: "critique"; critique: unknown }
 	| { type: "done"; file: string }
+	| { type: "token"; text: string }
 	| { type: "error"; error: string }
 
 export async function runDesign(
@@ -728,6 +729,7 @@ export async function runStage(
 			customTools: [submitTool],
 			sessionManager: SessionManager.inMemory(input.repoPath),
 		});
+	let prevTextLen = 0;
 	const unsubscribe = (
 		session as unknown as {
 			subscribe?: (cb: (ev: unknown) => void) => () => void;
@@ -735,22 +737,28 @@ export async function runStage(
 	).subscribe?.((ev) => {
 		const e = ev as {
 			type?: string;
-			delta?: string;
-			text?: string;
-			message?: { content?: Array<{ type?: string; text?: string; delta?: string }> };
+			message?: { role?: string; content?: Array<{ type?: string; text?: string }> };
 		};
-		let text = "";
-		if (typeof e.delta === "string") text = e.delta;
-		else if (typeof e.text === "string") text = e.text;
-		else if (Array.isArray(e.message?.content)) {
-			for (const part of e.message.content) {
-				if (part && (part.type === "text" || part.type === "text_delta"))
-					text += part.text ?? part.delta ?? "";
-			}
+		// pi session.subscribe 发高层事件(非 pi-ai 的 text_delta):
+		//   message_start/message_update 携带 partial AssistantMessage,
+		//   文本在 message.content[type="text"].text(累积全文,非 delta)。
+		//   故追踪 prevTextLen,只发 full.slice(prevTextLen) 真 delta;前端 append 即正确。
+		if (e.type === "message_start" && e.message?.role === "assistant") {
+			prevTextLen = 0;
+			return;
 		}
-		if (text) onEvent?.({ type: "token", text } as unknown as RunEvent);
+		if (e.type !== "message_update" || e.message?.role !== "assistant") return;
+		const content = e.message?.content;
+		if (!Array.isArray(content)) return;
+		let full = "";
+		for (const part of content) {
+			if (part && part.type === "text") full += part.text ?? "";
+		}
+		if (full.length > prevTextLen) {
+			onEvent?.({ type: "token", text: full.slice(prevTextLen) });
+			prevTextLen = full.length;
+		}
 	});
-	void unsubscribe;
 		onEvent?.({ type: "phase", phase: "architect" });
 	try {
 		await session.prompt(
@@ -783,6 +791,7 @@ export async function runStage(
 			if (parsed) assets = (parsed as { assets?: unknown }).assets ?? parsed;
 		}
 	} finally {
+		unsubscribe?.();
 		await session.dispose?.();
 	}
 	return assets;
