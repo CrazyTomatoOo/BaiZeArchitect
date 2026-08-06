@@ -13,3 +13,5 @@ evolver-home/
 .baize/
 web/node_modules/
 web/dist/
+.playwright-mcp/
+.codegraph/
