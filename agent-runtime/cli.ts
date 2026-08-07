@@ -3,7 +3,7 @@
  *
  * 收敛自原 server.ts(http)。砍掉 Go platform-api 那层 rpcRuntimeAdapter,
  * 直接 createAgentSession + submit_plan holder + .md 归档。
- * pi harness + .pi/skills(6 角色) + codebase-memory-mcp(后接证据层)。
+ * pi harness + .pi/skills(6 角色) + gitnexus 容器内证据层。
  *
  * ponytail: 单 phase 先跑通管线。多 phase(analyst/architect/critic 分 session
  * + 状态传递)等最小闭环在 docker 验证后再拆——现在拆是 speculative structure。
@@ -30,20 +30,17 @@ import { Type } from "typebox";
 import { getEvolverClient } from "./evolver-client.js";
 import { openStore } from "./store.js";
 import { getStageMethodology, getStageShape } from "./stage-prompts.js";
+import { generateEvidence, type EvidenceDoc } from "./evidence.js";
+import { validateEvidenceCandidates } from "./evidence-candidates.js";
 
 // ponytail: PROJECT_ROOT 指向项目根(.pi/skills 所在),不是 agent-runtime 目录。
 // resourceLoader.cwd 用它发现 skills;createAgentSession.cwd 用目标仓库——两者分离。
 const PROJECT_ROOT =
 	process.env.BAIZE_PROJECT_ROOT ?? path.resolve(import.meta.dirname, "..");
-const PROVIDER =
-	process.env.RUNTIME_MODEL_PROVIDER ??
-	process.env.PI_PROVIDER ??
-	"bailian";
-const MODEL_ID =
-	process.env.RUNTIME_MODEL_ID ?? process.env.PI_MODEL ?? "glm-5.2";
+const PROVIDER = process.env.RUNTIME_MODEL_PROVIDER ?? "bailian";
+const MODEL_ID = process.env.RUNTIME_MODEL_ID ?? "glm-5.2";
 const STAGE_MODEL_ID = process.env.BAIZE_STAGE_MODEL ?? "qwen-max";
 const OUT_DIR = process.env.BAIZE_OUT_DIR ?? path.join(PROJECT_ROOT, "out");
-const EVIDENCE_DIR = process.env.BAIZE_EVIDENCE_DIR ?? "/evidence";
 
 const SYSTEM_PROMPT = [
 	"你是 BaiZe Architect 的设计 agent。",
@@ -130,35 +127,9 @@ function fallbackPlan(
 		findingTitle: `Traceability for ${repoId}`,
 	};
 }
-// #5: 宿主 evidence.sh 用 codebase-memory-mcp 产 evidence/<repoId>.json(架构/hotspots/
-// boundaries/clusters + 历史 ADR),容器挂 /evidence 读取。architect 用结构化证据定位真实符号,
-// read/grep 仍负责行号精度——mcp 给结构,read/grep 给行。
-// ponytail: 容器内 evolver-mcp stdio(agent mid-design gene-search)非沉淀路径,speculative,
-// 按需再加;经验沉淀(ADR/gene)原 evolve.sh 已移除,改 manage_adr + distill-gene 手动(按需)。
-interface EvidenceDoc {
-	repositoryId: string;
-	project?: string;
-	architecture?: {
-		total_nodes?: number;
-		total_edges?: number;
-		languages?: Array<{ language: string; file_count: number }>;
-		entry_points?: Array<{ name: string; qualified_name: string; file: string }>;
-		hotspots?: Array<{ name: string; qualified_name: string; fan_in: number }>;
-		boundaries?: Array<{ from: string; to: string; call_count: number }>;
-		layers?: Array<{ name: string; layer: string; reason: string }>;
-		clusters?: Array<{ id: number; label: string; members: number; cohesion: number; top_nodes: string[] }>;
-	};
-}
-
-function loadEvidence(repoId: string): EvidenceDoc | null {
-	const dir = process.env.BAIZE_EVIDENCE_DIR ?? "/evidence";
-	const file = path.join(dir, `${repoId}.json`);
-	try {
-		return JSON.parse(readFileSync(file, "utf8")) as EvidenceDoc;
-	} catch {
-		return null;
-	}
-}
+// #5: 容器内 gitnexus 证据(generateEvidence,见 evidence.ts)产 evidence/<repoId>.json
+// (架构/hotspots/boundaries/clusters);architect 用结构化证据定位真实符号,read/grep 负责行号精度。
+// 历史 ADR(loadArchivedPrior)从 baize SQLite 读历史设计包(非 codebase-memory-mcp)。
 
 function loadArchivedPrior(repoId: string): string {
 	let store: ReturnType<typeof openStore> | null = null;
@@ -183,7 +154,7 @@ function stripProj(qn: string, proj?: string): string {
 
 function evidenceToPromptBlock(ev: EvidenceDoc, archivedPrior: string): string {
 	const a = ev.architecture;
-	const lines: string[] = ["## 仓库架构证据 (codebase-memory-mcp 结构化 — 定位真实符号与影响面)"];
+	const lines: string[] = ["## 仓库架构证据 (gitnexus 容器内索引 — 定位真实符号与影响面)"];
 	if (a) {
 		const langs = (a.languages ?? []).map((l) => `${l.language}(${l.file_count})`).join(", ");
 		lines.push(`- 规模: ${a.total_nodes ?? "?"} 节点 / ${a.total_edges ?? "?"} 边;语言: ${langs || "?"}`);
@@ -432,7 +403,7 @@ export async function runDesign(
 		sessionManager: SessionManager.inMemory(input.repoPath),
 	});
 	try {
-		const ev = loadEvidence(input.repoId);
+		const ev = await generateEvidence(input.repoPath, input.repoId);
 		const archivedPrior = loadArchivedPrior(input.repoId);
 		const evidenceBlock = ev ? evidenceToPromptBlock(ev, archivedPrior) : archivedPrior ? `## 历史决策 (复用资产库沉淀,避免重复决策)\n${archivedPrior}` : "";
 		const prompt = [
@@ -477,7 +448,7 @@ export async function runDesign(
 			};
 		},
 	});
-	const plan =
+	const rawPlan =
 		planFromTool ??
 		fallbackPlan(
 			input.repoId,
@@ -485,6 +456,29 @@ export async function runDesign(
 			input.requirement,
 			"LLM 未调用 submit_plan",
 		);
+	const evidenceValidation = await validateEvidenceCandidates(
+		(rawPlan.evidenceCandidates as unknown[]) ?? [],
+		input.repoPath,
+		input.repoId,
+		sha,
+	);
+	if (evidenceValidation.rejected.length > 0) {
+		console.warn(
+			`[baize] rejected evidence: ${evidenceValidation.rejected.join("; ")}`,
+		);
+	}
+	if (evidenceValidation.candidates.length === 0) {
+		throw new Error("architect plan contains no valid code evidence");
+	}
+	if (evidenceValidation.corrected > 0) {
+		console.warn(
+			`[baize] normalized ${evidenceValidation.corrected} evidence candidate(s) against repository source`,
+		);
+	}
+	const plan: Plan = {
+		...rawPlan,
+		evidenceCandidates: evidenceValidation.candidates,
+	};
 	onEvent?.({ type: "plan", plan });
 	onEvent?.({ type: "phase", phase: "critic" });
 	const { session: criticSession } = await createAgentSession({

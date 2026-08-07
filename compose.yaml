@@ -1,8 +1,8 @@
 # BaiZe Architect — 单进程本地 agent。
-# ponytail: out 挂 ./out 可 git commit(手动);evidence 挂 /evidence:ro
-# (#5: evidence.sh 宿主 codebase-memory-mcp 预产结构化证据,cli.ts 注入)。
+# ponytail: out 挂 ./out 可 git commit(手动);evidence 挂 /evidence(rw,容器内 gitnexus 写)
+# (#5: 容器内 gitnexus analyze + extract-architecture.cjs 产 evidence/<repo>.json,cli.ts 注入)。
 # evolver-home 挂 /evolver-home (#9b: evolver-mcp 本地 gene store 持久)。
-# 目标仓库由 run.sh -v <repo>:/repo:ro 挂入(lws/test-repo-2);
+# 目标仓库由 run.sh -v <repo>:/repo(rw,gitnexus 写 .gitnexus) 挂入(lws/test-repo-2);
 # build 前删 ._ 防 AppleDouble。
 services:
   baize:
@@ -10,7 +10,7 @@ services:
       context: .
       dockerfile: agent-runtime/Dockerfile
     volumes:
-      - ./evidence:/evidence:ro
+      - ./evidence:/evidence
       - ./out:/app/out
       - ./evolver-home:/evolver-home
     environment:
@@ -19,8 +19,8 @@ services:
       - BAIZE_EVIDENCE_DIR=/evidence
       - BAIZE_EVOLVER=1
       - EVOLVER_HOME=/evolver-home
-      - RUNTIME_MODEL_PROVIDER=${PI_PROVIDER:-bailian}
-      - RUNTIME_MODEL_ID=${PI_MODEL:-glm-5.2}
+      - RUNTIME_MODEL_PROVIDER=${BAIZE_MODEL_PROVIDER:-bailian}
+      - RUNTIME_MODEL_ID=${BAIZE_MODEL_ID:-glm-5.2}
       - DASHSCOPE_API_KEY=${DASHSCOPE_API_KEY:-}
       - BAIZE_AUTO_APPROVE=${BAIZE_AUTO_APPROVE:-1}
       - EVOLVER_IPC_TOKEN=${EVOLVER_IPC_TOKEN:-}
@@ -46,8 +46,8 @@ services:
       - BAIZE_EVIDENCE_DIR=/evidence
       - BAIZE_EVOLVER=1
       - EVOLVER_HOME=/evolver-home
-      - RUNTIME_MODEL_PROVIDER=${PI_PROVIDER:-bailian}
-      - RUNTIME_MODEL_ID=${PI_MODEL:-glm-5.2}
+      - RUNTIME_MODEL_PROVIDER=${BAIZE_MODEL_PROVIDER:-bailian}
+      - RUNTIME_MODEL_ID=${BAIZE_MODEL_ID:-glm-5.2}
       - DASHSCOPE_API_KEY=${DASHSCOPE_API_KEY:-}
       - BAIZE_AUTO_APPROVE=${BAIZE_AUTO_APPROVE:-1}
       - EVOLVER_IPC_TOKEN=${EVOLVER_IPC_TOKEN:-}

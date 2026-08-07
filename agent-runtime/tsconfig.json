@@ -11,6 +11,10 @@
   },
   "include": [
     "cli.ts",
+    "evidence.ts",
+    "evidence-candidates.ts",
+    "evidence-candidates.test.ts",
+    "evidence.test.ts",
     "server.ts",
     "evolver-client.ts",
     "distill-gene.ts",

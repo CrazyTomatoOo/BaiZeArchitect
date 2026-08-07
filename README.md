@@ -19,29 +19,29 @@ DASHSCOPE_API_KEY=... ./scripts/run.sh lws "你的设计需求"
 
 下次 `run.sh lws` 时,architect prompt 自动注入三层复用:
 
-- **mcp 结构化证据**(hotspots/boundaries/clusters/layers)— `evidence.sh` 预产
-- **历史 ADR**(复用,避免重复决策)— `manage_adr(update)` 手动沉淀(原 `evolve.sh` 已移除)
+- **gitnexus 结构化证据**(hotspots/boundaries/clusters)— 容器内 generateEvidence 产
+- **历史设计**(复用,避免重复决策)— `loadArchivedPrior` 读 baize SQLite 历史设计包
 - **可复用 gene**(经 `evolver_recall` mid-design 查)— 容器 evolver-mcp
 
 ## 架构
 
 ```
-宿主 (mac, 有 codebase-memory-mcp binary)          容器 (baizearchitect-baize, linux)
+宿主 (mac)                                          容器 (baizearchitect-baize, linux, 自包含)
 ─────────────────────────────────────────         ─────────────────────────────────────────
-evidence.sh ──get_architecture/manage_adr──►      /evidence/<repo>.json        (ro 挂载)
-                                                       │
                                 docker run ──────►   cli.ts
-                                                     ├ architect phase (submit_plan)
+                                                     ├ generateEvidence(gitnexus analyze + extract-architecture.cjs → /evidence/<repo>.json)
+                                                     ├ architect phase (submit_plan + read/grep 定位真实行号)
+                                                     ├ validateEvidenceCandidates(路径/符号/行号确定性门禁)
                                                      ├ critic phase   (record_critique)
-                                                     ├ evolver-mcp stdio 子进程 (BAIZE_EVOLVER=1)
-                                                     └ read/grep 定位真实行号
+                                                     └ evolver-mcp stdio 子进程 (BAIZE_EVOLVER=1)
                                                        ▼
                                                 out/design-package-<repo>-<ts>.md
 ```
 
 - **单进程**:`docker run` → `agent-runtime/cli.ts`(pi SDK `createAgentSession` + 内联
   bailian provider + `.pi/skills` 6 角色)。
-- **两 phase**:architect(`submit_plan` 工具产 5 类 artifact + 真实证据)→ critic(独立
+- **两 phase**:architect(`submit_plan` 工具产 5 类 artifact + 真实证据)→ 确定性证据门禁
+  (`evidence-candidates.ts` 校验仓库路径/符号并归一化行号,无有效证据即失败)→ critic(独立
   session,`record_critique` findings,grep 复核证据)。
 - **审批门**:`BAIZE_AUTO_APPROVE`(默认 1 auto-approve)→ design-package 头 "审批状态:
   accepted|pending"。
@@ -52,16 +52,15 @@ evidence.sh ──get_architecture/manage_adr──►      /evidence/<repo>.jso
 
 | 层 | 沉淀 | 复用注入 | 工具 |
 | --- | --- | --- | --- |
-| mcp 证据 | — | `evidence.sh` `get_architecture` → cli.ts prompt | codebase-memory-mcp(宿主 mac binary) |
-| ADR | `manage_adr(update)` 手动(原 `evolve.sh` 已移除) | `evidence.sh` `manage_adr(get)` → cli.ts "历史决策" | codebase-memory-mcp |
+| gitnexus 证据 | — | 容器内 `generateEvidence` → cli.ts prompt | gitnexus(Dockerfile `npm install -g`) |
+| 历史设计 | 归档 design-package(手动) | `loadArchivedPrior` 读 baize SQLite → cli.ts "历史决策" | baize SQLite(better-sqlite3) |
 | gene | `distill-gene.ts` 手动 → `./evolver-home/assets`(原 `evolve.sh` 已移除) | 容器 `evolver_recall`(`listApprovedGenes`,mid-design) | `@evomap/evolver-mcp`(stdio) |
 
 ## 脚本
 
 | 脚本 | 作用 |
 | --- | --- |
-| `scripts/run.sh <repo-dir> <requirement>` | 先 `evidence.sh`,再 `docker compose run` 跑 architect+critic |
-| `scripts/evidence.sh <repo-path> [repo-id]` | codebase-memory-mcp → `evidence/<repo-id>.json` |
+| `scripts/run.sh <repo-dir> <requirement>` | `docker compose run` 跑 architect+critic(容器内 gitnexus 自产 evidence) |
 
 > 经验沉淀(ADR/gene)原由 `evolve.sh` 一键完成,已移除;改为直接调
 > `manage_adr(update)` 与 `agent-runtime/distill-gene.ts`(按需,非必需)。
@@ -72,8 +71,8 @@ evidence.sh ──get_architecture/manage_adr──►      /evidence/<repo>.jso
 | --- | --- | --- |
 | `DASHSCOPE_API_KEY` | (必填) | bailian/glm-5.2 鉴权 |
 | `BAIZE_AUTO_APPROVE` | `1` | 1=auto-approve,0=pending |
-| `PI_PROVIDER` | `bailian` | LLM provider |
-| `PI_MODEL` | `glm-5.2` | LLM model |
+| `BAIZE_MODEL_PROVIDER` | `bailian` | LLM provider(映射到容器 `RUNTIME_MODEL_PROVIDER`) |
+| `BAIZE_MODEL_ID` | `glm-5.2` | LLM model(映射到容器 `RUNTIME_MODEL_ID`) |
 | `BAIZE_EVOLVER` | `1` | 启用容器内 evolver-mcp |
 | `EVOLVER_HOME` | `/evolver-home` | gene store(挂 `./evolver-home`) |
 | `EVOLVER_IPC_TOKEN` / `EVOLVER_PROXY_URL` | (空) | 可选 hub proxy 接入;空=local-only |
@@ -82,12 +81,14 @@ evidence.sh ──get_architecture/manage_adr──►      /evidence/<repo>.jso
 
 ```
 agent-runtime/
-  cli.ts              单进程入口(architect+critic 两 phase,evidence/evolver 注入)
-  evolver-client.ts   evolver-mcp stdio JSON-RPC 客户端(手写,未装 MCP SDK)
+  cli.ts                 单进程入口(architect+critic 两 phase,evidence/evolver 注入)
+  evidence.ts            容器内 GitNexus 架构证据生成
+  evidence-candidates.ts plan 代码证据路径/符号/行号确定性校验
+  evolver-client.ts      evolver-mcp stdio JSON-RPC 客户端(手写,未装 MCP SDK)
   distill-gene.ts     design-package → evolver_distill_conversation → gene
   Dockerfile          node:22-slim + pi SDK + .pi/skills
 compose.yaml          baize 服务(evidence/out/evolver-home 挂载 + env)
-scripts/              run.sh / evidence.sh
+scripts/              run.sh
 .pi/skills/           6 角色(architect/critic/orchestrator/analyst/reviewer/translator)
 schemas/              design artifact JSON schemas
 ```
@@ -95,8 +96,8 @@ schemas/              design artifact JSON schemas
 ## 状态 / 约束
 
 - **glm-5.2 慢**:单次设计 5-7min(两 phase:architect 分析 + critic 复核)。pre-existing。
-- **codebase-memory-mcp 是宿主 mac binary**:容器 linux 跑不了 → 宿主 `evidence.sh`
-  预产 `evidence.json` 挂载。agent 不直接调 mcp,用结构化证据。
+- **gitnexus 首次索引慢**:首次 `gitnexus analyze` 全量索引(大仓库数分钟),后续增量;
+  索引写 `<repo>/.gitnexus`(仓库需 rw 挂载,与 gateway 一致)。
 - **evolver-mcp local-only**(无 `EVOLVER_IPC_TOKEN`):gene 只在本机 `./evolver-home`
   store;要接 hub proxy 设 token + url。
 - 多 phase(analyst/orchestrator/reviewer/translator)尚未拆成独立 session——intentional
@@ -107,6 +108,6 @@ schemas/              design artifact JSON schemas
 ```sh
 cd agent-runtime && npm install && npx tsc --noEmit   # 类型检查
 docker compose build baize                            # 建镜像
-docker compose run --rm -v "$PWD/lws:/repo:ro" \
+docker compose run --rm -v "$PWD/lws:/repo" \
   baize --repo /repo --repo-id lws --requirement "..." # 直接跑(不经 run.sh)
 ```

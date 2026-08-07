@@ -12,10 +12,11 @@
 import http, { type IncomingMessage, type ServerResponse } from "node:http";
 import { fileURLToPath } from "node:url";
 import { dirname, join, resolve } from "node:path";
-import { mkdir, readdir, readFile, stat, writeFile } from "node:fs/promises";
+import { mkdir, readdir, readFile, writeFile } from "node:fs/promises";
 import { execFile } from "node:child_process";
 import { openStore, type Stage } from "./store.js";
 import type { StageName } from "./cli.js";
+import { generateEvidence } from "./evidence.js";
 
 // 必须在 import cli.ts 前设,否则 cli.ts 的 main 会跑(import 即执行)。
 process.env.BAIZE_GATEWAY = "1";
@@ -24,7 +25,6 @@ const { runStage, chatIntake, readModelConfig, writeModelConfig, currentModelCon
 const ROOT =
 	process.env.BAIZE_PROJECT_ROOT ??
 	join(dirname(fileURLToPath(import.meta.url)), "..");
-const AGENT_RUNTIME_DIR = dirname(fileURLToPath(import.meta.url));
 const PORT = Number(process.env.BAIZE_PORT ?? 18789);
 const REPOS_ROOT = process.env.BAIZE_REPOS_ROOT ?? ROOT;
 const OUT_DIR = process.env.BAIZE_OUT_DIR ?? join(ROOT, "out");
@@ -107,50 +107,6 @@ async function readEvidence(repoId: string): Promise<unknown> {
 		);
 	} catch {
 		return null;
-	}
-}
-
-// 容器内自动索引:gitnexus analyze → 查 LadybugDB 提取架构证据 → evidence/<repoId>.json。
-// 合并既有 evidence 的兼容元数据,仅替换 architecture;设计输入的历史决策从资产库读取。
-async function generateEvidence(repoPath: string, repoId: string): Promise<void> {
-	try {
-		await new Promise<void>((resolve, reject) =>
-			execFile("gitnexus", ["analyze", repoPath], { timeout: 600000 }, (err) =>
-				err ? reject(err) : resolve(),
-			),
-		);
-		// 查图提取 hotspots/boundaries/clusters(+ 统计);失败退空骨架,不阻断。
-		let architecture: Record<string, unknown> = {
-			hotspots: [],
-			boundaries: [],
-			clusters: [],
-		};
-		try {
-			architecture = JSON.parse(
-				await new Promise<string>((resolveStdout, rejectStdout) =>
-					execFile(
-						"node",
-						[join(AGENT_RUNTIME_DIR, "extract-architecture.cjs"), repoPath],
-						{ timeout: 120000, maxBuffer: 1 << 24 },
-						(err, stdout) => (err ? rejectStdout(err) : resolveStdout(stdout)),
-					),
-				),
-			);
-		} catch (e) {
-			console.warn("[evidence] extract-architecture failed:", (e as Error).message);
-		}
-		// 保留既有 evidence 的兼容元数据,仅刷新 architecture;prior 输入不再消费 repo priorAdr。
-		let existing: Record<string, unknown> = {};
-		try {
-			existing = JSON.parse(await readFile(join(EVIDENCE_DIR, `${repoId}.json`), "utf8"));
-		} catch {
-			/* 首次生成 */
-		}
-		const evidence = { ...existing, repositoryId: repoId, generatedBy: "gitnexus", architecture };
-		await mkdir(EVIDENCE_DIR, { recursive: true });
-		await writeFile(join(EVIDENCE_DIR, `${repoId}.json`), JSON.stringify(evidence, null, 2));
-	} catch (e) {
-		console.warn("[evidence] gitnexus generate failed:", (e as Error).message);
 	}
 }
 

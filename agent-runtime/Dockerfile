@@ -22,7 +22,7 @@ RUN cd agent-runtime && npm install && \
 	cd /app/agent-runtime
 
 # 容器内仓库索引(自动化证据生成):GitNexus(node,tree-sitter native,预计算聚类/impact)
-RUN npm install -g gitnexus
+RUN npm install -g gitnexus@1.6.6 --registry=https://registry.npmmirror.com
 
 # 源码 + .pi(skills) + schemas
 COPY agent-runtime ./agent-runtime
