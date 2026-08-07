@@ -1018,7 +1018,14 @@ const server = http.createServer(
 			/^\/api\/requirements\/(\d+)\/evidence-snapshot$/,
 		);
 		if (evSnap && req.method === "GET") {
-			json(200, store.getEvidenceSnapshot(Number(evSnap[1])) ?? null);
+			const snap = store.getEvidenceSnapshot(Number(evSnap[1])) as
+				| { architecture?: string; head_sha?: string; captured_at?: string }
+				| null;
+			if (!snap) { json(200, null); return; }
+			json(200, {
+				...snap,
+				architecture: snap.architecture ? JSON.parse(snap.architecture) : null,
+			});
 			return;
 		}
 		const dPkg = url.pathname.match(
