@@ -17,10 +17,10 @@
 <!-- closed ticket title + one-line gist live here -->
 - [Pi SDK 会话持久化与流式执行可行性](tickets/R02-pi-session-capability.md) — Pi JSONL 提供 transcript 恢复、订阅、取消与 steering；BaiZe SQLite 必须拥有 Run、事件、锁和治理状态。
 - [首版运行边界与设计会话契约](tickets/R01-runtime-session-contract.md) — Gateway 唯一入口；一个需求=持久主会话顺序多 Run、归档只读；异步可恢复可重放；证据驱动门禁；Critic 主会话内隔离子 Run。
+- [Artifact、决策与审批生命周期](tickets/R03-artifact-governance-lifecycle.md) — 全部一等实体；Artifact 不可变+Revision 链；审批三点(Revision/Decision/归档)；归档=DesignPackage 快照+工具检索注入；证据=Req 级快照+TraceLink。
 
 ## Not yet specified
 
-- 人工审批的细粒度策略：哪些动作仅需提示、哪些必须阻塞、哪些可由角色或风险等级升级为门禁；待 Artifact/Decision 生命周期确定后细化。
 - 多仓与跨 workspace 设计记忆的作用域、检索排序和数据隔离；待首版单 workspace/仓库闭环确定后细化。
 - 开发、测试和线上反馈接入 Experience 的数据来源及晋级评测；第一期只保留候选经验入口。
 
