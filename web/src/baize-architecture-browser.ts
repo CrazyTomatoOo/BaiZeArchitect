@@ -21,6 +21,8 @@ type C4Data = {
 	containers?: Array<Record<string, unknown>>;
 	components?: Array<Record<string, unknown>>;
 	code?: {
+		totalNodes?: number;
+		totalEdges?: number;
 		hotspots?: Array<{ qualified_name?: string; fan_in?: number }>;
 		boundaries?: Array<{ from?: string; to?: string; call_count?: number }>;
 		clusters?: Array<{
@@ -111,10 +113,6 @@ class BaizeArchitectureBrowser extends LitElement {
 		this.error = "";
 	}
 
-	connectedCallback(): void {
-		super.connectedCallback();
-		void this.load();
-	}
 
 	updated(changed: Map<string, unknown>): void {
 		if (changed.has("repo") && this.repo) void this.load();
@@ -263,7 +261,8 @@ class BaizeArchitectureBrowser extends LitElement {
 		const code = this.c4?.code;
 		return html`
 			<div class="stats">
-				<span class="stat">真实节点 <strong>${code?.clusters?.reduce((n, x) => n + Number(x.members ?? 0), 0) || "—"}</strong></span>
+				<span class="stat">真实节点 <strong>${code?.totalNodes ?? "—"}</strong></span>
+				<span class="stat">真实边 <strong>${code?.totalEdges ?? "—"}</strong></span>
 				<span class="stat">热点 <strong>${code?.hotspots?.length ?? 0}</strong></span>
 				<span class="stat">边界 <strong>${code?.boundaries?.length ?? 0}</strong></span>
 			</div>

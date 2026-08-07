@@ -1,7 +1,7 @@
 # BaiZe Architect — 单进程本地 agent。
-# ponytail: out 挂 ./out 可 git commit(手动);evidence 挂 /evidence(rw,容器内 gitnexus 写)
-# (#5: 容器内 gitnexus analyze + extract-architecture.cjs 产 evidence/<repo>.json,cli.ts 注入)。
-# evolver-home 挂 /evolver-home (#9b: evolver-mcp 本地 gene store 持久)。
+# ponytail: out 挂 ./out 可 git commit(手动);evidence 挂 /evidence(rw,容器内 gitnexus 写)。
+# SQLite 状态挂 ./.baize:/app/.baize;gateway 重建后保留工作区、需求与审核阶段。
+# evolver-home 挂 /evolver-home,持久化本地 gene store。
 # 目标仓库由 run.sh -v <repo>:/repo(rw,gitnexus 写 .gitnexus) 挂入(lws/test-repo-2);
 # build 前删 ._ 防 AppleDouble。
 services:
@@ -12,11 +12,13 @@ services:
     volumes:
       - ./evidence:/evidence
       - ./out:/app/out
+      - ./.baize:/app/.baize
       - ./evolver-home:/evolver-home
     environment:
       - BAIZE_PROJECT_ROOT=/app
       - BAIZE_OUT_DIR=/app/out
       - BAIZE_EVIDENCE_DIR=/evidence
+      - BAIZE_DB_PATH=/app/.baize/baize.db
       - BAIZE_EVOLVER=1
       - EVOLVER_HOME=/evolver-home
       - RUNTIME_MODEL_PROVIDER=${BAIZE_MODEL_PROVIDER:-bailian}
@@ -37,6 +39,7 @@ services:
     volumes:
       - ./evidence:/evidence
       - ./out:/app/out
+      - ./.baize:/app/.baize
       - ./evolver-home:/evolver-home
       # 仓库挂载(自动化证据索引用;宿主项目目录→容器同路径,repoPath 原样可用)
       - ${BAIZE_REPOS_ROOT:-/Volumes/work/Project}:${BAIZE_REPOS_ROOT:-/Volumes/work/Project}
@@ -44,6 +47,7 @@ services:
       - BAIZE_PROJECT_ROOT=/app
       - BAIZE_OUT_DIR=/app/out
       - BAIZE_EVIDENCE_DIR=/evidence
+      - BAIZE_DB_PATH=/app/.baize/baize.db
       - BAIZE_EVOLVER=1
       - EVOLVER_HOME=/evolver-home
       - RUNTIME_MODEL_PROVIDER=${BAIZE_MODEL_PROVIDER:-bailian}

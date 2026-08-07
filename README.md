@@ -46,7 +46,7 @@ DASHSCOPE_API_KEY=... ./scripts/run.sh lws "你的设计需求"
 - **审批门**:`BAIZE_AUTO_APPROVE`(默认 1 auto-approve)→ design-package 头 "审批状态:
   accepted|pending"。
 - **容器隔离**:容器自带 pi SDK(不挂宿主 `~/.pi`),`.pi/skills` COPY 进镜像,目标仓库 +
-  evidence + out + evolver-home 经 volume 挂载,`DASHSCOPE_API_KEY` env 透传。
+  evidence + out + `.baize` SQLite + evolver-home 经 volume 挂载,`DASHSCOPE_API_KEY` env 透传。
 
 ## 三层复用
 
@@ -87,7 +87,7 @@ agent-runtime/
   evolver-client.ts      evolver-mcp stdio JSON-RPC 客户端(手写,未装 MCP SDK)
   distill-gene.ts     design-package → evolver_distill_conversation → gene
   Dockerfile          node:22-slim + pi SDK + .pi/skills
-compose.yaml          baize 服务(evidence/out/evolver-home 挂载 + env)
+compose.yaml          baize/gateway 服务(evidence/out/.baize/evolver-home 持久卷 + env)
 scripts/              run.sh
 .pi/skills/           6 角色(architect/critic/orchestrator/analyst/reviewer/translator)
 schemas/              design artifact JSON schemas

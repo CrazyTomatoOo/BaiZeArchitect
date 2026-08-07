@@ -29,8 +29,10 @@ const PORT = Number(process.env.BAIZE_PORT ?? 18789);
 const REPOS_ROOT = process.env.BAIZE_REPOS_ROOT ?? ROOT;
 const OUT_DIR = process.env.BAIZE_OUT_DIR ?? join(ROOT, "out");
 const EVIDENCE_DIR = process.env.BAIZE_EVIDENCE_DIR ?? join(ROOT, "evidence");
+const DB_PATH = process.env.BAIZE_DB_PATH ?? join(ROOT, ".baize", "baize.db");
 // 生产部署:单进程服务 web/dist(SPA);dev 用 vite(:5173)代理 /api。
 const WEB_DIST = process.env.BAIZE_WEB_DIST ?? join(ROOT, "web", "dist");
+const C4_GENERATION = "heuristic-draft-v2";
 
 // —— 数据层接线(spec §2):证据快照 + 设计包落库 ——
 function gitHeadSha(repoPath: string): Promise<string> {
@@ -261,7 +263,12 @@ async function geneContextForRequirement(reqId: number, requirement: Record<stri
 	async function generateC4(repoId: string, repoPath: string): Promise<Record<string, unknown>> {
 		const headSha = (await gitHeadSha(repoPath)) || "untracked";
 		const cached = await readC4Cache(repoId);
-		if (cached && cached.head_sha === headSha) return { ...cached, cached: true };
+		if (
+			cached &&
+			cached.head_sha === headSha &&
+			cached.generation === C4_GENERATION
+		)
+			return { ...cached, cached: true };
 
 		const architecture = (await readEvidenceArchitecture(repoId)) ?? {};
 		const rootPackage = await readJsonIfExists(join(repoPath, "package.json"));
@@ -305,7 +312,7 @@ async function geneContextForRequirement(reqId: number, requirement: Record<stri
 			repositoryId: repoId,
 			head_sha: headSha,
 			generatedAt: new Date().toISOString(),
-			generation: "heuristic-draft",
+			generation: C4_GENERATION,
 			context: {
 				name: String(rootPackage?.name ?? repoId),
 				description: String(rootPackage?.description ?? "当前仓库的系统上下文(draft)"),
@@ -314,6 +321,8 @@ async function geneContextForRequirement(reqId: number, requirement: Record<stri
 			containers,
 			components,
 			code: {
+				totalNodes: Number(architecture.total_nodes ?? 0),
+				totalEdges: Number(architecture.total_edges ?? 0),
 				hotspots: (architecture as { hotspots?: unknown }).hotspots ?? [],
 				boundaries: (architecture as { boundaries?: unknown }).boundaries ?? [],
 				clusters,
@@ -324,7 +333,7 @@ async function geneContextForRequirement(reqId: number, requirement: Record<stri
 		return payload;
 	}
 
-	const store = openStore(join(ROOT, ".baize", "baize.db"));
+	const store = openStore(DB_PATH);
 
 // 阶段流水线(LLM 阶段,按序门禁);归档单独处理。
 const STAGE_ORDER: StageName[] = [
@@ -670,11 +679,7 @@ const server = http.createServer(
 			}
 			if (kind === "c4" && req.method === "GET") {
 				const cached = await readC4Cache(repoId);
-				if (!cached) {
-					json(404, { error: "C4 draft not generated", repositoryId: repoId });
-					return;
-				}
-				json(200, cached);
+				json(200, cached?.generation === C4_GENERATION ? cached : null);
 				return;
 			}
 			if (kind === "c4" && req.method === "POST") {

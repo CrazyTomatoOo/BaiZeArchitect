@@ -39,6 +39,7 @@ baize --repo <path> [--repo-id id] [--requirement <text|--requirement-file f>] [
 - `BAIZE_PROJECT_ROOT`(`/app`)— `.pi/skills` 所在
 - `BAIZE_OUT_DIR`(`/app/out`)— design package 产出
 - `BAIZE_EVIDENCE_DIR`(`/evidence`)— gitnexus `evidence.json`(容器内写)
+- `BAIZE_DB_PATH`(`/app/.baize/baize.db`)— 工作区/需求/阶段/设计包 SQLite(挂载 `./.baize`)
 - `RUNTIME_MODEL_PROVIDER` / `RUNTIME_MODEL_ID`(`bailian` / `glm-5.2`)
 - `BAIZE_EVOLVER=1` — 启用容器内 evolver-mcp(`evolver_recall` 工具)
 - `EVOLVER_HOME`(`/evolver-home`)— gene store(挂载 `./evolver-home`)
