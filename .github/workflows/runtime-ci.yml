@@ -1,0 +1,73 @@
+---
+name: runtime-ci
+
+"on":
+  push:
+    paths:
+      - "agent-runtime/**"
+      - "web/**"
+      - "scripts/**"
+      - ".pi/**"
+      - "schemas/**"
+      - "compose.yaml"
+      - ".dockerignore"
+      - ".github/workflows/runtime-ci.yml"
+  pull_request:
+    paths:
+      - "agent-runtime/**"
+      - "web/**"
+      - "scripts/**"
+      - ".pi/**"
+      - "schemas/**"
+      - "compose.yaml"
+      - ".dockerignore"
+      - ".github/workflows/runtime-ci.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: runtime-ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  agent-runtime:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: agent-runtime/package-lock.json
+      - run: npm ci
+        working-directory: agent-runtime
+      - run: npm test
+        working-directory: agent-runtime
+      - run: npm run typecheck
+        working-directory: agent-runtime
+
+  web:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - run: npm ci
+        working-directory: web
+      - run: npm run typecheck
+        working-directory: web
+      - run: npm run build
+        working-directory: web
+
+  compose:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - run: docker compose config --quiet
