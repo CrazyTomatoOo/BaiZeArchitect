@@ -19,6 +19,7 @@
 - [首版运行边界与设计会话契约](tickets/R01-runtime-session-contract.md) — Gateway 唯一入口；一个需求=持久主会话顺序多 Run、归档只读；异步可恢复可重放；证据驱动门禁；Critic 主会话内隔离子 Run。
 - [Artifact、决策与审批生命周期](tickets/R03-artifact-governance-lifecycle.md) — 全部一等实体；Artifact 不可变+Revision 链；审批三点(Revision/Decision/归档)；归档=DesignPackage 快照+工具检索注入；证据=Req 级快照+TraceLink。
 - [领域工具、Skill 与证据策略](tickets/R04-domain-tool-skill-policy.md) — 纯领域工具集禁用 shell；角色模式+版本化 Skill；Agent 主动调工具取证+TraceLink；工具治理=超时+裁剪+审计+门禁分层。
+- [渐进迁移切面与发布门禁](tickets/R05-strangler-migration-release-plan.md) — 自底向上五切面、无兼容层即删即替、现有数据一次性迁移后删旧表；完整方案 docs/refactor-plan.md。
 
 ## Not yet specified
 
