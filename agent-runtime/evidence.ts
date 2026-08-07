@@ -5,8 +5,8 @@
  * extract-architecture.cjs 查图提取 hotspots/boundaries/clusters → EvidenceDoc。
  * 产物落 evidence/<repoId>.json(web UI evidence-snapshot 消费)。
  *
- * 替代原宿主 evidence.sh(codebase-memory-mcp mac binary)—— 容器内自包含,
- * 无宿主依赖。仓库需 rw 挂载(gitnexus 写 <repo>/.gitnexus,与 gateway 一致)。
+ * 完全在容器内运行；测试仓库先复制到 tmpfs，GitNexus 索引和 EvidenceDoc
+ * 随一次性容器删除，不依赖或修改任何宿主目录。
  */
 import { execFile } from "node:child_process";
 import { mkdir, writeFile } from "node:fs/promises";

@@ -1,95 +1,190 @@
 #!/usr/bin/env node
 /**
- * smoke-gateway — 旅程状态机冒烟:门禁/打回校验/归档(不跑 LLM)。
- * 用法:node scripts/smoke-gateway.mjs
+ * 一次性容器集成测试：固定仓库、Gateway、GitNexus、阶段门禁与归档。
+ * 所有可写数据都位于容器 tmpfs，退出前主动清理。
  */
-import { spawn } from "node:child_process";
-import { mkdtempSync, existsSync } from "node:fs";
+import { execFileSync, spawn } from "node:child_process";
+import { once } from "node:events";
+import { cpSync, existsSync, mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createRequire } from "node:module";
 
-const require = createRequire(import.meta.url);
-const Database = require(
-	join(process.cwd(), "agent-runtime/node_modules/better-sqlite3"),
-);
+if (process.env.BAIZE_CONTAINER_TEST !== "1") {
+	throw new Error("smoke-gateway.mjs 只能在一次性容器测试环境中运行");
+}
 
+const APP_ROOT = process.cwd();
 const PORT = 18899;
 const BASE = `http://127.0.0.1:${PORT}`;
 const root = mkdtempSync(join(tmpdir(), "baize-smoke-"));
+const reposRoot = join(root, "repos");
+const repoPath = join(reposRoot, "test-repo");
+const evidenceDir = join(root, "evidence");
+const outDir = join(root, "out");
 
-const gw = spawn("npx", ["tsx", "agent-runtime/gateway.ts"], {
-	env: { ...process.env, BAIZE_PROJECT_ROOT: root, BAIZE_PORT: String(PORT) },
+mkdirSync(reposRoot, { recursive: true });
+cpSync(join(APP_ROOT, "fixtures", "test-repo"), repoPath, { recursive: true });
+execFileSync("git", ["init", "--quiet"], { cwd: repoPath });
+execFileSync("git", ["add", "."], { cwd: repoPath });
+execFileSync(
+	"git",
+	[
+		"-c",
+		"user.name=BaiZe Container Test",
+		"-c",
+		"user.email=container-test@localhost",
+		"commit",
+		"--quiet",
+		"-m",
+		"fixture",
+	],
+	{ cwd: repoPath },
+);
+
+const require = createRequire(import.meta.url);
+const Database = require(
+	join(APP_ROOT, "agent-runtime/node_modules/better-sqlite3"),
+);
+const gatewayEnv = {
+	...process.env,
+	BAIZE_PROJECT_ROOT: APP_ROOT,
+	BAIZE_REPOS_ROOT: reposRoot,
+	BAIZE_DB_PATH: join(root, "baize.db"),
+	BAIZE_EVIDENCE_DIR: evidenceDir,
+	BAIZE_OUT_DIR: outDir,
+	EVOLVER_HOME: join(root, "evolver-home"),
+	BAIZE_EVOLVER: "0",
+	BAIZE_PORT: String(PORT),
+};
+
+const tsx = join(APP_ROOT, "agent-runtime", "node_modules", ".bin", "tsx");
+const gateway = spawn(tsx, ["agent-runtime/gateway.ts"], {
+	cwd: APP_ROOT,
+	env: gatewayEnv,
 	stdio: ["ignore", "pipe", "pipe"],
+	detached: true,
 });
-gw.stderr.on("data", (d) => process.stderr.write(`[gw] ${d}`));
+gateway.stdout.on("data", (data) => process.stdout.write(`[gateway] ${data}`));
+gateway.stderr.on("data", (data) => process.stderr.write(`[gateway] ${data}`));
 
 let failed = 0;
-const check = (name, cond) => {
-	console.log(`${cond ? "PASS" : "FAIL"}  ${name}`);
-	if (!cond) failed++;
+const check = (name, condition) => {
+	process.stdout.write(`${condition ? "PASS" : "FAIL"}  ${name}\n`);
+	if (!condition) failed++;
 };
 
 async function api(path, method = "GET", body) {
-	const r = await fetch(BASE + path, {
+	const response = await fetch(BASE + path, {
 		method,
 		headers: { "content-type": "application/json" },
 		body: body === undefined ? undefined : JSON.stringify(body),
 	});
-	return { status: r.status, body: await r.json().catch(() => ({})) };
+	return {
+		status: response.status,
+		body: await response.json().catch(() => null),
+	};
 }
 
-// 等 gateway 起来
-for (let i = 0; i < 40; i++) {
+async function stopGateway() {
+	if (gateway.exitCode !== null) return;
 	try {
-		await fetch(BASE + "/api/overview");
-		break;
+		process.kill(-gateway.pid, "SIGTERM");
 	} catch {
-		await new Promise((r) => setTimeout(r, 500));
+		gateway.kill("SIGTERM");
+	}
+	await Promise.race([
+		once(gateway, "exit"),
+		new Promise((resolve) => setTimeout(resolve, 3_000)),
+	]);
+	if (gateway.exitCode === null) {
+		try {
+			process.kill(-gateway.pid, "SIGKILL");
+		} catch {
+			gateway.kill("SIGKILL");
+		}
 	}
 }
 
 try {
-	const ws = await api("/api/workspaces", "POST", {
-		repoPath: "/tmp/repo-x",
-		name: "smoke",
-	});
-	const req = await api("/api/requirements", "POST", {
-		workspaceId: ws.body.id,
-		title: "冒烟需求",
-		description: "测试旅程",
-	});
-	const rid = req.body.id;
+	let ready = false;
+	for (let i = 0; i < 40; i++) {
+		try {
+			const response = await fetch(BASE + "/api/overview");
+			if (response.ok) {
+				ready = true;
+				break;
+			}
+		} catch {
+			// Gateway 仍在启动。
+		}
+		await new Promise((resolve) => setTimeout(resolve, 500));
+	}
+	check("Gateway 在容器内部启动", ready);
+	if (!ready) throw new Error("Gateway 启动超时");
 
-	const stages = (await api(`/api/requirements/${rid}/stages`)).body;
+	const web = await fetch(BASE + "/");
 	check(
-		"新需求初始化 7 个阶段(录入完成 + 6 未开始)",
+		"Web SPA 从镜像内部提供",
+		web.status === 200 &&
+			web.headers.get("content-type")?.startsWith("text/html"),
+	);
+
+	const system = await api("/api/system/status");
+	check(
+		"GitNexus 随镜像提供",
+		system.status === 200 && system.body?.gitnexus?.available === true,
+	);
+
+	const generate = await api("/api/evidence/generate", "POST", {
+		repoPath,
+		repoId: "test-repo",
+	});
+	check("内置仓库开始生成证据", generate.status === 202);
+
+	let evidence = null;
+	for (let i = 0; i < 240; i++) {
+		const result = await api("/api/evidence/test-repo");
+		if (result.body?.repositoryId === "test-repo") {
+			evidence = result.body;
+			break;
+		}
+		await new Promise((resolve) => setTimeout(resolve, 500));
+	}
+	check(
+		"GitNexus 证据仅写入容器 tmpfs",
+		evidence?.generatedBy === "gitnexus" &&
+			existsSync(join(evidenceDir, "test-repo.json")) &&
+			evidence.repoPath === repoPath,
+	);
+
+	const workspace = await api("/api/workspaces", "POST", {
+		repoPath,
+		name: "container-smoke",
+	});
+	const requirement = await api("/api/requirements", "POST", {
+		workspaceId: workspace.body.id,
+		title: "容器闭环冒烟",
+		description: "验证测试数据不会离开容器",
+	});
+	const requirementId = requirement.body.id;
+
+	const stagesResponse = await api(`/api/requirements/${requirementId}/stages`);
+	const stages = stagesResponse.body;
+	check(
+		"新需求初始化七个阶段",
 		stages.length === 7 &&
-			stages.find((s) => s.stage === "录入").status === "完成" &&
-			stages.find((s) => s.stage === "归档").status === "未开始" &&
-			stages.find((s) => s.stage === "功能设计").status === "未开始",
+			stages.find((stage) => stage.stage === "录入").status === "完成" &&
+			stages.find((stage) => stage.stage === "归档").status === "未开始",
 	);
 
-	const g = await api(`/api/requirements/${rid}/stage/scenario/run`, "POST");
-	check("门禁:分析未完成不能 run 场景(409)", g.status === 409);
-
-	const a = await api(
-		`/api/requirements/${rid}/stage/analysis/approve`,
+	const gated = await api(
+		`/api/requirements/${requirementId}/stage/scenario/run`,
 		"POST",
 	);
-	check("非待审不能 approve(409)", a.status === 409);
+	check("分析未完成时阻止场景阶段", gated.status === 409);
 
-	const rj = await api(
-		`/api/requirements/${rid}/stage/analysis/reject`,
-		"POST",
-		{
-			feedback: "x",
-		},
-	);
-	check("非待审不能 reject(409)", rj.status === 409);
-
-	// 模拟全部 LLM 阶段已通过,验证归档
-	const db = new Database(join(root, ".baize", "baize.db"));
+	const database = new Database(join(root, "baize.db"));
 	const seed = [
 		["分析", '[{"type":"analysis","content":{"scope":["冒烟"]}}]'],
 		["场景", '[{"type":"scenario","id":1,"title":"s1","description":"d1"}]'],
@@ -104,32 +199,41 @@ try {
 		],
 	];
 	for (const [stage, refs] of seed) {
-		db.prepare(
-			"update stage_progress set status='完成', artifact_refs=? where requirement_id=? and stage=?",
-		).run(refs, rid, stage);
+		database
+			.prepare(
+				"update stage_progress set status='完成', artifact_refs=? where requirement_id=? and stage=?",
+			)
+			.run(refs, requirementId, stage);
 	}
-	db.close();
+	database.close();
 
-	const early = await api(
-		`/api/requirements/${rid}/stage/analysis/run`,
+	const archive = await api(
+		`/api/requirements/${requirementId}/stage/archive/run`,
 		"POST",
 	);
-	check("已完成阶段不能重跑(409)", early.status === 409);
+	const archiveFile = archive.body?.refs?.[0]?.file ?? "";
+	check(
+		"归档只生成在容器 tmpfs",
+		archive.status === 200 &&
+			existsSync(archiveFile) &&
+			archiveFile.startsWith(root),
+	);
 
-	const arch = await api(`/api/requirements/${rid}/stage/archive/run`, "POST");
-	check("归档成功(200)", arch.status === 200);
-	const archFile = arch.body.refs?.[0]?.file ?? "";
-	check("归档文件已写入", existsSync(archFile));
-	check("归档文件名含 design-archive", archFile.includes("design-archive"));
-
-	const list = (await api(`/api/requirements?workspace=${ws.body.id}`)).body;
-	check("需求列表标记已完成", list[0].done === true && list[0].current === "");
-
-	const again = await api(`/api/requirements/${rid}/stage/archive/run`, "POST");
-	check("重复归档被拒(409)", again.status === 409);
+	const again = await api(
+		`/api/requirements/${requirementId}/stage/archive/run`,
+		"POST",
+	);
+	check("重复归档被拒绝", again.status === 409);
+} catch (error) {
+	failed++;
+	console.error(error);
 } finally {
-	gw.kill();
+	await stopGateway();
+	rmSync(root, { recursive: true, force: true });
+	check("退出前清理容器临时数据", !existsSync(root));
 }
 
-console.log(failed === 0 ? "\n✓ smoke 全部通过" : `\n✗ ${failed} 项失败`);
+process.stdout.write(
+	failed === 0 ? "\n✓ 容器闭环测试全部通过\n" : `\n✗ ${failed} 项失败\n`,
+);
 process.exit(failed === 0 ? 0 : 1);

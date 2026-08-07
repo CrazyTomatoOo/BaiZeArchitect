@@ -20,7 +20,13 @@ import { generateEvidence } from "./evidence.js";
 
 // 必须在 import cli.ts 前设,否则 cli.ts 的 main 会跑(import 即执行)。
 process.env.BAIZE_GATEWAY = "1";
-const { runStage, chatIntake, readModelConfig, writeModelConfig, currentModelConfig, applyModelConfig } = await import("./cli.js");
+const {
+	runStage,
+	chatIntake,
+	writeModelConfig,
+	currentModelConfig,
+	applyModelConfig,
+} = await import("./cli.js");
 
 const ROOT =
 	process.env.BAIZE_PROJECT_ROOT ??
@@ -91,7 +97,7 @@ async function readJson(
 
 async function listRepos(): Promise<string[]> {
 	// 列出已有证据的仓库(evidence/<repoId>.json)—— 这是真实"可见"的仓库,
-	// 而非扫描文件系统找 .git(容器挂载路径与宿主不同,扫描不可靠)。
+	// 不扫描仓库目录；只暴露本次容器会话已经生成的证据快照。
 	try {
 		const files = await readdir(EVIDENCE_DIR);
 		return files

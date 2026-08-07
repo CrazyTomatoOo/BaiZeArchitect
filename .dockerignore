@@ -11,8 +11,7 @@
 _archived
 backups
 
-# 运行时数据/挂载目录(不进镜像,避免 ._ 炸 context + 加速 build)
-# lws/test-repo-2 由 run.sh -v 挂载;evidence/evolver-home/out 是运行时数据
+# 宿主历史运行数据不进入镜像；容器测试使用 fixtures/test-repo。
 test-repo-2
 lws
 evolver-home
@@ -27,6 +26,7 @@ docs
 .codegraph
 .playwright-mcp
 examples
-scripts
+scripts/*
+!scripts/smoke-gateway.mjs
 *.md
 !schemas/**

@@ -1,6 +1,0 @@
-# 开发便利:挂载本地构建的 web/dist,本地 `vite build` 即被服务,免每次重建镜像。
-# (镜像内仍自带 web 构建,自包含;此 override 仅用于本地快速设计迭代。)
-services:
-  gateway:
-    volumes:
-      - ./web/dist:/app/web/dist:ro

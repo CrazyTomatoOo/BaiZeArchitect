@@ -1,58 +1,25 @@
-# BaiZe Architect — 单进程本地 agent。
-# ponytail: out 挂 ./out 可 git commit(手动);evidence 挂 /evidence(rw,容器内 gitnexus 写)。
-# SQLite 状态挂 ./.baize:/app/.baize;gateway 重建后保留工作区、需求与审核阶段。
-# evolver-home 挂 /evolver-home,持久化本地 gene store。
-# 目标仓库由 run.sh -v <repo>:/repo(rw,gitnexus 写 .gitnexus) 挂入(lws/test-repo-2);
-# build 前删 ._ 防 AppleDouble。
+---
 services:
-  baize:
+  test:
     build:
       context: .
       dockerfile: agent-runtime/Dockerfile
-    volumes:
-      - ./evidence:/evidence
-      - ./out:/app/out
-      - ./.baize:/app/.baize
-      - ./evolver-home:/evolver-home
+    working_dir: /app
+    entrypoint: ["node", "scripts/smoke-gateway.mjs"]
     environment:
-      - BAIZE_PROJECT_ROOT=/app
-      - BAIZE_OUT_DIR=/app/out
-      - BAIZE_EVIDENCE_DIR=/evidence
-      - BAIZE_DB_PATH=/app/.baize/baize.db
-      - BAIZE_EVOLVER=1
-      - EVOLVER_HOME=/evolver-home
-      - RUNTIME_MODEL_PROVIDER=${BAIZE_MODEL_PROVIDER:-bailian}
-      - RUNTIME_MODEL_ID=${BAIZE_MODEL_ID:-glm-5.2}
-      - DASHSCOPE_API_KEY=${DASHSCOPE_API_KEY:-}
-      - BAIZE_AUTO_APPROVE=${BAIZE_AUTO_APPROVE:-1}
-      - EVOLVER_IPC_TOKEN=${EVOLVER_IPC_TOKEN:-}
-      - EVOLVER_PROXY_URL=${EVOLVER_PROXY_URL:-}
-
-  gateway:
-    build:
-      context: .
-      dockerfile: agent-runtime/Dockerfile
-    entrypoint: ["npx", "tsx", "gateway.ts"]
-    working_dir: /app/agent-runtime
-    ports:
-      - "18789:18789"
-    volumes:
-      - ./evidence:/evidence
-      - ./out:/app/out
-      - ./.baize:/app/.baize
-      - ./evolver-home:/evolver-home
-      # 仓库挂载(自动化证据索引用;宿主项目目录→容器同路径,repoPath 原样可用)
-      - ${BAIZE_REPOS_ROOT:-/Volumes/work/Project}:${BAIZE_REPOS_ROOT:-/Volumes/work/Project}
-    environment:
-      - BAIZE_PROJECT_ROOT=/app
-      - BAIZE_OUT_DIR=/app/out
-      - BAIZE_EVIDENCE_DIR=/evidence
-      - BAIZE_DB_PATH=/app/.baize/baize.db
-      - BAIZE_EVOLVER=1
-      - EVOLVER_HOME=/evolver-home
-      - RUNTIME_MODEL_PROVIDER=${BAIZE_MODEL_PROVIDER:-bailian}
-      - RUNTIME_MODEL_ID=${BAIZE_MODEL_ID:-glm-5.2}
-      - DASHSCOPE_API_KEY=${DASHSCOPE_API_KEY:-}
-      - BAIZE_AUTO_APPROVE=${BAIZE_AUTO_APPROVE:-1}
-      - EVOLVER_IPC_TOKEN=${EVOLVER_IPC_TOKEN:-}
-      - EVOLVER_PROXY_URL=${EVOLVER_PROXY_URL:-}
+      BAIZE_CONTAINER_TEST: "1"
+      BAIZE_PROJECT_ROOT: /app
+      BAIZE_REPOS_ROOT: /tmp/baize/repos
+      BAIZE_OUT_DIR: /tmp/baize/out
+      BAIZE_EVIDENCE_DIR: /tmp/baize/evidence
+      BAIZE_DB_PATH: /tmp/baize/baize.db
+      BAIZE_EVOLVER: "0"
+      EVOLVER_HOME: /tmp/baize/evolver-home
+      HOME: /tmp/home
+      NPM_CONFIG_CACHE: /tmp/npm-cache
+    init: true
+    user: node
+    read_only: true
+    network_mode: none
+    tmpfs:
+      - /tmp:rw,nosuid,nodev,size=1g

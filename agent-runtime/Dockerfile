@@ -1,7 +1,5 @@
-# BaiZe Architect — 单进程本地 agent 容器。
-# ponytail: 不挂载宿主 ~/.pi,容器自带 pi SDK(npm install)。bailian provider
-# 已内联进 cli.ts(createProvider + registerNativeProvider),不再需 extension。
-# 目标仓库与产出目录通过 compose volume 挂载,模型鉴权通过 env 透传。
+# BaiZe Architect — 一次性、自闭环的容器测试镜像。
+# 应用、Web、技能、工具和固定仓库全部打入镜像；运行数据只写容器 tmpfs。
 FROM node:22-slim
 
 # better-sqlite3 原生编译(prebuild 未命中 arm64 时回退 node-gyp,slim 无 build tools)。
@@ -24,16 +22,18 @@ RUN cd agent-runtime && npm install && \
 # 容器内仓库索引(自动化证据生成):GitNexus(node,tree-sitter native,预计算聚类/impact)
 RUN npm install -g gitnexus@1.6.6 --registry=https://registry.npmmirror.com
 
-# 源码 + .pi(skills) + schemas
-COPY agent-runtime ./agent-runtime
-COPY .pi ./.pi
-COPY schemas ./schemas
+# 应用源码、技能、Schema、固定测试仓库与测试入口。
+COPY --chown=node:node agent-runtime ./agent-runtime
+COPY --chown=node:node .pi ./.pi
+COPY --chown=node:node schemas ./schemas
+COPY --chown=node:node fixtures ./fixtures
+COPY --chown=node:node --chmod=755 scripts/smoke-gateway.mjs ./scripts/smoke-gateway.mjs
 
 # web SPA 构建 → /app/web/dist(gateway WEB_DIST 服务;镜像自带 dist,自包含)
 COPY web/package.json web/package-lock.json* ./web/
 RUN cd web && npm install
 COPY web ./web
-RUN cd web && npm run build
+RUN cd web && npm run build && chown -R node:node /app/web
 WORKDIR /app/agent-runtime
 
 # 开发镜像直接 tsx 跑;生产再 build → node dist/cli.js
