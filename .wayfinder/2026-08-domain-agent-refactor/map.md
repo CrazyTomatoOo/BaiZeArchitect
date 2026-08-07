@@ -16,6 +16,7 @@
 
 <!-- closed ticket title + one-line gist live here -->
 - [Pi SDK 会话持久化与流式执行可行性](tickets/R02-pi-session-capability.md) — Pi JSONL 提供 transcript 恢复、订阅、取消与 steering；BaiZe SQLite 必须拥有 Run、事件、锁和治理状态。
+- [首版运行边界与设计会话契约](tickets/R01-runtime-session-contract.md) — Gateway 唯一入口；一个需求=持久主会话顺序多 Run、归档只读；异步可恢复可重放；证据驱动门禁；Critic 主会话内隔离子 Run。
 
 ## Not yet specified
 
