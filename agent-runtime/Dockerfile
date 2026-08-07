@@ -4,8 +4,14 @@
 # 目标仓库与产出目录通过 compose volume 挂载,模型鉴权通过 env 透传。
 FROM node:22-slim
 
-# better-sqlite3 原生编译(prebuild 未命中 arm64 时回退 node-gyp,slim 无 build tools)
-RUN apt-get update && apt-get install -y --no-install-recommends python3 make g++ && rm -rf /var/lib/apt/lists/*
+# better-sqlite3 原生编译(prebuild 未命中 arm64 时回退 node-gyp,slim 无 build tools)。
+# git 用于证据快照 head_sha 捕获(node:22-slim 不含 git)。
+# 用清华镜像加速 apt(build 容器无法走宿主 127.0.0.1 proxy);unset proxy 避免 127.0.0.1 不可达。
+RUN sed -i 's|http://deb.debian.org/debian|http://mirrors.tuna.tsinghua.edu.cn/debian|g' /etc/apt/sources.list.d/debian.sources && \
+    sed -i 's|http://deb.debian.org/debian-security|http://mirrors.tuna.tsinghua.edu.cn/debian-security|g' /etc/apt/sources.list.d/debian.sources && \
+    env -u http_proxy -u https_proxy -u HTTP_PROXY -u HTTPS_PROXY apt-get update && \
+    env -u http_proxy -u https_proxy -u HTTP_PROXY -u HTTPS_PROXY apt-get install -y --no-install-recommends python3 make g++ git && \
+    rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 
