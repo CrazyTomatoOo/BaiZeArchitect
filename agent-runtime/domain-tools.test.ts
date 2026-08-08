@@ -24,7 +24,9 @@ async function invoke(
 	name: string,
 	params: Record<string, unknown>,
 ): Promise<ToolResult> {
-	const tool = tools.find((candidate) => candidate.name === name) as unknown as InvokableTool | undefined;
+	const tool = tools.find((candidate) => candidate.name === name) as unknown as
+		| InvokableTool
+		| undefined;
 	assert.ok(tool, `missing domain tool: ${name}`);
 	return tool.execute("test-tool-call", params);
 }
@@ -37,11 +39,18 @@ async function setup(): Promise<{
 	const repoPath = await mkdtemp(join(tmpdir(), "baize-domain-tools-"));
 	await mkdir(join(repoPath, "src"));
 	await writeFile(join(repoPath, "README.md"), "repository overview\n");
-	await writeFile(join(repoPath, "src", "checkout.ts"), "export function submitOrder() { return true; }\n");
+	await writeFile(
+		join(repoPath, "src", "checkout.ts"),
+		"export function submitOrder() { return true; }\n",
+	);
 	const store = openStore(":memory:");
 	const workspaceId = store.addWorkspace(repoPath, "Tools workspace");
 	const requirementId = store.addRequirement(workspaceId, "Design checkout");
-	const session = store.createDesignSession(requirementId, join(repoPath, "session.jsonl"), "tool-session");
+	const session = store.createDesignSession(
+		requirementId,
+		join(repoPath, "session.jsonl"),
+		"tool-session",
+	);
 	const run = store.createRun(requirementId, session.id, "stage", "分析");
 	store.setRunStatus(run.id, "running");
 	return {
@@ -55,26 +64,51 @@ test("audits successful and failed restricted repository tools", async () => {
 	const { store, context, repoPath } = await setup();
 	try {
 		const tools = createDomainTools(context);
-		assert.deepEqual(tools.map((tool) => tool.name), [
-			"inspect_repository", "search_code", "get_architecture", "search_prior_designs", "get_artifact",
-			"patch_artifact", "raise_decision", "record_finding", "run_consistency_check", "request_human_input",
-		]);
+		assert.deepEqual(
+			tools.map((tool) => tool.name),
+			[
+				"inspect_repository",
+				"search_code",
+				"get_architecture",
+				"search_prior_designs",
+				"get_artifact",
+				"patch_artifact",
+				"raise_decision",
+				"record_finding",
+				"run_consistency_check",
+				"request_human_input",
+			],
+		);
 		const inspected = await invoke(tools, "inspect_repository", { path: "." });
 		assert.equal(inspected.isError, undefined);
-		assert.ok((inspected.details as { files: string[] }).files.includes("src/checkout.ts"));
-		const searched = await invoke(tools, "search_code", { query: "submitOrder" });
+		assert.ok(
+			(inspected.details as { files: string[] }).files.includes(
+				"src/checkout.ts",
+			),
+		);
+		const searched = await invoke(tools, "search_code", {
+			query: "submitOrder",
+		});
 		assert.equal(searched.isError, undefined);
-		const failed = await invoke(tools, "search_code", { query: "x", path: "../outside" });
+		const failed = await invoke(tools, "search_code", {
+			query: "x",
+			path: "../outside",
+		});
 		assert.equal(failed.isError, true);
 		assert.deepEqual(
-			store.listToolCalls(context.runId).map((call) => [call.name, call.status]),
+			store
+				.listToolCalls(context.runId)
+				.map((call) => [call.name, call.status]),
 			[
 				["inspect_repository", "completed"],
 				["search_code", "completed"],
 				["search_code", "failed"],
 			],
 		);
-		assert.equal(store.listToolCalls(context.runId)[2]?.error, "path must stay inside the repository");
+		assert.equal(
+			store.listToolCalls(context.runId)[2]?.error,
+			"path must stay inside the repository",
+		);
 	} finally {
 		store.close();
 		await rm(repoPath, { recursive: true, force: true });
@@ -84,8 +118,14 @@ test("audits successful and failed restricted repository tools", async () => {
 test("patches artifact revisions and records decisions, findings, and consistency", async () => {
 	const { store, context, repoPath } = await setup();
 	try {
-		const artifact = store.createArtifact(context.requirementId, "design", "Checkout");
-		const first = store.createArtifactRevision(artifact.id, context.runId, { version: 1 });
+		const artifact = store.createArtifact(
+			context.requirementId,
+			"design",
+			"Checkout",
+		);
+		const first = store.createArtifactRevision(artifact.id, context.runId, {
+			version: 1,
+		});
 		const tools = createDomainTools(context);
 		const patched = await invoke(tools, "patch_artifact", {
 			artifactId: artifact.id,
@@ -108,15 +148,26 @@ test("patches artifact revisions and records decisions, findings, and consistenc
 			content: { file: "src/checkout.ts", line: 1 },
 		});
 		assert.equal(finding.isError, undefined);
-		const human = await invoke(tools, "request_human_input", { question: "Need product owner input" });
+		const human = await invoke(tools, "request_human_input", {
+			question: "Need product owner input",
+		});
 		assert.equal(human.isError, undefined);
-		assert.equal((human.details as { status: string }).status, "waiting_for_human");
+		assert.equal(
+			(human.details as { status: string }).status,
+			"waiting_for_human",
+		);
 		const consistency = await invoke(tools, "run_consistency_check", {});
 		assert.equal(consistency.isError, undefined);
 		assert.deepEqual((consistency.details as { ok: boolean }).ok, true);
 		assert.deepEqual(
 			store.listToolCalls(context.runId).map((call) => call.name),
-			["patch_artifact", "raise_decision", "record_finding", "request_human_input", "run_consistency_check"],
+			[
+				"patch_artifact",
+				"raise_decision",
+				"record_finding",
+				"request_human_input",
+				"run_consistency_check",
+			],
 		);
 	} finally {
 		store.close();
