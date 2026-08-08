@@ -14,7 +14,7 @@ import { fileURLToPath } from "node:url";
 import { dirname, join, resolve } from "node:path";
 import { mkdir, readdir, readFile, writeFile } from "node:fs/promises";
 import { execFile } from "node:child_process";
-import { openStore, RunInProgressError, type Stage } from "./store.js";
+import { openStore, RunInProgressError, type ArtifactKind, type Stage } from "./store.js";
 import type { StageName } from "./cli.js";
 import { generateEvidence } from "./evidence.js";
 
@@ -410,14 +410,36 @@ function clearRefs(oldRefs: unknown[]): void {
 	}
 }
 
+function writeDomainArtifactRevision(
+	requirementId: number,
+	runId: number,
+	kind: ArtifactKind,
+	title: string,
+	content: unknown,
+ ): void {
+	const artifact =
+		store.listArtifacts(requirementId).find((item) => item.kind === kind && item.title === title) ??
+		store.createArtifact(requirementId, kind, title);
+	const previous = store.listArtifactRevisions(artifact.id).at(-1);
+	store.createArtifactRevision(
+		artifact.id,
+		runId,
+		content,
+		"pending",
+		previous?.id ?? null,
+	);
+}
+
 function writeStageAssets(
 	wsId: number,
 	reqId: number,
 	stage: StageName,
 	assets: unknown,
 	oldRefs: unknown[],
-): unknown[] {
-	clearRefs(oldRefs);
+	runId: number,
+ ): unknown[] {
+	return store.transaction(() => {
+		clearRefs(oldRefs);
 	const a = (assets ?? {}) as Record<string, unknown[]>;
 	const refs: unknown[] = [];
 	if (stage === "scenario") {
@@ -433,6 +455,7 @@ function writeStageAssets(
 				title: s.title,
 				description: s.description,
 			});
+			writeDomainArtifactRevision(reqId, runId, "scenario", s.title ?? "", s);
 		}
 	} else if (stage === "usecase") {
 		const scens = store.listScenarios(wsId) as Array<{
@@ -462,6 +485,7 @@ function writeStageAssets(
 				exceptions: u.exceptions,
 				postcondition: u.postcondition,
 			});
+			writeDomainArtifactRevision(reqId, runId, "usecase", (u.title as string) ?? "", u);
 		}
 	} else if (stage === "function") {
 		for (const d of (a.domains ?? []) as Array<Record<string, unknown>>) {
@@ -490,12 +514,15 @@ function writeStageAssets(
 				description: d.description,
 				items,
 			});
+			writeDomainArtifactRevision(reqId, runId, "function", (d.name as string) ?? "", d);
 		}
 	} else {
 		// analysis / design:内联产物
 		refs.push({ type: stage, content: assets });
+		writeDomainArtifactRevision(reqId, runId, stage, stage, assets);
 	}
 	return refs;
+});
 }
 
 // 归档:确定性汇总所有阶段产物 → out/ 下 markdown 包,不走 LLM。
@@ -675,6 +702,8 @@ type StageRunTask = {
     geneContext?: string;
     previousStatus: string;
     previousRefs: unknown[];
+    evidenceArchitecture?: unknown;
+    evidenceHeadSha?: string;
     sessionManager: ReturnType<typeof openPersistentSession>["manager"];
 };
 
@@ -683,6 +712,14 @@ async function executeStageRun(task: StageRunTask): Promise<void> {
         store.setRunStatus(task.runId, "running");
         emitLatestRunEvent(task.runId);
         if (store.getRun(task.runId)?.status === "cancelled") return;
+        if (task.evidenceArchitecture !== undefined && task.evidenceHeadSha !== undefined) {
+            store.captureEvidenceSnapshot(
+                task.requirementId,
+                task.evidenceArchitecture,
+                task.evidenceHeadSha,
+                task.runId,
+            );
+        }
         const assets = await runStage(
             {
                 repoPath: task.repoPath,
@@ -716,6 +753,7 @@ async function executeStageRun(task: StageRunTask): Promise<void> {
             task.stage,
             assets,
             task.previousRefs,
+            task.runId,
         );
         store.setStage(task.requirementId, STAGE_CN[task.stage], "待审", refs);
         store.setRunStatus(task.runId, "completed");
@@ -1038,12 +1076,14 @@ const server = http.createServer(
 				| { repo_path: string }
 				| undefined;
 			// 证据快照(spec §2.1):analysis 首阶段固化设计时架构事实,审核看 AI 当时看到的
+			let evidenceArchitecture: unknown;
+			let evidenceHeadSha: string | undefined;
 			if (stage === "analysis") {
 				const repoId = ws?.repo_path.split("/").pop() ?? "";
 				const arch = await readEvidenceArchitecture(repoId);
 				if (arch) {
-					const sha = await gitHeadSha(ws?.repo_path ?? ROOT);
-					store.captureEvidenceSnapshot(reqId, arch, sha);
+					evidenceArchitecture = arch;
+					evidenceHeadSha = await gitHeadSha(ws?.repo_path ?? ROOT);
 				}
 			}
 			const archivedPrior = stage === "analysis"
@@ -1110,6 +1150,8 @@ const server = http.createServer(
                 geneContext,
                 previousStatus: curStatus,
                 previousRefs: parseRefs(cur),
+                evidenceArchitecture,
+                evidenceHeadSha,
                 sessionManager: persistentSession.manager,
             });
             json(202, {

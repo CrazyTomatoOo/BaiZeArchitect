@@ -58,6 +58,120 @@ export interface RunEventRow {
 	created_at: string;
 }
 
+export type ArtifactKind =
+    | "requirement"
+    | "analysis"
+    | "scenario"
+    | "usecase"
+    | "function"
+    | "design"
+    | "architecture"
+    | "data"
+    | "api";
+export type ArtifactRevisionStatus = "draft" | "pending" | "approved" | "rejected";
+export type DecisionStatus = "open" | "accepted" | "rejected" | "deferred";
+export type ApprovalDecision = "approved" | "rejected";
+
+export interface ArtifactRow {
+    id: number;
+    requirement_id: number;
+    kind: ArtifactKind;
+    title: string;
+    created_at: string;
+}
+
+export interface ArtifactRevisionRow {
+    id: number;
+    artifact_id: number;
+    run_id: number;
+    revision_no: number;
+    fork_from_revision_id: number | null;
+    content: unknown;
+    status: ArtifactRevisionStatus;
+    created_at: string;
+}
+
+export interface DecisionRow {
+    id: number;
+    requirement_id: number;
+    run_id: number;
+    title: string;
+    question: string;
+    severity: string;
+    status: DecisionStatus;
+    selected_option_id: number | null;
+    created_at: string;
+    updated_at: string;
+}
+
+export interface DecisionOptionRow {
+    id: number;
+    decision_id: number;
+    title: string;
+    description: string;
+    created_at: string;
+}
+
+export interface FindingRow {
+    id: number;
+    requirement_id: number;
+    run_id: number;
+    severity: string;
+    title: string;
+    content: unknown;
+    status: string;
+    created_at: string;
+}
+
+export interface ApprovalRow {
+    id: number;
+    requirement_id: number;
+    run_id: number;
+    subject_type: string;
+    subject_id: number;
+    decision: ApprovalDecision;
+    actor: string;
+    reason: string;
+    diff: unknown;
+    created_at: string;
+}
+
+export interface TraceLinkRow {
+    id: number;
+    requirement_id: number;
+    run_id: number;
+    source_type: string;
+    source_id: number;
+    evidence_snapshot_id: number;
+    file_path: string;
+    symbol: string;
+    line_start: number | null;
+    line_end: number | null;
+    node: unknown;
+    created_at: string;
+}
+
+export interface EvidenceSnapshotRow {
+    requirement_id: number;
+    run_id: number | null;
+    architecture: unknown;
+    head_sha: string;
+    captured_at: string;
+}
+
+export interface DesignPackageRow {
+    id: number;
+    requirement_id: number;
+    workspace_id: number;
+    run_id: number | null;
+    title: string;
+    content: string;
+    adr: string;
+    snapshot: unknown;
+    status: "draft" | "approved";
+    archived_at: string;
+}
+
 export class RunInProgressError extends Error {
 	readonly code = "RUN_IN_PROGRESS";
 
@@ -189,6 +303,83 @@ create table if not exists run_events(
   unique(run_id, seq)
 );
 create index if not exists run_events_lookup_idx on run_events(run_id, seq);
+create table if not exists artifacts(
+  id integer primary key autoincrement,
+  requirement_id integer not null references requirements(id) on delete cascade,
+  kind text not null,
+  title text not null default '',
+  created_at text not null default (datetime('now'))
+);
+create index if not exists artifacts_requirement_idx on artifacts(requirement_id, id desc);
+create table if not exists artifact_revisions(
+  id integer primary key autoincrement,
+  artifact_id integer not null references artifacts(id) on delete cascade,
+  run_id integer not null references runs(id) on delete cascade,
+  revision_no integer not null,
+  fork_from_revision_id integer references artifact_revisions(id),
+  content text not null default '{}',
+  status text not null default 'draft',
+  created_at text not null default (datetime('now')),
+  unique(artifact_id, revision_no)
+);
+create index if not exists artifact_revisions_lookup_idx on artifact_revisions(artifact_id, revision_no desc);
+create table if not exists decisions(
+  id integer primary key autoincrement,
+  requirement_id integer not null references requirements(id) on delete cascade,
+  run_id integer not null references runs(id) on delete cascade,
+  title text not null,
+  question text not null default '',
+  severity text not null default 'major',
+  status text not null default 'open',
+  selected_option_id integer,
+  created_at text not null default (datetime('now')),
+  updated_at text not null default (datetime('now'))
+);
+create table if not exists decision_options(
+  id integer primary key autoincrement,
+  decision_id integer not null references decisions(id) on delete cascade,
+  title text not null,
+  description text not null default '',
+  created_at text not null default (datetime('now'))
+);
+create index if not exists decisions_requirement_idx on decisions(requirement_id, id desc);
+create table if not exists findings(
+  id integer primary key autoincrement,
+  requirement_id integer not null references requirements(id) on delete cascade,
+  run_id integer not null references runs(id) on delete cascade,
+  severity text not null default 'medium',
+  title text not null,
+  content text not null default '{}',
+  status text not null default 'open',
+  created_at text not null default (datetime('now'))
+);
+create table if not exists approvals(
+  id integer primary key autoincrement,
+  requirement_id integer not null references requirements(id) on delete cascade,
+  run_id integer not null references runs(id) on delete cascade,
+  subject_type text not null,
+  subject_id integer not null,
+  decision text not null,
+  actor text not null,
+  reason text not null default '',
+  diff text not null default '{}',
+  created_at text not null default (datetime('now'))
+);
+create table if not exists trace_links(
+  id integer primary key autoincrement,
+  requirement_id integer not null references requirements(id) on delete cascade,
+  run_id integer not null references runs(id) on delete cascade,
+  source_type text not null,
+  source_id integer not null,
+  evidence_snapshot_id integer not null references evidence_snapshots(requirement_id) on delete cascade,
+  file_path text not null,
+  symbol text not null default '',
+  line_start integer,
+  line_end integer,
+  node text not null default '{}',
+  created_at text not null default (datetime('now'))
+);
+create index if not exists trace_links_source_idx on trace_links(source_type, source_id);
 `;
 
 const TERMINAL_RUN_STATUSES = new Set<RunStatus>([
@@ -213,6 +404,18 @@ export class Store {
 		} catch {
 			/* already exists */
 		}
+		this.addColumnIfMissing("evidence_snapshots", "run_id", "integer references runs(id)");
+		this.addColumnIfMissing("design_packages", "run_id", "integer references runs(id)");
+		this.addColumnIfMissing("design_packages", "snapshot", "text not null default '{}'");
+		this.addColumnIfMissing("design_packages", "status", "text not null default 'draft'");
+	}
+
+	private addColumnIfMissing(table: string, column: string, definition: string): void {
+		try {
+			this.db.exec(`alter table ${table} add column ${column} ${definition}`);
+		} catch {
+			/* column already exists */
+		}
 	}
 
 	// workspaces
@@ -228,10 +431,13 @@ export class Store {
 	}
 
 	renameWorkspace(id: number, name: string): void {
-		this.db.prepare("update workspaces set name = ? where id = ?").run(name, id);
+		this.db
+			.prepare("update workspaces set name = ? where id = ?")
+			.run(name, id);
 	}
 
 	deleteWorkspace(id: number): void {
+		this.transaction(() => {
 		const reqIds = (
 			this.db
 				.prepare("select id from requirements where workspace_id = ?")
@@ -239,16 +445,28 @@ export class Store {
 		).map((r) => r.id);
 		for (const rid of reqIds) {
 			this.db
-				.prepare("delete from run_events where run_id in (select id from runs where requirement_id = ?)")
+				.prepare(
+					"delete from run_events where run_id in (select id from runs where requirement_id = ?)",
+				)
 				.run(rid);
-			this.db.prepare("delete from run_locks where requirement_id = ?").run(rid);
-			this.db.prepare("delete from runs where requirement_id = ?").run(rid);
-			this.db.prepare("delete from design_sessions where requirement_id = ?").run(rid);
-			this.db.prepare("delete from stage_progress where requirement_id = ?").run(rid);
+			this.db
+				.prepare("delete from run_locks where requirement_id = ?")
+				.run(rid);
 			this.db.prepare("delete from evidence_snapshots where requirement_id = ?").run(rid);
 			this.db.prepare("delete from design_packages where requirement_id = ?").run(rid);
-			this.db.prepare("delete from requirement_genes where requirement_id = ?").run(rid);
-			this.db.prepare("delete from requirement_scenarios where requirement_id = ?").run(rid);
+			this.db.prepare("delete from runs where requirement_id = ?").run(rid);
+			this.db
+				.prepare("delete from design_sessions where requirement_id = ?")
+				.run(rid);
+			this.db
+				.prepare("delete from stage_progress where requirement_id = ?")
+				.run(rid);
+			this.db
+				.prepare("delete from requirement_genes where requirement_id = ?")
+				.run(rid);
+			this.db
+				.prepare("delete from requirement_scenarios where requirement_id = ?")
+				.run(rid);
 		}
 		this.db.prepare("delete from requirements where workspace_id = ?").run(id);
 		const ucIds = (
@@ -256,18 +474,29 @@ export class Store {
 				.prepare("select id from use_cases where workspace_id = ?")
 				.all(id) as Array<{ id: number }>
 		).map((r) => r.id);
-		for (const u of ucIds) this.db.prepare("delete from usecase_functions where usecase_id = ?").run(u);
+		for (const u of ucIds)
+			this.db
+				.prepare("delete from usecase_functions where usecase_id = ?")
+				.run(u);
 		const fnIds = (
 			this.db
 				.prepare("select id from function_items where workspace_id = ?")
 				.all(id) as Array<{ id: number }>
 		).map((r) => r.id);
-		for (const f of fnIds) this.db.prepare("delete from usecase_functions where function_item_id = ?").run(f);
+		for (const f of fnIds)
+			this.db
+				.prepare("delete from usecase_functions where function_item_id = ?")
+				.run(f);
 		this.db.prepare("delete from use_cases where workspace_id = ?").run(id);
-		this.db.prepare("delete from function_items where workspace_id = ?").run(id);
-		this.db.prepare("delete from function_domains where workspace_id = ?").run(id);
+		this.db
+			.prepare("delete from function_items where workspace_id = ?")
+			.run(id);
+		this.db
+			.prepare("delete from function_domains where workspace_id = ?")
+			.run(id);
 		this.db.prepare("delete from scenarios where workspace_id = ?").run(id);
 		this.db.prepare("delete from workspaces where id = ?").run(id);
+		});
 	}
 
 	// requirements
@@ -298,7 +527,8 @@ export class Store {
 	}
 	counts(): Record<string, number> {
 		const t = (name: string): number =>
-			(this.db.prepare(`select count(*) c from ${name}`).get() as { c: number }).c;
+			(this.db.prepare(`select count(*) c from ${name}`).get() as { c: number })
+				.c;
 		return {
 			workspaces: t("workspaces"),
 			requirements: t("requirements"),
@@ -309,9 +539,306 @@ export class Store {
 			design_sessions: t("design_sessions"),
 			runs: t("runs"),
 			run_events: t("run_events"),
+			artifacts: t("artifacts"),
+			artifact_revisions: t("artifact_revisions"),
+			decisions: t("decisions"),
+			decision_options: t("decision_options"),
+			findings: t("findings"),
+			approvals: t("approvals"),
+			trace_links: t("trace_links"),
 		};
 	}
 
+	transaction<T>(fn: () => T): T {
+		return this.db.transaction(fn)();
+	}
+
+	private encodeJson(value: unknown): string {
+		return JSON.stringify(value ?? {});
+	}
+
+	private decodeJson(value: string): unknown {
+		try {
+			return JSON.parse(value);
+		} catch {
+			return { raw: value };
+		}
+	}
+
+	// ---- artifact / revision domain kernel ----
+	createArtifact(requirementId: number, kind: ArtifactKind, title = ""): ArtifactRow {
+		const id = Number(
+			this.db
+				.prepare("insert into artifacts(requirement_id, kind, title) values (?, ?, ?)")
+				.run(requirementId, kind, title).lastInsertRowid,
+		);
+		return this.getArtifact(id) as ArtifactRow;
+	}
+
+	getArtifact(id: number): ArtifactRow | undefined {
+		return this.db.prepare("select * from artifacts where id = ?").get(id) as
+			| ArtifactRow
+			| undefined;
+	}
+
+	listArtifacts(requirementId: number): ArtifactRow[] {
+		return this.db
+			.prepare("select * from artifacts where requirement_id = ? order by id")
+			.all(requirementId) as ArtifactRow[];
+	}
+
+	createArtifactRevision(
+		artifactId: number,
+		runId: number,
+		content: unknown,
+		status: ArtifactRevisionStatus = "draft",
+		forkFromRevisionId: number | null = null,
+	): ArtifactRevisionRow {
+		const create = this.db.transaction(() => {
+			const artifact = this.getArtifact(artifactId);
+			if (!artifact) throw new Error(`artifact not found: ${artifactId}`);
+			if (!this.getRun(runId)) throw new Error(`run not found: ${runId}`);
+			if (forkFromRevisionId !== null) {
+				const fork = this.getArtifactRevision(forkFromRevisionId);
+				if (!fork || fork.artifact_id !== artifactId) {
+					throw new Error("fork revision must belong to the same artifact");
+				}
+			}
+			const revisionNo = (
+				this.db
+					.prepare(
+						"select coalesce(max(revision_no), 0) + 1 as revision_no from artifact_revisions where artifact_id = ?",
+					)
+					.get(artifactId) as { revision_no: number }
+			).revision_no;
+			return Number(
+				this.db
+					.prepare(
+						"insert into artifact_revisions(artifact_id, run_id, revision_no, fork_from_revision_id, content, status) values (?, ?, ?, ?, ?, ?)",
+					)
+					.run(
+						artifactId,
+						runId,
+						revisionNo,
+						forkFromRevisionId,
+						this.encodeJson(content),
+						status,
+					).lastInsertRowid,
+			);
+		});
+		return this.getArtifactRevision(create()) as ArtifactRevisionRow;
+	}
+
+	getArtifactRevision(id: number): ArtifactRevisionRow | undefined {
+		const row = this.db.prepare("select * from artifact_revisions where id = ?").get(id) as
+			| (Omit<ArtifactRevisionRow, "content"> & { content: string })
+			| undefined;
+		return row ? { ...row, content: this.decodeJson(row.content) } : undefined;
+	}
+
+	listArtifactRevisions(artifactId: number): ArtifactRevisionRow[] {
+		const rows = this.db
+			.prepare("select * from artifact_revisions where artifact_id = ? order by revision_no")
+			.all(artifactId) as Array<Omit<ArtifactRevisionRow, "content"> & { content: string }>;
+		return rows.map((row) => ({ ...row, content: this.decodeJson(row.content) }));
+	}
+
+	createDecision(
+		requirementId: number,
+		runId: number,
+		title: string,
+		question = "",
+		severity = "major",
+	): DecisionRow {
+		const id = Number(
+			this.db
+				.prepare(
+					"insert into decisions(requirement_id, run_id, title, question, severity) values (?, ?, ?, ?, ?)",
+				)
+				.run(requirementId, runId, title, question, severity).lastInsertRowid,
+		);
+		return this.getDecision(id) as DecisionRow;
+	}
+
+	getDecision(id: number): DecisionRow | undefined {
+		return this.db.prepare("select * from decisions where id = ?").get(id) as
+			| DecisionRow
+			| undefined;
+	}
+
+	listDecisions(requirementId: number): DecisionRow[] {
+		return this.db
+			.prepare("select * from decisions where requirement_id = ? order by id")
+			.all(requirementId) as DecisionRow[];
+	}
+
+	addDecisionOption(decisionId: number, title: string, description = ""): DecisionOptionRow {
+		const id = Number(
+			this.db
+				.prepare(
+					"insert into decision_options(decision_id, title, description) values (?, ?, ?)",
+				)
+				.run(decisionId, title, description).lastInsertRowid,
+		);
+		return this.getDecisionOption(id) as DecisionOptionRow;
+	}
+
+	getDecisionOption(id: number): DecisionOptionRow | undefined {
+		return this.db.prepare("select * from decision_options where id = ?").get(id) as
+			| DecisionOptionRow
+			| undefined;
+	}
+
+	listDecisionOptions(decisionId: number): DecisionOptionRow[] {
+		return this.db
+			.prepare("select * from decision_options where decision_id = ? order by id")
+			.all(decisionId) as DecisionOptionRow[];
+	}
+
+	selectDecisionOption(decisionId: number, optionId: number): DecisionRow {
+		const option = this.getDecisionOption(optionId);
+		if (!option || option.decision_id !== decisionId) {
+			throw new Error("decision option must belong to the decision");
+		}
+		this.db
+			.prepare(
+				"update decisions set selected_option_id = ?, status = 'accepted', updated_at = datetime('now') where id = ?",
+			)
+			.run(optionId, decisionId);
+		return this.getDecision(decisionId) as DecisionRow;
+	}
+
+	setDecisionStatus(decisionId: number, status: DecisionStatus): DecisionRow {
+		this.db
+			.prepare("update decisions set status = ?, updated_at = datetime('now') where id = ?")
+			.run(status, decisionId);
+		return this.getDecision(decisionId) as DecisionRow;
+	}
+
+	createFinding(
+		requirementId: number,
+		runId: number,
+		severity: string,
+		title: string,
+		content: unknown = {},
+	): FindingRow {
+		const id = Number(
+			this.db
+				.prepare(
+					"insert into findings(requirement_id, run_id, severity, title, content) values (?, ?, ?, ?, ?)",
+				)
+				.run(requirementId, runId, severity, title, this.encodeJson(content)).lastInsertRowid,
+		);
+		return this.getFinding(id) as FindingRow;
+	}
+
+	getFinding(id: number): FindingRow | undefined {
+		const row = this.db.prepare("select * from findings where id = ?").get(id) as
+			| (Omit<FindingRow, "content"> & { content: string })
+			| undefined;
+		return row ? { ...row, content: this.decodeJson(row.content) } : undefined;
+	}
+
+	listFindings(requirementId: number): FindingRow[] {
+		const rows = this.db
+			.prepare("select * from findings where requirement_id = ? order by id")
+			.all(requirementId) as Array<Omit<FindingRow, "content"> & { content: string }>;
+		return rows.map((row) => ({ ...row, content: this.decodeJson(row.content) }));
+	}
+
+	createApproval(
+		requirementId: number,
+		runId: number,
+		subjectType: string,
+		subjectId: number,
+		decision: ApprovalDecision,
+		actor: string,
+		reason = "",
+		diff: unknown = {},
+	): ApprovalRow {
+		const id = Number(
+			this.db
+				.prepare(
+					"insert into approvals(requirement_id, run_id, subject_type, subject_id, decision, actor, reason, diff) values (?, ?, ?, ?, ?, ?, ?, ?)",
+				)
+				.run(
+					requirementId,
+					runId,
+					subjectType,
+					subjectId,
+					decision,
+					actor,
+					reason,
+					this.encodeJson(diff),
+				).lastInsertRowid,
+		);
+		return this.getApproval(id) as ApprovalRow;
+	}
+
+	getApproval(id: number): ApprovalRow | undefined {
+		const row = this.db.prepare("select * from approvals where id = ?").get(id) as
+			| (Omit<ApprovalRow, "diff"> & { diff: string })
+			| undefined;
+		return row ? { ...row, diff: this.decodeJson(row.diff) } : undefined;
+	}
+
+	listApprovals(requirementId: number): ApprovalRow[] {
+		const rows = this.db
+			.prepare("select * from approvals where requirement_id = ? order by id")
+			.all(requirementId) as Array<Omit<ApprovalRow, "diff"> & { diff: string }>;
+		return rows.map((row) => ({ ...row, diff: this.decodeJson(row.diff) }));
+	}
+
+	createTraceLink(
+		requirementId: number,
+		runId: number,
+		sourceType: string,
+		sourceId: number,
+		evidenceSnapshotId: number,
+		filePath: string,
+		symbol = "",
+		lineStart: number | null = null,
+		lineEnd: number | null = null,
+		node: unknown = {},
+	): TraceLinkRow {
+		const snapshot = this.db
+			.prepare("select requirement_id from evidence_snapshots where requirement_id = ?")
+			.get(evidenceSnapshotId);
+		if (!snapshot) throw new Error(`evidence snapshot not found: ${evidenceSnapshotId}`);
+		const id = Number(
+			this.db
+				.prepare(
+					"insert into trace_links(requirement_id, run_id, source_type, source_id, evidence_snapshot_id, file_path, symbol, line_start, line_end, node) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+				)
+				.run(
+					requirementId,
+					runId,
+					sourceType,
+					sourceId,
+					evidenceSnapshotId,
+					filePath,
+					symbol,
+					lineStart,
+					lineEnd,
+					this.encodeJson(node),
+				).lastInsertRowid,
+		);
+		return this.getTraceLink(id) as TraceLinkRow;
+	}
+
+	getTraceLink(id: number): TraceLinkRow | undefined {
+		const row = this.db.prepare("select * from trace_links where id = ?").get(id) as
+			| (Omit<TraceLinkRow, "node"> & { node: string })
+			| undefined;
+		return row ? { ...row, node: this.decodeJson(row.node) } : undefined;
+	}
+
+	listTraceLinks(requirementId: number): TraceLinkRow[] {
+		const rows = this.db
+			.prepare("select * from trace_links where requirement_id = ? order by id")
+			.all(requirementId) as Array<Omit<TraceLinkRow, "node"> & { node: string }>;
+		return rows.map((row) => ({ ...row, node: this.decodeJson(row.node) }));
+	}
 	// stage progress (upsert)
 	setStage(
 		requirementId: number,
@@ -330,7 +857,13 @@ export class Store {
 				               feedback = excluded.feedback,
 				               updated_at = excluded.updated_at`,
 			)
-			.run(requirementId, stage, status, JSON.stringify(artifactRefs), feedback);
+			.run(
+				requirementId,
+				stage,
+				status,
+				JSON.stringify(artifactRefs),
+				feedback,
+			);
 	}
 	getStages(requirementId: number): unknown[] {
 		return this.db
@@ -356,7 +889,7 @@ export class Store {
 		if (existing) {
 			this.db
 				.prepare(
-                    "update design_sessions set session_file = ?, session_id = ?, status = 'active', archived_at = null, updated_at = datetime('now') where id = ?",
+					"update design_sessions set session_file = ?, session_id = ?, status = 'active', archived_at = null, updated_at = datetime('now') where id = ?",
 				)
 				.run(sessionFile, sessionId, existing.id);
 			return this.getDesignSession(requirementId) as DesignSessionRow;
@@ -388,7 +921,9 @@ export class Store {
 	): RunEventRow {
 		const next = (
 			this.db
-				.prepare("select coalesce(max(seq), 0) + 1 as seq from run_events where run_id = ?")
+				.prepare(
+					"select coalesce(max(seq), 0) + 1 as seq from run_events where run_id = ?",
+				)
 				.get(runId) as { seq: number }
 		).seq;
 		const result = this.db
@@ -406,7 +941,11 @@ export class Store {
 		};
 	}
 
-	appendRunEvent(runId: number, type: string, payload: unknown = {}): RunEventRow {
+	appendRunEvent(
+		runId: number,
+		type: string,
+		payload: unknown = {},
+	): RunEventRow {
 		const append = this.db.transaction(() =>
 			this.appendRunEventUnsafe(runId, type, payload),
 		);
@@ -418,7 +957,9 @@ export class Store {
 			.prepare(
 				"select * from run_events where run_id = ? and seq > ? order by seq",
 			)
-			.all(runId, afterSeq) as Array<Omit<RunEventRow, "payload"> & { payload: string }>;
+			.all(runId, afterSeq) as Array<
+			Omit<RunEventRow, "payload"> & { payload: string }
+		>;
 		return rows.map((row) => ({
 			...row,
 			payload: this.parsePayload(row.payload),
@@ -468,7 +1009,9 @@ export class Store {
 
 	listRuns(requirementId: number, limit = 50): RunRow[] {
 		return this.db
-			.prepare("select * from runs where requirement_id = ? order by id desc limit ?")
+			.prepare(
+				"select * from runs where requirement_id = ? order by id desc limit ?",
+			)
 			.all(requirementId, limit) as RunRow[];
 	}
 
@@ -480,7 +1023,11 @@ export class Store {
 			.get(requirementId) as RunRow | undefined;
 	}
 
-	setRunStatus(runId: number, status: RunStatus, error: string | null = null): void {
+	setRunStatus(
+		runId: number,
+		status: RunStatus,
+		error: string | null = null,
+	): void {
 		const update = this.db.transaction(() => {
 			this.db
 				.prepare(
@@ -629,15 +1176,21 @@ export class Store {
 
 	// 打回重跑前清理旧资产(避免复用池堆积重复项)
 	deleteScenario(id: number): void {
-		this.db.prepare("delete from requirement_scenarios where scenario_id = ?").run(id);
+		this.db
+			.prepare("delete from requirement_scenarios where scenario_id = ?")
+			.run(id);
 		this.db.prepare("delete from scenarios where id = ?").run(id);
 	}
 	deleteUseCase(id: number): void {
-		this.db.prepare("delete from usecase_functions where usecase_id = ?").run(id);
+		this.db
+			.prepare("delete from usecase_functions where usecase_id = ?")
+			.run(id);
 		this.db.prepare("delete from use_cases where id = ?").run(id);
 	}
 	deleteFunctionItem(id: number): void {
-		this.db.prepare("delete from usecase_functions where function_item_id = ?").run(id);
+		this.db
+			.prepare("delete from usecase_functions where function_item_id = ?")
+			.run(id);
 		this.db.prepare("delete from function_items where id = ?").run(id);
 	}
 	deleteFunctionDomain(id: number): void {
@@ -646,39 +1199,88 @@ export class Store {
 	}
 
 	// ---- evidence snapshot / design package / requirement genes ----
-	captureEvidenceSnapshot(requirementId: number, architecture: unknown, headSha: string): void {
+	captureEvidenceSnapshot(
+		requirementId: number,
+		architecture: unknown,
+		headSha: string,
+		runId: number | null = null,
+	): void {
 		this.db
 			.prepare(
-				"insert into evidence_snapshots(requirement_id, architecture, head_sha) values (?, ?, ?) on conflict(requirement_id) do update set architecture=excluded.architecture, head_sha=excluded.head_sha, captured_at=datetime('now')",
+				"insert into evidence_snapshots(requirement_id, run_id, architecture, head_sha) values (?, ?, ?, ?) on conflict(requirement_id) do update set run_id=excluded.run_id, architecture=excluded.architecture, head_sha=excluded.head_sha, captured_at=datetime('now')",
 			)
-			.run(requirementId, JSON.stringify(architecture ?? {}), headSha);
+			.run(requirementId, runId, JSON.stringify(architecture ?? {}), headSha);
 	}
 	getEvidenceSnapshot(requirementId: number): unknown {
-		return this.db.prepare("select * from evidence_snapshots where requirement_id = ?").get(requirementId);
+		return this.db
+			.prepare("select * from evidence_snapshots where requirement_id = ?")
+			.get(requirementId);
 	}
-	saveDesignPackage(requirementId: number, workspaceId: number, title: string, content: string, adr: string): number {
+	saveDesignPackage(
+		requirementId: number,
+		workspaceId: number,
+		title: string,
+		content: string,
+		adr: string,
+		runId: number | null = null,
+		snapshot: unknown = {},
+		status: "draft" | "approved" = "draft",
+	): number {
 		return Number(
 			this.db
 				.prepare(
-					"insert into design_packages(requirement_id, workspace_id, title, content, adr) values (?, ?, ?, ?, ?)",
+					"insert into design_packages(requirement_id, workspace_id, run_id, title, content, adr, snapshot, status) values (?, ?, ?, ?, ?, ?, ?, ?)",
 				)
-				.run(requirementId, workspaceId, title, content, adr).lastInsertRowid,
+				.run(
+					requirementId,
+					workspaceId,
+					runId,
+					title,
+					content,
+					adr,
+					this.encodeJson(snapshot),
+					status,
+				).lastInsertRowid,
 		);
 	}
 	getDesignPackageByReq(requirementId: number): unknown {
-		return this.db.prepare("select * from design_packages where requirement_id = ? order by id desc limit 1").get(requirementId);
+		return this.db
+			.prepare(
+				"select * from design_packages where requirement_id = ? order by id desc limit 1",
+			)
+			.get(requirementId);
 	}
 	listDesignPackages(workspaceId: number): unknown[] {
-		return this.db.prepare("select * from design_packages where workspace_id = ? order by id desc").all(workspaceId);
+		return this.db
+			.prepare(
+				"select * from design_packages where workspace_id = ? order by id desc",
+			)
+			.all(workspaceId);
 	}
-	addRequirementGene(requirementId: number, geneId: string, source: string): void {
-		this.db.prepare("insert or ignore into requirement_genes(requirement_id, gene_id, source) values (?, ?, ?)").run(requirementId, geneId, source);
+	addRequirementGene(
+		requirementId: number,
+		geneId: string,
+		source: string,
+	): void {
+		this.db
+			.prepare(
+				"insert or ignore into requirement_genes(requirement_id, gene_id, source) values (?, ?, ?)",
+			)
+			.run(requirementId, geneId, source);
 	}
 	removeRequirementGene(requirementId: number, geneId: string): void {
-		this.db.prepare("delete from requirement_genes where requirement_id = ? and gene_id = ?").run(requirementId, geneId);
+		this.db
+			.prepare(
+				"delete from requirement_genes where requirement_id = ? and gene_id = ?",
+			)
+			.run(requirementId, geneId);
 	}
 	listRequirementGenes(requirementId: number): unknown[] {
-		return this.db.prepare("select * from requirement_genes where requirement_id = ? order by rowid").all(requirementId);
+		return this.db
+			.prepare(
+				"select * from requirement_genes where requirement_id = ? order by rowid",
+			)
+			.all(requirementId);
 	}
 
 	close(): void {
