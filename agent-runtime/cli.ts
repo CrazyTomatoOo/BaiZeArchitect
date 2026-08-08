@@ -678,6 +678,38 @@ export interface StageRunInput {
 	feedback?: string;
 	/** 需求上下文中已选/自动推荐的 gene JSON,注入阶段 prompt */
 	geneContext?: string;
+	/** Reuse the Requirement's persisted Pi session when supplied by Gateway. */
+	sessionManager?: SessionManager;
+	/** Expose the active Pi session for Gateway steer/cancel controls. */
+	onSession?: (session: StageSessionControl) => void;
+}
+export interface StageSessionControl {
+	steer(text: string): Promise<void>;
+	abort(): Promise<void>;
+}
+
+export interface PersistentSession {
+	manager: SessionManager;
+	sessionFile: string;
+	sessionId: string;
+}
+
+export function openPersistentSession(
+	repoPath: string,
+	sessionDir: string,
+	sessionFile?: string,
+): PersistentSession {
+	mkdirSync(sessionDir, { recursive: true });
+	const manager = sessionFile
+		? SessionManager.open(sessionFile, sessionDir, repoPath)
+		: SessionManager.create(repoPath, sessionDir);
+	const persistedFile = manager.getSessionFile();
+	if (!persistedFile) throw new Error("persistent session has no session file");
+	return {
+		manager,
+		sessionFile: persistedFile,
+		sessionId: manager.getSessionId(),
+	};
 }
 
 function extractJson(text: string): unknown {
@@ -740,9 +772,10 @@ export async function runStage(
 		modelRuntime,
 		resourceLoader,
 		tools: ["submit_stage_assets"],
-			customTools: [submitTool],
-			sessionManager: SessionManager.inMemory(input.repoPath),
-		});
+		customTools: [submitTool],
+		sessionManager: input.sessionManager ?? SessionManager.inMemory(input.repoPath),
+	});
+	input.onSession?.(session);
 	let prevTextLen = 0;
 	const unsubscribe = (
 		session as unknown as {

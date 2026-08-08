@@ -14,7 +14,7 @@ import { fileURLToPath } from "node:url";
 import { dirname, join, resolve } from "node:path";
 import { mkdir, readdir, readFile, writeFile } from "node:fs/promises";
 import { execFile } from "node:child_process";
-import { openStore, type Stage } from "./store.js";
+import { openStore, RunInProgressError, type Stage } from "./store.js";
 import type { StageName } from "./cli.js";
 import { generateEvidence } from "./evidence.js";
 
@@ -26,6 +26,7 @@ const {
 	writeModelConfig,
 	currentModelConfig,
 	applyModelConfig,
+	openPersistentSession,
 } = await import("./cli.js");
 
 const ROOT =
@@ -36,6 +37,7 @@ const REPOS_ROOT = process.env.BAIZE_REPOS_ROOT ?? ROOT;
 const OUT_DIR = process.env.BAIZE_OUT_DIR ?? join(ROOT, "out");
 const EVIDENCE_DIR = process.env.BAIZE_EVIDENCE_DIR ?? join(ROOT, "evidence");
 const DB_PATH = process.env.BAIZE_DB_PATH ?? join(ROOT, ".baize", "baize.db");
+const SESSION_DIR = process.env.BAIZE_SESSION_DIR ?? join(ROOT, ".baize", "sessions");
 // 生产部署:单进程服务 web/dist(SPA);dev 用 vite(:5173)代理 /api。
 const WEB_DIST = process.env.BAIZE_WEB_DIST ?? join(ROOT, "web", "dist");
 const C4_GENERATION = "heuristic-draft-v2";
@@ -340,6 +342,7 @@ async function geneContextForRequirement(reqId: number, requirement: Record<stri
 	}
 
 	const store = openStore(DB_PATH);
+	store.recoverActiveRuns();
 
 // 阶段流水线(LLM 阶段,按序门禁);归档单独处理。
 const STAGE_ORDER: StageName[] = [
@@ -603,18 +606,148 @@ async function serveStatic(res: ServerResponse, pathname: string): Promise<void>
 }
 
 // SSE:阶段 run 事件流(单向推送,无新依赖;替代 ws)。token 级流式已仪器化:runStage 追踪 prevTextLen,从 message_update 发真 delta,经此转发到前端 append 滚动。
-const sseClients = new Set<ServerResponse>();
-function broadcastRun(ev: Record<string, unknown>) {
-	const line = `data: ${JSON.stringify(ev)}\n\n`;
-	for (const c of sseClients) {
-		try {
-			c.write(line);
-		} catch {
-			sseClients.delete(c);
-		}
-	}
+interface SseClient {
+    res: ServerResponse;
+    runId?: number;
 }
 
+const sseClients = new Set<SseClient>();
+const activeRuns = new Map<number, {
+    session: {
+        steer(text: string): Promise<void>;
+        abort(): Promise<void>;
+    };
+}>();
+
+function writeSse(client: SseClient, data: Record<string, unknown>, seq?: number): void {
+    try {
+        if (seq !== undefined) client.res.write(`id: ${seq}\n`);
+        client.res.write(`data: ${JSON.stringify(data)}\n\n`);
+    } catch {
+        sseClients.delete(client);
+    }
+}
+
+function publishRunEvent(row: {
+    run_id: number;
+    seq: number;
+    type: string;
+    payload: unknown;
+}): void {
+    const payload =
+        row.payload && typeof row.payload === "object" && !Array.isArray(row.payload)
+            ? (row.payload as Record<string, unknown>)
+            : { payload: row.payload };
+    const data = { ...payload, type: row.type, runId: row.run_id, seq: row.seq };
+    for (const client of sseClients) {
+        if (client.runId === undefined || client.runId === row.run_id) {
+            writeSse(client, data, row.seq);
+        }
+    }
+}
+
+function emitRunEvent(runId: number, event: Record<string, unknown>): void {
+    publishRunEvent(store.appendRunEvent(runId, String(event.type ?? "event"), event));
+}
+
+function emitLatestRunEvent(runId: number): void {
+    const event = store.listRunEvents(runId).at(-1);
+    if (event) publishRunEvent(event);
+}
+
+function broadcastRun(event: Record<string, unknown>): void {
+    for (const client of sseClients) {
+        if (client.runId === undefined) writeSse(client, event);
+    }
+}
+
+type StageRunTask = {
+    runId: number;
+    requirementId: number;
+    workspaceId: number;
+    stage: StageName;
+    repoPath: string;
+    repoId: string;
+    requirementTitle: string;
+    requirementDesc: string;
+    upstream: string;
+    feedback?: string;
+    geneContext?: string;
+    previousStatus: string;
+    previousRefs: unknown[];
+    sessionManager: ReturnType<typeof openPersistentSession>["manager"];
+};
+
+async function executeStageRun(task: StageRunTask): Promise<void> {
+    try {
+        store.setRunStatus(task.runId, "running");
+        emitLatestRunEvent(task.runId);
+        if (store.getRun(task.runId)?.status === "cancelled") return;
+        const assets = await runStage(
+            {
+                repoPath: task.repoPath,
+                repoId: task.repoId,
+                requirementTitle: task.requirementTitle,
+                requirementDesc: task.requirementDesc,
+                upstream: task.upstream,
+                stage: task.stage,
+                feedback: task.feedback,
+                geneContext: task.geneContext,
+                sessionManager: task.sessionManager,
+                onSession: (session) => {
+                    activeRuns.set(task.runId, { session });
+                    if (store.getRun(task.runId)?.status === "cancelled") {
+                        void session.abort().catch(() => undefined);
+                    }
+                },
+            },
+            (event) =>
+                emitRunEvent(task.runId, {
+                    ...event,
+                    requirementId: task.requirementId,
+                    stage: STAGE_CN[task.stage],
+                }),
+        );
+        if (store.getRun(task.runId)?.status === "cancelled") return;
+
+        const refs = writeStageAssets(
+            task.workspaceId,
+            task.requirementId,
+            task.stage,
+            assets,
+            task.previousRefs,
+        );
+        store.setStage(task.requirementId, STAGE_CN[task.stage], "待审", refs);
+        store.setRunStatus(task.runId, "completed");
+        emitLatestRunEvent(task.runId);
+        emitRunEvent(task.runId, {
+            type: "done",
+            requirementId: task.requirementId,
+            stage: STAGE_CN[task.stage],
+        });
+    } catch (error) {
+        if (store.getRun(task.runId)?.status === "cancelled") return;
+        const message = String((error as Error)?.message ?? error);
+        const retryStatus = task.previousStatus === "打回" ? "打回" : "未开始";
+        store.setStage(
+            task.requirementId,
+            STAGE_CN[task.stage],
+            retryStatus,
+            task.previousRefs,
+            task.feedback ?? "",
+        );
+        store.setRunStatus(task.runId, "failed", message);
+        emitLatestRunEvent(task.runId);
+        emitRunEvent(task.runId, {
+            type: "error",
+            requirementId: task.requirementId,
+            stage: STAGE_CN[task.stage],
+            error: message,
+        });
+    } finally {
+        activeRuns.delete(task.runId);
+    }
+}
 const server = http.createServer(
 	async (req: IncomingMessage, res: ServerResponse) => {
 		res.setHeader("access-control-allow-origin", "*");
@@ -920,33 +1053,72 @@ const server = http.createServer(
 					.join("\n\n")
 				: "";
 			const geneContext = await geneContextForRequirement(reqId, requirement as unknown as Record<string, unknown>, stage === "analysis");
-			broadcastRun({ type: "start", requirementId: reqId, stage: STAGE_CN[stage], requirementTitle: requirement.title });
-			const assets = await runStage({
-				repoPath: ws?.repo_path ?? ROOT,
-				repoId: ws?.repo_path.split("/").pop() ?? "",
-				requirementTitle: requirement.title,
-				requirementDesc: requirement.description,
-				upstream: JSON.stringify({ stages: rows, archivedDecisions: archivedPrior || "(无已归档决策)" }),
-				stage,
-				feedback: cur?.feedback || undefined,
-				geneContext,
-			},
-			(e) =>
-				broadcastRun({ ...e, requirementId: reqId, stage: STAGE_CN[stage] }),
-			);
-			const refs = writeStageAssets(
-				requirement.workspace_id,
-				reqId,
-				stage,
-				assets,
-				parseRefs(cur),
-			);
-			store.setStage(reqId, STAGE_CN[stage], "待审", refs);
-			broadcastRun({ type: "done", requirementId: reqId, stage: STAGE_CN[stage] });
-			json(200, { ok: true, refs });
-			return;
-		}
-
+            const existingSession = store.getDesignSession(reqId);
+            let persistentSession: ReturnType<typeof openPersistentSession>;
+            try {
+                persistentSession = openPersistentSession(
+                    ws?.repo_path ?? ROOT,
+                    SESSION_DIR,
+                    existingSession?.session_file,
+                );
+            } catch (error) {
+                json(500, { error: `无法打开设计会话: ${String((error as Error)?.message ?? error)}` });
+                return;
+            }
+            const designSession = store.createDesignSession(
+                reqId,
+                persistentSession.sessionFile,
+                persistentSession.sessionId,
+            );
+            let run: ReturnType<typeof store.createRun>;
+            try {
+                run = store.createRun(
+                    reqId,
+                    designSession.id,
+                    "stage",
+                    STAGE_CN[stage],
+                    JSON.stringify({ stage, requirementId: reqId }),
+                );
+            } catch (error) {
+                if (error instanceof RunInProgressError) {
+                    json(409, { error: "需求已有进行中的 Run", runId: error.runId });
+                    return;
+                }
+                json(500, { error: String((error as Error)?.message ?? error) });
+                return;
+            }
+            const queuedEvent = store.listRunEvents(run.id).at(-1);
+            if (queuedEvent) publishRunEvent(queuedEvent);
+            store.setStage(reqId, STAGE_CN[stage], "进行中", parseRefs(cur), cur?.feedback ?? "");
+            emitRunEvent(run.id, {
+                type: "start",
+                requirementId: reqId,
+                stage: STAGE_CN[stage],
+                requirementTitle: requirement.title,
+            });
+            void executeStageRun({
+                runId: run.id,
+                requirementId: reqId,
+                workspaceId: requirement.workspace_id,
+                stage,
+                repoPath: ws?.repo_path ?? ROOT,
+                repoId: ws?.repo_path?.split("/").pop() ?? "",
+                requirementTitle: requirement.title,
+                requirementDesc: requirement.description,
+                upstream: JSON.stringify({ stages: rows, archivedDecisions: archivedPrior || "(无已归档决策)" }),
+                feedback: cur?.feedback || undefined,
+                geneContext,
+                previousStatus: curStatus,
+                previousRefs: parseRefs(cur),
+                sessionManager: persistentSession.manager,
+            });
+            json(202, {
+                runId: run.id,
+                status: "queued",
+                sessionId: persistentSession.sessionId,
+            });
+            return;
+        }
 		const stageAct = url.pathname.match(
 			/^\/api\/requirements\/(\d+)\/stage\/(analysis|scenario|usecase|function|design)\/(approve|reject)$/,
 		);
@@ -1091,17 +1263,120 @@ const server = http.createServer(
 			return;
 		}
 
-		if (url.pathname === "/api/runs/stream" && req.method === "GET") {
-			res.writeHead(200, {
-				"content-type": "text/event-stream",
-				"cache-control": "no-cache",
-				connection: "keep-alive",
-			});
-			sseClients.add(res);
-			res.write(": connected\n\n");
-			req.on("close", () => sseClients.delete(res));
-			return;
-		}
+const runEventsRoute = url.pathname.match(/^\/api\/runs\/(\d+)\/events$/);
+        if (runEventsRoute && req.method === "GET") {
+            const runId = Number(runEventsRoute[1]);
+            if (!store.getRun(runId)) {
+                json(404, { error: "run not found" });
+                return;
+            }
+            const after = Math.max(
+                0,
+                Number(url.searchParams.get("after") ?? req.headers["last-event-id"] ?? 0),
+            );
+            json(200, store.listRunEvents(runId, Number.isFinite(after) ? after : 0));
+            return;
+        }
+
+        const runAction = url.pathname.match(/^\/api\/runs\/(\d+)\/(steer|cancel)$/);
+        if (runAction && req.method === "POST") {
+            const runId = Number(runAction[1]);
+            const action = runAction[2];
+            const run = store.getRun(runId);
+            if (!run) {
+                json(404, { error: "run not found" });
+                return;
+            }
+            if (["completed", "failed", "cancelled"].includes(run.status)) {
+                json(409, { error: `Run 已结束: ${run.status}` });
+                return;
+            }
+            if (action === "steer") {
+                const body = await readJson(req);
+                const text = String(body?.text ?? body?.message ?? "").trim();
+                if (!text) {
+                    json(400, { error: "text required" });
+                    return;
+                }
+                const active = activeRuns.get(runId);
+                if (!active) {
+                    json(409, { error: "Run 尚未绑定活动会话" });
+                    return;
+                }
+                try {
+                    await active.session.steer(text);
+                } catch (error) {
+                    json(409, { error: String((error as Error)?.message ?? error) });
+                    return;
+                }
+                emitRunEvent(runId, { type: "steer", text });
+                json(202, { ok: true, runId });
+                return;
+            }
+            store.setRunStatus(runId, "cancelled", "Cancelled by user");
+            emitLatestRunEvent(runId);
+            const active = activeRuns.get(runId);
+            if (active) {
+                try {
+                    await active.session.abort();
+                } catch {
+                    // 状态已先落库为 cancelled;中止失败不应恢复为 failed。
+                }
+            }
+            emitRunEvent(runId, { type: "cancelled", runId });
+            json(202, { ok: true, runId, status: "cancelled" });
+            return;
+        }
+
+        const runRoute = url.pathname.match(/^\/api\/runs\/(\d+)$/);
+        if (runRoute && req.method === "GET") {
+            const run = store.getRun(Number(runRoute[1]));
+            if (!run) {
+                json(404, { error: "run not found" });
+                return;
+            }
+            json(200, run);
+            return;
+        }
+
+        if (url.pathname === "/api/runs/stream" && req.method === "GET") {
+            const runIdValue = url.searchParams.get("runId");
+            const runId = runIdValue ? Number(runIdValue) : undefined;
+            if (runId !== undefined && (!Number.isInteger(runId) || !store.getRun(runId))) {
+                json(404, { error: "run not found" });
+                return;
+            }
+            const headerAfter = req.headers["last-event-id"];
+            const after = Number(url.searchParams.get("after") ?? headerAfter ?? 0);
+            const client: SseClient = { res, runId };
+            res.writeHead(200, {
+                "content-type": "text/event-stream",
+                "cache-control": "no-cache",
+                connection: "keep-alive",
+            });
+            res.write(": connected\n\n");
+            sseClients.add(client);
+            if (runId !== undefined) {
+                for (const event of store.listRunEvents(
+                    runId,
+                    Number.isFinite(after) ? Math.max(0, after) : 0,
+                )) {
+                    const payload =
+                        event.payload &&
+                        typeof event.payload === "object" &&
+                        !Array.isArray(event.payload)
+                            ? (event.payload as Record<string, unknown>)
+                            : { payload: event.payload };
+                    writeSse(
+                        client,
+                        { ...payload, type: event.type, runId, seq: event.seq },
+                        event.seq,
+                    );
+                }
+            }
+            req.on("close", () => sseClients.delete(client));
+            return;
+        }
 
 		if (url.pathname === "/api/chat/intake" && req.method === "POST") {
 			const b = (await readJson(req)) as { messages?: Array<{ role: string; content: string }> } | null;

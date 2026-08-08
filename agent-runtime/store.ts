@@ -3,9 +3,10 @@ import { mkdirSync } from "node:fs";
 import { dirname } from "node:path";
 
 /**
- * store.ts — 设计资产库 SQLite(better-sqlite3 v13)。T01 领域模型的落库。
- * workspace=1 repo;资产(场景/用例/功能)为 workspace 级复用池。
- * ponytail: 单全局 DB(workspaceId 列分 scope),同步 API,小规模本地库足够。
+ * store.ts — BaiZe 本地 SQLite 状态与设计资产库。
+ *
+ * 旧阶段资产表在切面 1 暂时保留；设计会话、Run、事件和锁是新的
+ * Gateway 控制面，后续切面会把阶段资产迁移到 Artifact/Revision。
  */
 export type Stage =
 	| "录入"
@@ -16,6 +17,55 @@ export type Stage =
 	| "功能设计"
 	| "归档";
 export type StageStatus = "未开始" | "进行中" | "待审" | "打回" | "完成";
+export type RunStatus =
+	| "queued"
+	| "running"
+	| "completed"
+	| "failed"
+	| "cancelled";
+
+export interface DesignSessionRow {
+	id: number;
+	requirement_id: number;
+	session_file: string;
+	session_id: string;
+	status: "active" | "archived";
+	created_at: string;
+	updated_at: string;
+	archived_at: string | null;
+}
+
+export interface RunRow {
+	id: number;
+	requirement_id: number;
+	session_id: number;
+	kind: string;
+	stage: string | null;
+	status: RunStatus;
+	prompt: string;
+	error: string | null;
+	created_at: string;
+	started_at: string | null;
+	finished_at: string | null;
+}
+
+export interface RunEventRow {
+	id: number;
+	run_id: number;
+	seq: number;
+	type: string;
+	payload: unknown;
+	created_at: string;
+}
+
+export class RunInProgressError extends Error {
+	readonly code = "RUN_IN_PROGRESS";
+
+	constructor(readonly runId: number) {
+		super(`requirement already has an active run: ${runId}`);
+		this.name = "RunInProgressError";
+	}
+}
 
 const SCHEMA = `
 create table if not exists workspaces(
@@ -99,7 +149,53 @@ create table if not exists requirement_genes(
   source text not null default 'auto',
   primary key (requirement_id, gene_id)
 );
+
+create table if not exists design_sessions(
+  id integer primary key autoincrement,
+  requirement_id integer not null unique references requirements(id) on delete cascade,
+  session_file text not null,
+  session_id text not null,
+  status text not null default 'active',
+  created_at text not null default (datetime('now')),
+  updated_at text not null default (datetime('now')),
+  archived_at text
+);
+create table if not exists runs(
+  id integer primary key autoincrement,
+  requirement_id integer not null references requirements(id) on delete cascade,
+  session_id integer not null references design_sessions(id) on delete cascade,
+  kind text not null,
+  stage text,
+  status text not null default 'queued',
+  prompt text not null default '',
+  error text,
+  created_at text not null default (datetime('now')),
+  started_at text,
+  finished_at text
+);
+create index if not exists runs_requirement_idx on runs(requirement_id, id desc);
+create table if not exists run_locks(
+  requirement_id integer primary key references requirements(id) on delete cascade,
+  run_id integer not null unique references runs(id) on delete cascade,
+  acquired_at text not null default (datetime('now'))
+);
+create table if not exists run_events(
+  id integer primary key autoincrement,
+  run_id integer not null references runs(id) on delete cascade,
+  seq integer not null,
+  type text not null,
+  payload text not null default '{}',
+  created_at text not null default (datetime('now')),
+  unique(run_id, seq)
+);
+create index if not exists run_events_lookup_idx on run_events(run_id, seq);
 `;
+
+const TERMINAL_RUN_STATUSES = new Set<RunStatus>([
+	"completed",
+	"failed",
+	"cancelled",
+]);
 
 export class Store {
 	db: Database.Database;
@@ -107,8 +203,9 @@ export class Store {
 	constructor(dbPath: string) {
 		mkdirSync(dirname(dbPath), { recursive: true });
 		this.db = new Database(dbPath);
+		this.db.pragma("foreign_keys = ON");
 		this.db.exec(SCHEMA);
-		// ponytail: 老库补 feedback 列;列已存在则忽略
+		// 老库补 feedback 列；列已存在则忽略。
 		try {
 			this.db.exec(
 				"alter table stage_progress add column feedback text not null default ''",
@@ -135,15 +232,36 @@ export class Store {
 	}
 
 	deleteWorkspace(id: number): void {
-		const reqIds = (this.db.prepare("select id from requirements where workspace_id = ?").all(id) as Array<{ id: number }>).map((r) => r.id);
+		const reqIds = (
+			this.db
+				.prepare("select id from requirements where workspace_id = ?")
+				.all(id) as Array<{ id: number }>
+		).map((r) => r.id);
 		for (const rid of reqIds) {
+			this.db
+				.prepare("delete from run_events where run_id in (select id from runs where requirement_id = ?)")
+				.run(rid);
+			this.db.prepare("delete from run_locks where requirement_id = ?").run(rid);
+			this.db.prepare("delete from runs where requirement_id = ?").run(rid);
+			this.db.prepare("delete from design_sessions where requirement_id = ?").run(rid);
 			this.db.prepare("delete from stage_progress where requirement_id = ?").run(rid);
+			this.db.prepare("delete from evidence_snapshots where requirement_id = ?").run(rid);
+			this.db.prepare("delete from design_packages where requirement_id = ?").run(rid);
+			this.db.prepare("delete from requirement_genes where requirement_id = ?").run(rid);
 			this.db.prepare("delete from requirement_scenarios where requirement_id = ?").run(rid);
 		}
 		this.db.prepare("delete from requirements where workspace_id = ?").run(id);
-		const ucIds = (this.db.prepare("select id from use_cases where workspace_id = ?").all(id) as Array<{ id: number }>).map((r) => r.id);
+		const ucIds = (
+			this.db
+				.prepare("select id from use_cases where workspace_id = ?")
+				.all(id) as Array<{ id: number }>
+		).map((r) => r.id);
 		for (const u of ucIds) this.db.prepare("delete from usecase_functions where usecase_id = ?").run(u);
-		const fnIds = (this.db.prepare("select id from function_items where workspace_id = ?").all(id) as Array<{ id: number }>).map((r) => r.id);
+		const fnIds = (
+			this.db
+				.prepare("select id from function_items where workspace_id = ?")
+				.all(id) as Array<{ id: number }>
+		).map((r) => r.id);
 		for (const f of fnIds) this.db.prepare("delete from usecase_functions where function_item_id = ?").run(f);
 		this.db.prepare("delete from use_cases where workspace_id = ?").run(id);
 		this.db.prepare("delete from function_items where workspace_id = ?").run(id);
@@ -188,8 +306,12 @@ export class Store {
 			use_cases: t("use_cases"),
 			function_domains: t("function_domains"),
 			function_items: t("function_items"),
+			design_sessions: t("design_sessions"),
+			runs: t("runs"),
+			run_events: t("run_events"),
 		};
 	}
+
 	// stage progress (upsert)
 	setStage(
 		requirementId: number,
@@ -216,6 +338,187 @@ export class Store {
 				"select * from stage_progress where requirement_id = ? order by stage",
 			)
 			.all(requirementId);
+	}
+
+	// ---- design session / run control plane ----
+	getDesignSession(requirementId: number): DesignSessionRow | undefined {
+		return this.db
+			.prepare("select * from design_sessions where requirement_id = ?")
+			.get(requirementId) as DesignSessionRow | undefined;
+	}
+
+	createDesignSession(
+		requirementId: number,
+		sessionFile: string,
+		sessionId: string,
+	): DesignSessionRow {
+		const existing = this.getDesignSession(requirementId);
+		if (existing) {
+			this.db
+				.prepare(
+                    "update design_sessions set session_file = ?, session_id = ?, status = 'active', archived_at = null, updated_at = datetime('now') where id = ?",
+				)
+				.run(sessionFile, sessionId, existing.id);
+			return this.getDesignSession(requirementId) as DesignSessionRow;
+		}
+		const id = Number(
+			this.db
+				.prepare(
+					"insert into design_sessions(requirement_id, session_file, session_id) values (?, ?, ?)",
+				)
+				.run(requirementId, sessionFile, sessionId).lastInsertRowid,
+		);
+		return this.db
+			.prepare("select * from design_sessions where id = ?")
+			.get(id) as DesignSessionRow;
+	}
+
+	archiveDesignSession(requirementId: number): void {
+		this.db
+			.prepare(
+				"update design_sessions set status = 'archived', archived_at = datetime('now'), updated_at = datetime('now') where requirement_id = ?",
+			)
+			.run(requirementId);
+	}
+
+	private appendRunEventUnsafe(
+		runId: number,
+		type: string,
+		payload: unknown,
+	): RunEventRow {
+		const next = (
+			this.db
+				.prepare("select coalesce(max(seq), 0) + 1 as seq from run_events where run_id = ?")
+				.get(runId) as { seq: number }
+		).seq;
+		const result = this.db
+			.prepare(
+				"insert into run_events(run_id, seq, type, payload) values (?, ?, ?, ?)",
+			)
+			.run(runId, next, type, JSON.stringify(payload ?? {}));
+		return {
+			id: Number(result.lastInsertRowid),
+			run_id: runId,
+			seq: next,
+			type,
+			payload,
+			created_at: new Date().toISOString(),
+		};
+	}
+
+	appendRunEvent(runId: number, type: string, payload: unknown = {}): RunEventRow {
+		const append = this.db.transaction(() =>
+			this.appendRunEventUnsafe(runId, type, payload),
+		);
+		return append();
+	}
+
+	listRunEvents(runId: number, afterSeq = 0): RunEventRow[] {
+		const rows = this.db
+			.prepare(
+				"select * from run_events where run_id = ? and seq > ? order by seq",
+			)
+			.all(runId, afterSeq) as Array<Omit<RunEventRow, "payload"> & { payload: string }>;
+		return rows.map((row) => ({
+			...row,
+			payload: this.parsePayload(row.payload),
+		}));
+	}
+
+	private parsePayload(payload: string): unknown {
+		try {
+			return JSON.parse(payload);
+		} catch {
+			return { raw: payload };
+		}
+	}
+
+	createRun(
+		requirementId: number,
+		sessionId: number,
+		kind: string,
+		stage: string | null = null,
+		prompt = "",
+	): RunRow {
+		const create = this.db.transaction(() => {
+			const active = this.db
+				.prepare("select run_id from run_locks where requirement_id = ?")
+				.get(requirementId) as { run_id: number } | undefined;
+			if (active) throw new RunInProgressError(active.run_id);
+			const result = this.db
+				.prepare(
+					"insert into runs(requirement_id, session_id, kind, stage, prompt) values (?, ?, ?, ?, ?)",
+				)
+				.run(requirementId, sessionId, kind, stage, prompt);
+			const runId = Number(result.lastInsertRowid);
+			this.db
+				.prepare("insert into run_locks(requirement_id, run_id) values (?, ?)")
+				.run(requirementId, runId);
+			this.appendRunEventUnsafe(runId, "run_queued", { status: "queued" });
+			return runId;
+		});
+		return this.getRun(create()) as RunRow;
+	}
+
+	getRun(runId: number): RunRow | undefined {
+		return this.db.prepare("select * from runs where id = ?").get(runId) as
+			| RunRow
+			| undefined;
+	}
+
+	listRuns(requirementId: number, limit = 50): RunRow[] {
+		return this.db
+			.prepare("select * from runs where requirement_id = ? order by id desc limit ?")
+			.all(requirementId, limit) as RunRow[];
+	}
+
+	getActiveRun(requirementId: number): RunRow | undefined {
+		return this.db
+			.prepare(
+				"select r.* from runs r join run_locks l on l.run_id = r.id where r.requirement_id = ?",
+			)
+			.get(requirementId) as RunRow | undefined;
+	}
+
+	setRunStatus(runId: number, status: RunStatus, error: string | null = null): void {
+		const update = this.db.transaction(() => {
+			this.db
+				.prepare(
+					`update runs
+					 set status = ?, error = ?,
+					     started_at = case when ? = 'running' and started_at is null then datetime('now') else started_at end,
+					     finished_at = case when ? in ('completed', 'failed', 'cancelled') then datetime('now') else finished_at end
+					 where id = ?`,
+				)
+				.run(status, error, status, status, runId);
+			this.appendRunEventUnsafe(runId, "run_status", { status, error });
+			if (TERMINAL_RUN_STATUSES.has(status)) {
+				this.db.prepare("delete from run_locks where run_id = ?").run(runId);
+			}
+		});
+		update();
+	}
+
+	recoverActiveRuns(): number[] {
+		const recover = this.db.transaction(() => {
+			const rows = this.db
+				.prepare("select id from runs where status in ('queued', 'running')")
+				.all() as Array<{ id: number }>;
+			for (const row of rows) {
+				this.db
+					.prepare(
+						"update runs set status = 'failed', error = ?, finished_at = datetime('now') where id = ?",
+					)
+					.run("Gateway restarted before Run completed", row.id);
+				this.appendRunEventUnsafe(row.id, "run_recovered", {
+					status: "failed",
+					error: "Gateway restarted before Run completed",
+				});
+				this.db.prepare("delete from run_locks where run_id = ?").run(row.id);
+			}
+			return rows.map((row) => row.id);
+		});
+		return recover();
 	}
 
 	// scenarios (reuse pool)
@@ -342,7 +645,7 @@ export class Store {
 		this.db.prepare("delete from function_domains where id = ?").run(id);
 	}
 
-	// ---- evidence snapshot / design package / requirement genes(evidence-redesign §2)----
+	// ---- evidence snapshot / design package / requirement genes ----
 	captureEvidenceSnapshot(requirementId: number, architecture: unknown, headSha: string): void {
 		this.db
 			.prepare(
@@ -376,6 +679,10 @@ export class Store {
 	}
 	listRequirementGenes(requirementId: number): unknown[] {
 		return this.db.prepare("select * from requirement_genes where requirement_id = ? order by rowid").all(requirementId);
+	}
+
+	close(): void {
+		this.db.close();
 	}
 }
 
