@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 /**
- * 一次性容器集成测试：固定仓库、Gateway、GitNexus、阶段门禁与归档。
- * 所有可写数据都位于容器 tmpfs，退出前主动清理。
+ * One-shot container integration test for the Gateway's generic Run and archive flow.
+ * All writable data lives in container tmpfs and is removed before exit.
  */
 import { execFileSync, spawn } from "node:child_process";
 import { once } from "node:events";
@@ -21,7 +21,6 @@ const root = mkdtempSync(join(tmpdir(), "baize-smoke-"));
 const reposRoot = join(root, "repos");
 const repoPath = join(reposRoot, "test-repo");
 const evidenceDir = join(root, "evidence");
-const outDir = join(root, "out");
 
 mkdirSync(reposRoot, { recursive: true });
 cpSync(join(APP_ROOT, "fixtures", "test-repo"), repoPath, { recursive: true });
@@ -52,7 +51,6 @@ const gatewayEnv = {
 	BAIZE_REPOS_ROOT: reposRoot,
 	BAIZE_DB_PATH: join(root, "baize.db"),
 	BAIZE_EVIDENCE_DIR: evidenceDir,
-	BAIZE_OUT_DIR: outDir,
 	EVOLVER_HOME: join(root, "evolver-home"),
 	BAIZE_EVOLVER: "0",
 	BAIZE_PORT: String(PORT),
@@ -110,6 +108,7 @@ try {
 	let ready = false;
 	for (let i = 0; i < 40; i++) {
 		try {
+			// nosemgrep: typescript.react.security.react-insecure-request.react-insecure-request -- local HTTP smoke server
 			const response = await fetch(BASE + "/api/overview");
 			if (response.ok) {
 				ready = true;
@@ -123,39 +122,12 @@ try {
 	check("Gateway 在容器内部启动", ready);
 	if (!ready) throw new Error("Gateway 启动超时");
 
+	// nosemgrep: typescript.react.security.react-insecure-request.react-insecure-request -- local HTTP smoke server
 	const web = await fetch(BASE + "/");
 	check(
 		"Web SPA 从镜像内部提供",
 		web.status === 200 &&
 			web.headers.get("content-type")?.startsWith("text/html"),
-	);
-
-	const system = await api("/api/system/status");
-	check(
-		"GitNexus 随镜像提供",
-		system.status === 200 && system.body?.gitnexus?.available === true,
-	);
-
-	const generate = await api("/api/evidence/generate", "POST", {
-		repoPath,
-		repoId: "test-repo",
-	});
-	check("内置仓库开始生成证据", generate.status === 202);
-
-	let evidence = null;
-	for (let i = 0; i < 240; i++) {
-		const result = await api("/api/evidence/test-repo");
-		if (result.body?.repositoryId === "test-repo") {
-			evidence = result.body;
-			break;
-		}
-		await new Promise((resolve) => setTimeout(resolve, 500));
-	}
-	check(
-		"GitNexus 证据仅写入容器 tmpfs",
-		evidence?.generatedBy === "gitnexus" &&
-			existsSync(join(evidenceDir, "test-repo.json")) &&
-			evidence.repoPath === repoPath,
 	);
 
 	const workspace = await api("/api/workspaces", "POST", {
@@ -164,66 +136,114 @@ try {
 	});
 	const requirement = await api("/api/requirements", "POST", {
 		workspaceId: workspace.body.id,
-		title: "容器闭环冒烟",
-		description: "验证测试数据不会离开容器",
+		title: "容器通用 Run 冒烟",
+		description: "验证 SQLite 归档与通用 Agent Run",
 	});
 	const requirementId = requirement.body.id;
-
-	const stagesResponse = await api(`/api/requirements/${requirementId}/stages`);
-	const stages = stagesResponse.body;
 	check(
-		"新需求初始化七个阶段",
-		stages.length === 7 &&
-			stages.find((stage) => stage.stage === "录入").status === "完成" &&
-			stages.find((stage) => stage.stage === "归档").status === "未开始",
+		"创建 Requirement",
+		workspace.status === 200 && requirement.status === 200,
 	);
 
-	const gated = await api(
+	const overview = await api("/api/overview");
+	check(
+		"Overview 不再暴露旧产物计数",
+		overview.status === 200 &&
+			!Object.hasOwn(overview.body, "scenarios") &&
+			!Object.hasOwn(overview.body, "use_cases") &&
+			!Object.hasOwn(overview.body, "stage_progress"),
+	);
+
+	const invalidRole = await api(
+		`/api/requirements/${requirementId}/runs`,
+		"POST",
+		{
+			prompt: "invalid role should be rejected",
+			role: "stage",
+		},
+	);
+	check("通用 Run 拒绝旧 stage role", invalidRole.status === 400);
+
+	const runResponse = await api(
+		`/api/requirements/${requirementId}/runs`,
+		"POST",
+		{
+			prompt: "Inspect the repository and summarize the requirement.",
+			role: "orchestrator",
+		},
+	);
+	const runId = runResponse.body?.runId;
+	check("通用 Run 入队", runResponse.status === 202 && Number.isInteger(runId));
+
+	let run = null;
+	for (let i = 0; i < 120; i++) {
+		const result = await api(`/api/runs/${runId}`);
+		run = result.body;
+		if (["completed", "failed", "cancelled"].includes(run?.status)) break;
+		await new Promise((resolve) => setTimeout(resolve, 500));
+	}
+	if (run && !["completed", "failed", "cancelled"].includes(run.status)) {
+		await api(`/api/runs/${runId}/cancel`, "POST");
+		const cancelled = await api(`/api/runs/${runId}`);
+		run = cancelled.body;
+	}
+	check(
+		"Run 到达终态",
+		["completed", "failed", "cancelled"].includes(run?.status),
+	);
+
+	const archive = await api(
+		`/api/requirements/${requirementId}/archive`,
+		"POST",
+	);
+	check(
+		"SQLite DesignPackage 归档",
+		archive.status === 200 && Number.isInteger(archive.body?.packageId),
+	);
+
+	const designPackage = await api(
+		`/api/requirements/${requirementId}/design-package`,
+	);
+	const snapshot = designPackage.body?.snapshot
+		? JSON.parse(designPackage.body.snapshot)
+		: null;
+	check(
+		"归档快照包含领域实体且不依赖 Markdown 文件",
+		designPackage.status === 200 &&
+			designPackage.body?.status === "approved" &&
+			snapshot?.requirement?.id === requirementId &&
+			Array.isArray(snapshot.artifacts) &&
+			Array.isArray(snapshot.decisions) &&
+			!existsSync(join(root, "out")),
+	);
+
+	const legacyStages = await api(`/api/requirements/${requirementId}/stages`);
+	const legacyRun = await api(
 		`/api/requirements/${requirementId}/stage/scenario/run`,
 		"POST",
 	);
-	check("分析未完成时阻止场景阶段", gated.status === 409);
+	check(
+		"旧 stages/run 路由已下线",
+		legacyStages.status === 404 && legacyRun.status === 404,
+	);
+
+	const assets = await api("/api/assets?workspace=" + workspace.body.id);
+	check(
+		"资产端点从 Artifact 派生",
+		assets.status === 200 &&
+			Array.isArray(assets.body?.scenarios) &&
+			Array.isArray(assets.body?.usecases) &&
+			Array.isArray(assets.body?.functions),
+	);
 
 	const database = new Database(join(root, "baize.db"));
-	const seed = [
-		["分析", '[{"type":"analysis","content":{"scope":["冒烟"]}}]'],
-		["场景", '[{"type":"scenario","id":1,"title":"s1","description":"d1"}]'],
-		["用例", '[{"type":"usecase","id":1,"title":"u1","mainFlow":"m"}]'],
-		[
-			"功能分解",
-			'[{"type":"domain","id":1,"name":"域A","items":[{"id":1,"title":"项1"}]}]',
-		],
-		[
-			"功能设计",
-			'[{"type":"design","content":{"designs":[{"functionItem":"项1","flow":"f"}]}}]',
-		],
-	];
-	for (const [stage, refs] of seed) {
-		database
-			.prepare(
-				"update stage_progress set status='完成', artifact_refs=? where requirement_id=? and stage=?",
-			)
-			.run(refs, requirementId, stage);
-	}
+	const legacyTables = database
+		.prepare(
+			"select name from sqlite_master where type='table' and name in ('stage_progress','scenarios','use_cases','function_domains','function_items','requirement_scenarios','usecase_functions')",
+		)
+		.all();
+	check("SQLite 不再创建旧产物表", legacyTables.length === 0);
 	database.close();
-
-	const archive = await api(
-		`/api/requirements/${requirementId}/stage/archive/run`,
-		"POST",
-	);
-	const archiveFile = archive.body?.refs?.[0]?.file ?? "";
-	check(
-		"归档只生成在容器 tmpfs",
-		archive.status === 200 &&
-			existsSync(archiveFile) &&
-			archiveFile.startsWith(root),
-	);
-
-	const again = await api(
-		`/api/requirements/${requirementId}/stage/archive/run`,
-		"POST",
-	);
-	check("重复归档被拒绝", again.status === 409);
 } catch (error) {
 	failed++;
 	console.error(error);

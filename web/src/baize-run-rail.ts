@@ -1,17 +1,16 @@
 import { LitElement, html, css, type PropertyValues } from "lit";
 
 /**
- * baize-run-rail — 阶段 run 实时视图:订阅 gateway SSE /api/runs/stream。
- * 两种 variant:
- *   dock(默认)= 浮动 dock(全局,跨需求,末 400 字)。行为不变。
- *   column    = 详情页内全列流式视图(本需求,完整 token 不截断,全高滚动,持久面板)。
- * token 级流式:gateway 转发 runStage 的 message_update 真 delta,本组件 append 滚动显示。
-	 * dock 在需求页被抑制(column 接管富视图);离开需求页恢复 ambient 跨需求指示。同一 SSE,各自过滤。
+ * baize-run-rail — 通用 Run 实时视图:订阅 Gateway SSE /api/runs/stream。
+ * dock(默认)=浮动 dock(全局); column=需求详情页内全列流式视图。
+ * token 级流式由 Gateway 转发,本组件只负责显示并按 Run 过滤。
+ * dock 在需求页被抑制(column 接管富视图);离开需求页恢复跨需求指示。
  */
 interface RunEvt {
 	type: string;
+	runId?: number;
 	requirementId?: number;
-	stage?: string;
+	role?: string;
 	requirementTitle?: string;
 	text?: string;
 }
@@ -234,7 +233,7 @@ class BaizeRunRail extends LitElement {
 			}
 		} else if (ev.type === "done") {
 			this.active = this.active.filter(
-				(a) => !(a.requirementId === ev.requirementId && a.stage === ev.stage),
+				(a) => a.runId !== ev.runId,
 			);
 		} else if (ev.type === "token") {
 			if (this.belongs(ev)) {
@@ -260,7 +259,7 @@ class BaizeRunRail extends LitElement {
 			<div class="body">
 				${this.active.map(
 					(a) => html`<div class="run">
-						<span class="pulse"></span>${a.stage ?? ""}
+						<span class="pulse"></span>${a.role ?? ""}
 					</div>`,
 				)}
 				${
@@ -269,13 +268,13 @@ class BaizeRunRail extends LitElement {
 						: this.active.length
 							? null
 							: html`<div class="placeholder">
-								暂无运行。点左侧阶段「运行」启动,token 实时滚动于此(完整流,不截断)。
+								暂无运行。点「启动 Run」开始,token 实时滚动于此(完整流,不截断)。
 							</div>`
 				}
 				${scoped.slice(0, 20).map(
 					(e) => html`<div class="ev">
 						<span class="k ${e.type === "done" ? "done" : ""}">${e.type}</span>
-						${e.stage ?? ""}
+						${e.role ?? ""}
 					</div>`,
 				)}
 			</div>
@@ -304,14 +303,14 @@ class BaizeRunRail extends LitElement {
 			<div class="body">
 				${this.active.map(
 					(a) => html`<div class="run">
-						<span class="pulse"></span>${a.requirementTitle ?? ""} · ${a.stage ?? ""}
+						<span class="pulse"></span>${a.requirementTitle ?? ""} · ${a.role ?? ""}
 					</div>`,
 				)}
 				${this.liveText ? html`<div class="ev live">${this.liveText}</div>` : null}
 			${this.events.filter((e) => e.type !== "token").slice(0, 8).map(
 					(e) => html`<div class="ev">
 						<span class="k ${e.type === "done" ? "done" : ""}">${e.type}</span>
-						${e.requirementTitle ?? ""} ${e.stage ?? ""}
+						${e.requirementTitle ?? ""} ${e.role ?? ""}
 					</div>`,
 				)}
 			</div>

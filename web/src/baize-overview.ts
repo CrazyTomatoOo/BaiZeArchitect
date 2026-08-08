@@ -15,10 +15,12 @@ interface WsProgress {
 const COUNTS: Array<[string, string]> = [
 	["workspaces", "工作区"],
 	["requirements", "需求"],
-	["scenarios", "场景"],
-	["use_cases", "用例"],
-	["function_domains", "功能域"],
-	["function_items", "功能项"],
+	["design_sessions", "设计会话"],
+	["runs", "Runs"],
+	["artifacts", "产物"],
+	["decisions", "Decision"],
+	["findings", "Finding"],
+	["design_packages", "DesignPackage"],
 ];
 
 class BaizeOverview extends LitElement {

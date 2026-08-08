@@ -23,8 +23,7 @@ test("persists design sessions, run events, and requirement run locks", () => {
 		const run = store.createRun(
 			requirementId,
 			session.id,
-			"stage",
-			"分析",
+			"main",
 			"Analyze it",
 		);
 		assert.equal(run.status, "queued");
@@ -35,7 +34,7 @@ test("persists design sessions, run events, and requirement run locks", () => {
 		);
 
 		assert.throws(
-			() => store.createRun(requirementId, session.id, "stage", "场景"),
+			() => store.createRun(requirementId, session.id, "main", "Retry"),
 			(error: unknown) =>
 				error instanceof RunInProgressError && error.runId === run.id,
 		);
@@ -54,13 +53,12 @@ test("persists design sessions, run events, and requirement run locks", () => {
 			store.listRunEvents(run.id).some((event) => event.type === "run_status"),
 		);
 
-		const nextRun = store.createRun(requirementId, session.id, "stage", "场景");
+		const nextRun = store.createRun(requirementId, session.id, "main", "Next run");
 		assert.equal(nextRun.status, "queued");
 		store.setRunStatus(nextRun.id, "completed");
 		const criticRun = store.createRun(
 			requirementId,
 			session.id,
-			"critic",
 			"critic",
 			"Review the design",
 			"/tmp/baize-sessions/critic.jsonl",
@@ -80,10 +78,14 @@ test("persists design sessions, run events, and requirement run locks", () => {
 test("stores artifact revisions, decisions, evidence, and approvals as domain entities", () => {
 	const store = openStore(":memory:");
 	try {
+		assert.equal(
+			(store.db.prepare("select count(*) as count from sqlite_master where type='table' and name in ('stage_progress','scenarios','use_cases','function_domains','function_items','requirement_scenarios','usecase_functions')").get() as { count: number }).count,
+			0,
+		);
 		const workspaceId = store.addWorkspace("/tmp/baize-domain-test", "Domain workspace");
 		const requirementId = store.addRequirement(workspaceId, "Model the domain");
 		const session = store.createDesignSession(requirementId, "/tmp/domain-session.jsonl", "domain-session");
-		const run = store.createRun(requirementId, session.id, "stage", "分析");
+		const run = store.createRun(requirementId, session.id, "main", "Analyze the domain");
 		store.setRunStatus(run.id, "running");
 
 		const artifact = store.createArtifact(requirementId, "design", "Checkout design");
@@ -204,8 +206,8 @@ test("recovers queued and running runs after a gateway restart", () => {
 		const queued = store.createRun(
 			queuedRequirementId,
 			queuedSession.id,
-			"stage",
-			"分析",
+			"main",
+			"Recover queued run",
 		);
 		const runningRequirementId = store.addRequirement(
 			workspaceId,
@@ -219,8 +221,8 @@ test("recovers queued and running runs after a gateway restart", () => {
 		const running = store.createRun(
 			runningRequirementId,
 			runningSession.id,
-			"stage",
-			"场景",
+			"main",
+			"Recover running run",
 		);
 		store.setRunStatus(running.id, "running");
 

@@ -1,8 +1,7 @@
 /**
  * EvolverMcpClient — 容器内 evolver-mcp stdio 子进程的最小 JSON-RPC 客户端。
  *
- * #9b: BAIZE_EVOLVER=1 时 cli.ts lazy-spawn evolver-mcp,暴露 evolver_recall 让 architect
- * mid-design 查本机已审核可复用 gene。proxy(hub)需 EVOLVER_IPC_TOKEN+EVOLVER_PROXY_URL;
+ * #9b: 可选的本地 Evolver 客户端，供 distill-gene 等离线工具复用。
  * 否则 local-only(空 store → recall 返 "(无可用 gene)")。
  *
  * ponytail: 不引 @modelcontextprotocol/sdk(未装),手写 newline-delimited JSON-RPC。

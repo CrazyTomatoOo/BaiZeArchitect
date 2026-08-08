@@ -36,5 +36,5 @@ COPY web ./web
 RUN cd web && npm run build && chown -R node:node /app/web
 WORKDIR /app/agent-runtime
 
-# 开发镜像直接 tsx 跑;生产再 build → node dist/cli.js
-ENTRYPOINT ["npx", "tsx", "cli.ts"]
+# Gateway is the sole runtime entrypoint; build output is dist/gateway.js.
+ENTRYPOINT ["npx", "tsx", "gateway.ts"]

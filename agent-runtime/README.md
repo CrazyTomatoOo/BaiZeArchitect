@@ -22,17 +22,17 @@ docker compose run --rm test
 | `/app/fixtures/test-repo` | 只读测试仓库种子 |
 | `/tmp/baize-smoke-*` | 单次测试的 SQLite、证据、归档和可写仓库 |
 
-Compose 设置 `BAIZE_CONTAINER_TEST=1`，并将 `BAIZE_DB_PATH`、`BAIZE_EVIDENCE_DIR`、`BAIZE_OUT_DIR`、`BAIZE_REPOS_ROOT` 和 `EVOLVER_HOME` 指向容器内 `/tmp`。测试退出后这些数据全部销毁。
+Compose 设置 `BAIZE_CONTAINER_TEST=1`，并将 `BAIZE_DB_PATH`、`BAIZE_EVIDENCE_DIR`、`BAIZE_REPOS_ROOT` 和 `EVOLVER_HOME` 指向容器内 `/tmp`。测试退出后这些数据全部销毁。
 
 ## 主要模块
 
 | 文件 | 职责 |
 | --- | --- |
-| `cli.ts` | architect + critic 设计流水线 |
-| `gateway.ts` | UI、API、阶段状态机和归档入口 |
+| `agent.ts` | 持久 Agent 会话、角色 Run 和需求澄清 |
+| `gateway.ts` | 唯一 Gateway、通用 Run API、SSE 和 SQLite 归档 |
 | `evidence.ts` | 容器内 GitNexus 证据生成 |
 | `evidence-candidates.ts` | 代码证据路径、符号和行号校验 |
-| `store.ts` | SQLite 状态存储 |
+| `store.ts` | SQLite 状态存储与领域实体 |
 | `Dockerfile` | 自包含测试镜像 |
 
 ## 源码检查

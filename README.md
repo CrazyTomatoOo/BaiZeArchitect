@@ -19,7 +19,7 @@ docker compose run --rm test
 - 根文件系统只读，唯一可写位置是容器内 tmpfs `/tmp`。
 - 使用非 root 的 `node` 用户运行。
 - SQLite、证据、GitNexus 索引、设计归档和临时仓库都随容器删除。
-- 不需要模型 API Key；冒烟测试不调用 LLM。
+- 不需要模型 API Key；冒烟测试只验证 Run 控制面终态，不依赖模型产出。
 
 ## 测试闭环
 
@@ -31,8 +31,8 @@ docker compose run --rm test
                     │
                     ├─ Gateway 启动与系统诊断
                     ├─ GitNexus 证据生成
-                    ├─ 工作区/需求/阶段门禁
-                    ├─ 确定性归档
+                    ├─ Workspace/Requirement 创建与通用 Run
+                    ├─ SQLite DesignPackage 快照归档
                     └─ 进程停止 + 临时目录清理
 ```
 

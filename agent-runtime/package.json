@@ -4,10 +4,9 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "cli": "tsx cli.ts",
-    "serve": "tsx server.ts",
+    "gateway": "tsx gateway.ts",
     "build": "tsc",
-    "start": "node dist/cli.js",
+    "start": "node dist/gateway.js",
     "typecheck": "tsc --noEmit",
     "test": "node --import tsx --test *.test.ts"
   },

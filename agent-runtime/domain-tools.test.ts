@@ -51,7 +51,7 @@ async function setup(): Promise<{
 		join(repoPath, "session.jsonl"),
 		"tool-session",
 	);
-	const run = store.createRun(requirementId, session.id, "stage", "分析");
+	const run = store.createRun(requirementId, session.id, "main", "Design checkout");
 	store.setRunStatus(run.id, "running");
 	return {
 		store,

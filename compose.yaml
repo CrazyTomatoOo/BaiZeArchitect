@@ -10,7 +10,6 @@ services:
       BAIZE_CONTAINER_TEST: "1"
       BAIZE_PROJECT_ROOT: /app
       BAIZE_REPOS_ROOT: /tmp/baize/repos
-      BAIZE_OUT_DIR: /tmp/baize/out
       BAIZE_EVIDENCE_DIR: /tmp/baize/evidence
       BAIZE_DB_PATH: /tmp/baize/baize.db
       BAIZE_EVOLVER: "0"

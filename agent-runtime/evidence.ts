@@ -1,5 +1,5 @@
 /**
- * evidence.ts — 容器内 gitnexus 证据生成(共享:cli.ts + gateway.ts)。
+ * evidence.ts — 容器内 gitnexus 证据生成(由 Gateway 调用)。
  *
  * gitnexus analyze <repo> → 写 <repo>/.gitnexus/lbug(KuzuDB 图);
  * extract-architecture.cjs 查图提取 hotspots/boundaries/clusters → EvidenceDoc。
