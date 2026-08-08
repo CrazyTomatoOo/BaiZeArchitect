@@ -24,3 +24,52 @@ services:
     network_mode: none
     tmpfs:
       - /tmp:rw,nosuid,nodev,size=1g
+
+  demo:
+    build:
+      context: .
+      dockerfile: agent-runtime/Dockerfile
+    image: baizearchitect-demo
+    working_dir: /app
+    # 体验环境:不挂载任何宿主目录/卷,所有运行数据写容器 tmpfs,容器删除即全清。
+    # 首次启动把镜像内 fixtures/test-repo 种子化为带 commit 的 git 仓库,再拉起 Gateway。
+    entrypoint:
+      - sh
+      - -c
+      - |
+        set -e
+        mkdir -p /tmp/baize/repos /tmp/home /tmp/npm-cache
+        if [ ! -d /tmp/baize/repos/test-repo/.git ]; then
+          cp -r /app/fixtures/test-repo /tmp/baize/repos/test-repo
+          git -C /tmp/baize/repos/test-repo init --quiet
+          git -C /tmp/baize/repos/test-repo add .
+          git -C /tmp/baize/repos/test-repo \
+            -c user.name="BaiZe Demo" -c user.email="demo@localhost" \
+            commit --quiet -m fixture
+        fi
+        cd /app/agent-runtime
+        exec npx tsx gateway.ts
+    environment:
+      BAIZE_PROJECT_ROOT: /app
+      BAIZE_PORT: "18789"
+      BAIZE_REPOS_ROOT: /tmp/baize/repos
+      BAIZE_EVIDENCE_DIR: /tmp/baize/evidence
+      BAIZE_DB_PATH: /tmp/baize/baize.db
+      BAIZE_SESSION_DIR: /tmp/baize/sessions
+      BAIZE_MODEL_CONFIG_PATH: /tmp/baize/model-config.json
+      BAIZE_EVOLVER: "0"
+      EVOLVER_HOME: /tmp/baize/evolver-home
+      HOME: /tmp/home
+      NPM_CONFIG_CACHE: /tmp/npm-cache
+    ports:
+      - "127.0.0.1:18789:18789"
+    init: true
+    user: node
+    read_only: true
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:18789/api/overview').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 5s
+      timeout: 3s
+      retries: 24
+    tmpfs:
+      - /tmp:rw,nosuid,nodev,size=2g
