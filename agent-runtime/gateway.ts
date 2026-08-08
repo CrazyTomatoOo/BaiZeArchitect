@@ -15,13 +15,14 @@ import { dirname, join, resolve } from "node:path";
 import { mkdir, readdir, readFile, writeFile } from "node:fs/promises";
 import { execFile } from "node:child_process";
 import { openStore, RunInProgressError, type ArtifactKind, type Stage } from "./store.js";
-import type { StageName } from "./cli.js";
+import type { AgentRole, StageName } from "./cli.js";
 import { generateEvidence } from "./evidence.js";
 
 // 必须在 import cli.ts 前设,否则 cli.ts 的 main 会跑(import 即执行)。
 process.env.BAIZE_GATEWAY = "1";
 const {
 	runStage,
+	runAgentTurn,
 	chatIntake,
 	writeModelConfig,
 	currentModelConfig,
@@ -793,6 +794,83 @@ async function executeStageRun(task: StageRunTask): Promise<void> {
         activeRuns.delete(task.runId);
     }
 }
+
+function openRequirementSession(requirementId: number, repoPath: string) {
+    const existing = store.getDesignSession(requirementId);
+    if (existing?.status === "archived") throw new Error("design session is archived");
+    const persistent = openPersistentSession(repoPath, SESSION_DIR, existing?.session_file);
+    const designSession = store.createDesignSession(
+        requirementId,
+        persistent.sessionFile,
+        persistent.sessionId,
+    );
+    return { persistent, designSession };
+}
+
+type AgentRunTask = {
+    runId: number;
+    requirementId: number;
+    workspaceId: number;
+    repoPath: string;
+    repoId: string;
+    role: AgentRole;
+    prompt: string;
+    sessionManager: ReturnType<typeof openPersistentSession>["manager"];
+};
+
+async function executeAgentRun(task: AgentRunTask): Promise<void> {
+    try {
+        store.setRunStatus(task.runId, "running");
+        emitLatestRunEvent(task.runId);
+        if (store.getRun(task.runId)?.status === "cancelled") return;
+        const result = await runAgentTurn(
+            {
+                repoPath: task.repoPath,
+                repoId: task.repoId,
+                role: task.role,
+                prompt: task.prompt,
+                sessionManager: task.sessionManager,
+                domainContext: {
+                    store,
+                    requirementId: task.requirementId,
+                    runId: task.runId,
+                    workspaceId: task.workspaceId,
+                    repoPath: task.repoPath,
+                },
+                onSession: (session) => {
+                    activeRuns.set(task.runId, { session });
+                    if (store.getRun(task.runId)?.status === "cancelled") {
+                        void session.abort().catch(() => undefined);
+                    }
+                },
+            },
+            (event) => emitRunEvent(task.runId, { ...event, requirementId: task.requirementId, role: task.role }),
+        );
+        if (store.getRun(task.runId)?.status === "cancelled") return;
+        emitRunEvent(task.runId, {
+            type: "result",
+            requirementId: task.requirementId,
+            role: task.role,
+            text: result.slice(0, 12_000),
+        });
+        store.setRunStatus(task.runId, "completed");
+        emitLatestRunEvent(task.runId);
+        emitRunEvent(task.runId, { type: "done", requirementId: task.requirementId, role: task.role });
+    } catch (error) {
+        if (store.getRun(task.runId)?.status === "cancelled") return;
+        const message = String((error as Error)?.message ?? error);
+        store.setRunStatus(task.runId, "failed", message);
+        emitLatestRunEvent(task.runId);
+        emitRunEvent(task.runId, {
+            type: "error",
+            requirementId: task.requirementId,
+            role: task.role,
+            error: message,
+        });
+    } finally {
+        activeRuns.delete(task.runId);
+    }
+}
 const server = http.createServer(
 	async (req: IncomingMessage, res: ServerResponse) => {
 		res.setHeader("access-control-allow-origin", "*");
@@ -1014,6 +1092,88 @@ const server = http.createServer(
 		}
 
 		// run:LLM 阶段(带门禁+打回意见注入);archive 为确定性归档。
+		const agentRunRoute = url.pathname.match(/^\/api\/requirements\/(\d+)\/runs$/);
+		if (agentRunRoute && req.method === "POST") {
+			const reqId = Number(agentRunRoute[1]);
+			const requirement = store.getRequirement(reqId) as
+				| { workspace_id: number; title: string; description: string }
+				| undefined;
+			if (!requirement) {
+				json(404, { error: "requirement not found" });
+				return;
+			}
+			const body = (await readJson(req)) as {
+				prompt?: string;
+				role?: string;
+				parentRunId?: number;
+			} | null;
+			const prompt = body?.prompt?.trim() ?? "";
+			const role = body?.role ?? "orchestrator";
+			const roles: AgentRole[] = ["orchestrator", "analyst", "architect", "critic", "reviewer"];
+			if (!prompt || !roles.includes(role as AgentRole)) {
+				json(400, { error: "prompt and a valid role are required" });
+				return;
+			}
+			const parentRunId = body?.parentRunId;
+			const parentRun = parentRunId === undefined ? undefined : store.getRun(parentRunId);
+			if (parentRunId !== undefined && !parentRun) {
+				json(404, { error: "parent Run not found" });
+				return;
+			}
+			if (parentRun && (parentRun.requirement_id !== reqId || parentRun.status !== "completed")) {
+				json(409, { error: "parent Run must be a completed Run for this requirement" });
+				return;
+			}
+			const workspace = store.getWorkspace(requirement.workspace_id) as { repo_path?: string } | undefined;
+			const repoPath = workspace?.repo_path ?? ROOT;
+			let mainSession: ReturnType<typeof openPersistentSession>["manager"];
+			let designSession: ReturnType<typeof store.createDesignSession>;
+			try {
+				const opened = openRequirementSession(reqId, repoPath);
+				mainSession = opened.persistent.manager;
+				designSession = opened.designSession;
+			} catch (error) {
+				json(409, { error: String((error as Error)?.message ?? error) });
+				return;
+			}
+			const critic = role === "critic";
+			const executionSession = critic ? openPersistentSession(repoPath, SESSION_DIR) : undefined;
+			const sessionManager = executionSession?.manager ?? mainSession;
+			const sessionFile = executionSession?.sessionFile ?? designSession.session_file;
+			const rolePrompt = critic
+				? `${prompt}\n请独立评审当前需求的 Artifact；先用 get_artifact 读取上游产物，再用 record_finding 记录风险。${parentRun ? `父 Run: ${parentRun.id}` : ""}`
+				: `${prompt}\n如需历史方案，主动调用 search_prior_designs；所有仓库事实必须来自受限领域工具。`;
+			let run: ReturnType<typeof store.createRun>;
+			try {
+				run = store.createRun(
+					reqId,
+					designSession.id,
+					critic ? "critic" : "main",
+					role,
+					rolePrompt,
+					sessionFile,
+					parentRun?.id ?? null,
+				);
+			} catch (error) {
+				json(error instanceof RunInProgressError ? 409 : 500, { error: String((error as Error)?.message ?? error) });
+				return;
+			}
+			const queued = store.listRunEvents(run.id).at(-1);
+			if (queued) publishRunEvent(queued);
+			emitRunEvent(run.id, { type: "start", requirementId: reqId, role, requirementTitle: requirement.title });
+			void executeAgentRun({
+				runId: run.id,
+				requirementId: reqId,
+				workspaceId: requirement.workspace_id,
+				repoPath,
+				repoId: repoPath.split("/").filter(Boolean).pop() ?? "repo",
+				role: role as AgentRole,
+				prompt: rolePrompt,
+				sessionManager,
+			});
+			json(202, { runId: run.id, status: "queued", role, sessionId: designSession.session_id });
+			return;
+		}
 		const stageRun = url.pathname.match(
 			/^\/api\/requirements\/(\d+)\/stage\/(analysis|scenario|usecase|function|design|archive)\/run$/,
 		);
@@ -1059,6 +1219,7 @@ const server = http.createServer(
 						"",
 					);
 			store.setStage(reqId, "归档", "完成", refs);
+			store.archiveDesignSession(reqId);
 			broadcastRun({ type: "done", requirementId: reqId, stage: "归档" });
 				json(200, { ok: true, refs });
 				return;
@@ -1100,23 +1261,16 @@ const server = http.createServer(
 					.join("\n\n")
 				: "";
 			const geneContext = await geneContextForRequirement(reqId, requirement as unknown as Record<string, unknown>, stage === "analysis");
-            const existingSession = store.getDesignSession(reqId);
-            let persistentSession: ReturnType<typeof openPersistentSession>;
-            try {
-                persistentSession = openPersistentSession(
-                    ws?.repo_path ?? ROOT,
-                    SESSION_DIR,
-                    existingSession?.session_file,
-                );
-            } catch (error) {
-                json(500, { error: `无法打开设计会话: ${String((error as Error)?.message ?? error)}` });
-                return;
-            }
-            const designSession = store.createDesignSession(
-                reqId,
-                persistentSession.sessionFile,
-                persistentSession.sessionId,
-            );
+			let persistentSession: ReturnType<typeof openPersistentSession>;
+			let designSession: ReturnType<typeof store.createDesignSession>;
+			try {
+				const opened = openRequirementSession(reqId, ws?.repo_path ?? ROOT);
+				persistentSession = opened.persistent;
+				designSession = opened.designSession;
+			} catch (error) {
+				json(409, { error: `无法打开设计会话: ${String((error as Error)?.message ?? error)}` });
+				return;
+			}
             let run: ReturnType<typeof store.createRun>;
             try {
                 run = store.createRun(
@@ -1124,8 +1278,9 @@ const server = http.createServer(
                     designSession.id,
                     "stage",
                     STAGE_CN[stage],
-                    JSON.stringify({ stage, requirementId: reqId }),
-                );
+					JSON.stringify({ stage, requirementId: reqId }),
+					persistentSession.sessionFile,
+				);
             } catch (error) {
                 if (error instanceof RunInProgressError) {
                     json(409, { error: "需求已有进行中的 Run", runId: error.runId });

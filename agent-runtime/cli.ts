@@ -47,8 +47,8 @@ const SYSTEM_PROMPT = [
 	"你是 BaiZe Architect 的设计 agent。",
 	"参考 .pi/skills 下各角色(orchestrator/analyst/architect/critic/reviewer)的职责契约。",
 	"通过 inspect_repository/search_code/get_architecture 等受限领域工具获取仓库事实，不得假设未读取的事实。禁止使用 bash/read/grep/find 或任何原始 shell/filesystem 工具。",
-	"evidenceCandidates 的 filePath 必须是仓库内真实存在的相对路径,lineStart/lineEnd 必须是该文件真实行号区间——禁止编造证据。",
-	"不要把 plan 输出为文本,只调用 submit_plan 工具。",
+	"涉及代码证据时，只引用受限领域工具返回的真实相对路径和行号，禁止编造证据。",
+	"遵循当前 Run 的任务与角色 Skill，以结构化结果或已注册领域工具完成工作；不要调用不存在的工具。",
 ].join("\n");
 
 // submit_plan schema — 与 .pi/extensions/baize-plan.ts 保持一致,收敛后由单进程
@@ -851,6 +851,93 @@ export async function runStage(
 	return assets;
 }
 
+export type AgentRole = "orchestrator" | "analyst" | "architect" | "critic" | "reviewer";
+
+export interface AgentTurnInput {
+	repoPath: string;
+	repoId: string;
+	role: AgentRole;
+	prompt: string;
+	domainContext?: DomainToolContext;
+	sessionManager: SessionManager;
+	onSession?: (session: StageSessionControl) => void;
+}
+
+const CRITIC_TOOL_NAMES = new Set([
+	"inspect_repository",
+	"search_code",
+	"get_architecture",
+	"search_prior_designs",
+	"get_artifact",
+	"run_consistency_check",
+	"record_finding",
+]);
+
+async function loadRoleSkill(role: AgentRole): Promise<string> {
+	try {
+		return await fs.readFile(path.join(PROJECT_ROOT, ".pi", "skills", role, "SKILL.md"), "utf8");
+	} catch {
+		return "";
+	}
+}
+
+export async function runAgentTurn(
+	input: AgentTurnInput,
+	onEvent?: (event: { type: "token"; text: string }) => void,
+	): Promise<string> {
+	const model = resolveModel();
+	if (!model) throw new Error(`model not found: ${PROVIDER}/${MODEL_ID}`);
+	const domainTools = input.domainContext ? createDomainTools(input.domainContext) : [];
+	const customTools = input.role === "critic"
+		? domainTools.filter((tool) => CRITIC_TOOL_NAMES.has(tool.name))
+		: domainTools;
+	const { session } = await createAgentSession({
+		cwd: input.repoPath,
+		model,
+		modelRuntime,
+		resourceLoader,
+		tools: [],
+		customTools,
+		sessionManager: input.sessionManager,
+	});
+	input.onSession?.(session);
+	let previousTextLength = 0;
+	const unsubscribe = (session as unknown as {
+		subscribe?: (callback: (event: unknown) => void) => () => void;
+	}).subscribe?.((event) => {
+		const item = event as {
+			type?: string;
+			message?: { role?: string; content?: Array<{ type?: string; text?: string }> };
+		};
+		if (item.type === "message_start" && item.message?.role === "assistant") {
+			previousTextLength = 0;
+			return;
+		}
+		if (item.type !== "message_update" || item.message?.role !== "assistant") return;
+		const content = item.message.content;
+		if (!Array.isArray(content)) return;
+		const fullText = content.filter((part) => part?.type === "text").map((part) => part.text ?? "").join("");
+		if (fullText.length > previousTextLength) {
+			onEvent?.({ type: "token", text: fullText.slice(previousTextLength) });
+			previousTextLength = fullText.length;
+		}
+	});
+	try {
+		const skill = await loadRoleSkill(input.role);
+		await session.prompt([
+			`角色模式: ${input.role}，仓库: ${input.repoId}`,
+			"只能使用已注册的受限领域工具获取仓库事实；禁止假设未读取的代码事实。",
+			...(input.role === "critic" ? ["这是隔离评审 Run，只能读取上游 Artifact；只能记录 Finding，不得修改 Artifact 或提出决策。"] : []),
+			...(skill ? ["角色 Skill:", skill] : []),
+			"任务:",
+			input.prompt,
+		].join("\n"));
+		return lastAssistantText(session);
+	} finally {
+		unsubscribe?.();
+		await session.dispose?.();
+	}
+}
 /** 需求录入 chat 化(T05):多轮澄清 → 收敛为 {title,description}。无 repo/工具,纯对话。 */
 export async function chatIntake(
 	history: Array<{ role: "user" | "assistant"; content: string }>,

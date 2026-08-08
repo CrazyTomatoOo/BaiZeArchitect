@@ -39,6 +39,8 @@ export interface RunRow {
 	id: number;
 	requirement_id: number;
 	session_id: number;
+	session_file: string | null;
+	parent_run_id: number | null;
 	kind: string;
 	stage: string | null;
 	status: RunStatus;
@@ -290,6 +292,8 @@ create table if not exists runs(
   id integer primary key autoincrement,
   requirement_id integer not null references requirements(id) on delete cascade,
   session_id integer not null references design_sessions(id) on delete cascade,
+  session_file text,
+  parent_run_id integer references runs(id) on delete set null,
   kind text not null,
   stage text,
   status text not null default 'queued',
@@ -943,6 +947,9 @@ export class Store {
 		sessionId: string,
 	): DesignSessionRow {
 		const existing = this.getDesignSession(requirementId);
+		if (existing?.status === "archived") {
+			throw new Error("design session is archived");
+		}
 		if (existing) {
 			this.db
 				.prepare(
@@ -1037,17 +1044,34 @@ export class Store {
 		kind: string,
 		stage: string | null = null,
 		prompt = "",
+		sessionFile: string | null = null,
+		parentRunId: number | null = null,
 	): RunRow {
 		const create = this.db.transaction(() => {
+			const session = this.db
+				.prepare("select requirement_id, status from design_sessions where id = ?")
+				.get(sessionId) as { requirement_id: number; status: DesignSessionRow["status"] } | undefined;
+			if (!session || session.requirement_id !== requirementId) {
+				throw new Error("design session does not belong to requirement");
+			}
+			if (session.status === "archived") throw new Error("design session is archived");
+			if (parentRunId !== null) {
+				const parent = this.db
+					.prepare("select requirement_id, status from runs where id = ?")
+					.get(parentRunId) as { requirement_id: number; status: RunStatus } | undefined;
+				if (!parent || parent.requirement_id !== requirementId || parent.status !== "completed") {
+					throw new Error("parent Run must be a completed Run for this requirement");
+				}
+			}
 			const active = this.db
 				.prepare("select run_id from run_locks where requirement_id = ?")
 				.get(requirementId) as { run_id: number } | undefined;
 			if (active) throw new RunInProgressError(active.run_id);
 			const result = this.db
 				.prepare(
-					"insert into runs(requirement_id, session_id, kind, stage, prompt) values (?, ?, ?, ?, ?)",
+					"insert into runs(requirement_id, session_id, session_file, parent_run_id, kind, stage, prompt) values (?, ?, ?, ?, ?, ?, ?)",
 				)
-				.run(requirementId, sessionId, kind, stage, prompt);
+				.run(requirementId, sessionId, sessionFile, parentRunId, kind, stage, prompt);
 			const runId = Number(result.lastInsertRowid);
 			this.db
 				.prepare("insert into run_locks(requirement_id, run_id) values (?, ?)")

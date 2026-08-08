@@ -56,6 +56,22 @@ test("persists design sessions, run events, and requirement run locks", () => {
 
 		const nextRun = store.createRun(requirementId, session.id, "stage", "场景");
 		assert.equal(nextRun.status, "queued");
+		store.setRunStatus(nextRun.id, "completed");
+		const criticRun = store.createRun(
+			requirementId,
+			session.id,
+			"critic",
+			"critic",
+			"Review the design",
+			"/tmp/baize-sessions/critic.jsonl",
+			nextRun.id,
+		);
+		assert.equal(criticRun.session_file, "/tmp/baize-sessions/critic.jsonl");
+		assert.equal(criticRun.parent_run_id, nextRun.id);
+		store.setRunStatus(criticRun.id, "completed");
+		store.archiveDesignSession(requirementId);
+		assert.equal(store.getDesignSession(requirementId)?.status, "archived");
+		assert.throws(() => store.createDesignSession(requirementId, "/tmp/new.jsonl", "new-session"), /archived/);
 	} finally {
 		store.close();
 	}
