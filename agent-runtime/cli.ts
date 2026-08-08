@@ -29,6 +29,7 @@ import {
 import { Type } from "typebox";
 import { getEvolverClient } from "./evolver-client.js";
 import { openStore } from "./store.js";
+import { createDomainTools, type DomainToolContext } from "./domain-tools.js";
 import { getStageMethodology, getStageShape } from "./stage-prompts.js";
 import { generateEvidence, type EvidenceDoc } from "./evidence.js";
 import { validateEvidenceCandidates } from "./evidence-candidates.js";
@@ -45,7 +46,7 @@ const OUT_DIR = process.env.BAIZE_OUT_DIR ?? path.join(PROJECT_ROOT, "out");
 const SYSTEM_PROMPT = [
 	"你是 BaiZe Architect 的设计 agent。",
 	"参考 .pi/skills 下各角色(orchestrator/analyst/architect/critic/reviewer)的职责契约。",
-	"用 read/grep/find 定位仓库真实符号与行号,然后调用 submit_plan 提交完整设计 plan。",
+	"通过 inspect_repository/search_code/get_architecture 等受限领域工具获取仓库事实，不得假设未读取的事实。禁止使用 bash/read/grep/find 或任何原始 shell/filesystem 工具。",
 	"evidenceCandidates 的 filePath 必须是仓库内真实存在的相对路径,lineStart/lineEnd 必须是该文件真实行号区间——禁止编造证据。",
 	"不要把 plan 输出为文本,只调用 submit_plan 工具。",
 ].join("\n");
@@ -678,6 +679,8 @@ export interface StageRunInput {
 	feedback?: string;
 	/** 需求上下文中已选/自动推荐的 gene JSON,注入阶段 prompt */
 	geneContext?: string;
+	/** Bounded repository/domain tools available for this stage run. */
+	domainContext?: DomainToolContext;
 	/** Reuse the Requirement's persisted Pi session when supplied by Gateway. */
 	sessionManager?: SessionManager;
 	/** Expose the active Pi session for Gateway steer/cancel controls. */
@@ -772,7 +775,7 @@ export async function runStage(
 		modelRuntime,
 		resourceLoader,
 		tools: ["submit_stage_assets"],
-		customTools: [submitTool],
+		customTools: [submitTool, ...(input.domainContext ? createDomainTools(input.domainContext) : [])],
 		sessionManager: input.sessionManager ?? SessionManager.inMemory(input.repoPath),
 	});
 	input.onSession?.(session);
@@ -825,6 +828,7 @@ export async function runStage(
 					: []),
 				getStageMethodology(input.stage),
 				`产出本阶段资产,形状:${getStageShape(input.stage)}`,
+				...(input.domainContext ? ["先主动使用受限领域工具取证、检索 Artifact 或记录 Decision/Finding,禁止假设仓库事实。"] : []),
 				"优先调用 submit_stage_assets 提交;若无法调用工具,直接输出一个 JSON 代码块(形状同上)。",
 			].join("\n"),
 		);

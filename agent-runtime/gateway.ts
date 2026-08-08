@@ -731,6 +731,13 @@ async function executeStageRun(task: StageRunTask): Promise<void> {
                 feedback: task.feedback,
                 geneContext: task.geneContext,
                 sessionManager: task.sessionManager,
+                domainContext: {
+                    store,
+                    requirementId: task.requirementId,
+                    runId: task.runId,
+                    workspaceId: task.workspaceId,
+                    repoPath: task.repoPath,
+                },
                 onSession: (session) => {
                     activeRuns.set(task.runId, { session });
                     if (store.getRun(task.runId)?.status === "cancelled") {

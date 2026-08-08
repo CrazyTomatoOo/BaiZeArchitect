@@ -172,6 +172,18 @@ export interface DesignPackageRow {
     archived_at: string;
 }
 
+export interface ToolCallRow {
+    id: number;
+    run_id: number;
+    name: string;
+    input: unknown;
+    output: unknown;
+    status: "running" | "completed" | "failed";
+    error: string | null;
+    started_at: string;
+    finished_at: string | null;
+}
+
 export class RunInProgressError extends Error {
 	readonly code = "RUN_IN_PROGRESS";
 
@@ -303,6 +315,18 @@ create table if not exists run_events(
   unique(run_id, seq)
 );
 create index if not exists run_events_lookup_idx on run_events(run_id, seq);
+create table if not exists tool_calls(
+  id integer primary key autoincrement,
+  run_id integer not null references runs(id) on delete cascade,
+  name text not null,
+  input text not null default '{}',
+  output text not null default '{}',
+  status text not null default 'running',
+  error text,
+  started_at text not null default (datetime('now')),
+  finished_at text
+ );
+create index if not exists tool_calls_run_idx on tool_calls(run_id, id desc);
 create table if not exists artifacts(
   id integer primary key autoincrement,
   requirement_id integer not null references requirements(id) on delete cascade,
@@ -546,6 +570,7 @@ export class Store {
 			findings: t("findings"),
 			approvals: t("approvals"),
 			trace_links: t("trace_links"),
+			tool_calls: t("tool_calls"),
 		};
 	}
 
@@ -563,6 +588,38 @@ export class Store {
 		} catch {
 			return { raw: value };
 		}
+	}
+
+	startToolCall(runId: number, name: string, input: unknown): number {
+		return Number(
+			this.db
+				.prepare("insert into tool_calls(run_id, name, input) values (?, ?, ?)")
+				.run(runId, name, this.encodeJson(input)).lastInsertRowid,
+		);
+	}
+
+	finishToolCall(
+		id: number,
+		status: "completed" | "failed",
+		output: unknown = {},
+		error: string | null = null,
+	): void {
+		this.db
+			.prepare(
+				"update tool_calls set status = ?, output = ?, error = ?, finished_at = datetime('now') where id = ?",
+			)
+			.run(status, this.encodeJson(output), error, id);
+	}
+
+	listToolCalls(runId: number): ToolCallRow[] {
+		const rows = this.db
+			.prepare("select * from tool_calls where run_id = ? order by id")
+			.all(runId) as Array<Omit<ToolCallRow, "input" | "output"> & { input: string; output: string }>;
+		return rows.map((row) => ({
+			...row,
+			input: this.decodeJson(row.input),
+			output: this.decodeJson(row.output),
+		}));
 	}
 
 	// ---- artifact / revision domain kernel ----
