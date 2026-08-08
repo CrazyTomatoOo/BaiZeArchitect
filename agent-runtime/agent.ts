@@ -123,7 +123,7 @@ const MODEL_CONFIG_PATH =
 	process.env.BAIZE_MODEL_CONFIG_PATH ??
 	path.join(PROJECT_ROOT, ".baize", "model-config.json");
 
-export function readModelConfig(): ModelConfig | null {
+function readModelConfig(): ModelConfig | null {
 	try {
 		return JSON.parse(readFileSync(MODEL_CONFIG_PATH, "utf8")) as ModelConfig;
 	} catch {
@@ -155,7 +155,7 @@ function resolveModel() {
 	);
 }
 
-export interface SessionControl {
+interface SessionControl {
 	steer(text: string): Promise<void>;
 	abort(): Promise<void>;
 }

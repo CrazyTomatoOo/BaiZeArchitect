@@ -11,7 +11,7 @@
  *        IMPLEMENTS, EXTENDS}
  *   聚类:Community 节点(label/cohesion/symbolCount) + 符号经 MEMBER_OF 归属
  *
- * 产物形态对齐 web/src/baize-dashboard.ts 的 Evidence 接口:
+ * 产物形态对齐当前架构证据接口:
  *   architecture.hotspots[{name, qualified_name, fan_in}]
  *   architecture.boundaries[{from, to, call_count}]
  *   architecture.clusters[{label, members, cohesion, top_nodes[]}]

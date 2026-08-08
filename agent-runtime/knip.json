@@ -1,0 +1,13 @@
+{
+  "ignore": [
+    "distill-gene.ts",
+    "evolver-client.ts",
+    "extract-architecture.cjs"
+  ],
+  "ignoreDependencies": [
+    "@evomap/evolver"
+  ],
+  "ignoreBinaries": [
+    "gitnexus"
+  ]
+}

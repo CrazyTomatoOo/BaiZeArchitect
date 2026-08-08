@@ -2,7 +2,7 @@ import { LitElement, html, css } from "lit";
 
 /**
  * baize-system — 系统页(现代化):子 tab [证据可视化 | 设置]。
- * 证据可视化 = 收编旧 baize-dashboard;设置 = 模型配置入口(provider/modelId/apiKey → /api/config,保存即生效)。
+ * 证据可视化由架构浏览器提供;设置 = 模型配置入口(provider/modelId/apiKey → /api/config,保存即生效)。
  */
 class BaizeSystem extends LitElement {
 	static properties = {

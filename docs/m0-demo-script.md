@@ -22,19 +22,8 @@
 cd /Volumes/work/Project/BaiZeArchitect
 ```
 
-确认两个校验命令可运行：
-
-```bash
-uv run scripts/validate_m0.py
-uv run scripts/validate_m0_package.py
-```
-
-预期输出：
-
-```text
-M0 validation passed
-M0 package validation passed
-```
+旧 M0 校验命令已在当前 Gateway/SQLite 重构中移除；本文件仅保留演示讲稿和历史材料索引。
+历史材料曾记录 M0 baseline 与 Design Package 校验通过；当前不再执行旧脚本。
 
 ## 3. 演示流程
 
@@ -118,27 +107,11 @@ examples/m0/cases.json
 - `UserController.createUser`
 - `users.email_unique`
 
-### 3.4 运行代码证据校验，2 分钟
+### 3.4 代码证据校验（历史记录），2 分钟
 
-执行：
-
-```bash
-uv run scripts/validate_m0.py
-```
-
-讲解词：
-
-> 这个校验器会检查案例数量、每个案例的证据数量、仓库路径、commit、文件、行号和符号。也就是说，设计结论引用的代码证据必须真实存在。
-
-展示外部仓库路径能力：
-
-```bash
-uv run scripts/validate_m0.py --repo-root pilot-backend=/Volumes/work/Project/BaiZeArchitect/pilot-backend
-```
-
-讲解词：
-
-> 这说明未来接真实企业仓库时，不需要把仓库复制进当前项目，只要传入 repositoryId 到真实路径的映射。
+旧 M0 校验器已移除。本节仅说明历史演示曾检查案例数量、仓库路径、commit、文件、行号和符号；新的试点应使用当前 Gateway/SQLite 流程。
+历史仓库映射说明已归档；当前流程不再使用 `--repo-root`。
+新的试点应遵循根目录 `README.md` 中的 Gateway/SQLite 测试流程。
 
 ### 3.5 展示样例 Artifact，3 分钟
 
@@ -174,15 +147,8 @@ examples/m0/artifacts/
 
 > 追踪矩阵把需求、领域概念、架构组件、API、数据、决策和证据连起来。manifest 则记录需求基线、代码基线、Schema、Artifact、Skill、MCP 和验证命令。这是后续设计归档和审计的基础。
 
-执行：
-
-```bash
-uv run scripts/validate_m0_package.py
-```
-
-讲解词：
-
-> 归档包校验器证明 Design Package 的引用关系没有断链。
+历史 Design Package 校验器已移除；manifest 与追踪矩阵仍作为归档材料供人工检查。
+> 历史归档材料记录 Design Package 的引用关系；当前不再执行旧校验器。
 
 ### 3.7 结论，1 分钟
 
@@ -194,15 +160,9 @@ uv run scripts/validate_m0_package.py
 
 > 批准进入真实企业试点仓验证；暂不直接进入完整 M1 平台开发。
 
-## 4. 演示命令汇总
+## 4. 历史演示命令
 
-```bash
-cd /Volumes/work/Project/BaiZeArchitect
-git -C pilot-backend rev-parse --short=12 HEAD
-uv run scripts/validate_m0.py
-uv run scripts/validate_m0.py --repo-root pilot-backend=/Volumes/work/Project/BaiZeArchitect/pilot-backend
-uv run scripts/validate_m0_package.py
-```
+旧 M0 校验命令已移除；`pilot-backend`、案例和 Design Package 仅作为历史材料保留。
 
 ## 5. 演示时必须主动说明的限制
 

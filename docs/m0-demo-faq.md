@@ -30,29 +30,15 @@
 - 代码引用不是截图，而是 `repositoryId + commitSha + filePath + symbol + lineStart + lineEnd`。
 - 归档不是压缩包，而是带 manifest 和追踪矩阵的 Design Package。
 
-## 5. 当前校验器到底验证了什么？
+## 5. 历史校验器验证了什么？
 
-`scripts/validate_m0.py` 验证：
+旧 M0 校验器已在当前 Gateway/SQLite 重构中移除。历史记录曾覆盖：
 
-- Schema 文件存在。
-- 至少 5 个案例存在。
-- 每个案例至少 2 条代码证据。
-- 每条证据的仓库目录存在。
-- 每条证据的 commit 存在。
-- 每条证据的文件存在。
-- 每条证据的行号有效。
-- 每条证据的符号出现在对应代码片段中。
-- 至少 2 个 Artifact 案例存在。
-- Artifact 的架构产物引用对应决策。
-- Artifact 的证据引用属于对应案例。
+- Schema 文件和案例数量。
+- 代码证据中的仓库、commit、文件、行号和符号。
+- Artifact、Design Package 与追踪矩阵的引用关系。
 
-`scripts/validate_m0_package.py` 验证：
-
-- Design Package manifest 存在。
-- Schema 和 Artifact 引用路径存在。
-- 追踪矩阵存在。
-- 追踪矩阵至少 2 条。
-- 每条追踪项有架构组件、决策和至少 2 条证据。
+这些结论仅作为 M0 历史评审材料保留，不应作为当前可执行命令。
 
 ## 6. 当前校验器没有验证什么？
 
@@ -67,17 +53,9 @@
 
 这些需要真实试点和 M1 之后的平台能力。
 
-## 7. 为什么要支持 `--repo-root`？
+## 7. 为什么曾经支持 `--repo-root`？
 
-因为真实企业仓库不应该被复制进这个 PoC 目录。
-
-现在可以这样运行：
-
-```bash
-uv run scripts/validate_m0.py --repo-root pilot-backend=/path/to/real/repo
-```
-
-其中 `pilot-backend` 是 `cases.json` 里的 `repositoryId`。后面的路径可以是任意本地真实仓库路径。
+旧校验器曾允许把案例中的 `repositoryId` 映射到外部本地仓库路径。该入口已随校验器删除；本节仅解释历史设计，不提供可执行命令。
 
 ## 8. 没有真实仓库时，演示结论应该怎么说？
 
@@ -135,12 +113,4 @@ uv run scripts/validate_m0.py --repo-root pilot-backend=/path/to/real/repo
 答：M0 当前使用人工样例隔离模型不确定性。M1 前需要补 Agent Runtime PoC，把模型输出写入相同 Artifact Schema。
 
 ## 12. 演示通过后的正确下一步是什么？
-
-正确下一步是准备真实试点替换：
-
-1. 找到一个可读的 Java/Go 后端仓库。
-2. 固定 commit。
-3. 选择 5 个历史需求。
-4. 替换 `examples/m0/cases.json` 中的证据。
-5. 使用 `--repo-root` 运行校验。
-6. 由架构师填写 `docs/m0-review-checklist.md`。
+M0 演示材料仅供历史评审；若启动新的试点，应使用当前 Gateway/SQLite 流程和根目录 `README.md` 中的测试入口，不再替换案例后运行旧校验器。

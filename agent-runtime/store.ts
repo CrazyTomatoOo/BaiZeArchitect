@@ -142,27 +142,6 @@ export interface TraceLinkRow {
     created_at: string;
 }
 
-export interface EvidenceSnapshotRow {
-    requirement_id: number;
-    run_id: number | null;
-    architecture: unknown;
-    head_sha: string;
-    captured_at: string;
-}
-
-export interface DesignPackageRow {
-    id: number;
-    requirement_id: number;
-    workspace_id: number;
-    run_id: number | null;
-    title: string;
-    content: string;
-    adr: string;
-    snapshot: unknown;
-    status: "draft" | "approved";
-    archived_at: string;
-}
-
 export interface ToolCallRow {
     id: number;
     run_id: number;

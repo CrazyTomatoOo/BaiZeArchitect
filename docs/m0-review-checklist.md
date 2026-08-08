@@ -14,17 +14,12 @@
 
 ## 2. 快速验收
 
-评审前执行：
-
-```bash
-uv run scripts/validate_m0.py
-uv run scripts/validate_m0_package.py
-```
+评审前请阅读 `docs/m0-review-report.md` 的历史结论；旧 M0 校验器已随当前 Gateway/SQLite 重构移除。
 
 | 检查项 | 通过 | 备注 |
 |---|---|---|
-| M0 baseline 校验通过 |  |  |
-| M0 package 校验通过 |  |  |
+| M0 baseline 历史结论 |  | 校验器已移除 |
+| M0 package 历史结论 |  | 校验器已移除 |
 | 5 个案例存在 |  |  |
 | 每个案例至少 2 条代码证据 |  |  |
 | 证据绑定真实 commit |  |  |

@@ -1,6 +1,6 @@
 # Production Quickstart
 
-This guide runs the Platform API with PostgreSQL-backed storage, automatic schema migration, and the governed runtime workflow.
+This guide targets the retired Platform API/PostgreSQL stack and is retained only for historical reference; it is not a current deployment path.
 
 ## Start with Docker Compose
 
@@ -170,38 +170,12 @@ curl -fsS "http://127.0.0.1:8080/api/v1/design-runs/$RUN_ID/export" \
 
 The audit response includes lifecycle events and approval records. The export response combines the completed run, generated design package manifest/traceability, and the same audit trail.
 
-## Backup and restore
+## Historical backup and restore notes
 
-Create a PostgreSQL custom-format backup from any environment that has `pg_dump` available:
+The former PostgreSQL backup/restore scripts were removed when persistence moved to the SQLite runtime. This document is retained only as historical platform-api material; use the root `README.md` and `compose.yaml` for the current test workflow.
+## Historical validation commands
 
-```bash
-DATABASE_URL='postgres://...' scripts/postgres-backup.sh
-DATABASE_URL='postgres://...' scripts/postgres-backup.sh backups/manual.dump
-```
-
-Restore a backup into the target database from any environment that has `pg_restore` and `psql` available:
-
-```bash
-DATABASE_URL='postgres://...' scripts/postgres-restore.sh backups/manual.dump
-```
-
-Run restore drills against a disposable database before relying on a backup for team operations.
-
-## Validation commands
-
-From `platform-api/`:
-
-```bash
-go test -race -shuffle=on -count=1 ./...
-go build ./cmd/platform-api
-```
-
-From the repository root:
-
-```bash
-uv run scripts/validate_m0.py
-uv run scripts/validate_m0_package.py
-```
+The former M0 and platform-api validation commands are retained in git history only. The current verification workflow is documented in the root `README.md`.
 
 ## CI and observability handoff
 

@@ -33,41 +33,27 @@ M0 当前已完成一个可本地复现的技术验证闭环：需求案例、�
 | 架构 Schema | `schemas/architecture-spec.schema.json` | ArchitectureSpecification 契约 |
 | 决策 Schema | `schemas/decision-record.schema.json` | DecisionRecord 契约 |
 | 代码证据 Schema | `schemas/code-evidence.schema.json` | CodeEvidence 契约 |
-| M0 校验器 | `scripts/validate_m0.py` | 校验案例、真实代码证据和 Artifact |
-| 归档包校验器 | `scripts/validate_m0_package.py` | 校验 Design Package manifest 和追踪矩阵 |
+| 历史 M0 校验器 | 已在当前 Gateway/SQLite 重构中移除 | 保留结构化案例与追踪矩阵作为历史材料 |
 
 ## 3. 已验证能力
 
 | 能力 | 状态 | 证据 |
 |---|---|---|
 | 5 个需求案例 | 已完成 | `examples/m0/cases.json` |
-| 每个案例至少 2 条代码证据 | 已完成 | `scripts/validate_m0.py` 通过 |
+| 每个案例至少 2 条代码证据 | 历史评审材料 | 旧校验器已移除 |
 | 证据绑定 repositoryId | 已完成 | `pilot-backend` |
 | 证据绑定 commitSha | 已完成 | `3dc359fceb1f` |
-| 证据绑定文件、符号、行号 | 已完成 | `scripts/validate_m0.py` 通过 |
+| 证据绑定文件、符号、行号 | 历史评审材料 | 旧校验器已移除 |
 | 样例需求 Artifact | 已完成 | `examples/m0/artifacts/M0-001.json`、`M0-005.json` |
 | 样例架构 Artifact | 已完成 | 同上 |
 | 样例决策记录 | 已完成 | `DEC-2026-0001`、`DEC-2026-0005` |
 | 追踪矩阵 | 已完成 | `examples/m0/design-package/traceability.json` |
 | Design Package manifest | 已完成 | `examples/m0/design-package/manifest.json` |
-| CLI 可复现校验 | 已完成 | `uv run scripts/validate_m0.py`、`uv run scripts/validate_m0_package.py` |
+| CLI 可复现校验 | 历史评审材料 | 旧校验器已移除 |
 
-## 4. 验证命令
+## 4. 历史验证记录
 
-```bash
-uv run scripts/validate_m0.py
-uv run scripts/validate_m0_package.py
-uv run scripts/validate_m0.py --help
-uv run scripts/validate_m0_package.py --help
-```
-
-当前已观察结果：
-
-- M0 baseline 校验通过。
-- M0 package 校验通过。
-- Python 脚本 LSP 无诊断。
-- Go 样例 LSP 无诊断。
-- Java 样例通过 `javac`。
+旧 M0 校验器已在当前 Gateway/SQLite 重构中移除。本节原记录仅作为历史评审结论保留；当前验证入口见根目录 `README.md`。
 
 ## 5. 与 SRS 的覆盖关系
 

@@ -20,25 +20,7 @@
 
 ## 2. 一键演示入口
 
-执行：
-
-```bash
-bash scripts/run_m0_demo.sh
-```
-
-该脚本会依次验证：
-
-1. `pilot-backend` 当前 commit。
-2. M0 baseline 默认本地仓库校验。
-3. M0 baseline 外部路径映射校验。
-4. M0 Design Package 校验。
-5. Java 样例证据文件编译。
-
-预期最后输出：
-
-```text
-M0 demo passed
-```
+原 M0 演示脚本已在当前 Gateway/SQLite 重构中移除。本文及其余 M0 文档、样例数据保留为历史评审材料，不再提供可执行的本地校验入口。
 
 ## 3. 材料地图
 
@@ -52,13 +34,12 @@ M0 demo passed
 | M0 演示 FAQ | `docs/m0-demo-faq.md` | 回答没有真实仓库时的常见质疑 |
 | 本交接索引 | `docs/m0-handoff-index.md` | 材料入口地图 |
 
-## 4. 可执行资产
+## 4. 历史资产
+
+M0 校验脚本已删除；以下路径仅作为历史材料保留。
 
 | 类型 | 路径 | 用途 |
 |---|---|---|
-| 一键演示 | `scripts/run_m0_demo.sh` | 串联 M0 演示命令 |
-| M0 baseline 校验 | `scripts/validate_m0.py` | 校验案例、代码证据和 Artifact |
-| M0 package 校验 | `scripts/validate_m0_package.py` | 校验 Design Package manifest 和追踪矩阵 |
 | 本地试点仓库 | `pilot-backend/` | 模拟 Java/Go 企业存量后端 |
 
 ## 5. 结构化资产
@@ -75,11 +56,10 @@ M0 demo passed
 
 建议按以下顺序评审：
 
-1. 先运行 `bash scripts/run_m0_demo.sh`。
-2. 阅读 `docs/m0-review-report.md` 的结论和缺口。
-3. 用 `docs/m0-demo-script.md` 走一遍演示。
-4. 用 `docs/m0-review-checklist.md` 记录人工评审意见。
-5. 只做一个阶段性决策：是否允许进入真实企业试点仓验证。
+1. 阅读 `docs/m0-review-report.md` 的结论和缺口。
+2. 用 `docs/m0-demo-script.md` 对照历史材料。
+3. 用 `docs/m0-review-checklist.md` 记录人工评审意见。
+4. 只做一个阶段性决策：是否允许进入真实企业试点仓验证。
 
 ## 7. 下一阶段决策
 

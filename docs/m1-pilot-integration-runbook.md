@@ -1,6 +1,6 @@
 # M1 Pilot Integration Runbook
 
-This runbook defines how to connect a real pilot repository to the current M1 Platform API skeleton without assuming the future Agent Runtime or Code Knowledge Service exists yet.
+This historical runbook targets the retired Platform API stack and is not a current execution path.
 
 ## Scope
 
@@ -46,12 +46,7 @@ If the Docker daemon is unavailable, `docker compose config` still validates the
 
 ## Validate local assets
 
-From the repository root:
-
-```bash
-uv run scripts/validate_m0.py
-uv run scripts/validate_m0_package.py
-```
+The former M0 validation scripts were removed during the Gateway/SQLite rewrite. Keep `examples/m0/` only as historical reference material.
 
 From `platform-api/`:
 

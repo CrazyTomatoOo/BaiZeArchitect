@@ -38,7 +38,7 @@ schemas/architecture-spec.schema.json
 schemas/decision-record.schema.json
 schemas/code-evidence.schema.json
 examples/m0/cases.json
-scripts/validate_m0.py
+（历史离线校验器，已在当前 Gateway/SQLite 重构中移除）
 ```
 
 ## 验证流程
@@ -47,7 +47,7 @@ scripts/validate_m0.py
 2. 为 5 个变更需求补全 `examples/m0/cases.json` 中的真实证据。
 3. 使用代码知识工具确认证据中的文件、符号和行号存在。
 4. 用 Agent Runtime PoC 生成三个 Artifact：需求、架构、决策。
-5. 使用 `scripts/validate_m0.py` 执行离线基线校验。
+5. 以保留的案例、Artifact 和追踪矩阵作为历史评审材料。
 6. 由架构师审查每个案例的人工修改比例和结论可采纳性。
 
 ## 退出条件
@@ -67,8 +67,4 @@ M0 通过必须同时满足：
 
 ## 使用方式
 
-```bash
-uv run scripts/validate_m0.py
-```
-
-脚本会检查 Schema、案例数量、证据结构、决策候选和退出条件覆盖情况。
+M0 校验器已删除；请将本文件与 `examples/m0/` 中的历史材料一起用于评审，不再执行旧命令。

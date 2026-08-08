@@ -31,8 +31,5 @@
     "code-knowledge": "m0.local-file-git-validation"
   },
   "approvalRecords": [],
-  "validationCommands": [
-    "uv run scripts/validate_m0.py",
-    "uv run scripts/validate_m0_package.py"
-  ]
+  "validationCommands": []
 }

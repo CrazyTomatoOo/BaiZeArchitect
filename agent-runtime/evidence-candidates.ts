@@ -1,7 +1,7 @@
 import path from "node:path";
 import fs from "node:fs/promises";
 
-export interface EvidenceCandidate {
+interface EvidenceCandidate {
 	repositoryId: string;
 	commitSha: string;
 	filePath: string;

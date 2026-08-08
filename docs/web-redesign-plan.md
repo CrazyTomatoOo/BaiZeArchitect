@@ -103,7 +103,7 @@
 ### 6.6 系统页(T06 F3 — 证据独立子页)
 
 - 系统页主区:设置(schema 驱动表单,借 Hermes AutoField)+ 摘要入口卡片(ADR 历史 / gene 复用 / 证据可视化)。
-- **子页**:证据可视化(收编旧 baize-dashboard:热点/boundaries/clusters + ADR 历史 + gene 复用)—— 独立子页,不在系统页主区内挤。
+- **子页**:证据可视化(由当前架构浏览器承载热点/boundaries/clusters + ADR 历史 + gene 复用)—— 独立子页,不在系统页主区内挤。
 - **数据**:`/api/evidence/<repo>`、`/api/genes`、`manage_adr(get)`。
 
 ## 7. 组件模式清单
@@ -131,7 +131,7 @@
 4. **新增 `baize-asset-library`**(四 tab:需求管理/场景/用例/功能)。
 5. **`baize-overview` 重做**(计数卡片 + 活动流)。
 6. **`baize-workspaces` 适配**:workspace 单作用域 + 防歧义三连。
-7. **`baize-dashboard` 拆 → `baize-system` + 证据子页**;新增 `baize-decisions`(待决策页,从 requirement 内审批抽出独立页)。
+7. **旧 `baize-dashboard` 已退役**;其能力由 `baize-system` + 架构证据子页承载;新增 `baize-decisions`(待决策页,从 requirement 内审批抽出独立页)。
 8. **新增全局件**:`baize-run-rail`、`baize-command-palette`、`baize-consent-modal`、`baize-chat-intake`。
 9. **gateway 补 ws**:广播阶段 run 事件(T05 决策的基建,实施 effort 前置)。
 
@@ -148,7 +148,7 @@
 
 ## 10. 附
 
-- 原型:`web/redesign-mock.html`(`?variant=A|B|C`,C 为胜出方案)。
+- 原型 `web/redesign-mock.html` 已删除;视觉验收截图和研究记录保留在文档/归档中。
 - 调研:`.wayfinder/research/T01-openclaw-control-ui-design.md`、`T02-hermes-dashboard-design.md`。
 - 决策票:`.wayfinder/tickets/T01`~`T06`。
 

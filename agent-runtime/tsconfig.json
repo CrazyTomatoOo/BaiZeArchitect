@@ -10,17 +10,9 @@
     "resolveJsonModule": true
   },
   "include": [
-    "agent.ts",
-    "evidence.ts",
-    "evidence-candidates.ts",
-    "evidence-candidates.test.ts",
-    "evidence.test.ts",
-    "evolver-client.ts",
-    "distill-gene.ts",
-    "domain-tools.ts",
-    "domain-tools.test.ts",
-    "gateway.ts",
-    "store.ts",
-    "store.test.ts"
+    "*.ts"
+  ],
+  "exclude": [
+    "dist"
   ]
 }
