@@ -55,7 +55,7 @@ export interface EvidenceDoc {
 /** 跑 extract-architecture.cjs 查 GitNexus 索引。 */
 async function extractArchitecture(
 	repoPath: string,
-): Promise<Record<string, unknown>> {
+): Promise<Record<string, unknown> | null> {
 	const stdout = await new Promise<string>((resolve, reject) =>
 		execFile(
 			"node",
@@ -64,7 +64,11 @@ async function extractArchitecture(
 			(err, out) => (err ? reject(err) : resolve(out)),
 		),
 	);
-	return JSON.parse(stdout) as Record<string, unknown>;
+	try {
+		return JSON.parse(stdout) as Record<string, unknown>;
+	} catch {
+		return null;
+	}
 }
 
 /**
@@ -89,7 +93,7 @@ export async function generateEvidence(
 		console.warn("[evidence] gitnexus analyze failed:", (e as Error).message);
 		return null;
 	}
-	let architecture: Record<string, unknown>;
+	let architecture: Record<string, unknown> | null;
 	try {
 		architecture = await extractArchitecture(repoPath);
 	} catch (e) {
@@ -99,6 +103,7 @@ export async function generateEvidence(
 		);
 		return null;
 	}
+	if (!architecture) return null;
 	const evidence: EvidenceDoc = {
 		repositoryId: repoId,
 		repoPath,

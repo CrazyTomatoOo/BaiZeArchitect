@@ -151,13 +151,20 @@ class BaizeMarkdown extends LitElement {
 
 	private async _loadSrc() {
 		if (!this.src) return;
-		// allowlist:仅同源相对路径,防 SSRF/外联
-		if (!this.src.startsWith("/")) {
+		// Allow only same-origin absolute paths; reject protocol-relative URLs and external hosts.
+		let target: URL;
+		try {
+			target = new URL(this.src, window.location.origin);
+		} catch {
+			this.text = "_(src 必须为同源相对路径)_";
+			return;
+		}
+		if (!this.src.startsWith("/") || this.src.startsWith("//") || target.origin !== window.location.origin) {
 			this.text = "_(src 必须为同源相对路径)_";
 			return;
 		}
 		try {
-			const r = await fetch(this.src);
+			const r = await fetch(target.pathname + target.search);
 			this.text = await r.text();
 		} catch {
 			this.text = "_(加载失败)_";

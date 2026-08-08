@@ -2,7 +2,7 @@ import { lstat, readdir, readFile } from "node:fs/promises";
 import { join, relative, resolve, sep } from "node:path";
 import { defineTool } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
-import type { ArtifactKind, ArtifactRevisionStatus, Store } from "./store.js";
+import { type ArtifactRevisionStatus, type Store } from "./store.js";
 
 const MAX_RESULT_CHARS = 12_000;
 const MAX_FILES = 200;
@@ -283,22 +283,19 @@ export function createDomainTools(context: DomainToolContext) {
 		parameters: Type.Object({ artifactId: Type.Optional(Type.Number()) }),
 		execute: async (_id, params) =>
 			audited(context, "get_artifact", params, () => {
-				const artifacts =
-					params.artifactId === undefined
-						? context.store.listArtifacts(context.requirementId)
-						: (() => {
-								const artifact = context.store.getArtifact(params.artifactId);
-								if (
-									artifact &&
-									artifact.requirement_id !== context.requirementId
-								) {
-									throw new Error("artifact not found");
-								}
-								return artifact ? [artifact] : [];
-							})();
+				let artifacts;
+				if (params.artifactId === undefined) {
+					artifacts = context.store.listArtifacts(context.requirementId);
+				} else {
+					const artifact = context.store.getArtifact(params.artifactId);
+					if (artifact && artifact.requirement_id !== context.requirementId) {
+						throw new Error("artifact not found");
+					}
+					artifacts = artifact ? [artifact] : [];
+				}
 				return artifacts.map((artifact) => ({
 					artifact,
-					revisions: context.store.listArtifactRevisions(artifact!.id),
+					revisions: context.store.listArtifactRevisions(artifact.id),
 				}));
 			}),
 	});

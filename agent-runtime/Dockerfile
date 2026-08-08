@@ -35,6 +35,6 @@ RUN cd web && npm install
 COPY web ./web
 RUN cd web && npm run build && chown -R node:node /app/web
 WORKDIR /app/agent-runtime
-
+USER node
 # Gateway is the sole runtime entrypoint; build output is dist/gateway.js.
 ENTRYPOINT ["npx", "tsx", "gateway.ts"]

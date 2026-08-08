@@ -824,10 +824,15 @@ const server = http.createServer(
 				| { architecture?: string; head_sha?: string; captured_at?: string }
 				| null;
 			if (!snap) { json(200, null); return; }
-			json(200, {
-				...snap,
-				architecture: snap.architecture ? JSON.parse(snap.architecture) : null,
-			});
+			let architecture: unknown = null;
+			if (snap.architecture) {
+				try {
+					architecture = JSON.parse(snap.architecture);
+				} catch {
+					architecture = null;
+				}
+			}
+			json(200, { ...snap, architecture });
 			return;
 		}
 		const dPkg = url.pathname.match(

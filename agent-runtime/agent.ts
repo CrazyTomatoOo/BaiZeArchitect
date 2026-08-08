@@ -288,10 +288,10 @@ export async function runAgentTurn(
 			return;
 		const content = item.message.content;
 		if (!Array.isArray(content)) return;
-		const fullText = content
-			.filter((part) => part?.type === "text")
-			.map((part) => part.text ?? "")
-			.join("");
+		const fullText = content.reduce((text, part) => {
+			if (part?.type === "text") return text + (part.text ?? "");
+			return text;
+		}, "");
 		if (fullText.length > previousTextLength) {
 			onEvent?.({ type: "token", text: fullText.slice(previousTextLength) });
 			previousTextLength = fullText.length;

@@ -364,18 +364,33 @@ export class Store {
 		this.db = new Database(dbPath);
 		this.db.pragma("foreign_keys = ON");
 		this.db.exec(SCHEMA);
-		for (const table of ["stage_progress", "requirement_scenarios", "usecase_functions", "use_cases", "function_items", "function_domains", "scenarios"]) {
-			this.db.exec(`drop table if exists ${table}`);
-		}
-		this.addColumnIfMissing("evidence_snapshots", "run_id", "integer references runs(id)");
-		this.addColumnIfMissing("design_packages", "run_id", "integer references runs(id)");
-		this.addColumnIfMissing("design_packages", "snapshot", "text not null default '{}'");
-		this.addColumnIfMissing("design_packages", "status", "text not null default 'draft'");
+		this.db.exec(
+			"drop table if exists stage_progress; drop table if exists requirement_scenarios; " +
+			"drop table if exists usecase_functions; drop table if exists use_cases; " +
+			"drop table if exists function_items; drop table if exists function_domains; " +
+			"drop table if exists scenarios;",
+		);
+		this.migrateSchema();
 	}
 
-	private addColumnIfMissing(table: string, column: string, definition: string): void {
+	private migrateSchema(): void {
 		try {
-			this.db.exec(`alter table ${table} add column ${column} ${definition}`);
+			this.db.exec("alter table evidence_snapshots add column run_id integer references runs(id)");
+		} catch {
+			/* column already exists */
+		}
+		try {
+			this.db.exec("alter table design_packages add column run_id integer references runs(id)");
+		} catch {
+			/* column already exists */
+		}
+		try {
+			this.db.exec("alter table design_packages add column snapshot text not null default '{}'");
+		} catch {
+			/* column already exists */
+		}
+		try {
+			this.db.exec("alter table design_packages add column status text not null default 'draft'");
 		} catch {
 			/* column already exists */
 		}
