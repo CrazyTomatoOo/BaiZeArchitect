@@ -22,7 +22,7 @@ docker compose run --rm test
 | `/app/fixtures/test-repo` | 只读测试仓库种子 |
 | `/tmp/baize-smoke-*` | 单次测试的 SQLite、证据、归档和可写仓库 |
 
-Compose 设置 `BAIZE_CONTAINER_TEST=1`，并将 `BAIZE_DB_PATH`、`BAIZE_EVIDENCE_DIR`、`BAIZE_REPOS_ROOT` 和 `EVOLVER_HOME` 指向容器内 `/tmp`。测试退出后这些数据全部销毁。
+Compose 设置 `BAIZE_CONTAINER_TEST=1`，并将 `BAIZE_DB_PATH`、`BAIZE_SESSION_DIR`、`BAIZE_MODEL_CONFIG_PATH`、`BAIZE_EVIDENCE_DIR`、`BAIZE_REPOS_ROOT` 和 `EVOLVER_HOME` 指向容器内 `/tmp`。测试退出后这些数据全部销毁。
 
 ## 主要模块
 

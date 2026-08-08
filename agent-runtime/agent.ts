@@ -119,11 +119,9 @@ export function applyModelConfig(config: ModelConfig): void {
 	registerProvider(activeProvider);
 }
 
-const MODEL_CONFIG_PATH = path.join(
-	PROJECT_ROOT,
-	".baize",
-	"model-config.json",
-);
+const MODEL_CONFIG_PATH =
+	process.env.BAIZE_MODEL_CONFIG_PATH ??
+	path.join(PROJECT_ROOT, ".baize", "model-config.json");
 
 export function readModelConfig(): ModelConfig | null {
 	try {

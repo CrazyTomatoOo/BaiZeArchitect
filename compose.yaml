@@ -12,6 +12,8 @@ services:
       BAIZE_REPOS_ROOT: /tmp/baize/repos
       BAIZE_EVIDENCE_DIR: /tmp/baize/evidence
       BAIZE_DB_PATH: /tmp/baize/baize.db
+      BAIZE_SESSION_DIR: /tmp/baize/sessions
+      BAIZE_MODEL_CONFIG_PATH: /tmp/baize/model-config.json
       BAIZE_EVOLVER: "0"
       EVOLVER_HOME: /tmp/baize/evolver-home
       HOME: /tmp/home
