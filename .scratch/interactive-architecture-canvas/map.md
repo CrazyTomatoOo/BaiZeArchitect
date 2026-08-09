@@ -31,6 +31,7 @@ Produce an implementation-ready specification for replacing the architecture bro
 - [Define scale, aggregation, and layout behavior](issues/05-define-scale-aggregation-and-layout-behavior.md) — The evidence-backed Visible Graph is capped at 500 nodes, with deterministic Worker layouts, density merging, adaptive labels, stale-result protection, and explicit interaction-first budgets.
 - [Define the frontend integration and Mermaid cutover boundary](issues/07-define-integration-and-mermaid-cutover-boundary.md) — The browser coordinates immutable snapshot/view state while a lazily imported G6/ELK canvas renders it; old C4 Mermaid arrays are removed atomically without affecting Markdown Mermaid.
 - [Define the accessibility, testing, and acceptance bar](issues/08-define-accessibility-testing-and-acceptance-bar.md) — WCAG 2.2 AA, a semantic list/live-region graph alternative, four automated test layers, performance budgets, three viewports, and dual-screen-reader human verification are mandatory before cutover.
+- [Approve the implementation-ready canvas specification](issues/09-approve-the-implementation-ready-canvas-specification.md) — [`spec.md`](spec.md) reconciles all resolved contracts and authorizes implementation only against its snapshot-first, free G6/ELK, accessible, fully tested cutover plan.
 
 ## Not yet specified
 
