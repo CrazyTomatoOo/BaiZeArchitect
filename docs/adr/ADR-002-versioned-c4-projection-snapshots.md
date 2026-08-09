@@ -1,0 +1,3 @@
+# Use immutable, evidence-backed C4 projection snapshots
+
+The architecture browser will consume one canonical fact graph per `repositoryId + headSha + projectionVersion`, persisted immutably and referenced by requirement evidence snapshots. Context, Container, Component, and Code are filtered views over that one graph; elements use semantic IDs plus lineage, relationships are strongly typed and evidence-backed, and aggregation is explicit and traceable. This replaces the current heuristic C4 cache of separate arrays and positional IDs so graph navigation, export, and audit replay cannot diverge.

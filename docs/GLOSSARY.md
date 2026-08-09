@@ -14,6 +14,7 @@
 | 角色 | Role | Agent 在运行时所承担的职责 | 角色 ID 为英文小写（`orchestrator` 等），UI 显示使用 `roles.*` 本地化标签。 |
 | 用户 | User | 通过 GitHub OAuth 登录的个体 | 登录页使用 `login.*` 文案；登录后 header 展示当前用户名。 |
 | 团队 | Team | 用户所属的组织单元，拥有操作权限 | 团队令牌与审批权限相关，错误提示使用 `error.approvalPermissionRequired`。 |
+| 架构投影快照 | Architecture Projection Snapshot | 同一仓库提交与投影版本对应的不可变、可审计 C4 事实图 | 架构浏览、导出和需求证据均显示并引用同一快照标识。 |
 
 ## 角色定义
 
