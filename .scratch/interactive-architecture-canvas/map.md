@@ -30,6 +30,7 @@ Produce an implementation-ready specification for replacing the architecture bro
 - [Run the G6 and ELK 500-node evaluation spike](issues/13-run-g6-elk-500-node-evaluation-spike.md) — The free stack passed its worker-layout, compound-rendering, semantic-navigation, standalone-SVG, and bounded-PNG gate; production must lazy-load the measured dependency boundary.
 - [Define scale, aggregation, and layout behavior](issues/05-define-scale-aggregation-and-layout-behavior.md) — The evidence-backed Visible Graph is capped at 500 nodes, with deterministic Worker layouts, density merging, adaptive labels, stale-result protection, and explicit interaction-first budgets.
 - [Define the frontend integration and Mermaid cutover boundary](issues/07-define-integration-and-mermaid-cutover-boundary.md) — The browser coordinates immutable snapshot/view state while a lazily imported G6/ELK canvas renders it; old C4 Mermaid arrays are removed atomically without affecting Markdown Mermaid.
+- [Define the accessibility, testing, and acceptance bar](issues/08-define-accessibility-testing-and-acceptance-bar.md) — WCAG 2.2 AA, a semantic list/live-region graph alternative, four automated test layers, performance budgets, three viewports, and dual-screen-reader human verification are mandatory before cutover.
 
 ## Not yet specified
 
