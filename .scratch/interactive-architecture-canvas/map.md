@@ -25,6 +25,7 @@ Produce an implementation-ready specification for replacing the architecture bro
 - [Decide the yFiles license and evaluation gate](issues/10-decide-yfiles-license-and-evaluation-gate.md) — yFiles plus Hierarchical Layout is the only first-release engine candidate, pending a hard evaluation gate in the real Lit/Vite route; a failed evaluation reopens selection rather than silently changing export requirements or stack.
 - [Prototype the interactive canvas visual language](issues/03-prototype-interactive-canvas-visual-language.md) — Direction A, the canvas-first Command deck with persistent evidence inspector, is the approved visual baseline; the throwaway alternatives remain on their prototype branch.
 - [Define the navigation and inspection contract](issues/04-define-navigation-and-inspection-contract.md) — Explicit drill-down plus per-layer session restoration, shareable navigation URLs, semantic keyboard navigation, and a single-selection evidence inspector define the read-only exploration flow.
+- [Define the PNG and SVG export contract](issues/06-define-png-and-svg-export-contract.md) — Browser-only downloads capture the full current visible graph with embedded provenance; SVG is standalone and 2× PNG refuses over-limit captures rather than silently degrading.
 
 ## Not yet specified
 
