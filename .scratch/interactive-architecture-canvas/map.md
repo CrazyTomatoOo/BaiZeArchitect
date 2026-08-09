@@ -26,7 +26,8 @@ Produce an implementation-ready specification for replacing the architecture bro
 - [Define the navigation and inspection contract](issues/04-define-navigation-and-inspection-contract.md) — Explicit drill-down plus per-layer session restoration, shareable navigation URLs, semantic keyboard navigation, and a single-selection evidence inspector define the read-only exploration flow.
 - [Define the PNG and SVG export contract](issues/06-define-png-and-svg-export-contract.md) — Browser-only downloads capture the full current visible graph with embedded provenance; SVG is standalone and 2× PNG refuses over-limit captures rather than silently degrading.
 - [Research a free graph engine and export stack](issues/12-research-free-graph-engine-and-export-stack.md) — AntV G6 plus ELK.js Layered ranks first; BaiZe must own projection-to-layout mapping and deterministic SVG/PNG generation, with Cytoscape.js plus ELK.js retained only as a fallback.
-- [Decide the free graph engine and layout stack](issues/10-decide-yfiles-license-and-evaluation-gate.md) — AntV G6 plus ELK.js Layered is the sole free production candidate, pending a hard 500-node Lit/Vite evaluation; BaiZe owns layout mapping and standalone SVG/PNG export.
+- [Decide the free graph engine and layout stack](issues/10-decide-yfiles-license-and-evaluation-gate.md) — AntV G6 plus ELK.js Layered is the accepted free production stack; BaiZe owns layout mapping and standalone SVG/PNG export.
+- [Run the G6 and ELK 500-node evaluation spike](issues/13-run-g6-elk-500-node-evaluation-spike.md) — The free stack passed its worker-layout, compound-rendering, semantic-navigation, standalone-SVG, and bounded-PNG gate; production must lazy-load the measured dependency boundary.
 
 ## Not yet specified
 
