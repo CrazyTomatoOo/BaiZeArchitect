@@ -29,6 +29,7 @@ Produce an implementation-ready specification for replacing the architecture bro
 - [Decide the free graph engine and layout stack](issues/10-decide-yfiles-license-and-evaluation-gate.md) — AntV G6 plus ELK.js Layered is the accepted free production stack; BaiZe owns layout mapping and standalone SVG/PNG export.
 - [Run the G6 and ELK 500-node evaluation spike](issues/13-run-g6-elk-500-node-evaluation-spike.md) — The free stack passed its worker-layout, compound-rendering, semantic-navigation, standalone-SVG, and bounded-PNG gate; production must lazy-load the measured dependency boundary.
 - [Define scale, aggregation, and layout behavior](issues/05-define-scale-aggregation-and-layout-behavior.md) — The evidence-backed Visible Graph is capped at 500 nodes, with deterministic Worker layouts, density merging, adaptive labels, stale-result protection, and explicit interaction-first budgets.
+- [Define the frontend integration and Mermaid cutover boundary](issues/07-define-integration-and-mermaid-cutover-boundary.md) — The browser coordinates immutable snapshot/view state while a lazily imported G6/ELK canvas renders it; old C4 Mermaid arrays are removed atomically without affecting Markdown Mermaid.
 
 ## Not yet specified
 
