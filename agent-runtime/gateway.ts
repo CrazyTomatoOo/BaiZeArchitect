@@ -12,6 +12,14 @@ import { execFile } from "node:child_process";
 import { openStore, RunInProgressError } from "./store.js";
 import type { AgentRole } from "./agent.js";
 import { generateEvidence } from "./evidence.js";
+import {
+	C4_LAYERS,
+	createC4ProjectionSnapshot,
+	deriveVisibleGraph,
+	type C4NodeKind,
+	type C4ProjectionInput,
+	type C4ProjectionSnapshot,
+} from "./c4-projection.js";
 
 process.env.BAIZE_GATEWAY = "1";
 const {
@@ -32,7 +40,7 @@ const DB_PATH = process.env.BAIZE_DB_PATH ?? join(ROOT, ".baize", "baize.db");
 const SESSION_DIR = process.env.BAIZE_SESSION_DIR ?? join(ROOT, ".baize", "sessions");
 // 生产部署:单进程服务 web/dist(SPA);dev 用 vite(:5173)代理 /api。
 const WEB_DIST = process.env.BAIZE_WEB_DIST ?? join(ROOT, "web", "dist");
-const C4_GENERATION = "heuristic-draft-v2";
+const C4_PROJECTION_VERSION = "c4-projection-v1";
 
 // —— 数据层接线(spec §2):证据快照 + 设计包落库 ——
 function gitHeadSha(repoPath: string): Promise<string> {
@@ -205,34 +213,35 @@ async function systemStatus(): Promise<Record<string, unknown>> {
 		}
 	}
 
-	async function readC4Cache(repoId: string): Promise<Record<string, unknown> | null> {
-		return readJsonIfExists(join(EVIDENCE_DIR, `${repoId}.c4.json`));
+	function c4SnapshotDirectory(repoId: string): string {
+		return join(EVIDENCE_DIR, `${encodeURIComponent(repoId)}.c4-snapshots`);
 	}
 
-	async function generateC4(repoId: string, repoPath: string): Promise<Record<string, unknown>> {
-		const headSha = (await gitHeadSha(repoPath)) || "untracked";
-		const cached = await readC4Cache(repoId);
-		if (
-			cached &&
-			cached.head_sha === headSha &&
-			cached.generation === C4_GENERATION
-		)
-			return { ...cached, cached: true };
+	async function readC4Snapshot(repoId: string, snapshotId: string): Promise<C4ProjectionSnapshot | null> {
+		const snapshot = await readJsonIfExists(join(c4SnapshotDirectory(repoId), `${snapshotId}.json`));
+		return snapshot?.id === snapshotId ? (snapshot as unknown as C4ProjectionSnapshot) : null;
+	}
 
+	function snapshotMetadata(snapshot: C4ProjectionSnapshot): Omit<C4ProjectionSnapshot, "nodes" | "edges"> & { nodeCount: number; edgeCount: number } {
+		const { nodes, edges, ...metadata } = snapshot;
+		return { ...metadata, nodeCount: nodes.length, edgeCount: edges.length };
+	}
+
+	async function buildC4ProjectionInput(repoId: string, repoPath: string): Promise<C4ProjectionInput> {
+		const headSha = (await gitHeadSha(repoPath)) || "untracked";
 		const architecture = (await readEvidenceArchitecture(repoId)) ?? {};
 		const rootPackage = await readJsonIfExists(join(repoPath, "package.json"));
 		const packageDirs = ["", "agent-runtime", "web"];
-		const containers: Array<Record<string, unknown>> = [];
+		const containers: C4ProjectionInput["containers"] = [];
 		for (const dir of packageDirs) {
 			const pkg = await readJsonIfExists(join(repoPath, dir, "package.json"));
 			if (!pkg) continue;
-			const name = String(pkg.name ?? (dir ? `${repoId}/${dir}` : repoId));
 			containers.push({
 				id: dir ? dir.replace(/[^a-zA-Z0-9]/g, "-") : "app",
-				name,
+				name: String(pkg.name ?? (dir ? `${repoId}/${dir}` : repoId)),
 				description: String(pkg.description ?? (dir ? `${dir} package` : "repository application")),
 				technology: "Node.js / TypeScript",
-				source: dir ? `${dir}/package.json` : "package.json",
+				sourcePath: dir ? `${dir}/package.json` : "package.json",
 			});
 		}
 		const composeFiles = ["compose.yaml", "compose.yml", "docker-compose.yml"];
@@ -241,45 +250,63 @@ async function systemStatus(): Promise<Record<string, unknown>> {
 			if (!text) continue;
 			for (const match of text.matchAll(/^  ([A-Za-z0-9_-]+):\s*$/gm)) {
 				const name = match[1];
-				if (name === "services" || containers.some((c) => c.name === name)) continue;
-				containers.push({ id: `compose-${name}`, name, description: `compose service ${name}`, technology: "Docker", source: file });
+				if (name === "services" || containers.some((container) => container.name === name)) continue;
+				containers.push({ id: `compose-${name}`, name, description: `compose service ${name}`, technology: "Docker", sourcePath: file });
 			}
 			break;
 		}
-		const clusters = Array.isArray((architecture as { clusters?: unknown }).clusters) ? (architecture as { clusters: Array<Record<string, unknown>> }).clusters : [];
-		const components = clusters.map((cluster, index) => ({
-			id: `component-${index + 1}`,
-			name: String(cluster.label ?? `Component ${index + 1}`),
-			description: "从代码聚类反推的职责块(draft)",
-			containerId: containers[0]?.id ?? "app",
-			members: Number(cluster.members ?? 0),
-			cohesion: Number(cluster.cohesion ?? 0),
-			topNodes: cluster.top_nodes ?? [],
-		}));
+		const architectureRecord = architecture as { clusters?: unknown; hotspots?: unknown };
+		const clusters = Array.isArray(architectureRecord.clusters) ? architectureRecord.clusters as Array<Record<string, unknown>> : [];
+		const components = clusters.map((cluster, index) => {
+			const topNodes = Array.isArray(cluster.top_nodes) ? cluster.top_nodes.map(String) : [];
+			return {
+				id: `component-${index + 1}`,
+				name: String(cluster.label ?? `Component ${index + 1}`),
+				description: "Evidence-backed code community",
+				parentId: containers[0]?.id,
+				members: topNodes,
+			};
+		});
+		const hotspots = Array.isArray(architectureRecord.hotspots) ? architectureRecord.hotspots as Array<Record<string, unknown>> : [];
+		const code = hotspots.map((hotspot, index) => {
+			const qualifiedName = String(hotspot.qualified_name ?? hotspot.name ?? `code-${index + 1}`);
+			return {
+				id: `code-${index + 1}`,
+				name: qualifiedName,
+				description: `Hotspot with ${Number(hotspot.fan_in ?? 0)} callers`,
+				parentId: components[0]?.id,
+				sourcePath: qualifiedName.split(":")[0] || "architecture evidence",
+			};
+		});
 		const dependencies = Object.keys((rootPackage?.dependencies as Record<string, unknown>) ?? {}).slice(0, 12);
-		const payload: Record<string, unknown> = {
+		const relationships: C4ProjectionInput["relationships"] = [
+			...dependencies.flatMap((dependency) => containers[0] ? [{ source: containers[0].id, target: `external:${dependency}`, kind: "externalDependency" as const, evidence: ["package.json"] }] : []),
+			...components.flatMap((component) => component.parentId ? [{ source: component.parentId, target: component.id, kind: "contains" as const, evidence: component.members?.length ? component.members : ["architecture evidence"] }] : []),
+			...code.flatMap((node) => node.parentId ? [{ source: node.parentId, target: node.id, kind: "contains" as const, evidence: node.sourcePath ? [node.sourcePath] : ["architecture evidence"] }] : []),
+		];
+		return {
 			repositoryId: repoId,
-			head_sha: headSha,
-			generatedAt: new Date().toISOString(),
-			generation: C4_GENERATION,
-			context: {
+			headSha,
+			projectionVersion: C4_PROJECTION_VERSION,
+			system: {
 				name: String(rootPackage?.name ?? repoId),
-				description: String(rootPackage?.description ?? "当前仓库的系统上下文(draft)"),
-				externalSystems: dependencies.map((name) => ({ name, kind: "dependency" })),
+				description: String(rootPackage?.description ?? "Repository architecture"),
 			},
+			externalDependencies: dependencies.map((name) => ({ name, description: "Declared package dependency", evidence: ["package.json"] })),
 			containers,
 			components,
-			code: {
-				totalNodes: Number(architecture.total_nodes ?? 0),
-				totalEdges: Number(architecture.total_edges ?? 0),
-				hotspots: (architecture as { hotspots?: unknown }).hotspots ?? [],
-				boundaries: (architecture as { boundaries?: unknown }).boundaries ?? [],
-				clusters,
-			},
+			code,
+			relationships,
 		};
-		await mkdir(EVIDENCE_DIR, { recursive: true });
-		await writeFile(join(EVIDENCE_DIR, `${repoId}.c4.json`), JSON.stringify(payload, null, 2));
-		return payload;
+	}
+
+	async function resolveC4Snapshot(repoId: string, repoPath: string): Promise<C4ProjectionSnapshot> {
+		const snapshot = createC4ProjectionSnapshot(await buildC4ProjectionInput(repoId, repoPath));
+		const cached = await readC4Snapshot(repoId, snapshot.id);
+		if (cached) return cached;
+		await mkdir(c4SnapshotDirectory(repoId), { recursive: true });
+		await writeFile(join(c4SnapshotDirectory(repoId), `${snapshot.id}.json`), JSON.stringify(snapshot, null, 2));
+		return snapshot;
 	}
 
 	const store = openStore(DB_PATH);
@@ -530,29 +557,75 @@ const server = http.createServer(
 			return;
 		}
 
-		const architectureRoute = url.pathname.match(/^\/api\/architecture\/([^/]+)\/(tree|c4)(?:\/generate)?$/);
-		if (architectureRoute) {
-			const repoId = decodeURIComponent(architectureRoute[1]);
-			const kind = architectureRoute[2];
+		const treeRoute = url.pathname.match(/^\/api\/architecture\/([^/]+)\/tree$/);
+		if (treeRoute) {
+			if (req.method !== "GET") {
+				json(405, { error: "method not allowed" });
+				return;
+			}
+			const repoId = decodeURIComponent(treeRoute[1]);
 			const repoPath = await repoPathForId(repoId);
 			if (!repoPath) {
 				json(404, { error: `repository not found: ${repoId}` });
 				return;
 			}
-			if (kind === "tree" && req.method === "GET") {
-				json(200, { repositoryId: repoId, tree: await buildDirectoryTree(repoPath) });
+			json(200, { repositoryId: repoId, tree: await buildDirectoryTree(repoPath) });
+			return;
+		}
+
+		const resolveSnapshotRoute = url.pathname.match(/^\/api\/architecture\/([^/]+)\/c4\/snapshots\/resolve$/);
+		if (resolveSnapshotRoute) {
+			if (req.method !== "POST") {
+				json(405, { error: "method not allowed" });
 				return;
 			}
-			if (kind === "c4" && req.method === "GET") {
-				const cached = await readC4Cache(repoId);
-				json(200, cached?.generation === C4_GENERATION ? cached : null);
+			const repoId = decodeURIComponent(resolveSnapshotRoute[1]);
+			const repoPath = await repoPathForId(repoId);
+			if (!repoPath) {
+				json(404, { error: `repository not found: ${repoId}` });
 				return;
 			}
-			if (kind === "c4" && req.method === "POST") {
-				json(200, await generateC4(repoId, repoPath));
+			json(200, snapshotMetadata(await resolveC4Snapshot(repoId, repoPath)));
+			return;
+		}
+
+		const snapshotRoute = url.pathname.match(/^\/api\/architecture\/([^/]+)\/c4\/snapshots\/([^/]+)(?:\/(visible))?$/);
+		if (snapshotRoute) {
+			if (req.method !== "GET") {
+				json(405, { error: "method not allowed" });
 				return;
 			}
-			json(405, { error: "method not allowed" });
+			const repoId = decodeURIComponent(snapshotRoute[1]);
+			const snapshotId = decodeURIComponent(snapshotRoute[2]);
+			const snapshot = await readC4Snapshot(repoId, snapshotId);
+			if (!snapshot) {
+				json(404, { error: `snapshot not found: ${snapshotId}` });
+				return;
+			}
+			if (snapshotRoute[3] !== "visible") {
+				json(200, snapshotMetadata(snapshot));
+				return;
+			}
+			const layer = url.searchParams.get("layer");
+			if (!layer || !C4_LAYERS.includes(layer as (typeof C4_LAYERS)[number])) {
+				json(400, { error: "a valid C4 layer is required" });
+				return;
+			}
+			const allowedKinds = new Set<C4NodeKind>(["system", "externalSystem", "container", "component", "code", "aggregate"]);
+			const kinds = (url.searchParams.get("kinds") ?? "").split(",").filter((kind): kind is C4NodeKind => allowedKinds.has(kind as C4NodeKind));
+			const maxNodes = Number(url.searchParams.get("maxNodes"));
+			try {
+				json(200, deriveVisibleGraph(snapshot, {
+					layer: layer as (typeof C4_LAYERS)[number],
+					root: url.searchParams.get("root") || undefined,
+					query: url.searchParams.get("query") || undefined,
+					focus: url.searchParams.get("focus") || undefined,
+					kinds: kinds.length ? kinds : undefined,
+					maxNodes: Number.isFinite(maxNodes) ? maxNodes : undefined,
+				}));
+			} catch (error) {
+				json(400, { error: error instanceof Error ? error.message : "visible graph request failed" });
+			}
 			return;
 		}
 
