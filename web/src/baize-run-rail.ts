@@ -61,7 +61,7 @@ class BaizeRunRail extends LitElement {
 			background: var(--surface);
 			border: 1px solid var(--border-strong);
 			border-radius: var(--radius);
-			box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
+			box-shadow: 0 8px 24px var(--shadow-2);
 			overflow: hidden;
 			pointer-events: auto;
 			font-size: 0.8rem;
@@ -137,7 +137,7 @@ class BaizeRunRail extends LitElement {
 			font-size: 0.72rem;
 		}
 		.ev .k {
-			color: var(--info);
+			color: var(--accent);
 		}
 		.ev .k.done {
 			color: var(--ok);

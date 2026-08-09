@@ -31,13 +31,13 @@ class BaizeDecisions extends LitElement {
 
 	static styles = css`
 		:host { display: block; }
-		.page-head h1 { margin: 0; font-size: 1.4rem; }
+		.page-head h1 { margin: 0; font-family: var(--font-display); font-weight: 600; font-size: 1.4rem; }
 		.page-head .sub { margin: 4px 0 24px; color: var(--text-muted); font-size: .88rem; }
 		.list { display: flex; flex-direction: column; gap: var(--gap); max-width: 780px; }
 		.item { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; }
 		.row { display: flex; align-items: center; gap: 12px; padding: 14px 16px; cursor: pointer; }
 		.row:hover { background: var(--surface-2); }
-		.badge { padding: 2px 9px; border-radius: 99px; color: var(--warn); background: rgba(251, 191, 36, .15); font-size: 11px; font-weight: 600; }
+		.badge { padding: 2px 9px; border-radius: 99px; color: var(--warn); background: var(--warn-soft); font-size: 11px; font-weight: 600; }
 		.row .title { font-weight: 600; }
 		.row .severity { margin-left: auto; color: var(--text-muted); font: .78rem var(--font-mono); }
 		.detail { padding: 16px; border-top: 1px solid var(--border); background: var(--surface-2); }
@@ -46,7 +46,8 @@ class BaizeDecisions extends LitElement {
 		.option { padding: 8px 10px; margin: 6px 0; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--bg); }
 		.option small { display: block; margin-top: 3px; color: var(--text-muted); }
 		.empty { max-width: 780px; padding: 48px 24px; color: var(--text-muted); text-align: center; background: var(--surface); border: 1px dashed var(--border-strong); border-radius: var(--radius); }
-		.btn { margin-top: 12px; padding: 8px 14px; border: 1px solid var(--border-strong); border-radius: var(--radius-sm); background: var(--surface-hover); color: var(--text); cursor: pointer; font: inherit; }
+		.btn { margin-top: 12px; padding: 8px 14px; border: 1px solid var(--border-strong); border-radius: var(--radius-sm); background: transparent; color: var(--text); cursor: pointer; font: inherit; }
+		.btn:hover { border-color: var(--accent); }
 	`;
 
 	constructor() {

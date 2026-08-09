@@ -41,7 +41,8 @@ class BaizeOverview extends LitElement {
 		.page-head h1 {
 			margin: 0;
 			font-size: 1.4rem;
-			font-weight: 650;
+			font-family: var(--font-display);
+			font-weight: 600;
 			letter-spacing: -0.01em;
 		}
 		.page-head .sub {
@@ -52,7 +53,7 @@ class BaizeOverview extends LitElement {
 		/* 计数卡片 */
 		.stats {
 			display: grid;
-			grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+			grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
 			gap: var(--gap);
 			margin-bottom: 32px;
 		}
@@ -67,7 +68,6 @@ class BaizeOverview extends LitElement {
 		}
 		.stat:hover {
 			border-color: var(--border-strong);
-			box-shadow: 0 6px 20px rgba(0, 0, 0, 0.3);
 			transform: translateY(-2px);
 		}
 		.stat::before {
@@ -85,6 +85,7 @@ class BaizeOverview extends LitElement {
 			font-weight: 700;
 			color: var(--text);
 			font-family: var(--font-mono);
+			font-variant-numeric: tabular-nums;
 			line-height: 1.1;
 		}
 		.stat .label {

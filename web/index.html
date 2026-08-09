@@ -5,30 +5,35 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>BaiZe Architect</title>
     <style>
-      /* BaiZe design tokens — Graphite Indigo(T04 变体 C)。沿用 CSS vars,系统字体栈。 */
+      /* BaiZe design tokens — Graphite Indigo(T04 变体 C)。OKLCH;单一真源见 DESIGN.md。 */
       :root {
         /* 基面:石墨 + 可见边框 */
-        --bg: #111317;
-        --surface: #1a1d23;
-        --surface-2: #21242b;
-        --surface-hover: #2a2e36;
-        --border: #2c3038;
-        --border-strong: #3a3f49;
-        /* 文字 */
-        --text: #d8dbe0;
-        --text-muted: #878c96;
-        --text-subtle: #545862;
-        /* accent + 状态(BaiZe 签名靛蓝;run 专色与 ok 显式区分) */
-        --accent: #7c8cff;
-        --accent-fg: #111317;
-        --accent-2: #38bdf8;
-        --run: #38bdf8;
-        --ok: #34d399;
-        --warn: #fbbf24;
-        --danger: #fb7185;
-        --destructive: #fb7185;
-        --info: #818cf8;
-        --muted: #6b7280;
+        --bg: oklch(18.6% 0.009 264.3);
+        --surface: oklch(23% 0.012 264.3);
+        --surface-2: oklch(26% 0.014 267);
+        --surface-hover: oklch(30.1% 0.016 264.3);
+        --border: oklch(43.4% 0.026 265.5);
+        --border-strong: oklch(50.5% 0.023 260.1);
+        /* 文字(对 bg 对比 13.4 / 5.5 / 4.8 :1) */
+        --text: oklch(89.1% 0.008 260.7);
+        --text-muted: oklch(63.9% 0.016 264.5);
+        --text-subtle: oklch(60.6% 0.016 264.4);
+        /* accent + 状态(run 专色与 ok 显式区分) */
+        --accent: oklch(68.1% 0.169 275);
+        --accent-hi: oklch(74% 0.165 275);
+        --accent-fg: oklch(18.6% 0.009 264.3);
+        --run: oklch(75.4% 0.139 232.7);
+        --ok: oklch(77.3% 0.153 163.2);
+        --warn: oklch(83.7% 0.164 84.4);
+        --danger: oklch(71.9% 0.169 13.4);
+        --scrim: oklch(12% 0.01 264 / 0.55);
+        --accent-glow: oklch(68.1% 0.169 275 / 0.15);
+        --ok-soft: oklch(77.3% 0.153 163.2 / 0.15);
+        --warn-soft: oklch(83.7% 0.164 84.4 / 0.12);
+        --warn-line: oklch(83.7% 0.164 84.4 / 0.3);
+        --scrim-strong: oklch(8% 0.01 264 / 0.6);
+        --shadow-1: oklch(10% 0.01 264 / 0.3);
+        --shadow-2: oklch(10% 0.01 264 / 0.5);
         /* 几何 */
         --radius: 6px;
         --radius-sm: 4px;
@@ -37,10 +42,10 @@
         --sidebar-w: 258px;
         --rail-w: 400px;
         --content-max: 1120px;
-        /* 字体:系统栈,无字体文件 */
+        /* 字体:display 自托管(latin),CJK 诚实回退系统栈 */
         --font-ui: -apple-system, "SF Pro Text", system-ui, sans-serif;
         --font-mono: "SF Mono", ui-monospace, "JetBrains Mono", monospace;
-        --font-display: "Space Grotesk", -apple-system, system-ui, sans-serif;
+        --font-display: "Space Grotesk Variable", -apple-system, system-ui, sans-serif;
         /* type scale */
         --text-xs: 0.6875rem;
         --text-sm: 0.8125rem;
@@ -60,6 +65,7 @@
       html,
       body {
         margin: 0;
+        overflow-x: clip;
         background: var(--bg);
         color: var(--text);
         font-family: var(--font-ui);

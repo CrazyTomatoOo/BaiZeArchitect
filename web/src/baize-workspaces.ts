@@ -35,7 +35,8 @@ class BaizeWorkspaces extends LitElement {
 		.page-head h1 {
 			margin: 0;
 			font-size: 1.4rem;
-			font-weight: 650;
+			font-family: var(--font-display);
+			font-weight: 600;
 			letter-spacing: -0.01em;
 		}
 		.page-head .sub {
@@ -74,7 +75,7 @@ class BaizeWorkspaces extends LitElement {
 			border: 1px solid var(--border);
 			border-radius: var(--radius);
 			padding: 20px;
-			box-shadow: 0 4px 16px rgba(0, 0, 0, 0.25);
+			box-shadow: 0 4px 16px var(--shadow-1);
 		}
 		.form-card.hero {
 			width: 100%;
@@ -115,7 +116,7 @@ class BaizeWorkspaces extends LitElement {
 		input:focus {
 			outline: none;
 			border-color: var(--accent);
-			box-shadow: 0 0 0 3px rgba(124, 140, 255, 0.15);
+			box-shadow: 0 0 0 3px var(--accent-glow);
 		}
 		.btn {
 			display: inline-flex;
@@ -134,7 +135,7 @@ class BaizeWorkspaces extends LitElement {
 			transition: background 0.2s, transform 0.1s;
 		}
 		.btn:hover {
-			background: var(--info);
+			background: var(--accent-hi);
 		}
 		.btn:active {
 			transform: scale(0.97);
@@ -218,7 +219,7 @@ class BaizeWorkspaces extends LitElement {
 		}
 		.ws-card:hover {
 			border-color: var(--border-strong);
-			box-shadow: 0 6px 20px rgba(0, 0, 0, 0.3);
+			box-shadow: 0 6px 20px var(--shadow-1);
 			transform: translateY(-2px);
 		}
 		.ws-top {

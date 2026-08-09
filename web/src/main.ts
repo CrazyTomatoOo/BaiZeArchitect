@@ -1,3 +1,4 @@
+import "@fontsource-variable/space-grotesk";
 import "./baize-shell.ts";
 import "./baize-architecture-browser.ts";
 import "./baize-overview.ts";

@@ -54,7 +54,8 @@ class BaizeAssetLibrary extends LitElement {
 		.page-head h1 {
 			margin: 0;
 			font-size: 1.4rem;
-			font-weight: 650;
+			font-family: var(--font-display);
+			font-weight: 600;
 			letter-spacing: -0.01em;
 		}
 		.page-head .sub {

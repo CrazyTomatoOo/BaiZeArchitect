@@ -14,6 +14,7 @@ class BaizeShell extends LitElement {
 		wsName: { state: true },
 		workspaces: { state: true },
 		folded: { state: true },
+		navOpen: { state: true },
 		decCount: { state: true },
 		wsConnected: { state: true },
 	};
@@ -23,6 +24,7 @@ class BaizeShell extends LitElement {
 	declare wsName: string;
 	declare workspaces: Array<{ id: number; name: string }>;
 	declare folded: boolean;
+	declare navOpen: boolean;
 	declare decCount: number;
 	declare wsConnected: boolean;
 
@@ -96,7 +98,6 @@ class BaizeShell extends LitElement {
 		}
 		.nav-group .label {
 			font-size: 11px;
-			text-transform: uppercase;
 			letter-spacing: 0.06em;
 			color: var(--text-subtle);
 			margin-bottom: 6px;
@@ -115,13 +116,14 @@ class BaizeShell extends LitElement {
 			font-size: 0.85rem;
 			width: 100%;
 			text-align: left;
+			white-space: nowrap;
 		}
 		.nav-item:hover {
 			background: var(--surface-hover);
 			color: var(--text);
 		}
 		.nav-item:focus-visible {
-			outline: 2px solid var(--accent-2);
+			outline: var(--focus-ring);
 			outline-offset: 2px;
 		}
 		.nav-item.active {
@@ -135,7 +137,7 @@ class BaizeShell extends LitElement {
 			color: var(--text-muted);
 		}
 		.status-foot .live {
-			color: var(--muted);
+			color: var(--text-subtle);
 		}
 		.status-foot .live.on {
 			color: var(--ok);
@@ -168,9 +170,9 @@ class BaizeShell extends LitElement {
 			color: var(--accent);
 		}
 		.scope-banner {
-			background: rgba(245, 158, 11, 0.12);
+			background: var(--warn-soft);
 			color: var(--warn);
-			border: 1px solid rgba(245, 158, 11, 0.3);
+			border: 1px solid var(--warn-line);
 			border-radius: var(--radius-sm);
 			padding: 6px 12px;
 			font-size: 0.8rem;
@@ -196,8 +198,11 @@ class BaizeShell extends LitElement {
 			display: flex;
 			align-items: center;
 			gap: 8px;
-			font-weight: 650;
+			font-family: var(--font-display);
+			font-weight: 600;
 			font-size: 1rem;
+			letter-spacing: 0.01em;
+			white-space: nowrap;
 		}
 		.logo .dot {
 			color: var(--accent);
@@ -211,7 +216,7 @@ class BaizeShell extends LitElement {
 		.manage {
 			background: transparent;
 			border: 1px solid var(--border-strong);
-			color: var(--text-muted);
+			color: var(--text);
 			border-radius: var(--radius-sm);
 			padding: 6px 12px;
 			font: inherit;
@@ -228,6 +233,53 @@ class BaizeShell extends LitElement {
 			overflow: auto;
 			width: 100%;
 			padding: var(--pad) calc(var(--pad) * 1.4) 3rem;
+		}
+		.menu-btn {
+			display: none;
+			align-items: center;
+			justify-content: center;
+			width: 34px;
+			height: 34px;
+			background: transparent;
+			border: 1px solid var(--border-strong);
+			border-radius: var(--radius-sm);
+			color: var(--text);
+			font: inherit;
+			cursor: pointer;
+		}
+		.backdrop {
+			position: fixed;
+			inset: 0;
+			background: var(--scrim);
+			z-index: 40;
+		}
+		@media (max-width: 900px) {
+			.menu-btn { display: inline-flex; }
+			.app, .app.folded { grid-template-columns: 1fr; }
+			.app.folded .nav, .app.folded .status-foot,
+			.app.folded .ws-switch .name, .app.folded .ws-switch .caret { display: flex; }
+			.sidebar {
+				position: fixed;
+				top: 0;
+				bottom: 0;
+				left: 0;
+				width: min(80vw, 280px);
+				transform: translateX(-100%);
+				transition: transform var(--dur-2) var(--ease-out);
+				z-index: 50;
+			}
+			.app.nav-open .sidebar { transform: none; }
+			.topbar { position: sticky; top: 0; z-index: 30; }
+			.ws-select { max-width: 34vw; }
+			.manage { white-space: nowrap; }
+		}
+		@media (max-width: 480px) {
+			.logo .word { display: none; }
+			.manage { padding: 6px 8px; font-size: 0.72rem; white-space: nowrap; }
+			.ws-select { max-width: 30vw; }
+		}
+		@media (prefers-reduced-motion: reduce) {
+			.sidebar { transition: none; }
 		}
 	`;
 
@@ -248,6 +300,7 @@ class BaizeShell extends LitElement {
 		}
 		this.workspaces = [];
 		this.folded = localStorage.getItem("baize.ui.v1.sidebarFolded") === "1";
+		this.navOpen = false;
 		this.decCount = 0;
 		this.wsConnected = false;
 	}
@@ -331,6 +384,7 @@ class BaizeShell extends LitElement {
 
 	private goto(tab: string) {
 		this.tab = tab;
+		this.navOpen = false;
 		localStorage.setItem("baize.ui.v1.lastPage", tab);
 	}
 
@@ -388,7 +442,8 @@ class BaizeShell extends LitElement {
 		return html`
 			<div class="shell">
 				<header class="topbar">
-					<span class="logo"><span class="dot">◇</span> BaiZe Architect</span>
+					<button class="menu-btn" aria-label="切换导航" @click=${() => (this.navOpen = !this.navOpen)}>☰</button>
+					<span class="logo"><span class="dot">◇</span><span class="word"> BaiZe Architect</span></span>
 					<div class="topbar-right">
 						<select
 							class="ws-select ${this.ws && this.workspaces.length && this.ws !== this.workspaces[0].id ? "non-default" : ""}"
@@ -410,7 +465,8 @@ class BaizeShell extends LitElement {
 					? html`<div class="scope-banner">⚠ 当前工作区:${this.wsName}(非默认)—— 页面数据仅属此工作区</div>`
 					: null}
 				${this.ws
-					? html`<div class="app ${this.folded ? "folded" : ""}">
+					? html`<div class="app ${this.folded ? "folded" : ""} ${this.navOpen ? "nav-open" : ""}">
+							${this.navOpen ? html`<div class="backdrop" @click=${() => (this.navOpen = false)}></div>` : null}
 							<aside class="sidebar">
 								<nav class="nav">
 							<button class="nav-item ${this.tab === "overview" ? "active" : ""}" @click=${() => this.goto("overview")}>总览</button>

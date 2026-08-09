@@ -44,7 +44,8 @@ class BaizeSystem extends LitElement {
 		.page-head h1 {
 			margin: 0;
 			font-size: 1.4rem;
-			font-weight: 650;
+			font-family: var(--font-display);
+			font-weight: 600;
 			letter-spacing: -0.01em;
 		}
 		.page-head .sub {
@@ -145,7 +146,7 @@ class BaizeSystem extends LitElement {
 			transition: background 0.2s;
 		}
 		.btn:hover {
-			background: var(--info);
+			background: var(--accent-hi);
 		}
 		.saved {
 			margin-left: 10px;

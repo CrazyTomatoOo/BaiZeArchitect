@@ -1,94 +1,131 @@
-# BaiZe Architect 2.0 Design
+# Design — BaiZe Architect
 
-## Purpose
+A locked design system for this app. Every page redesign reads this file before
+emitting code. Do not regenerate per page — extend or amend this file when the
+system needs to grow. Implementation lives in `web/index.html` (`:root` token
+block) + `web/src/*.ts` (Lit shadow-DOM components consuming the tokens by name).
 
-The workbench is the operator surface for the evidence-backed design-run workflow. It drives repository evidence, runtime design, human approval, confirmation, and SRS readiness without hand-written curl commands. In 2.0 this surface is a React single-page application (SPA) served by the Go backend, backed by the same REST API the other clients consume.
+## Genre
 
-## 2.0 Architecture Overview
+atmospheric — 暗色 AI 工作台（Graphite Indigo，T04 变体 C 的产品决策）。
 
-- **Frontend**: React 18 SPA built with Vite 6, TypeScript 5, and Tailwind CSS 3. The app is a first-class client of the backend API, not a server-rendered page.
-- **Routing**: TanStack Router handles client-side navigation under `/workbench`, `/login`, `/auth/callback`, and `/`.
-- **State**: Zustand for auth and workbench UI state; TanStack Query for server state; React Hook Form + Zod for forms.
-- **Backend**: Go/Gin REST API with PostgreSQL-backed stores when `DATABASE_URL` is set (in-memory fallback for local dev), GitHub OAuth 2.0, JWT cookie auth, and API-token/team-token fallbacks.
-- **Agent runtime**: Orchestrator parses the requirement and creates a design run. Analyst, Architect, and Critic run as deterministic findings phase, followed by Reviewer (human approval), optional Translator, and final human confirmation.
-- **Workbench data**: `/api/workbench/*` provides JSON endpoints plus an SSE event stream consumed by the SPA.
-- **Deployment**: One Go binary serves the API and the built frontend (`frontend/dist`). No feature flag; the old server-rendered HTML workbench has been removed.
+## Macrostructure family
 
-## Frontend Stack
+- App pages: Workbench（sidebar rail + content grid + 右侧 run rail）。
+  页面间只变 archetype knobs（列表/详情分栏、卡片网格、tab），不变主题。
+- Marketing pages: 无（本产品无营销页）。
+- Content pages: 无独立内容页；markdown 渲染（baize-markdown）遵循正文排版规则。
 
-- **React 18** with function components and hooks.
-- **Vite 6** for dev server, build, and HMR. The dev server proxies `/api` to `localhost:8080`.
-- **TypeScript 5** in strict mode with `noUncheckedIndexedAccess`, `noUnusedLocals`, `noUnusedParameters`.
-- **Tailwind CSS 3.4** with design-token extensions (ink, slate, canvas, accent, success, danger, warning) and role-based colors (orchestrator, architect, critic, analyst, reviewer, translator).
-- **TanStack Router v1** for code-based routing (no file-based codegen). Routes are nested under `/workbench` with a shared layout.
-- **TanStack Query v5** for server-state caching, with `staleTime: 30_000`, `retry: 1`, and `refetchOnWindowFocus: false`.
-- **Zustand v5** for auth and workbench UI state; the auth store is built with the vanilla API and a React hook.
-- **React Hook Form 7** + **Zod v4** for form validation and submission (e.g., decision rejection reason).
-- **react-i18next 15** + **i18next 24** for internationalization; default language `zh-CN` with `en` fallback.
-- **react-markdown 10** + **remark-gfm 4** for rendering finding/resolution Markdown.
-- **lucide-react** for icons.
-- **Headless UI v2** for accessible primitives (Modal, Dialog).
+## Theme
 
-## Backend API Additions
+- `--bg`            oklch(18.6% 0.009 264.3)   石墨纸面
+- `--surface`       oklch(23.0% 0.012 264.3)   一级抬升
+- `--surface-2`     oklch(26.0% 0.014 267.0)   二级抬升
+- `--surface-hover` oklch(30.1% 0.016 264.3)
+- `--border`        oklch(43.4% 0.026 265.5)   可见边框（被动）
+- `--border-strong` oklch(50.5% 0.023 260.1)   交互轮廓 ≥3:1
+- `--text`          oklch(89.1% 0.008 260.7)   13.4:1
+- `--text-muted`    oklch(63.9% 0.016 264.5)   5.5:1 次级文本
+- `--text-subtle`   oklch(60.6% 0.016 264.4)   4.8:1 标签/脚注（AA）
+- `--accent`        oklch(68.1% 0.169 275.0)   靛蓝 #7c8cff，面积 ≤5%/viewport
+- `--accent-fg`     oklch(18.6% 0.009 264.3)   accent 上的字色 6.2:1
+- `--run`           oklch(75.4% 0.139 232.7)   运行中（青）
+- `--ok`            oklch(77.3% 0.153 163.2)
+- `--warn`          oklch(83.7% 0.164 84.4)
+- `--danger`        oklch(71.9% 0.169 13.4)
 
-### Authentication & Authorization
+对比度纪律：正文 ≥4.5:1；非文本交互轮廓 ≥3:1；语义色只作状态点/徽章/左边条，
+不作大面积填充。
 
-- **GitHub OAuth 2.0**: `GET /api/auth/github` redirects to GitHub; `GET /api/auth/github/callback` verifies state, exchanges code, fetches the user, and sets `baize_access` and `baize_refresh` httpOnly/Secure/SameSite=Lax cookies.
-- **JWT cookies**: HS256 access tokens (`<= 15 min`) and refresh tokens (`<= 7 days`). `POST /api/auth/refresh` rotates refresh tokens with single-use consumption.
-- **Role-based admin**: `ADMIN_GITHUB_LOGINS` grants admin on first login. `POST /api/admin/users/:id/team` requires admin claim.
-- **Fallback auth**: `API_TOKEN` (Bearer), `TEAM_TOKENS` (name:token:role), and `REQUIRE_AUTH=true` are still supported so the platform can run in protected or semi-open mode without OAuth.
-- **Approval permission**: decision actions require JWT admin, team-token approver/admin, or the no-auth dev fallback that accepts an optional actor.
+## Typography
 
-### Workbench JSON + SSE
+- Display: "Space Grotesk Variable"（@fontsource-variable 自托管，latin only），
+  weight 600，style normal；CJK 回退系统 sans（诚实栈，不伪装）。
+- Body: -apple-system, "SF Pro Text", system-ui, sans-serif；weight 400。
+- Mono: "SF Mono", ui-monospace, "JetBrains Mono", monospace；数据位专用，
+  数字容器加 `font-variant-numeric: tabular-nums`。
+- Display tracking: 0；侧栏分组标签 11px/0.06em/`--text-subtle`，不作装饰 eyebrow。
+- Type scale anchor: `--text-display` = 1.9rem；页 h1 用 display 栈 + 700。
 
-- `GET /api/workbench/config` returns version, language, supported languages, current user, and role metadata.
-- `GET /api/workbench/runs/:id` aggregates a run with its findings, decisions, and agent steps.
-- `GET /api/workbench/runs/:id/events` opens an SSE stream emitting `run.updated`, `finding.created`, `decision.updated`, and `agent_step.created` frames, with a `: heartbeat` comment every ~15 seconds.
-- `POST /api/workbench/decisions/:id/approve` transitions a decision from `PROPOSED` or `UNDER_REVIEW` to `ACCEPTED`.
-- `POST /api/workbench/decisions/:id/reject` and `POST /api/workbench/decisions/:id/request-changes` transition to `REJECTED` and require a non-empty reason (returning `400 {code: "reason_required"}`).
+## Spacing
 
-## Data Flow
+4-point named scale（`--pad` 14px · `--gap` 12px · radius 6/4px）。组件必须用
+named tokens，不得内联裸值。
 
-1. **Orchestrator** receives the project, requirement, and repository inputs, then creates a design run.
-2. **Analyst** breaks down the requirement and clarifies terminology.
-3. **Architect** generates architecture options and records a design decision.
-4. **Critic** reviews the design and emits findings (risks, gaps, recommendations).
-5. **Reviewer** (operator) inspects the decision and findings in the Workbench SPA and approves, rejects, or requests changes.
-6. **Decision** transitions to `ACCEPTED` or `REJECTED`; the SSE stream emits `decision.updated`.
-7. **Translator** runs only when `targetLanguage` is set, producing localized output.
-8. **Human confirmation** locks the run, and **SRS acceptance** reports readiness.
+## Motion
 
-## Deployment
+- Easings: `--ease-out` cubic-bezier(0.16,1,0.3,1) · `--ease-in-out`
+  cubic-bezier(0.65,0,0.35,1)。时长 150/250ms。
+- Reveal: none — 工作台不做 scroll reveal；仅 transform/opacity 状态过渡。
+- Reduced-motion: 空间运动折叠为 ≤150ms opacity。
 
-- The frontend is built with `npm run build` and emitted to `frontend/dist`, which contains `index.html`, the `/assets/` JS/CSS chunks, and source maps.
-- The Go server resolves the dist directory via `BAIZE_FRONTEND_DIST` (env override) or by deriving `frontend/dist` from the source file location (`runtime.Caller`). This works regardless of the working directory when the server is started.
-- Static routes are registered after the API routes and auth middleware so `/api/*` and `/healthz` are never shadowed.
-- `GET /workbench` and `GET /workbench/*path` serve `index.html`; the SPA router renders the correct child route.
-- `GET /assets/*` serves the built JS/CSS chunks referenced by absolute paths in `index.html`.
-- `GET /`, `/login`, and `/auth/callback` also return `index.html` so hard refreshes on auth and root routes work.
-- `/api/healthz` remains available for health checks and returns `{"status":"ok"}`.
+## Microinteractions stance
 
-## Visual Direction
+- Silent success（保存即生效 + 行内小字反馈），无庆祝 toast。
+- hover 800ms tooltip / focus 0ms。
+- 乐观更新 + 可撤销优先于确认对话框（归档除外：审批 gate 保留）。
 
-- Style: polished operational command center, calm, dense, and legible, with layered glass-like panels rather than flat admin cards.
-- Palette: ink `#172033`, slate `#566176`, muted `#7b8496`, panel `#ffffff`, panel-soft `#f8fbff`, canvas `#edf3fb`, accent `#3157d5`, accent-strong `#2446b8`, success `#1f8a5b`, danger `#b42318`, warning `#b7791f`, code `#101827`.
-- Type: system sans-serif, 16px base, tight display heading, compact labels, tabular numeric/ID text for workflow evidence.
-- Layout: responsive sidebar + main content; two-column detail view on desktop; single-column on narrow screens.
-- Depth: soft radial page background, subtle panel borders, and tinted shadows from the ink/accent palette.
-- Dark mode: supported via Tailwind `class` strategy and CSS custom properties; the UI flips in `.dark`.
+## CTA voice
 
-## Interaction Rules
+- Primary: accent 实底 · 6px 圆角 · 600 字重 · `--accent-fg` 字色。
+- Secondary: 透明底 · 1px `--border-strong` 描边 · `--text` 字色。
+- Danger: 透明底 · 1px `--danger` 描边 · `--danger` 字色。
+- Disabled: 40% 不透明度 + not-allowed，不换灰色实底。
+- 全站唯一按钮声音；白底按钮退役。
 
-- Every network step reports success or a stable, i18n-ready error code (`messageKey` from the backend, localized in the SPA).
-- Buttons disable while a request is in flight or until the required previous state exists.
-- The SPA uses the real REST API directly; no mock backend in production.
-- While requests are in flight, the active button keeps its label and adds a short loading affordance.
-- Status cards and badges change tone when IDs/statuses become available; SRS readiness uses text plus color so meaning is not color-only.
-- The raw event log remains available for debugging, but progress and next actions should be understandable without reading JSON.
+## Per-page allowances
 
-## Accepted Debt
+- App pages MUST NOT use enrichment — 功能承载页面。
+- 空态自适应高度（不得固定 ≥300px 死区），一行 `--text-muted` 说明 + 可选内联动作。
+- 统计卡用 `repeat(auto-fit, minmax(150px, 1fr))`，末行不留孤儿。
 
-- Wave 1 stores are PostgreSQL-backed when `DATABASE_URL` is set: eight `*_db_storage` adapters back all resources, migrations auto-apply on startup, and the PG-backed E2E (`postgres_e2e_test.go`) runs via testcontainers by default (or a CI postgres service when `DATABASE_URL` is set). The `docker compose` stack verifies the full approval→archive→SRS flow end-to-end.
-- The `request-changes` decision action is recorded as `REJECTED` because the existing decision status enum has no dedicated `CHANGES_REQUESTED` value; the action is distinguished by the endpoint and the `DECISION_REQUEST_CHANGES` run event.
-- Runtime SSE uses an in-memory poll diff of store snapshots rather than a persistent event log; this is acceptable while the platform runs as a single process.
-- The 2.0 Vite production bundle is code-split (largest chunk ≈ 157 KB / gzip 47 KB); further lazy-loading of heavy viewers (Mermaid, markdown) can reduce the initial download.
+## Responsive floor
+
+- ≤900px：sidebar 折叠为 off-canvas 抽屉（汉堡按钮 + 遮罩），内容列 `minmax(0,1fr)`。
+- 320/375/414/768 验证：无横向滚动；可点击文本不折行；`html,body{overflow-x:clip}`。
+
+## What pages MUST share
+
+wordmark（◇ BaiZe Architect）、accent 及其位置、display/body/mono 栈、CTA voice、
+radius 节奏、状态色语义（ok/warn/danger/run）。
+
+## What pages MAY differ on
+
+Workbench family 内的分栏与 archetype knobs；tab/chip 形态；空态文案。
+
+## Exports
+
+### tokens.css
+
+```css
+:root {
+  --bg: oklch(18.6% 0.009 264.3);
+  --surface: oklch(23.0% 0.012 264.3);
+  --surface-2: oklch(26.0% 0.014 267.0);
+  --surface-hover: oklch(30.1% 0.016 264.3);
+  --border: oklch(43.4% 0.026 265.5);
+  --border-strong: oklch(50.5% 0.023 260.1);
+  --text: oklch(89.1% 0.008 260.7);
+  --text-muted: oklch(63.9% 0.016 264.5);
+  --text-subtle: oklch(60.6% 0.016 264.4);
+  --accent: oklch(68.1% 0.169 275.0);
+  --accent-fg: oklch(18.6% 0.009 264.3);
+  --run: oklch(75.4% 0.139 232.7);
+  --ok: oklch(77.3% 0.153 163.2);
+  --warn: oklch(83.7% 0.164 84.4);
+  --danger: oklch(71.9% 0.169 13.4);
+  --font-display: "Space Grotesk Variable", -apple-system, system-ui, sans-serif;
+  --font-body: -apple-system, "SF Pro Text", system-ui, sans-serif;
+  --font-mono: "SF Mono", ui-monospace, "JetBrains Mono", monospace;
+  --space-2xs: 0.5rem; --space-xs: 0.75rem; --space-sm: 1rem; --space-md: 1.5rem;
+  --text-xs: 0.6875rem; --text-sm: 0.8125rem; --text-base: 0.875rem;
+  --text-lg: 1rem; --text-xl: 1.25rem; --text-display: 1.9rem;
+  --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+  --ease-in-out: cubic-bezier(0.65, 0, 0.35, 1);
+  --dur-1: 150ms; --dur-2: 250ms;
+  --radius-card: 6px; --radius-input: 6px; --radius-pill: 999px;
+}
+```
+
+（Tailwind `@theme` / DTCG `tokens.json` / shadcn 变量：本项目为 Lit，不引入
+这些消费端；如需跨项目复用，按上表机械映射。）

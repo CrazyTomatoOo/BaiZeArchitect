@@ -47,7 +47,7 @@ class BaizeChatIntake extends LitElement {
 		.overlay {
 			position: absolute;
 			inset: 0;
-			background: rgba(0, 0, 0, 0.6);
+			background: var(--scrim-strong);
 			display: flex;
 			align-items: center;
 			justify-content: center;
@@ -58,7 +58,7 @@ class BaizeChatIntake extends LitElement {
 			background: var(--bg);
 			border: 1px solid var(--border-strong);
 			border-radius: var(--radius);
-			box-shadow: 0 16px 48px rgba(0, 0, 0, 0.6);
+			box-shadow: 0 16px 48px var(--shadow-2);
 			display: flex;
 			flex-direction: column;
 			overflow: hidden;

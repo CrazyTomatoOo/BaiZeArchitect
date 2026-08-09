@@ -42,7 +42,7 @@ class BaizeCommandPalette extends LitElement {
 		.backdrop {
 			position: absolute;
 			inset: 0;
-			background: rgba(0, 0, 0, 0.5);
+			background: var(--scrim-strong);
 		}
 		.panel {
 			position: relative;
@@ -51,7 +51,7 @@ class BaizeCommandPalette extends LitElement {
 			background: var(--surface);
 			border: 1px solid var(--border-strong);
 			border-radius: var(--radius);
-			box-shadow: 0 12px 40px rgba(0, 0, 0, 0.5);
+			box-shadow: 0 12px 40px var(--shadow-2);
 			overflow: hidden;
 		}
 		input {

@@ -69,12 +69,13 @@ class BaizeArchitectureBrowser extends LitElement {
 		.actions { display: flex; align-items: center; gap: .5rem; flex-wrap: wrap; }
 		button { font: inherit; cursor: pointer; }
 		.primary { border: 1px solid var(--accent); background: var(--accent); color: var(--accent-fg); border-radius: var(--radius-sm); padding: .5rem .8rem; font-weight: 650; }
-		.secondary { border: 1px solid var(--border); background: var(--surface); color: var(--text); border-radius: var(--radius-sm); padding: .5rem .8rem; }
-		.primary:disabled, .secondary:disabled { opacity: .55; cursor: wait; }
-		.layout { display: grid; grid-template-columns: 250px minmax(0, 1fr); gap: 12px; min-height: 620px; }
+		.secondary { border: 1px solid var(--border-strong); background: transparent; color: var(--text); border-radius: var(--radius-sm); padding: .5rem .8rem; }
+		.secondary:hover:not(:disabled) { border-color: var(--accent); }
+		.primary:disabled, .secondary:disabled { opacity: 0.4; cursor: not-allowed; }
+		.layout { display: grid; grid-template-columns: 250px minmax(0, 1fr); gap: 12px; }
 		.card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 14px; min-width: 0; }
 		.tree-card { overflow: auto; }
-		.card-title { margin: 0 0 .7rem; color: var(--text-muted); font-size: .72rem; letter-spacing: .06em; text-transform: uppercase; }
+		.card-title { margin: 0 0 .7rem; color: var(--text-muted); font-size: .72rem; letter-spacing: .06em; }
 		details { margin-left: .2rem; }
 		details details { margin-left: .85rem; }
 		summary { padding: .26rem .2rem; color: var(--text); cursor: pointer; font-size: .78rem; list-style: none; }
@@ -86,8 +87,8 @@ class BaizeArchitectureBrowser extends LitElement {
 		.level.active { background: var(--accent); color: var(--accent-fg); border-color: var(--accent); }
 		.level small { opacity: .75; margin-left: .25rem; }
 		.panel { display: grid; grid-template-columns: minmax(0, 1.5fr) minmax(230px, .8fr); gap: 12px; }
-		.diagram { min-height: 390px; overflow: auto; }
-		.diagram baize-markdown { display: block; min-height: 340px; }
+		.diagram { min-height: 240px; overflow: auto; }
+		.diagram baize-markdown { display: block; min-height: 200px; }
 		.explain h2 { margin: 0 0 .35rem; font-size: 1rem; }
 		.explain p { margin: 0 0 .8rem; color: var(--text-muted); font-size: .82rem; line-height: 1.55; }
 		.draft { display: inline-block; border: 1px solid var(--warn); color: var(--warn); border-radius: 99px; padding: .18rem .45rem; font-size: .68rem; }

@@ -90,8 +90,8 @@ class BaizeRequirement extends LitElement {
 		.req { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 12px 14px; cursor: pointer; }
 		.req.active { border-color: var(--accent); background: var(--surface-2); }
 		.req .badge { display: inline-block; margin-bottom: 5px; padding: 1px 8px; border-radius: 99px; font-size: 11px; font-weight: 600; }
-		.badge.ok { color: var(--ok); background: rgba(52, 211, 153, .15); }
-		.badge.warn { color: var(--warn); background: rgba(251, 191, 36, .15); }
+		.badge.ok { color: var(--ok); background: var(--ok-soft); }
+		.badge.warn { color: var(--warn); background: var(--warn-soft); }
 		.req .t { display: block; font-weight: 600; }
 		.req .hint { display: block; margin-top: 5px; color: var(--text-subtle); font-size: .75rem; }
 		.detail-card { overflow: auto; padding-right: 4px; }
@@ -101,6 +101,21 @@ class BaizeRequirement extends LitElement {
 		.controls { display: grid; grid-template-columns: 150px 1fr auto auto; gap: 8px; align-items: start; margin-bottom: 16px; }
 		.controls select, .controls textarea { width: 100%; box-sizing: border-box; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--surface); color: inherit; font: inherit; padding: 8px; }
 		.controls textarea { min-height: 42px; resize: vertical; }
+		button {
+			font: inherit;
+			cursor: pointer;
+			background: transparent;
+			border: 1px solid var(--border-strong);
+			color: var(--text);
+			border-radius: var(--radius-sm);
+			padding: 7px 14px;
+			transition: border-color var(--dur-1) var(--ease-out), background var(--dur-1) var(--ease-out), opacity var(--dur-1) var(--ease-out);
+		}
+		button:hover:not(:disabled) { border-color: var(--accent); }
+		button:disabled { opacity: 0.4; cursor: not-allowed; }
+		button.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-fg); font-weight: 600; }
+		button.primary:hover:not(:disabled) { background: var(--accent-hi); border-color: var(--accent-hi); }
+		button:focus-visible, select:focus-visible, textarea:focus-visible { outline: var(--focus-ring); outline-offset: 2px; }
 		.controls button { white-space: nowrap; }
 		.status { color: var(--text-subtle); font-size: .8rem; }
 		.error { color: var(--danger); margin: 8px 0; white-space: pre-wrap; }
