@@ -23,6 +23,7 @@ Produce an implementation-ready specification for replacing the architecture bro
 - [Select the interactive graph engine and layout stack](issues/01-select-graph-engine-and-layout-stack.md) — Research ranks yFiles for HTML 3.x plus Hierarchical Layout first; its commercial-license/evaluation gate is the next explicit decision, while Cytoscape.js plus worker-hosted ELK.js is the OSS fallback with an SVG-export gap.
 - [Define the C4 graph projection contract](issues/02-define-c4-graph-projection-contract.md) — An immutable, evidence-backed `repositoryId + headSha + projectionVersion` fact graph underlies all four C4 views; requirements retain a durable snapshot reference and graph facts use semantic lineage, typed evidence-backed edges, and explicit aggregation.
 - [Decide the yFiles license and evaluation gate](issues/10-decide-yfiles-license-and-evaluation-gate.md) — yFiles plus Hierarchical Layout is the only first-release engine candidate, pending a hard evaluation gate in the real Lit/Vite route; a failed evaluation reopens selection rather than silently changing export requirements or stack.
+- [Prototype the interactive canvas visual language](issues/03-prototype-interactive-canvas-visual-language.md) — Direction A, the canvas-first Command deck with persistent evidence inspector, is the approved visual baseline; the throwaway alternatives remain on their prototype branch.
 
 ## Not yet specified
 
