@@ -20,12 +20,12 @@ Produce an implementation-ready specification for replacing the architecture bro
 
 ## Decisions so far
 
-- [Select the interactive graph engine and layout stack](issues/01-select-graph-engine-and-layout-stack.md) — Research ranks yFiles for HTML 3.x plus Hierarchical Layout first; its commercial-license/evaluation gate is the next explicit decision, while Cytoscape.js plus worker-hosted ELK.js is the OSS fallback with an SVG-export gap.
+- [Select the interactive graph engine and layout stack](issues/01-select-graph-engine-and-layout-stack.md) — Initial research identified yFiles as the lowest-risk technical fit, but its commercial restriction now excludes it; Cytoscape.js plus ELK.js is a candidate in the renewed free-stack selection and has an SVG-export gap.
 - [Define the C4 graph projection contract](issues/02-define-c4-graph-projection-contract.md) — An immutable, evidence-backed `repositoryId + headSha + projectionVersion` fact graph underlies all four C4 views; requirements retain a durable snapshot reference and graph facts use semantic lineage, typed evidence-backed edges, and explicit aggregation.
-- [Decide the yFiles license and evaluation gate](issues/10-decide-yfiles-license-and-evaluation-gate.md) — yFiles plus Hierarchical Layout is the only first-release engine candidate, pending a hard evaluation gate in the real Lit/Vite route; a failed evaluation reopens selection rather than silently changing export requirements or stack.
 - [Prototype the interactive canvas visual language](issues/03-prototype-interactive-canvas-visual-language.md) — Direction A, the canvas-first Command deck with persistent evidence inspector, is the approved visual baseline; the throwaway alternatives remain on their prototype branch.
 - [Define the navigation and inspection contract](issues/04-define-navigation-and-inspection-contract.md) — Explicit drill-down plus per-layer session restoration, shareable navigation URLs, semantic keyboard navigation, and a single-selection evidence inspector define the read-only exploration flow.
 - [Define the PNG and SVG export contract](issues/06-define-png-and-svg-export-contract.md) — Browser-only downloads capture the full current visible graph with embedded provenance; SVG is standalone and 2× PNG refuses over-limit captures rather than silently degrading.
+- [Research a free graph engine and export stack](issues/12-research-free-graph-engine-and-export-stack.md) — AntV G6 plus ELK.js Layered ranks first; BaiZe must own projection-to-layout mapping and deterministic SVG/PNG generation, with Cytoscape.js plus ELK.js retained only as a fallback.
 
 ## Not yet specified
 
@@ -39,3 +39,4 @@ Produce an implementation-ready specification for replacing the architecture bro
 - Automatically turning exported images into `ArtifactRevision` assets.
 - Replacing Mermaid in Markdown, design packages, or other static-document rendering.
 - Guaranteeing direct rendering of 2,000 or more visible nodes in the first release.
+- [Run the yFiles 500-node evaluation spike](issues/11-run-yfiles-500-node-evaluation-spike.md) — yFiles is excluded because the project requires a free stack; this commercial-license task is superseded by free-stack research.

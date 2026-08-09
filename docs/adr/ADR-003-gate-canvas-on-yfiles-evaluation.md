@@ -1,5 +1,5 @@
-# Gate the interactive canvas on a yFiles evaluation
+# Do not use yFiles for the interactive canvas
 
-Status: proposed
+Status: deprecated
 
-BaiZeArchitect will evaluate yFiles for HTML 3.x with Hierarchical Layout as the only production-engine candidate. No production dependency or Mermaid replacement may begin until a licensed, current Lit/Vite route renders a representative 500-node compound C4 fixture and proves layout, interaction, PNG/SVG export, accessible companion navigation, and package/runtime budgets; failure reopens engine selection rather than silently switching to an open-source stack.
+BaiZeArchitect will not procure or evaluate yFiles because the project requires a free stack. No yFiles SDK, license, or evaluation artifact may enter the repository. The replacement engine and its export ownership boundary remain subject to the free-stack research and a new evaluation gate.

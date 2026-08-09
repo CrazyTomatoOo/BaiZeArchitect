@@ -1,17 +1,9 @@
-# Decide the yFiles license and evaluation gate
+# Decide the free graph engine and layout stack
 
 Type: grilling
-Status: resolved
-Blocked by: 01
+Status: open
+Blocked by: 12
 
 ## Question
 
-Will BaiZeArchitect procure and evaluate yFiles for HTML 3.x as the selected graph engine, or must the first release use an open-source stack? If commercial licensing is not viable, decide whether to relax the required standalone SVG export, fund/own a maintained exporter, or select a different engine; record the resulting executable engine decision and the required representative 500-node Lit/Vite evaluation gate.
-
-## Answer
-
-Select **yFiles for HTML 3.x with Hierarchical Layout** as the sole candidate for the first-release engine evaluation; yFiles is not yet a production dependency. The user approved evaluation licensing, and the gate is hard: no production package install or Mermaid replacement may begin before the evaluation passes.
-
-The gate requires the current Lit/Vite route to render a representative 500-node compound C4 fixture with realistic labels and edge density, and to demonstrate layout, read-only interaction, PNG/SVG export, a keyboard/ARIA companion navigation surface, package impact, memory, and responsiveness. [Run the yFiles 500-node evaluation spike](11-run-yfiles-500-node-evaluation-spike.md) records that prerequisite. If it fails, engine selection reopens; do not silently fall back to Cytoscape.js plus ELK.js or weaken SVG export.
-
-The decision is recorded in [ADR-003](../../../docs/adr/ADR-003-gate-canvas-on-yfiles-evaluation.md).
+yFiles is excluded because BaiZeArchitect will not procure a commercial license. Based on the free-stack research, choose a zero-cost production graph engine, layout stack, and export ownership boundary that still satisfy the fixed C4, 500-visible-node, Lit/Vite, read-only, standalone-SVG, and 2× PNG requirements. Record the resulting evaluation gate and explicitly reject alternatives that cannot meet those requirements.
