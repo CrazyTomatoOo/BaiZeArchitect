@@ -37,4 +37,4 @@ It starts the Vite server, serves a deterministic API-mocked 500-node projection
 
 ## Remaining release checks
 
-This result does not replace the required keyboard-only, VoiceOver/Safari, and NVDA/Firefox full exploration checks. Those require a human operator on their respective assistive-technology platforms and remain open.
+This result does not replace the required human Google Chrome keyboard-only exploration. Record that check in [`manual-accessibility-checklist.md`](manual-accessibility-checklist.md) before approving the Mermaid cutover.

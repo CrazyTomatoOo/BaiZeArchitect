@@ -68,7 +68,7 @@ SVG and PNG export the complete current Visible Graph—not just the viewport—
 
 ## Accessibility
 
-The Command deck, canvas controls, semantic companion list, and inspector must satisfy WCAG 2.2 AA. The graphical canvas is never the only representation.
+Google Chrome is the sole supported release browser. The Command deck, canvas controls, semantic companion list, and inspector retain their accessible keyboard and semantic behavior within Chrome, but the release does not claim cross-browser or cross-screen-reader WCAG conformance. The graphical canvas is never the only representation.
 
 - The synchronized, filterable semantic companion list is the screen-reader traversal surface. The canvas exposes a layer/root/count summary.
 - A live region announces loading, result counts, selection, focus, export completion/refusal, snapshot changes, and errors.
@@ -85,7 +85,7 @@ All of the following are release blockers:
 3. Browser E2E tests for loading/error/empty states; drill-down/history restoration; search/filter/focus/expansion; keyboard and inspector behavior; update cancellation; normal SVG/PNG and refused PNG export.
 4. Visual-regression tests for ready, selected, focused, empty, and error states at 1440×900, 1024×768, and 390×844.
 5. Performance on the documented project benchmark machine, stable Chrome, 1280×800: initial interactive view ≤1.5s; topology re-layout ≤1.0s; submitted filter/focus ≤250ms; selection/inspector ≤100ms; ELK in a Worker; pan/zoom ≥30 FPS. Report hardware, browser, fixture cardinality, median, and p95. CI detects regressions but does not replace this benchmark.
-6. Release-candidate manual checks: axe, a keyboard-only full exploration, VoiceOver/Safari, and NVDA/Firefox over the same core flow.
+6. Release-candidate manual check in Google Chrome: complete the keyboard-only exploration and confirm controls, state changes, drill-down, filtering/focus, export, and error handling are usable. Safari/VoiceOver and Firefox/NVDA are not release gates.
 
 ## Implementation sequence
 
