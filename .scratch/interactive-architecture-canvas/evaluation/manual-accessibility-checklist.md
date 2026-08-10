@@ -32,7 +32,7 @@ This is the remaining release gate. A human operator must complete it in **Googl
 
 ## Sign-off
 
-- Google Chrome exploration: Pass / Fail — operator/date:
+- Google Chrome exploration: Pass — user-reported; version and date not recorded.
 - Release approver/date:
 
 A failed check blocks the Mermaid cutover until a fix, an automated regression test where applicable, and this manual Chrome check are repeated successfully.
