@@ -157,7 +157,7 @@ class BaizeArchitectureBrowser extends LitElement {
 
 	render() {
 		return html`
-			<div class="page-head"><div><h1>架构浏览</h1><p class="sub">从目录、运行单元到代码职责块，逐层理解仓库结构。当前仓库：<strong>${this.repo || "—"}</strong></p></div><div class="actions"><button class="secondary" @click=${this.refresh} ?disabled=${this.loading}>刷新</button><button class="primary" @click=${this.refresh} ?disabled=${this.loading}>${this.loading ? "更新中…" : "更新到最新提交"}</button></div></div>
+			<main aria-label="Architecture browser"><div class="page-head"><div><h1>架构浏览</h1><p class="sub">从目录、运行单元到代码职责块，逐层理解仓库结构。当前仓库：<strong>${this.repo || "—"}</strong></p></div><div class="actions"><button class="secondary" @click=${this.refresh} ?disabled=${this.loading}>刷新</button><button class="primary" @click=${this.refresh} ?disabled=${this.loading}>${this.loading ? "更新中…" : "更新到最新提交"}</button></div></div>
 			${this.error ? html`<p class="error" role="alert">${this.error}</p>` : null}
 			<div class="layout">
 				<section class="card tree-card"><h2 class="card-title">目录树</h2>${this.loading ? html`<p class="empty">读取中…</p>` : this.tree.length ? this.renderTree(this.tree) : html`<p class="empty">暂无目录数据</p>`}</section>
@@ -166,7 +166,7 @@ class BaizeArchitectureBrowser extends LitElement {
 					<form class="controls" @submit=${this.submitSearch}><input aria-label="Search architecture nodes" .value=${this.query} @input=${(event: InputEvent) => { this.query = (event.target as HTMLInputElement).value; }} placeholder="搜索当前快照中的节点" /><button class="secondary" type="submit">筛选</button><button class="secondary" @click=${this.toggleFocus} ?disabled=${!this.selectedNodeId}>${this.focusNodeId ? "退出邻居聚焦" : "聚焦邻居"}</button><span class="snapshot">${this.snapshot ? `${this.snapshot.headSha.slice(0, 8)} · ${this.graph?.nodes.length ?? 0} nodes` : "No snapshot"}</span></form>
 					${this.graph ? html`<baize-c4-canvas .graph=${this.graph} .selectedNodeId=${this.selectedNodeId} .rootLabel=${this.root || "Architecture root"} .rootId=${this.root || "root"} .filters=${this.query ? [`query:${this.query}`] : []} .focused=${Boolean(this.focusNodeId)} .status=${this.loading ? "Refreshing architecture view" : ""} @c4-canvas-intent=${this.onCanvasIntent}></baize-c4-canvas>` : html`<section class="card empty">${this.loading ? "正在准备不可变架构快照…" : "暂无可用架构图。"}</section>`}
 				</section>
-			</div>
+			</div></main>
 		`;
 	}
 }

@@ -98,7 +98,7 @@ export class BaiZeC4Canvas extends LitElement {
 					${selected ? html`<p><strong>${selected.kind}</strong> · ${selected.id}</p><button @click=${() => this.intent({ type: "drill-down", nodeId: selected.id })}>View internal</button>` : nothing}
 					${this.error ? html`<p class="error" role="alert">${this.error}</p>` : nothing}
 					<div class="list" role="list" aria-label="Architecture nodes">
-						${this.graph?.nodes.map((node) => this.nodeRow(node))}
+						${this.graph?.nodes.length ? this.graph.nodes.map((node) => this.nodeRow(node)) : html`<p class="empty">No architecture nodes match this view.</p>`}
 					</div>
 				</aside>
 			</section>
@@ -107,9 +107,22 @@ export class BaiZeC4Canvas extends LitElement {
 	}
 
 	private nodeRow(node: VisibleGraphNode) {
-		return html`<button class="node" role="listitem" aria-current=${String(node.id === this.selectedNodeId)} @click=${() => this.select(node.id)}>
+		return html`<div role="listitem"><button class="node" data-node-id=${node.id} aria-current=${String(node.id === this.selectedNodeId)} @click=${() => this.select(node.id)} @keydown=${(event: KeyboardEvent) => this.onNodeKeydown(event, node.id)}>
 			${node.name}<span class="kind">${node.kind}${node.memberIds ? ` · ${node.memberIds.length} members` : ""}</span>
-		</button>`;
+		</button></div>`;
+	}
+
+	private onNodeKeydown(event: KeyboardEvent, nodeId: string): void {
+		const nodes = this.graph?.nodes ?? [];
+		const index = nodes.findIndex((node) => node.id === nodeId);
+		if (index < 0) return;
+		const nextIndex = event.key === "ArrowDown" ? Math.min(index + 1, nodes.length - 1) : event.key === "ArrowUp" ? Math.max(index - 1, 0) : -1;
+		if (nextIndex < 0) return;
+		event.preventDefault();
+		const next = nodes[nextIndex];
+		if (!next) return;
+		this.select(next.id);
+		requestAnimationFrame(() => [...this.renderRoot.querySelectorAll<HTMLButtonElement>(".node")].find((button) => button.dataset.nodeId === next.id)?.focus());
 	}
 
 	private async layoutGraph(): Promise<void> {
@@ -215,7 +228,11 @@ export class BaiZeC4Canvas extends LitElement {
 	}
 
 	private intent(detail: CanvasIntent): void { this.dispatchEvent(new CustomEvent<CanvasIntent>("c4-canvas-intent", { detail, bubbles: true, composed: true })); }
-	private liveSummary(): string { return this.graph ? `${this.graph.nodes.length} nodes and ${this.graph.edges.length} relationships available.` : ""; }
+	private liveSummary(): string {
+		if (!this.graph) return "";
+		const selected = this.graph.nodes.find((node) => node.id === this.selectedNodeId);
+		return `${selected ? `${selected.name} selected. ` : ""}${this.graph.nodes.length} nodes and ${this.graph.edges.length} relationships available.`;
+	}
 }
 
 customElements.define("baize-c4-canvas", BaiZeC4Canvas);
