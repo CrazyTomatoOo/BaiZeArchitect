@@ -6,6 +6,7 @@
   "scripts": {
     "test": "vitest run src",
     "test:e2e": "playwright test",
+    "benchmark:canvas": "playwright test --config=playwright.benchmark.config.ts",
     "dev": "vite",
     "build": "vite build",
     "typecheck": "tsc --noEmit"
