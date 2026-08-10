@@ -187,6 +187,28 @@ test("stores artifact revisions, decisions, evidence, and approvals as domain en
 	}
 });
 
+test("supports manual asset requirement, revisions, and deletion", () => {
+	const store = openStore(":memory:");
+	try {
+		const workspaceId = store.addWorkspace("/tmp/baize-manual-assets", "Manual assets");
+		const requirementId = store.ensureAssetRequirement(workspaceId);
+		assert.equal(store.ensureAssetRequirement(workspaceId), requirementId);
+
+		const runId = store.ensureManualAssetRun(requirementId);
+		assert.equal(store.ensureManualAssetRun(requirementId), runId);
+		assert.equal(store.getRun(runId)?.status, "completed");
+
+		const artifact = store.createArtifact(requirementId, "scenario", "Login scenario");
+		store.createArtifactRevision(artifact.id, runId, { description: "Imported asset" }, "approved");
+		assert.deepEqual(store.listArtifactRevisions(artifact.id)[0]?.content, { description: "Imported asset" });
+		assert.equal(store.deleteArtifact(artifact.id), true);
+		assert.equal(store.listArtifacts(requirementId).length, 0);
+		assert.equal(store.deleteArtifact(artifact.id), false);
+	} finally {
+		store.close();
+	}
+});
+
 test("recovers queued and running runs after a gateway restart", () => {
 	const store = openStore(":memory:");
 	try {

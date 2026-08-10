@@ -9,7 +9,7 @@ import { fileURLToPath } from "node:url";
 import { dirname, join, resolve } from "node:path";
 import { mkdir, readdir, readFile, writeFile } from "node:fs/promises";
 import { execFile } from "node:child_process";
-import { openStore, RunInProgressError } from "./store.js";
+import { openStore, RunInProgressError, type ArtifactKind } from "./store.js";
 import type { AgentRole } from "./agent.js";
 import { generateEvidence } from "./evidence.js";
 import {
@@ -502,6 +502,93 @@ function designPackageSnapshot(requirementId: number): Record<string, unknown> {
 	};
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+	return !!value && typeof value === "object" && !Array.isArray(value);
+}
+
+function cleanImportedAsset(value: Record<string, unknown>): Record<string, unknown> {
+	const { id, requirementId, created_at, createdAt, ...rest } = value;
+	void id;
+	void requirementId;
+	void created_at;
+	void createdAt;
+	return rest;
+}
+
+function assetSnapshot(workspaceId: number): Record<string, unknown> {
+	const scenarios: unknown[] = [];
+	const usecases: unknown[] = [];
+	const functions: unknown[] = [];
+	for (const requirement of store.listRequirements(workspaceId) as Array<{ id: number }>) {
+		for (const artifact of store.listArtifacts(requirement.id)) {
+			const revision = store.listArtifactRevisions(artifact.id).at(-1);
+			const content = (revision?.content ?? {}) as Record<string, unknown>;
+			if (artifact.kind === "scenario") {
+				scenarios.push({ ...content, id: artifact.id, requirementId: requirement.id, title: artifact.title });
+			} else if (artifact.kind === "usecase") {
+				usecases.push({ ...content, id: artifact.id, requirementId: requirement.id, title: artifact.title });
+			} else if (artifact.kind === "function") {
+				const items = Array.isArray(content.items) ? content.items : [];
+				functions.push({
+					domain: { ...content, id: artifact.id, requirementId: requirement.id, name: artifact.title },
+					items: items.map((item, index) =>
+						isRecord(item)
+							? { ...item, id: item.id ?? `${artifact.id}:${index}`, artifactId: artifact.id }
+							: { id: `${artifact.id}:${index}`, artifactId: artifact.id, title: String(item) },
+					),
+				});
+			}
+		}
+	}
+	return { scenarios, usecases, functions };
+}
+
+function createAsset(
+	workspaceId: number,
+	kind: ArtifactKind,
+	title: string,
+	content: Record<string, unknown>,
+	requirementId?: number,
+): ReturnType<typeof store.createArtifact> {
+	const requirement = requirementId ? store.getRequirement(requirementId) as { workspace_id?: number } | undefined : undefined;
+	if (requirementId && requirement?.workspace_id !== workspaceId) throw new Error("requirement not found in workspace");
+	const targetRequirementId = requirementId ?? store.ensureAssetRequirement(workspaceId);
+	const runId = store.ensureManualAssetRun(targetRequirementId);
+	const artifact = store.createArtifact(targetRequirementId, kind, title);
+	store.createArtifactRevision(artifact.id, runId, content, "approved");
+	return artifact;
+}
+
+function importAssets(workspaceId: number, input: Record<string, unknown>): number {
+	let count = 0;
+	store.transaction(() => {
+		const requirementId = store.ensureAssetRequirement(workspaceId);
+		for (const item of Array.isArray(input.scenarios) ? input.scenarios : []) {
+			if (!isRecord(item)) continue;
+			const content = cleanImportedAsset(item);
+			const title = String(item.title ?? "未命名场景").trim();
+			createAsset(workspaceId, "scenario", title || "未命名场景", content, requirementId);
+			count++;
+		}
+		for (const item of Array.isArray(input.usecases) ? input.usecases : []) {
+			if (!isRecord(item)) continue;
+			const content = cleanImportedAsset(item);
+			const title = String(item.title ?? "未命名用例").trim();
+			createAsset(workspaceId, "usecase", title || "未命名用例", content, requirementId);
+			count++;
+		}
+		for (const item of Array.isArray(input.functions) ? input.functions : []) {
+			if (!isRecord(item)) continue;
+			const domain = isRecord(item.domain) ? cleanImportedAsset(item.domain) : cleanImportedAsset(item);
+			const items = Array.isArray(item.items) ? item.items : [];
+			const title = String(item.domain && isRecord(item.domain) ? item.domain.name ?? item.domain.title : item.name ?? item.title ?? "未命名功能域").trim();
+			createAsset(workspaceId, "function", title || "未命名功能域", { ...domain, items }, requirementId);
+			count++;
+		}
+	});
+	return count;
+}
+
 const server = http.createServer(
 	async (req: IncomingMessage, res: ServerResponse) => {
 		res.setHeader("access-control-allow-origin", "*");
@@ -958,26 +1045,69 @@ const server = http.createServer(
 
 		if (url.pathname === "/api/assets" && req.method === "GET") {
 			const ws = Number(url.searchParams.get("workspace") ?? 0);
-			const scenarios: unknown[] = [];
-			const usecases: unknown[] = [];
-			const functions: unknown[] = [];
-			for (const requirement of store.listRequirements(ws) as Array<{ id: number }>) {
-				for (const artifact of store.listArtifacts(requirement.id)) {
-					const revision = store.listArtifactRevisions(artifact.id).at(-1);
-					const content = (revision?.content ?? {}) as Record<string, unknown>;
-					if (artifact.kind === "scenario") {
-						scenarios.push({ id: artifact.id, requirementId: requirement.id, title: artifact.title, ...content });
-					} else if (artifact.kind === "usecase") {
-						usecases.push({ id: artifact.id, requirementId: requirement.id, title: artifact.title, ...content });
-					} else if (artifact.kind === "function") {
-						functions.push({
-							domain: { id: artifact.id, requirementId: requirement.id, name: artifact.title, ...content },
-							items: Array.isArray(content.items) ? content.items : [],
-						});
-					}
-				}
+			json(200, assetSnapshot(ws));
+			return;
+		}
+
+		if (url.pathname === "/api/assets/export" && req.method === "GET") {
+			const ws = Number(url.searchParams.get("workspace") ?? 0);
+			const body = {
+				version: 1,
+				exportedAt: new Date().toISOString(),
+				workspace: ws,
+				...assetSnapshot(ws),
+			};
+			res.writeHead(200, {
+				"content-type": "application/json",
+				"content-disposition": `attachment; filename=baize-assets-${ws}.json`,
+			});
+			res.end(JSON.stringify(body, null, 2));
+			return;
+		}
+
+		if (url.pathname === "/api/assets" && req.method === "POST") {
+			const body = (await readJson(req)) as {
+				workspaceId?: number;
+				requirementId?: number;
+				kind?: string;
+				title?: string;
+				content?: Record<string, unknown>;
+			} | null;
+			const kind = body?.kind as ArtifactKind | undefined;
+			if (!body?.workspaceId || !["scenario", "usecase", "function"].includes(kind ?? "") || !body.title?.trim()) {
+				json(400, { error: "workspaceId, kind, and title are required" });
+				return;
 			}
-			json(200, { scenarios, usecases, functions });
+			try {
+				const artifact = createAsset(body.workspaceId, kind as ArtifactKind, body.title.trim(), body.content ?? {}, body.requirementId);
+				json(200, { ok: true, artifact });
+			} catch (error) {
+				json(400, { error: String((error as Error)?.message ?? error) });
+			}
+			return;
+		}
+
+		if (url.pathname === "/api/assets/import" && req.method === "POST") {
+			const body = (await readJson(req)) as Record<string, unknown> | null;
+			const workspaceId = Number(body?.workspaceId ?? 0);
+			const assets = isRecord(body?.assets) ? body.assets : body;
+			if (!workspaceId || !assets) {
+				json(400, { error: "workspaceId and assets are required" });
+				return;
+			}
+			try {
+				const imported = importAssets(workspaceId, assets);
+				json(200, { ok: true, imported });
+			} catch (error) {
+				json(400, { error: String((error as Error)?.message ?? error) });
+			}
+			return;
+		}
+
+		const assetRoute = url.pathname.match(/^\/api\/assets\/(\d+)$/);
+		if (assetRoute && req.method === "DELETE") {
+			const ok = store.deleteArtifact(Number(assetRoute[1]));
+			json(ok ? 200 : 404, ok ? { ok: true } : { error: "asset not found" });
 			return;
 		}
 

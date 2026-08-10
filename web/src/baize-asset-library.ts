@@ -36,7 +36,7 @@ class BaizeAssetLibrary extends LitElement {
 	declare ws: number;
 	declare tab: (typeof TABS)[number]["id"];
 	declare data: AssetData | null;
-	declare selectedId: number | null;
+	declare selectedId: string | null;
 	declare view: string;
 	declare reqs: Array<Record<string, unknown>>;
 	declare busy: string;
@@ -187,6 +187,28 @@ class BaizeAssetLibrary extends LitElement {
 			color: var(--text);
 			border-left: 3px solid var(--accent);
 		}
+		.toolbar {
+			display: flex;
+			gap: 8px;
+			margin: -8px 0 16px;
+		}
+		.action {
+			padding: 7px 12px;
+			border: 1px solid var(--border);
+			border-radius: 8px;
+			background: var(--surface);
+			color: var(--text-muted);
+			cursor: pointer;
+			font: inherit;
+			font-size: 0.82rem;
+		}
+		.action:hover {
+			background: var(--surface-hover);
+			color: var(--text);
+		}
+		.action.danger {
+			color: var(--danger, #ef4444);
+		}
 	`;
 
 	constructor() {
@@ -253,17 +275,145 @@ class BaizeAssetLibrary extends LitElement {
 		return [];
 	}
 
+	private assetKind(): "scenario" | "usecase" | "function" | null {
+		if (this.tab === "scenario" || this.tab === "usecase" || this.tab === "function") return this.tab;
+		return null;
+	}
+
+	private selectedArtifactId(): number | null {
+		if (!this.selectedId) return null;
+		if (this.tab === "scenario" || this.tab === "usecase") return Number(this.selectedId);
+		if (this.tab !== "function") return null;
+		for (const group of this.data?.functions ?? []) {
+			for (const item of group.items as Array<Record<string, unknown>>) {
+				if (String(item.id) === this.selectedId) {
+					return Number(item.artifactId ?? group.domain.id);
+				}
+			}
+		}
+		return null;
+	}
+
+	private async createManualAsset() {
+		const kind = this.assetKind();
+		if (!kind) return;
+		const label = kind === "scenario" ? "场景" : kind === "usecase" ? "用例" : "功能域";
+		const title = window.prompt(`${label}名称`);
+		if (!title?.trim()) return;
+		let content: Record<string, unknown> = {};
+		if (kind === "scenario") {
+			content = { description: window.prompt("场景描述") ?? "" };
+		} else if (kind === "usecase") {
+			content = {
+				precondition: window.prompt("前置条件") ?? "",
+				main_flow: window.prompt("主流程") ?? "",
+				exceptions: "",
+				postcondition: "",
+			};
+		} else {
+			const itemTitle = window.prompt("首个功能项名称(可留空)") ?? "";
+			const description = itemTitle ? window.prompt("功能项描述") ?? "" : "";
+			content = { items: itemTitle.trim() ? [{ title: itemTitle.trim(), description }] : [] };
+		}
+		await fetch("/api/assets", {
+			method: "POST",
+			headers: { "content-type": "application/json" },
+			body: JSON.stringify({ workspaceId: this.ws, kind, title: title.trim(), content }),
+		});
+		await this.load();
+	}
+
+	private async deleteSelectedAsset() {
+		const id = this.selectedArtifactId();
+		if (!id || !window.confirm("删除选中的资产?")) return;
+		await fetch(`/api/assets/${id}`, { method: "DELETE" });
+		await this.load();
+	}
+
+	private async exportAssets() {
+		const response = await fetch(`/api/assets/export?workspace=${this.ws}`);
+		const blob = await response.blob();
+		const url = URL.createObjectURL(blob);
+		const link = document.createElement("a");
+		link.href = url;
+		link.download = `baize-assets-${this.ws}.json`;
+		link.click();
+		URL.revokeObjectURL(url);
+	}
+
+	private importExample(): string {
+		return JSON.stringify(
+			{
+				scenarios: [{ title: "用户登录", description: "用户使用账号密码登录系统" }],
+				usecases: [
+					{
+						title: "提交登录",
+						scenarioTitle: "用户登录",
+						precondition: "用户已打开登录页",
+						main_flow: "输入账号密码并点击登录",
+						exceptions: "密码错误时提示失败原因",
+						postcondition: "登录成功后进入首页",
+					},
+				],
+				functions: [
+					{
+						domain: { name: "认证", description: "登录与会话管理" },
+						items: [{ title: "账号密码登录", description: "校验凭据并创建会话" }],
+					},
+				],
+			},
+			 null,
+			 2,
+		);
+	}
+
+	private importAssets() {
+		const ok = window.confirm(`导入文件需为 JSON，格式样例:\n\n${this.importExample()}\n\n继续选择文件?`);
+		if (!ok) return;
+		const input = document.createElement("input");
+		input.type = "file";
+		input.accept = "application/json,.json";
+		input.onchange = async () => {
+			const file = input.files?.[0];
+			if (!file) return;
+			let assets: Record<string, unknown>;
+			try {
+				assets = JSON.parse(await file.text()) as Record<string, unknown>;
+			} catch {
+				window.alert("导入文件不是有效 JSON");
+				return;
+			}
+			await fetch("/api/assets/import", {
+				method: "POST",
+				headers: { "content-type": "application/json" },
+				body: JSON.stringify({ workspaceId: this.ws, assets }),
+			});
+			await this.load();
+		};
+		input.click();
+	}
+
+	private renderToolbar() {
+		if (!this.ws || !this.assetKind()) return null;
+		return html`<div class="toolbar">
+			<button class="action" @click=${() => this.createManualAsset()}>新增</button>
+			<button class="action danger" @click=${() => this.deleteSelectedAsset()}>删除</button>
+			<button class="action" @click=${() => this.importAssets()}>导入</button>
+			<button class="action" @click=${() => this.exportAssets()}>导出</button>
+		</div>`;
+	}
+
 	private renderListDetail() {
 		const items = this.list();
-		const sel = items.find((x) => (x.id as number) === this.selectedId) ?? null;
+		const sel = items.find((x) => String(x.id) === this.selectedId) ?? null;
 		return html`
 			<div class="list">
 				${
 					items.length
 						? items.map(
 								(x) => html`<div
-								class="item ${x.id === this.selectedId ? "active" : ""}"
-								@click=${() => (this.selectedId = x.id as number)}
+								class="item ${String(x.id) === this.selectedId ? "active" : ""}"
+								@click=${() => (this.selectedId = String(x.id))}
 							>
 								${x.title ?? "(无标题)"}
 							</div>`,
@@ -297,7 +447,7 @@ class BaizeAssetLibrary extends LitElement {
 		let selDomain: Record<string, unknown> | null = null;
 		for (const g of groups) {
 			for (const it of g.items as Array<Record<string, unknown>>) {
-				if ((it.id as number) === this.selectedId) {
+				if (String(it.id) === this.selectedId) {
 					selItem = it;
 					selDomain = g.domain;
 				}
@@ -312,8 +462,8 @@ class BaizeAssetLibrary extends LitElement {
 								<div class="gname">${g.domain.name ?? "(无域)"}</div>
 								${(g.items as Array<Record<string, unknown>>).map(
 									(it) => html`<div
-										class="fn-item ${it.id === this.selectedId ? "active" : ""}"
-										@click=${() => (this.selectedId = it.id as number)}
+										class="fn-item ${String(it.id) === this.selectedId ? "active" : ""}"
+										@click=${() => (this.selectedId = String(it.id))}
 									>
 										${it.title ?? "(无标题)"}
 									</div>`,
@@ -365,15 +515,15 @@ class BaizeAssetLibrary extends LitElement {
 	}
 
 	private renderPkgListDetail(pkgs: Array<Record<string, unknown>>) {
-		const sel = pkgs.find((x) => (x.id as number) === this.selectedId) ?? null;
+		const sel = pkgs.find((x) => String(x.id) === this.selectedId) ?? null;
 		return html`
 			<div class="list">
 				${
 					pkgs.length
 						? pkgs.map(
 								(x) => html`<div
-								class="item ${x.id === this.selectedId ? "active" : ""}"
-								@click=${() => (this.selectedId = x.id as number)}
+								class="item ${String(x.id) === this.selectedId ? "active" : ""}"
+								@click=${() => (this.selectedId = String(x.id))}
 							>
 								${x.title ?? "(无标题)"}
 							</div>`,
@@ -432,6 +582,7 @@ class BaizeAssetLibrary extends LitElement {
 				<h1>${TABS.find((t) => t.id === this.tab)?.cn ?? "资产库"}</h1>
 				<p class="sub">workspace 复用池,跨需求沉淀</p>
 			</header>
+			${this.renderToolbar()}
 			${
 				!this.ws
 					? html`<div class="empty">请先在顶部选择工作区</div>`

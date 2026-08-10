@@ -435,6 +435,46 @@ export class Store {
 	getWorkspace(id: number): unknown {
 		return this.db.prepare("select * from workspaces where id = ?").get(id);
 	}
+
+	ensureAssetRequirement(workspaceId: number): number {
+		const existing = this.db
+			.prepare("select id from requirements where workspace_id = ? and source = 'manual-assets' order by id limit 1")
+			.get(workspaceId) as { id: number } | undefined;
+		return existing?.id ?? this.addRequirement(
+			workspaceId,
+			"手动资产库",
+			"手动新增或导入的设计资产",
+			"manual-assets",
+		);
+	}
+
+	ensureManualAssetRun(requirementId: number): number {
+		const existing = this.db
+			.prepare("select id from runs where requirement_id = ? and kind = 'manual-asset' and status = 'completed' order by id desc limit 1")
+			.get(requirementId) as { id: number } | undefined;
+		if (existing) return existing.id;
+
+		const session =
+			this.getDesignSession(requirementId) ??
+			this.createDesignSession(
+				requirementId,
+				`manual-assets:${requirementId}`,
+				`manual-assets-${requirementId}`,
+			);
+		const run = this.createRun(
+			requirementId,
+			session.id,
+			"manual-asset",
+			"Manual asset library change",
+			session.session_file,
+		);
+		this.setRunStatus(run.id, "completed");
+		return run.id;
+	}
+
+	deleteArtifact(id: number): boolean {
+		return this.db.prepare("delete from artifacts where id = ?").run(id).changes > 0;
+	}
 	counts(): Record<string, number> {
 		const t = (name: string): number =>
 			(this.db.prepare(`select count(*) c from ${name}`).get() as { c: number })
