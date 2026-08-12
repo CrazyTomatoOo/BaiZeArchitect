@@ -1,5 +1,6 @@
 import type { CrashInjector, FixtureClock, FixtureOperator, FixtureOutboxTransport, HashProvider } from "../testing/deterministic-fixtures.js";
 import { WorkflowStore, type BeginPlanningResult, type CommandReceipt, type CompletePlanningResult, type ExecuteCommandInput, type ReconciliationReport, type WorkflowCommandType, type WorkflowProjection } from "../persistence/workflow-store.js";
+import type { BeginAttemptResult, CompleteAttemptResult, ExecuteTaskResult, RoleResult } from "./role-result.js";
 import { loadWorkflowContracts } from "./contracts/loader.js";
 import { compileWorkflowSchema, type WorkflowSchemaValidator } from "./contracts/schema.js";
 import type { DoctorReport } from "./workflow-doctor.js";
@@ -10,6 +11,7 @@ import type { RequirementBaseline } from "./requirement.js";
 
 export type { RequirementBaseline } from "./requirement.js";
 export type { CommandReceipt, ReconciliationReport, WorkflowCommandType, BeginPlanningResult, CompletePlanningResult } from "../persistence/workflow-store.js";
+export type { BeginAttemptResult, CompleteAttemptResult, ExecuteTaskResult, RoleResult } from "./role-result.js";
 export type { DoctorReport } from "./workflow-doctor.js";
 
 export interface HeadlessWorkflowRuntimeOptions {
@@ -55,6 +57,9 @@ export interface HeadlessWorkflowRuntime {
 	completePlanning(workflowId: number, attemptId: number, structuredResult: unknown): CompletePlanningResult;
 	planWorkflow(workflowId: number, modelDriver: ModelDriver): Promise<PlanWorkflowResult>;
 	getPlanningContextDigest(workflowId: number): string;
+	beginAttempt(workflowId: number): BeginAttemptResult;
+	completeAttempt(workflowId: number, attemptId: number, structuredResult: unknown): CompleteAttemptResult;
+	executeTask(workflowId: number, modelDriver: ModelDriver): Promise<ExecuteTaskResult>;
 	reconcile(): ReconciliationReport;
 	processOutbox(): { delivered: number; exhausted: number; incidentsCreated: number };
 	diagnose(): DoctorReport;
@@ -99,6 +104,9 @@ export async function openHeadlessWorkflowRuntime(
 		return store.failPlanningAttempt(workflowId, attemptId, validation.ruleViolations);
 	}
 
+	function completeAttemptInternal(workflowId: number, attemptId: number, structuredResult: unknown): CompleteAttemptResult {
+		return store.publishAttemptResult(workflowId, attemptId, structuredResult);
+	}
 	return {
 		createWorkspace(input) {
 			return store.createWorkspace(input);
@@ -161,6 +169,32 @@ export async function openHeadlessWorkflowRuntime(
 		},
 		getPlanningContextDigest(workflowId) {
 			return store.getPlanningContextDigest(workflowId);
+		},
+		beginAttempt(workflowId) {
+			return store.beginAttempt(workflowId);
+		},
+		completeAttempt(workflowId, attemptId, structuredResult) {
+			return completeAttemptInternal(workflowId, attemptId, structuredResult);
+		},
+		async executeTask(workflowId, modelDriver) {
+			for (let iteration = 0; iteration < 10; iteration += 1) {
+				const begin = store.beginAttempt(workflowId);
+				if (begin.taskId === 0) {
+					return { outcome: "no_ready_task", workflowVersion: begin.workflowVersion, lastEventSeq: begin.lastEventSeq };
+				}
+				const result = await modelDriver.execute(
+					{ role: "analyst", contextDigest: begin.contextDigest, instruction: "Produce the required artifact revisions." },
+					[],
+				);
+				const complete = completeAttemptInternal(workflowId, begin.attemptId, result.structuredResult);
+				if (complete.outcome === "published") {
+					return { outcome: "published", workflowVersion: complete.workflowVersion, lastEventSeq: complete.lastEventSeq };
+				}
+				if (complete.outcome === "task_exhausted") {
+					return { outcome: "task_exhausted", workflowVersion: complete.workflowVersion, lastEventSeq: complete.lastEventSeq };
+				}
+			}
+			throw new Error("Task execution loop exceeded maximum iterations");
 		},
 		reconcile() {
 			return store.reconcile();
