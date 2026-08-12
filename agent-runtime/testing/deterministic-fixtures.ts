@@ -91,9 +91,8 @@ export function createHashProvider(): HashProvider {
 
 export interface FixtureOperator {
 	actorRef: string;
-	capabilities: readonly ["workflow:approve", "workflow:operate"];
+	capabilities: readonly string[];
 }
-
 export function createFixtureOperator(name: string): FixtureOperator {
 	return {
 		actorRef: `operator:${name}`,

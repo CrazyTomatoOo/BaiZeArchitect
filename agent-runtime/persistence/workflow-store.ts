@@ -1,10 +1,59 @@
 import Database from "better-sqlite3";
 import { mkdirSync } from "node:fs";
 import path from "node:path";
-import type { CrashInjector, FixtureClock, HashProvider } from "../testing/deterministic-fixtures.js";
+import type { CrashInjector, FixtureClock, FixtureOutboxTransport, HashProvider } from "../testing/deterministic-fixtures.js";
 import type { RequirementBaseline } from "../workflow/requirement.js";
 import { WORKFLOW_GOVERNANCE_MIGRATION } from "./migrations/0001-workflow-governance.js";
+import { COMMAND_GOVERNANCE_MIGRATION } from "./migrations/0002-command-governance.js";
 
+const MIGRATIONS = [WORKFLOW_GOVERNANCE_MIGRATION, COMMAND_GOVERNANCE_MIGRATION] as const;
+
+export type WorkflowCommandType = "start" | "pause" | "resume";
+
+export type CommandOutcome =
+	| "accepted"
+	| "capability_denied"
+	| "version_conflict"
+	| "state_conflict"
+	| "business_rule_rejected"
+	| "idempotency_conflict";
+
+export interface CommandReceipt {
+	commandId: string;
+	workflowId: number;
+	commandType: WorkflowCommandType;
+	outcome: CommandOutcome;
+	httpStatus: number;
+	workflowVersion: number;
+	lastEventSeq: number;
+	createdAt: string;
+}
+
+export interface ExecuteCommandInput {
+	workflowId: number;
+	commandId: string;
+	expectedWorkflowVersion: number;
+	type: WorkflowCommandType;
+	payload?: Record<string, unknown>;
+	reason?: string;
+	operator: { actorRef: string; capabilities: readonly string[] };
+}
+
+interface CommandTransition {
+	readonly from: string;
+	readonly to: string;
+	readonly eventType: string;
+}
+
+const COMMAND_TRANSITIONS: Record<WorkflowCommandType, readonly CommandTransition[]> = {
+	start: [{ from: "pending", to: "running", eventType: "workflow_started" }],
+	pause: [
+		{ from: "running", to: "paused", eventType: "workflow_paused" },
+		{ from: "waiting_for_human", to: "paused", eventType: "workflow_paused" },
+		{ from: "ready_to_archive", to: "paused", eventType: "workflow_paused" },
+	],
+	resume: [{ from: "paused", to: "running", eventType: "workflow_resumed" }],
+};
 export interface PolicyBundleDocument {
 	schemaVersion: "policy-bundle/v1";
 	contracts: readonly {
@@ -32,6 +81,7 @@ interface WorkflowStoreOptions {
 	clock: FixtureClock;
 	hashProvider: HashProvider;
 	crashInjector: CrashInjector;
+	outboxTransport: FixtureOutboxTransport;
 	policyBundle: PolicyBundleDocument;
 }
 
@@ -113,9 +163,12 @@ export class WorkflowStore {
 			this.database.pragma("synchronous = FULL");
 			this.database.pragma("busy_timeout = 5000");
 			this.applyMigrations();
-			this.createRequirementTransaction = this.database.transaction((input) =>
-				this.createRequirementRows(input),
-			).immediate;
+		this.createRequirementTransaction = this.database.transaction((input) =>
+			this.createRequirementRows(input),
+		).immediate;
+		this.executeCommandTransaction = this.database.transaction((input: ExecuteCommandInput) =>
+			this.executeCommandRows(input),
+		).immediate;
 		} catch (error) {
 			this.database.close();
 			throw error;
@@ -123,17 +176,18 @@ export class WorkflowStore {
 	}
 
 	private applyMigrations(): void {
-		const migration = WORKFLOW_GOVERNANCE_MIGRATION;
 		const existing = this.database
 			.prepare("select name from sqlite_master where type = 'table' and name = 'schema_migrations'")
 			.get();
 		if (!existing) {
 			const apply = this.database.transaction(() => {
-				this.database.exec(migration.sql);
-				const digest = this.options.hashProvider.digest(migration.sql);
-				this.database
-					.prepare("insert into schema_migrations(version, name, checksum, applied_at) values (?, ?, ?, ?)")
-					.run(migration.version, migration.name, digest, this.options.clock.now().toISOString());
+				for (const migration of MIGRATIONS) {
+					this.database.exec(migration.sql);
+					const digest = this.options.hashProvider.digest(migration.sql);
+					this.database
+						.prepare("insert into schema_migrations(version, name, checksum, applied_at) values (?, ?, ?, ?)")
+						.run(migration.version, migration.name, digest, this.options.clock.now().toISOString());
+				}
 			}).immediate;
 			apply();
 			return;
@@ -141,16 +195,19 @@ export class WorkflowStore {
 		const applied = this.database
 			.prepare("select version, name, checksum from schema_migrations order by version")
 			.all() as Array<{ version: number; name: string; checksum: string }>;
-		const newer = applied.find((item) => item.version > migration.version);
+		const maxKnown = MIGRATIONS[MIGRATIONS.length - 1].version;
+		const newer = applied.find((item) => item.version > maxKnown);
 		if (newer) {
 			throw new Error(
-				`Workflow database migration ${newer.version} is newer than supported version ${migration.version}`,
+				`Workflow database migration ${newer.version} is newer than supported version ${maxKnown}`,
 			);
 		}
-		const row = applied.find((item) => item.version === migration.version);
-		const checksum = this.options.hashProvider.digest(migration.sql);
-		if (!row || row.name !== migration.name || row.checksum !== checksum) {
-			throw new Error(`Workflow migration ${migration.version} is missing or has a checksum mismatch`);
+		for (const migration of MIGRATIONS) {
+			const row = applied.find((item) => item.version === migration.version);
+			const checksum = this.options.hashProvider.digest(migration.sql);
+			if (!row || row.name !== migration.name || row.checksum !== checksum) {
+				throw new Error(`Workflow migration ${migration.version} is missing or has a checksum mismatch`);
+			}
 		}
 	}
 
@@ -376,6 +433,184 @@ export class WorkflowStore {
 		};
 	}
 
+	private readonly executeCommandTransaction: (input: ExecuteCommandInput) => CommandReceipt;
+
+	executeCommand(input: ExecuteCommandInput): CommandReceipt {
+		const receipt = this.executeCommandTransaction(input);
+		this.drainOutbox();
+		return receipt;
+	}
+
+	private executeCommandRows(input: ExecuteCommandInput): CommandReceipt {
+		const timestamp = this.options.clock.now().toISOString();
+		const requestDigest = this.options.hashProvider.digest({
+			schemaVersion: "workflow-command/v1",
+			expectedWorkflowVersion: input.expectedWorkflowVersion,
+			type: input.type,
+			payload: input.payload ?? {},
+			...(input.reason !== undefined ? { reason: input.reason } : {}),
+		});
+		const existing = this.database
+			.prepare("select request_digest, outcome, http_status, workflow_version, last_event_seq, created_at from command_receipts where command_id = ?")
+			.get(input.commandId) as { request_digest: string; outcome: string; http_status: number; workflow_version: number; last_event_seq: number; created_at: string } | undefined;
+		if (existing) {
+			if (existing.request_digest === requestDigest) {
+				return {
+					commandId: input.commandId,
+					workflowId: input.workflowId,
+					commandType: input.type,
+					outcome: existing.outcome as CommandOutcome,
+					httpStatus: existing.http_status,
+					workflowVersion: existing.workflow_version,
+					lastEventSeq: existing.last_event_seq,
+					createdAt: existing.created_at,
+				};
+			}
+		const conflictVersion = this.currentWorkflowVersion(input.workflowId);
+		const seq = this.appendEvent(input.workflowId, "command_idempotency_conflict", conflictVersion, "workflow_command", input.workflowId, 0, { conflictingDigest: requestDigest }, timestamp, undefined, input.commandId);
+			this.options.crashInjector.reach("execute_command.before_commit");
+			return {
+				commandId: input.commandId,
+				workflowId: input.workflowId,
+				commandType: input.type,
+				outcome: "idempotency_conflict",
+				httpStatus: 409,
+				workflowVersion: this.currentWorkflowVersion(input.workflowId),
+				lastEventSeq: seq,
+				createdAt: timestamp,
+			};
+		}
+		const workflow = this.database
+			.prepare("select state, version, last_event_seq from workflows where id = ?")
+			.get(input.workflowId) as { state: string; version: number; last_event_seq: number };
+		const actorSnapshot = this.insertSnapshot(
+			"actor_snapshot",
+			"actor/v1",
+			{ actorRef: input.operator.actorRef, capabilities: input.operator.capabilities },
+			timestamp,
+		);
+		const capability = `workflow:operate`;
+		if (!input.operator.capabilities.includes(capability)) {
+			return this.persistRejection(input, timestamp, requestDigest, workflow, actorSnapshot.id, "capability_denied", 403);
+		}
+		if (workflow.version !== input.expectedWorkflowVersion) {
+			return this.persistRejection(input, timestamp, requestDigest, workflow, actorSnapshot.id, "version_conflict", 409);
+		}
+		const transitions = COMMAND_TRANSITIONS[input.type];
+		const transition = transitions.find((t) => t.from === workflow.state);
+		if (!transition) {
+			return this.persistRejection(input, timestamp, requestDigest, workflow, actorSnapshot.id, "state_conflict", 409);
+		}
+		const newVersion = workflow.version + 1;
+		this.database
+			.prepare("update workflows set state = ?, version = ?, updated_at = ? where id = ?")
+			.run(transition.to, newVersion, timestamp, input.workflowId);
+		const seq = this.appendEvent(input.workflowId, transition.eventType, newVersion, "workflow", input.workflowId, newVersion, input.payload ?? {}, timestamp, actorSnapshot.id, input.commandId);
+		this.database
+			.prepare("insert into outbox_jobs(workflow_id, event_seq, delivery_type, payload, created_at) values (?, ?, 'workflow_event', ?, ?)")
+			.run(input.workflowId, seq, transition.eventType, timestamp);
+		const receipt: CommandReceipt = {
+			commandId: input.commandId,
+			workflowId: input.workflowId,
+			commandType: input.type,
+			outcome: "accepted",
+			httpStatus: 201,
+			workflowVersion: newVersion,
+			lastEventSeq: seq,
+			createdAt: timestamp,
+		};
+		this.database
+			.prepare("insert into command_receipts(command_id, workflow_id, request_digest, command_type, expected_workflow_version, actor_snapshot_document_id, outcome, http_status, workflow_version, last_event_seq, created_at) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
+			.run(receipt.commandId, receipt.workflowId, requestDigest, receipt.commandType, input.expectedWorkflowVersion, actorSnapshot.id, receipt.outcome, receipt.httpStatus, receipt.workflowVersion, receipt.lastEventSeq, receipt.createdAt);
+		this.options.crashInjector.reach("execute_command.before_commit");
+		return receipt;
+	}
+
+	private persistRejection(
+		input: ExecuteCommandInput,
+		timestamp: string,
+		requestDigest: string,
+		workflow: { state: string; version: number; last_event_seq: number },
+		actorSnapshotId: number,
+		outcome: CommandOutcome,
+		httpStatus: number,
+	): CommandReceipt {
+		const receipt: CommandReceipt = {
+			commandId: input.commandId,
+			workflowId: input.workflowId,
+			commandType: input.type,
+			outcome,
+			httpStatus,
+			workflowVersion: workflow.version,
+			lastEventSeq: workflow.last_event_seq,
+			createdAt: timestamp,
+		};
+		this.database
+			.prepare("insert into command_receipts(command_id, workflow_id, request_digest, command_type, expected_workflow_version, actor_snapshot_document_id, outcome, http_status, workflow_version, last_event_seq, created_at) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
+			.run(receipt.commandId, receipt.workflowId, requestDigest, receipt.commandType, input.expectedWorkflowVersion, actorSnapshotId, receipt.outcome, receipt.httpStatus, receipt.workflowVersion, receipt.lastEventSeq, receipt.createdAt);
+		this.options.crashInjector.reach("execute_command.before_commit");
+		return receipt;
+	}
+
+	private appendEvent(
+		workflowId: number,
+		type: string,
+		workflowVersion: number,
+		entityType: string,
+		entityId: number,
+		entityVersion: number,
+		payload: Record<string, unknown>,
+		createdAt: string,
+		actorSnapshotId?: number,
+		commandId?: string,
+	): number {
+		const seq = Number(
+			(this.database
+				.prepare("select coalesce(max(seq), 0) + 1 as next_seq from workflow_events where workflow_id = ?")
+				.get(workflowId) as { next_seq: number }).next_seq,
+		);
+		this.database
+			.prepare("insert into workflow_events(workflow_id, seq, type, type_version, schema_version, workflow_version, entity_type, entity_id, entity_version, command_id, actor_snapshot_document_id, payload, created_at) values (?, ?, ?, 1, 'workflow-event/v1', ?, ?, ?, ?, ?, ?, ?, ?)")
+			.run(workflowId, seq, type, workflowVersion, entityType, entityId, entityVersion, commandId ?? null, actorSnapshotId ?? null, JSON.stringify(payload), createdAt);
+		return seq;
+	}
+
+	private currentWorkflowVersion(workflowId: number): number {
+		return (this.database.prepare("select version from workflows where id = ?").get(workflowId) as { version: number }).version;
+	}
+
+	getCommandReceipt(workflowId: number, commandId: string): CommandReceipt | undefined {
+		const row = this.database
+			.prepare("select command_id, workflow_id, command_type, outcome, http_status, workflow_version, last_event_seq, created_at from command_receipts where command_id = ? and workflow_id = ?")
+			.get(commandId, workflowId) as Record<string, unknown> | undefined;
+		if (!row) return undefined;
+		return {
+			commandId: row.command_id as string,
+			workflowId: row.workflow_id as number,
+			commandType: row.command_type as WorkflowCommandType,
+			outcome: row.outcome as CommandOutcome,
+			httpStatus: row.http_status as number,
+			workflowVersion: row.workflow_version as number,
+			lastEventSeq: row.last_event_seq as number,
+			createdAt: row.created_at as string,
+		};
+	}
+
+	private drainOutbox(): void {
+		const jobs = this.database
+			.prepare("select id, workflow_id, event_seq, delivery_type, payload from outbox_jobs where delivered_at is null order by id")
+			.all() as Array<{ id: number; workflow_id: number; event_seq: number; delivery_type: string; payload: string }>;
+		const timestamp = this.options.clock.now().toISOString();
+		const mark = this.database.prepare("update outbox_jobs set delivered_at = ? where id = ?");
+		for (const job of jobs) {
+			void this.options.outboxTransport.deliver({
+				id: `outbox-${job.id}`,
+				type: job.delivery_type,
+				payload: job.payload,
+			});
+			mark.run(timestamp, job.id);
+		}
+	}
 	close(): void {
 		this.database.close();
 	}

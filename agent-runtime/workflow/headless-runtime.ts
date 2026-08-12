@@ -1,17 +1,29 @@
-import type { CrashInjector, FixtureClock, HashProvider } from "../testing/deterministic-fixtures.js";
-import { WorkflowStore, type WorkflowProjection } from "../persistence/workflow-store.js";
+import type { CrashInjector, FixtureClock, FixtureOperator, FixtureOutboxTransport, HashProvider } from "../testing/deterministic-fixtures.js";
+import { WorkflowStore, type CommandReceipt, type ExecuteCommandInput, type WorkflowCommandType, type WorkflowProjection } from "../persistence/workflow-store.js";
 import { loadWorkflowContracts } from "./contracts/loader.js";
 import { compileWorkflowSchema } from "./contracts/schema.js";
 import type { RequirementBaseline } from "./requirement.js";
 
 export type { RequirementBaseline } from "./requirement.js";
-
+export type { CommandReceipt, WorkflowCommandType } from "../persistence/workflow-store.js";
 
 export interface HeadlessWorkflowRuntimeOptions {
 	databasePath: string;
 	clock: FixtureClock;
 	hashProvider: HashProvider;
 	crashInjector: CrashInjector;
+	outboxTransport: FixtureOutboxTransport;
+}
+
+export interface ExecuteCommandRequest {
+	workflowId: number;
+	commandId: string;
+	expectedWorkflowVersion: number;
+	type: WorkflowCommandType;
+	payload?: Record<string, unknown>;
+	reason?: string;
+	operator: FixtureOperator;
+	schemaVersion?: string;
 }
 
 export interface HeadlessWorkflowRuntime {
@@ -25,6 +37,8 @@ export interface HeadlessWorkflowRuntime {
 	};
 	listRequirements(workspaceId: number): Array<{ requirementId: number; workflowId: number }>;
 	getWorkflowProjection(workflowId: number): WorkflowProjection | undefined;
+	executeCommand(input: ExecuteCommandRequest): CommandReceipt;
+	getCommandReceipt(workflowId: number, commandId: string): CommandReceipt | undefined;
 	close(): void;
 }
 
@@ -59,6 +73,24 @@ export async function openHeadlessWorkflowRuntime(
 		},
 		getWorkflowProjection(workflowId) {
 			return store.getWorkflowProjection(workflowId);
+		},
+		executeCommand(input) {
+			if (input.schemaVersion !== undefined && input.schemaVersion !== "workflow-command/v1") {
+				throw new Error("Command envelope schema is invalid");
+			}
+			const validTypes: readonly WorkflowCommandType[] = ["start", "pause", "resume"];
+			if (!validTypes.includes(input.type)) {
+				throw new Error("Command envelope schema is invalid");
+			}
+			if (!store.getWorkflowProjection(input.workflowId)) {
+				throw new Error("Command envelope schema is invalid");
+			}
+			const { schemaVersion: _omitted, ...envelope } = input;
+			void _omitted;
+			return store.executeCommand(envelope as ExecuteCommandInput);
+		},
+		getCommandReceipt(workflowId, commandId) {
+			return store.getCommandReceipt(workflowId, commandId);
 		},
 		close() {
 			store.close();

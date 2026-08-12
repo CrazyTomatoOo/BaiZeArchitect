@@ -8,6 +8,7 @@ import {
 	createCrashInjector,
 	createFixtureClock,
 	createHashProvider,
+	createOutboxTransport,
 } from "./testing/deterministic-fixtures.ts";
 import {
 	openHeadlessWorkflowRuntime,
@@ -29,6 +30,7 @@ function runtimeOptions(databasePath: string, crashPoints: readonly string[] = [
 		clock: createFixtureClock("2026-08-12T10:00:00.000Z"),
 		hashProvider: createHashProvider(),
 		crashInjector: createCrashInjector(crashPoints),
+		outboxTransport: createOutboxTransport(),
 	};
 }
 
@@ -358,12 +360,12 @@ test("startup refuses an unknown newer Workflow schema migration", async () => {
 	const runtime = await openHeadlessWorkflowRuntime(runtimeOptions(databasePath));
 	runtime.close();
 	const database = new Database(databasePath);
-	database.prepare("insert into schema_migrations(version, name, checksum, applied_at) values (2, 'future', 'sha256:future', ?)").run("2026-08-12T10:00:00.000Z");
+	database.prepare("insert into schema_migrations(version, name, checksum, applied_at) values (3, 'future', 'sha256:future', ?)").run("2026-08-12T10:00:00.000Z");
 	database.close();
 	try {
 		await assert.rejects(
 			openHeadlessWorkflowRuntime(runtimeOptions(databasePath)),
-			/Workflow database migration 2 is newer than supported version 1/,
+			/Workflow database migration 3 is newer than supported version 2/,
 		);
 	} finally {
 		await rm(directory, { recursive: true, force: true });
