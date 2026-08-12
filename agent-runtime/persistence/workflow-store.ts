@@ -3,12 +3,15 @@ import { mkdirSync } from "node:fs";
 import path from "node:path";
 import type { CrashInjector, FixtureClock, FixtureOutboxTransport, HashProvider } from "../testing/deterministic-fixtures.js";
 import { WorkflowDoctor, type DoctorReport } from "../workflow/workflow-doctor.js";
+import { PLAN_TASK_LIMITS, type PlanProposal, type TaskProposal } from "../workflow/plan-types.js";
 import type { RequirementBaseline } from "../workflow/requirement.js";
+
 import { WORKFLOW_GOVERNANCE_MIGRATION } from "./migrations/0001-workflow-governance.js";
 import { COMMAND_GOVERNANCE_MIGRATION } from "./migrations/0002-command-governance.js";
 import { RECOVERY_GOVERNANCE_MIGRATION } from "./migrations/0003-recovery-governance.js";
+import { PLANNING_GOVERNANCE_MIGRATION } from "./migrations/0004-planning-governance.js";
 
-const MIGRATIONS = [WORKFLOW_GOVERNANCE_MIGRATION, COMMAND_GOVERNANCE_MIGRATION, RECOVERY_GOVERNANCE_MIGRATION] as const;
+const MIGRATIONS = [WORKFLOW_GOVERNANCE_MIGRATION, COMMAND_GOVERNANCE_MIGRATION, RECOVERY_GOVERNANCE_MIGRATION, PLANNING_GOVERNANCE_MIGRATION] as const;
 
 export type WorkflowCommandType = "start" | "pause" | "resume" | "retry-recovery";
 
@@ -34,6 +37,29 @@ export interface OutboxDrainResult {
 	delivered: number;
 	exhausted: number;
 	incidentsCreated: number;
+}
+
+export interface BeginPlanningResult {
+	taskId: number;
+	attemptId: number;
+	runId: number;
+	planningContextDigest: string;
+	workflowVersion: number;
+	lastEventSeq: number;
+}
+
+export type CompletePlanningOutcome =
+	| "adopted"
+	| "validation_failed"
+	| "stale_context"
+	| "planning_exhausted"
+	| "plan_budget_exhausted";
+
+export interface CompletePlanningResult {
+	outcome: CompletePlanningOutcome;
+	planRevisionId: number | null;
+	workflowVersion: number;
+	lastEventSeq: number;
 }
 
 const MAX_DELIVERY_FAILURES = 5;
@@ -548,9 +574,9 @@ export class WorkflowStore {
 				.run(timestamp, incidentId);
 		}
 		const newVersion = workflow.version + 1;
-		this.database
-			.prepare("update workflows set state = ?, version = ?, updated_at = ? where id = ?")
-			.run(transition.to, newVersion, timestamp, input.workflowId);
+	this.database
+		.prepare("update workflows set state = ?, version = ?, consecutive_plan_revisions = 0, updated_at = ? where id = ?")
+		.run(transition.to, newVersion, timestamp, input.workflowId);
 		const seq = this.appendEvent(input.workflowId, transition.eventType, newVersion, "workflow", input.workflowId, newVersion, input.payload ?? {}, timestamp, actorSnapshot.id, input.commandId);
 		if (input.type !== "retry-recovery") {
 			this.database
@@ -763,6 +789,227 @@ export class WorkflowStore {
 			.immediate;
 		tx();
 	}
+	beginPlanning(workflowId: number): BeginPlanningResult {
+		const tx = this.database.transaction(() => this.beginPlanningRows(workflowId)).immediate;
+		return tx();
+	}
+
+	private beginPlanningRows(workflowId: number): BeginPlanningResult {
+		const timestamp = this.options.clock.now().toISOString();
+		const workflow = this.database
+			.prepare("select state, version, consecutive_plan_revisions from workflows where id = ?")
+			.get(workflowId) as { state: string; version: number; consecutive_plan_revisions: number };
+
+		if (workflow.state !== "running") {
+			throw new Error(`Cannot begin planning on workflow in state ${workflow.state}`);
+		}
+
+		if (workflow.consecutive_plan_revisions >= PLAN_TASK_LIMITS.maxConsecutivePlanRevisions) {
+			const newVersion = workflow.version + 1;
+			this.database
+				.prepare("update workflows set state = 'failed', version = ?, current_failure_code = 'plan_budget_exhausted', updated_at = ? where id = ?")
+				.run(newVersion, timestamp, workflowId);
+			this.appendEvent(workflowId, "workflow_failed", newVersion, "workflow", workflowId, newVersion, { failureCode: "plan_budget_exhausted" }, timestamp);
+			this.options.crashInjector.reach("begin_planning.before_commit");
+			return { taskId: 0, attemptId: 0, runId: 0, planningContextDigest: "", workflowVersion: newVersion, lastEventSeq: this.currentLastEventSeq(workflowId) };
+		}
+
+		const planningContextDigest = this.computePlanningContextDigest(workflowId);
+		const newVersion = workflow.version + 1;
+
+		let planningTask = this.database
+			.prepare("select id, status from tasks where workflow_id = ? and kind = 'plan' and status in ('pending', 'in_progress') order by id desc limit 1")
+			.get(workflowId) as { id: number; status: string } | undefined;
+	if (!planningTask) {
+		planningTask = {
+			id: Number(this.database
+				.prepare("insert into tasks(workflow_id, plan_revision_id, key, kind, role, objective, max_attempts, status, created_at) values (?, null, 'plan', 'plan', 'orchestrator', 'Produce a complete PlanProposal DAG', ?, 'in_progress', ?)")
+				.run(workflowId, PLAN_TASK_LIMITS.maxPlanningAttempts, timestamp).lastInsertRowid),
+			status: "in_progress",
+		};
+	}
+
+		const attemptNo = (this.database.prepare("select coalesce(max(attempt_no), 0) + 1 as next from task_attempts where task_id = ?").get(planningTask.id) as { next: number }).next;
+		const attemptId = Number(this.database
+			.prepare("insert into task_attempts(task_id, workflow_id, attempt_no, status, planning_context_digest, base_workflow_version, created_at) values (?, ?, ?, 'running', ?, ?, ?)")
+			.run(planningTask.id, workflowId, attemptNo, planningContextDigest, workflow.version, timestamp).lastInsertRowid);
+		const runId = Number(this.database
+			.prepare("insert into runs(attempt_id, workflow_id, session_file, session_id, status, created_at) values (?, ?, ?, ?, 'queued', ?)")
+			.run(attemptId, workflowId, `workflow-sessions/run-${attemptId}.jsonl`, `run:${attemptId}`, timestamp).lastInsertRowid);
+		this.database.prepare("update runs set status = 'running' where id = ?").run(runId);
+		this.database.prepare("insert into governance_claims(workflow_id, attempt_id, status, created_at) values (?, ?, 'active', ?)").run(workflowId, attemptId, timestamp);
+
+		this.appendEvent(workflowId, "planning_requested", newVersion, "task", planningTask.id, 0, { planningContextDigest }, timestamp);
+		this.appendEvent(workflowId, "attempt_created", newVersion, "task_attempt", attemptId, 0, { taskId: planningTask.id, attemptNo }, timestamp);
+		this.appendEvent(workflowId, "run_queued", newVersion, "run", runId, 0, { attemptId }, timestamp);
+		this.appendEvent(workflowId, "run_running", newVersion, "run", runId, 0, { attemptId }, timestamp);
+		this.appendEvent(workflowId, "workflow_attempt_claim_acquired", newVersion, "task_attempt", attemptId, 0, { attemptId }, timestamp);
+
+		this.database.prepare("update workflows set version = ?, updated_at = ? where id = ?").run(newVersion, timestamp, workflowId);
+		this.options.crashInjector.reach("begin_planning.before_commit");
+		return { taskId: planningTask.id, attemptId, runId, planningContextDigest, workflowVersion: newVersion, lastEventSeq: this.currentLastEventSeq(workflowId) };
+	}
+
+	getAttemptBaseVersion(workflowId: number, attemptId: number): number | null {
+		const row = this.database
+			.prepare("select base_workflow_version from task_attempts where id = ? and workflow_id = ?")
+			.get(attemptId, workflowId) as { base_workflow_version: number | null } | undefined;
+		return row?.base_workflow_version ?? null;
+	}
+
+	isPlanningContextStale(workflowId: number, attemptId: number): boolean {
+		const attempt = this.database
+			.prepare("select planning_context_digest from task_attempts where id = ?")
+			.get(attemptId) as { planning_context_digest: string } | undefined;
+		if (!attempt?.planning_context_digest) return false;
+		return attempt.planning_context_digest !== this.computePlanningContextDigest(workflowId);
+	}
+
+	getPlanningContextDigest(workflowId: number): string {
+		return this.computePlanningContextDigest(workflowId);
+	}
+
+	private computePlanningContextDigest(workflowId: number): string {
+		const row = this.database
+			.prepare(`select w.current_plan_revision_id, ar.content_digest as requirement_digest, policy.digest as policy_digest from workflows w join requirements r on r.id = w.requirement_id join artifact_revisions ar on ar.id = r.current_revision_id join snapshot_documents policy on policy.id = w.policy_bundle_document_id where w.id = ?`)
+			.get(workflowId) as { current_plan_revision_id: number | null; requirement_digest: string; policy_digest: string };
+		return this.options.hashProvider.digest({
+			requirementRevisionDigest: row.requirement_digest,
+			policyBundleDigest: row.policy_digest,
+			basePlanRevisionId: row.current_plan_revision_id,
+		});
+	}
+
+	adoptPlan(workflowId: number, attemptId: number, proposal: PlanProposal): CompletePlanningResult {
+		const tx = this.database.transaction(() => this.adoptPlanRows(workflowId, attemptId, proposal)).immediate;
+		const result = tx();
+		this.options.crashInjector.reach("drain_outbox.before");
+		this.drainOutbox();
+		return result;
+	}
+
+	private adoptPlanRows(workflowId: number, attemptId: number, proposal: PlanProposal): CompletePlanningResult {
+		const timestamp = this.options.clock.now().toISOString();
+		const workflow = this.database
+			.prepare("select version, current_plan_revision_id, consecutive_plan_revisions from workflows where id = ?")
+			.get(workflowId) as { version: number; current_plan_revision_id: number | null; consecutive_plan_revisions: number };
+		const attempt = this.database
+			.prepare("select task_id, planning_context_digest from task_attempts where id = ?")
+			.get(attemptId) as { task_id: number; planning_context_digest: string };
+		const currentContext = this.computePlanningContextDigest(workflowId);
+		if (attempt.planning_context_digest !== currentContext) {
+			return this.supersedePlanningRows(workflowId, attemptId, "planning_context_changed");
+		}
+
+		const proposalSnapshot = this.insertSnapshot("plan_proposal", "plan-proposal/v1", proposal, timestamp);
+		const revisionNo = (this.database.prepare("select coalesce(max(revision_no), 0) + 1 as next from plan_revisions where workflow_id = ?").get(workflowId) as { next: number }).next;
+		const newVersion = workflow.version + 1;
+
+		if (workflow.current_plan_revision_id !== null) {
+			this.database.prepare("update plan_revisions set status = 'superseded' where id = ?").run(workflow.current_plan_revision_id);
+		}
+
+		const planRevisionId = Number(this.database
+			.prepare("insert into plan_revisions(workflow_id, revision_no, proposal_document_id, proposal_digest, base_plan_revision_id, planning_context_digest, status, created_at) values (?, ?, ?, ?, ?, ?, 'active', ?)")
+			.run(workflowId, revisionNo, proposalSnapshot.id, proposalSnapshot.digest, workflow.current_plan_revision_id, attempt.planning_context_digest, timestamp).lastInsertRowid);
+
+		for (const task of proposal.tasks) {
+			const taskId = Number(this.database
+				.prepare("insert into tasks(workflow_id, plan_revision_id, key, kind, role, objective, depends_on_json, inputs_json, expected_artifact_effects_json, completion_policy_ref, max_attempts, status, created_at) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?)")
+				.run(workflowId, planRevisionId, task.key, task.kind, task.role, task.objective, JSON.stringify(task.dependsOn), JSON.stringify(task.inputs), JSON.stringify(task.expectedArtifactEffects), task.completionPolicyRef, task.maxAttempts, timestamp).lastInsertRowid);
+			this.appendEvent(workflowId, "task_created", newVersion, "task", taskId, 0, { planRevisionId, key: task.key, kind: task.kind, role: task.role }, timestamp);
+		}
+
+		this.database.prepare("update task_attempts set status = 'succeeded', completed_at = ? where id = ?").run(timestamp, attemptId);
+		const runId = (this.database.prepare("select id from runs where attempt_id = ? order by id desc limit 1").get(attemptId) as { id: number }).id;
+		this.database.prepare("update runs set status = 'completed', completed_at = ? where id = ?").run(timestamp, runId);
+		this.database.prepare("update governance_claims set status = 'released', released_at = ? where attempt_id = ? and status = 'active'").run(timestamp, attemptId);
+		this.database.prepare("update workflows set version = ?, current_plan_revision_id = ?, consecutive_plan_revisions = ?, updated_at = ? where id = ?")
+			.run(newVersion, planRevisionId, workflow.consecutive_plan_revisions + 1, timestamp, workflowId);
+
+		this.appendEvent(workflowId, "plan_adopted", newVersion, "plan_revision", planRevisionId, revisionNo, { proposalDigest: proposalSnapshot.digest, revisionNo, basePlanRevisionId: workflow.current_plan_revision_id }, timestamp);
+		this.appendEvent(workflowId, "attempt_succeeded", newVersion, "task_attempt", attemptId, 0, { taskId: attempt.task_id }, timestamp);
+		this.appendEvent(workflowId, "run_completed", newVersion, "run", runId, 0, { attemptId }, timestamp);
+		this.appendEvent(workflowId, "workflow_attempt_claim_released", newVersion, "task_attempt", attemptId, 0, { attemptId }, timestamp);
+
+		this.options.crashInjector.reach("adopt_plan.before_commit");
+		return { outcome: "adopted", planRevisionId, workflowVersion: newVersion, lastEventSeq: this.currentLastEventSeq(workflowId) };
+	}
+
+	failPlanningAttempt(workflowId: number, attemptId: number, violations: unknown): CompletePlanningResult {
+		const tx = this.database.transaction(() => this.failPlanningAttemptRows(workflowId, attemptId, violations)).immediate;
+		const result = tx();
+		this.options.crashInjector.reach("drain_outbox.before");
+		this.drainOutbox();
+		return result;
+	}
+
+	private failPlanningAttemptRows(workflowId: number, attemptId: number, violations: unknown): CompletePlanningResult {
+		const timestamp = this.options.clock.now().toISOString();
+		const workflow = this.database.prepare("select version from workflows where id = ?").get(workflowId) as { version: number };
+		const attempt = this.database.prepare("select task_id, attempt_no from task_attempts where id = ?").get(attemptId) as { task_id: number; attempt_no: number };
+		const newVersion = workflow.version + 1;
+
+		this.database.prepare("update task_attempts set status = 'failed', completed_at = ? where id = ?").run(timestamp, attemptId);
+		const runId = (this.database.prepare("select id from runs where attempt_id = ? order by id desc limit 1").get(attemptId) as { id: number }).id;
+		this.database.prepare("update runs set status = 'failed', completed_at = ? where id = ?").run(timestamp, runId);
+		this.database.prepare("update governance_claims set status = 'released', released_at = ? where attempt_id = ? and status = 'active'").run(timestamp, attemptId);
+
+		this.appendEvent(workflowId, "plan_validation_failed", newVersion, "task_attempt", attemptId, 0, { violations }, timestamp);
+		this.appendEvent(workflowId, "attempt_failed", newVersion, "task_attempt", attemptId, 0, { taskId: attempt.task_id, attemptNo: attempt.attempt_no }, timestamp);
+		this.appendEvent(workflowId, "run_failed", newVersion, "run", runId, 0, { attemptId }, timestamp);
+		this.appendEvent(workflowId, "workflow_attempt_claim_released", newVersion, "task_attempt", attemptId, 0, { attemptId }, timestamp);
+
+		const failedCount = (this.database.prepare("select count(*) as count from task_attempts where task_id = ? and status = 'failed'").get(attempt.task_id) as { count: number }).count;
+
+		let outcome: CompletePlanningOutcome = "validation_failed";
+		if (failedCount >= PLAN_TASK_LIMITS.maxPlanningAttempts) {
+			this.database.prepare("update tasks set status = 'failed' where id = ?").run(attempt.task_id);
+			this.database.prepare("update workflows set state = 'failed', version = ?, current_failure_code = 'planning_exhausted', updated_at = ? where id = ?").run(newVersion, timestamp, workflowId);
+			this.appendEvent(workflowId, "workflow_failed", newVersion, "workflow", workflowId, newVersion, { failureCode: "planning_exhausted" }, timestamp);
+			outcome = "planning_exhausted";
+		} else {
+			this.database.prepare("update workflows set version = ?, updated_at = ? where id = ?").run(newVersion, timestamp, workflowId);
+		}
+
+		this.options.crashInjector.reach("fail_planning.before_commit");
+		return { outcome, planRevisionId: null, workflowVersion: newVersion, lastEventSeq: this.currentLastEventSeq(workflowId) };
+	}
+
+	supersedePlanningAttempt(workflowId: number, attemptId: number, reason: string): CompletePlanningResult {
+		const tx = this.database.transaction(() => this.supersedePlanningRows(workflowId, attemptId, reason)).immediate;
+		const result = tx();
+		this.options.crashInjector.reach("drain_outbox.before");
+		this.drainOutbox();
+		return result;
+	}
+
+	private supersedePlanningRows(workflowId: number, attemptId: number, reason: string): CompletePlanningResult {
+		const timestamp = this.options.clock.now().toISOString();
+		const workflow = this.database.prepare("select version from workflows where id = ?").get(workflowId) as { version: number };
+		const attempt = this.database.prepare("select task_id from task_attempts where id = ?").get(attemptId) as { task_id: number };
+		const newVersion = workflow.version + 1;
+
+		const runId = (this.database.prepare("select id from runs where attempt_id = ? order by id desc limit 1").get(attemptId) as { id: number }).id;
+		this.database.prepare("update runs set status = 'completed', completed_at = ? where id = ?").run(timestamp, runId);
+		this.database.prepare("update task_attempts set status = 'superseded', completed_at = ? where id = ?").run(timestamp, attemptId);
+		this.database.prepare("update tasks set status = 'superseded' where id = ?").run(attempt.task_id);
+		this.database.prepare("update governance_claims set status = 'released', released_at = ? where attempt_id = ? and status = 'active'").run(timestamp, attemptId);
+		this.database.prepare("update workflows set version = ?, updated_at = ? where id = ?").run(newVersion, timestamp, workflowId);
+
+		this.appendEvent(workflowId, "run_completed", newVersion, "run", runId, 0, { attemptId }, timestamp);
+		this.appendEvent(workflowId, "attempt_superseded", newVersion, "task_attempt", attemptId, 0, { taskId: attempt.task_id, reason }, timestamp);
+		this.appendEvent(workflowId, "task_superseded", newVersion, "task", attempt.task_id, 0, { reason }, timestamp);
+		this.appendEvent(workflowId, "workflow_attempt_claim_released", newVersion, "task_attempt", attemptId, 0, { attemptId }, timestamp);
+
+		this.options.crashInjector.reach("supersede_planning.before_commit");
+		return { outcome: "stale_context", planRevisionId: null, workflowVersion: newVersion, lastEventSeq: this.currentLastEventSeq(workflowId) };
+	}
+
+	private currentLastEventSeq(workflowId: number): number {
+		return (this.database.prepare("select last_event_seq from workflows where id = ?").get(workflowId) as { last_event_seq: number }).last_event_seq;
+	}
+
 	close(): void {
 		this.database.close();
 	}
