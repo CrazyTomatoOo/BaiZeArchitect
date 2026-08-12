@@ -5,6 +5,7 @@ import type { ModelUsage } from "../workflow/model-driver.js";
 
 export interface FixtureClock {
 	now(): Date;
+	advance(milliseconds: number): void;
 }
 
 export function createFixtureClock(
@@ -14,11 +15,15 @@ export function createFixtureClock(
 	const startMilliseconds = new Date(start).getTime();
 	if (!Number.isFinite(startMilliseconds)) throw new Error(`invalid fixture time: ${start}`);
 	let tick = 0;
+	let elapsed = 0;
 	return {
 		now() {
-			const value = new Date(startMilliseconds + tick * stepMilliseconds);
+			const value = new Date(startMilliseconds + elapsed + tick * stepMilliseconds);
 			tick += 1;
 			return value;
+		},
+		advance(milliseconds) {
+			elapsed += milliseconds;
 		},
 	};
 }
@@ -126,14 +131,19 @@ export interface OutboxDelivery {
 }
 
 export interface FixtureOutboxTransport {
-	deliver(delivery: OutboxDelivery): Promise<void>;
+	deliver(delivery: OutboxDelivery): void;
 	deliveries(): readonly OutboxDelivery[];
 }
 
-export function createOutboxTransport(): FixtureOutboxTransport {
+export function createOutboxTransport(options?: { failFirst?: number }): FixtureOutboxTransport {
 	const delivered: OutboxDelivery[] = [];
+	let failRemaining = options?.failFirst ?? 0;
 	return {
-		async deliver(delivery) {
+		deliver(delivery) {
+			if (failRemaining > 0) {
+				failRemaining -= 1;
+				throw new Error("fixture delivery failed");
+			}
 			delivered.push(structuredClone(delivery));
 		},
 		deliveries() {

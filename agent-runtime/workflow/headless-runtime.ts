@@ -1,11 +1,13 @@
 import type { CrashInjector, FixtureClock, FixtureOperator, FixtureOutboxTransport, HashProvider } from "../testing/deterministic-fixtures.js";
-import { WorkflowStore, type CommandReceipt, type ExecuteCommandInput, type WorkflowCommandType, type WorkflowProjection } from "../persistence/workflow-store.js";
+import { WorkflowStore, type CommandReceipt, type ExecuteCommandInput, type ReconciliationReport, type WorkflowCommandType, type WorkflowProjection } from "../persistence/workflow-store.js";
 import { loadWorkflowContracts } from "./contracts/loader.js";
 import { compileWorkflowSchema } from "./contracts/schema.js";
+import type { DoctorReport } from "./workflow-doctor.js";
 import type { RequirementBaseline } from "./requirement.js";
 
 export type { RequirementBaseline } from "./requirement.js";
-export type { CommandReceipt, WorkflowCommandType } from "../persistence/workflow-store.js";
+export type { CommandReceipt, ReconciliationReport, WorkflowCommandType } from "../persistence/workflow-store.js";
+export type { DoctorReport } from "./workflow-doctor.js";
 
 export interface HeadlessWorkflowRuntimeOptions {
 	databasePath: string;
@@ -39,6 +41,9 @@ export interface HeadlessWorkflowRuntime {
 	getWorkflowProjection(workflowId: number): WorkflowProjection | undefined;
 	executeCommand(input: ExecuteCommandRequest): CommandReceipt;
 	getCommandReceipt(workflowId: number, commandId: string): CommandReceipt | undefined;
+	reconcile(): ReconciliationReport;
+	processOutbox(): { delivered: number; exhausted: number; incidentsCreated: number };
+	diagnose(): DoctorReport;
 	close(): void;
 }
 
@@ -78,7 +83,7 @@ export async function openHeadlessWorkflowRuntime(
 			if (input.schemaVersion !== undefined && input.schemaVersion !== "workflow-command/v1") {
 				throw new Error("Command envelope schema is invalid");
 			}
-			const validTypes: readonly WorkflowCommandType[] = ["start", "pause", "resume"];
+			const validTypes: readonly WorkflowCommandType[] = ["start", "pause", "resume", "retry-recovery"];
 			if (!validTypes.includes(input.type)) {
 				throw new Error("Command envelope schema is invalid");
 			}
@@ -91,6 +96,15 @@ export async function openHeadlessWorkflowRuntime(
 		},
 		getCommandReceipt(workflowId, commandId) {
 			return store.getCommandReceipt(workflowId, commandId);
+		},
+		reconcile() {
+			return store.reconcile();
+		},
+		processOutbox() {
+			return store.processOutbox();
+		},
+		diagnose() {
+			return store.diagnose();
 		},
 		close() {
 			store.close();

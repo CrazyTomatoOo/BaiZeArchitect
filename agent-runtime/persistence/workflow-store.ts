@@ -2,13 +2,15 @@ import Database from "better-sqlite3";
 import { mkdirSync } from "node:fs";
 import path from "node:path";
 import type { CrashInjector, FixtureClock, FixtureOutboxTransport, HashProvider } from "../testing/deterministic-fixtures.js";
+import { WorkflowDoctor, type DoctorReport } from "../workflow/workflow-doctor.js";
 import type { RequirementBaseline } from "../workflow/requirement.js";
 import { WORKFLOW_GOVERNANCE_MIGRATION } from "./migrations/0001-workflow-governance.js";
 import { COMMAND_GOVERNANCE_MIGRATION } from "./migrations/0002-command-governance.js";
+import { RECOVERY_GOVERNANCE_MIGRATION } from "./migrations/0003-recovery-governance.js";
 
-const MIGRATIONS = [WORKFLOW_GOVERNANCE_MIGRATION, COMMAND_GOVERNANCE_MIGRATION] as const;
+const MIGRATIONS = [WORKFLOW_GOVERNANCE_MIGRATION, COMMAND_GOVERNANCE_MIGRATION, RECOVERY_GOVERNANCE_MIGRATION] as const;
 
-export type WorkflowCommandType = "start" | "pause" | "resume";
+export type WorkflowCommandType = "start" | "pause" | "resume" | "retry-recovery";
 
 export type CommandOutcome =
 	| "accepted"
@@ -17,6 +19,26 @@ export type CommandOutcome =
 	| "state_conflict"
 	| "business_rule_rejected"
 	| "idempotency_conflict";
+
+export interface ReconciliationReport {
+	databaseIntact: boolean;
+	foreignKeysValid: boolean;
+	workflowsChecked: number;
+	outboxReset: number;
+	outboxDelivered: number;
+	outboxExhausted: number;
+	incidentsCreated: number;
+}
+
+export interface OutboxDrainResult {
+	delivered: number;
+	exhausted: number;
+	incidentsCreated: number;
+}
+
+const MAX_DELIVERY_FAILURES = 5;
+const BACKOFF_SECONDS = [1, 2, 5, 15, 30] as const;
+const RECOVERABLE_INCIDENT_TYPES = ["outbox_exhausted", "recoverable_reconciliation_failure"] as const;
 
 export interface CommandReceipt {
 	commandId: string;
@@ -53,6 +75,7 @@ const COMMAND_TRANSITIONS: Record<WorkflowCommandType, readonly CommandTransitio
 		{ from: "ready_to_archive", to: "paused", eventType: "workflow_paused" },
 	],
 	resume: [{ from: "paused", to: "running", eventType: "workflow_resumed" }],
+	"retry-recovery": [{ from: "failed", to: "running", eventType: "recovery_retried" }],
 };
 export interface PolicyBundleDocument {
 	schemaVersion: "policy-bundle/v1";
@@ -437,9 +460,10 @@ export class WorkflowStore {
 
 	executeCommand(input: ExecuteCommandInput): CommandReceipt {
 		const receipt = this.executeCommandTransaction(input);
+		this.options.crashInjector.reach("drain_outbox.before");
 		this.drainOutbox();
 		return receipt;
-	}
+}
 
 	private executeCommandRows(input: ExecuteCommandInput): CommandReceipt {
 		const timestamp = this.options.clock.now().toISOString();
@@ -501,14 +525,38 @@ export class WorkflowStore {
 		if (!transition) {
 			return this.persistRejection(input, timestamp, requestDigest, workflow, actorSnapshot.id, "state_conflict", 409);
 		}
+		if (input.type === "retry-recovery") {
+			const incidentId = input.payload?.incidentId;
+			if (typeof incidentId !== "number") {
+				return this.persistRejection(input, timestamp, requestDigest, workflow, actorSnapshot.id, "business_rule_rejected", 422);
+			}
+			const incident = this.database
+				.prepare("select incident_type, status, subject_id from workflow_incidents where id = ? and workflow_id = ?")
+				.get(incidentId, input.workflowId) as { incident_type: string; status: string; subject_id: number } | undefined;
+			if (
+				!incident
+				|| !RECOVERABLE_INCIDENT_TYPES.includes(incident.incident_type as (typeof RECOVERABLE_INCIDENT_TYPES)[number])
+				|| incident.status !== "open"
+			) {
+				return this.persistRejection(input, timestamp, requestDigest, workflow, actorSnapshot.id, "business_rule_rejected", 422);
+			}
+			this.database
+				.prepare("update outbox_jobs set delivery_failures = 0, next_attempt_at = null where id = ? and workflow_id = ?")
+				.run(incident.subject_id, input.workflowId);
+			this.database
+				.prepare("update workflow_incidents set status = 'resolved', resolved_at = ? where id = ?")
+				.run(timestamp, incidentId);
+		}
 		const newVersion = workflow.version + 1;
 		this.database
 			.prepare("update workflows set state = ?, version = ?, updated_at = ? where id = ?")
 			.run(transition.to, newVersion, timestamp, input.workflowId);
 		const seq = this.appendEvent(input.workflowId, transition.eventType, newVersion, "workflow", input.workflowId, newVersion, input.payload ?? {}, timestamp, actorSnapshot.id, input.commandId);
-		this.database
-			.prepare("insert into outbox_jobs(workflow_id, event_seq, delivery_type, payload, created_at) values (?, ?, 'workflow_event', ?, ?)")
-			.run(input.workflowId, seq, transition.eventType, timestamp);
+		if (input.type !== "retry-recovery") {
+			this.database
+				.prepare("insert into outbox_jobs(workflow_id, event_seq, delivery_type, payload, created_at) values (?, ?, 'workflow_event', ?, ?)")
+				.run(input.workflowId, seq, transition.eventType, timestamp);
+		}
 		const receipt: CommandReceipt = {
 			commandId: input.commandId,
 			workflowId: input.workflowId,
@@ -596,20 +644,124 @@ export class WorkflowStore {
 		};
 	}
 
-	private drainOutbox(): void {
-		const jobs = this.database
-			.prepare("select id, workflow_id, event_seq, delivery_type, payload from outbox_jobs where delivered_at is null order by id")
-			.all() as Array<{ id: number; workflow_id: number; event_seq: number; delivery_type: string; payload: string }>;
-		const timestamp = this.options.clock.now().toISOString();
-		const mark = this.database.prepare("update outbox_jobs set delivered_at = ? where id = ?");
-		for (const job of jobs) {
-			void this.options.outboxTransport.deliver({
-				id: `outbox-${job.id}`,
-				type: job.delivery_type,
-				payload: job.payload,
-			});
-			mark.run(timestamp, job.id);
+	reconcile(): ReconciliationReport {
+		const resetCount = this.database
+			.prepare("update outbox_jobs set next_attempt_at = null where delivered_at is null and next_attempt_at is not null")
+			.run().changes;
+		const quickCheck = this.database.pragma("quick_check", { simple: true }) as string;
+		if (quickCheck !== "ok") {
+			throw new Error(`Database integrity check failed: ${quickCheck}`);
 		}
+		const fkErrors = this.database.pragma("foreign_key_check") as unknown[];
+		if (fkErrors.length > 0) {
+			throw new Error(`Foreign key check failed: ${JSON.stringify(fkErrors)}`);
+		}
+		const workflowCount = (
+			this.database.prepare("select count(*) as count from workflows").get() as { count: number }
+		).count;
+		const drainResult = this.drainOutbox();
+		return {
+			databaseIntact: true,
+			foreignKeysValid: true,
+			workflowsChecked: workflowCount,
+			outboxReset: resetCount,
+			outboxDelivered: drainResult.delivered,
+			outboxExhausted: drainResult.exhausted,
+			incidentsCreated: drainResult.incidentsCreated,
+		};
+	}
+
+	processOutbox(): OutboxDrainResult {
+		return this.drainOutbox();
+	}
+
+	diagnose(): DoctorReport {
+		return new WorkflowDoctor(this.database).diagnose();
+	}
+
+	private drainOutbox(): OutboxDrainResult {
+		const now = this.options.clock.now().toISOString();
+		const jobs = this.database
+			.prepare(
+				"select id, workflow_id, event_seq, delivery_type, payload, delivery_failures from outbox_jobs where delivered_at is null and delivery_failures < ? and (next_attempt_at is null or next_attempt_at <= ?) order by id",
+			)
+			.all(MAX_DELIVERY_FAILURES, now) as Array<{
+				id: number;
+				workflow_id: number;
+				event_seq: number;
+				delivery_type: string;
+				payload: string;
+				delivery_failures: number;
+			}>;
+		let delivered = 0;
+		let exhausted = 0;
+		let incidentsCreated = 0;
+		for (const job of jobs) {
+			try {
+				this.options.outboxTransport.deliver({
+					id: `outbox-${job.id}`,
+					type: job.delivery_type,
+					payload: job.payload,
+				});
+				this.database
+					.prepare("update outbox_jobs set delivered_at = ? where id = ?")
+					.run(now, job.id);
+				delivered += 1;
+			} catch {
+				const failures = job.delivery_failures + 1;
+				if (failures >= MAX_DELIVERY_FAILURES) {
+					this.database
+						.prepare("update outbox_jobs set delivery_failures = ? where id = ?")
+						.run(failures, job.id);
+					this.failWorkflowWithOutboxIncident(job.workflow_id, job.id, now);
+					exhausted += 1;
+					incidentsCreated += 1;
+				} else {
+					const backoffMs = (BACKOFF_SECONDS[failures - 1] ?? 30) * 1000;
+					const nextAttempt = new Date(new Date(now).getTime() + backoffMs).toISOString();
+					this.database
+						.prepare("update outbox_jobs set delivery_failures = ?, next_attempt_at = ? where id = ?")
+						.run(failures, nextAttempt, job.id);
+				}
+			}
+		}
+		return { delivered, exhausted, incidentsCreated };
+	}
+
+	private failWorkflowWithOutboxIncident(
+		workflowId: number,
+		outboxJobId: number,
+		timestamp: string,
+	): void {
+		const tx = this.database
+			.transaction(() => {
+				const { version } = this.database
+					.prepare("select version from workflows where id = ?")
+					.get(workflowId) as { version: number };
+				const newVersion = version + 1;
+				this.database
+					.prepare(
+						"update workflows set state = 'failed', version = ?, current_failure_code = 'outbox_exhausted', current_failure_subject_id = ?, updated_at = ? where id = ?",
+					)
+					.run(newVersion, outboxJobId, timestamp, workflowId);
+				this.appendEvent(
+					workflowId,
+					"outbox_delivery_exhausted",
+					newVersion,
+					"outbox_job",
+					outboxJobId,
+					0,
+					{ outboxJobId },
+					timestamp,
+				);
+				this.database
+					.prepare(
+						"insert into workflow_incidents(workflow_id, incident_type, failure_code, subject_type, subject_id, subject_version, status, created_at) values (?, 'outbox_exhausted', 'outbox_exhausted', 'outbox_job', ?, 0, 'open', ?)",
+					)
+					.run(workflowId, outboxJobId, timestamp);
+			})
+			.immediate;
+		tx();
 	}
 	close(): void {
 		this.database.close();
