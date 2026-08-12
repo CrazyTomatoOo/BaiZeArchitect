@@ -44,7 +44,7 @@ export interface BeginAttemptResult {
 	lastEventSeq: number;
 }
 
-export type CompleteAttemptOutcome = "published" | "failed" | "task_exhausted";
+export type CompleteAttemptOutcome = "published" | "failed" | "task_exhausted" | "blocked" | "replan_requested" | "late_result_audit";
 
 export interface CompleteAttemptResult {
 	outcome: CompleteAttemptOutcome;

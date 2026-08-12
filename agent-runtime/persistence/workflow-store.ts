@@ -11,12 +11,12 @@ import { COMMAND_GOVERNANCE_MIGRATION } from "./migrations/0002-command-governan
 import { RECOVERY_GOVERNANCE_MIGRATION } from "./migrations/0003-recovery-governance.js";
 import { PLANNING_GOVERNANCE_MIGRATION } from "./migrations/0004-planning-governance.js";
 import { ATTEMPT_EXECUTION_MIGRATION } from "./migrations/0005-attempt-execution-governance.js";
-import { ARTIFACT_OWNERSHIP, type InputBinding } from "../workflow/plan-types.js";
+import { DEPENDENT_TASK_SAFETY_MIGRATION } from "./migrations/0006-dependent-task-safety.js";
+import { ARTIFACT_OWNERSHIP, type InputBinding, type TaskOutputInput } from "../workflow/plan-types.js";
 import type { RoleResult, ContextManifest, RoleContract, BeginAttemptResult, CompleteAttemptResult } from "../workflow/role-result.js";
 
-const MIGRATIONS = [WORKFLOW_GOVERNANCE_MIGRATION, COMMAND_GOVERNANCE_MIGRATION, RECOVERY_GOVERNANCE_MIGRATION, PLANNING_GOVERNANCE_MIGRATION, ATTEMPT_EXECUTION_MIGRATION] as const;
-
-export type WorkflowCommandType = "start" | "pause" | "resume" | "retry-recovery";
+const MIGRATIONS = [WORKFLOW_GOVERNANCE_MIGRATION, COMMAND_GOVERNANCE_MIGRATION, RECOVERY_GOVERNANCE_MIGRATION, PLANNING_GOVERNANCE_MIGRATION, ATTEMPT_EXECUTION_MIGRATION, DEPENDENT_TASK_SAFETY_MIGRATION] as const;
+export type WorkflowCommandType = "start" | "pause" | "resume" | "retry-recovery" | "cancel-run";
 
 export type CommandOutcome =
 	| "accepted"
@@ -105,6 +105,7 @@ const COMMAND_TRANSITIONS: Record<WorkflowCommandType, readonly CommandTransitio
 	],
 	resume: [{ from: "paused", to: "running", eventType: "workflow_resumed" }],
 	"retry-recovery": [{ from: "failed", to: "running", eventType: "recovery_retried" }],
+	"cancel-run": [{ from: "running", to: "paused", eventType: "workflow_cancel_run" }],
 };
 export interface PolicyBundleDocument {
 	schemaVersion: "policy-bundle/v1";
@@ -576,6 +577,19 @@ export class WorkflowStore {
 				.prepare("update workflow_incidents set status = 'resolved', resolved_at = ? where id = ?")
 				.run(timestamp, incidentId);
 		}
+		if (input.type === "cancel-run") {
+			const activeClaim = this.database
+				.prepare("select attempt_id from governance_claims where workflow_id = ? and status = 'active'")
+				.get(input.workflowId) as { attempt_id: number } | undefined;
+			if (activeClaim) {
+				const runId = (this.database.prepare("select id from runs where attempt_id = ? order by id desc limit 1").get(activeClaim.attempt_id) as { id: number }).id;
+				this.database.prepare("update task_attempts set status = 'cancelled', completed_at = ? where id = ?").run(timestamp, activeClaim.attempt_id);
+				this.database.prepare("update runs set status = 'cancelled', completed_at = ? where id = ?").run(timestamp, runId);
+				this.database.prepare("update governance_claims set status = 'released', released_at = ? where attempt_id = ? and status = 'active'").run(timestamp, activeClaim.attempt_id);
+				this.appendEvent(input.workflowId, "attempt_cancelled", workflow.version, "task_attempt", activeClaim.attempt_id, 0, { attemptId: activeClaim.attempt_id }, timestamp, actorSnapshot.id, input.commandId);
+				this.appendEvent(input.workflowId, "run_cancelled", workflow.version, "run", runId, 0, { attemptId: activeClaim.attempt_id }, timestamp, actorSnapshot.id, input.commandId);
+			}
+		}
 		const newVersion = workflow.version + 1;
 	this.database
 		.prepare("update workflows set state = ?, version = ?, consecutive_plan_revisions = 0, updated_at = ? where id = ?")
@@ -1035,8 +1049,13 @@ export class WorkflowStore {
 			return { taskId: 0, attemptId: 0, runId: 0, contextDigest: "", workflowVersion: workflow.version, lastEventSeq: this.currentLastEventSeq(workflowId) };
 		}
 
+		const resolvedInputs = this.resolveTaskOutputInputs(workflowId, task);
+		if (!resolvedInputs) {
+			return { taskId: 0, attemptId: 0, runId: 0, contextDigest: "", workflowVersion: workflow.version, lastEventSeq: this.currentLastEventSeq(workflowId) };
+		}
+
 		const roleContract = this.getOrCreateRoleContract(task.role, timestamp);
-		const manifest = this.buildContextManifest(workflowId, workflow.version, task, roleContract, timestamp);
+		const manifest = this.buildContextManifest(workflowId, workflow.version, task, resolvedInputs, roleContract, timestamp);
 		const contextSnapshot = this.insertSnapshot("context_manifest", "context-manifest/v1", manifest, timestamp);
 
 		const attemptNo = (this.database.prepare("select coalesce(max(attempt_no), 0) + 1 as next from task_attempts where task_id = ?").get(task.id) as { next: number }).next;
@@ -1064,8 +1083,12 @@ export class WorkflowStore {
 
 	private getReadyExecutionTask(workflowId: number): { id: number; key: string; kind: string; role: string; objective: string; plan_revision_id: number; depends_on_json: string; inputs_json: string; expected_artifact_effects_json: string; completion_policy_ref: string | null; max_attempts: number } | null {
 		const tasks = this.database
-			.prepare("select id, key, kind, role, objective, plan_revision_id, depends_on_json, inputs_json, expected_artifact_effects_json, completion_policy_ref, max_attempts, status from tasks where workflow_id = ? and kind != 'plan' and status = 'pending' order by id")
-			.all(workflowId) as Array<{ id: number; key: string; kind: string; role: string; objective: string; plan_revision_id: number; depends_on_json: string; inputs_json: string; expected_artifact_effects_json: string; completion_policy_ref: string | null; max_attempts: number; status: string }>;
+			.prepare(`select t.id, t.key, t.kind, t.role, t.objective, t.plan_revision_id, t.depends_on_json, t.inputs_json, t.expected_artifact_effects_json, t.completion_policy_ref, t.max_attempts, t.status,
+				(select count(*) from task_attempts ta where ta.task_id = t.id and ta.status = 'failed') as failed_attempt_count
+				from tasks t
+				where t.workflow_id = ? and t.kind != 'plan' and t.status = 'pending'
+				order by failed_attempt_count desc, t.id`)
+			.all(workflowId) as Array<{ id: number; key: string; kind: string; role: string; objective: string; plan_revision_id: number; depends_on_json: string; inputs_json: string; expected_artifact_effects_json: string; completion_policy_ref: string | null; max_attempts: number; status: string; failed_attempt_count: number }>;
 		for (const task of tasks) {
 			const deps = parseJson<string[]>(task.depends_on_json);
 			if (deps.length === 0) return task;
@@ -1080,6 +1103,32 @@ export class WorkflowStore {
 		return null;
 	}
 
+	private resolveTaskOutputInputs(workflowId: number, task: { id: number; key: string; inputs_json: string; plan_revision_id: number }): Array<Record<string, unknown>> | null {
+		const inputs = parseJson<InputBinding[]>(task.inputs_json);
+		const resolved: Array<Record<string, unknown>> = [];
+		for (const input of inputs) {
+			if (input.type === "task_output") {
+				const taskOutput = input as TaskOutputInput;
+				const ancestorTask = this.database
+					.prepare("select id from tasks where workflow_id = ? and key = ? and plan_revision_id = ?")
+					.get(workflowId, taskOutput.taskKey, task.plan_revision_id) as { id: number } | undefined;
+				if (!ancestorTask) return null;
+				const revisions = this.database
+					.prepare(`select ar.id from artifact_revisions ar
+						join attempt_effects ae on ae.published_artifact_revision_id = ar.id
+						join task_attempts ta on ta.id = ae.attempt_id
+						where ae.workflow_id = ? and ae.artifact_kind = ? and ta.task_id = ? and ar.status = 'pending'
+						order by ar.id desc`)
+					.all(workflowId, taskOutput.artifactKind, ancestorTask.id) as Array<{ id: number }>;
+				if (revisions.length !== 1) return null;
+				resolved.push({ ...taskOutput, resolvedRevisionId: revisions[0].id });
+			} else {
+				resolved.push(input as unknown as Record<string, unknown>);
+			}
+		}
+		return resolved;
+	}
+
 	private getOrCreateRoleContract(role: string, timestamp: string): { documentId: number; identity: string; digest: string } & RoleContract {
 		const contract: RoleContract = {
 			schemaVersion: "role-contract/v1",
@@ -1092,12 +1141,11 @@ export class WorkflowStore {
 		return { ...contract, documentId: snapshot.id, identity, digest: snapshot.digest };
 	}
 
-	private buildContextManifest(workflowId: number, workflowVersion: number, task: { id: number; key: string; kind: string; role: string; objective: string; inputs_json: string; plan_revision_id: number }, roleContract: { documentId: number; identity: string; digest: string }, timestamp: string): ContextManifest {
+	private buildContextManifest(workflowId: number, workflowVersion: number, task: { id: number; key: string; kind: string; role: string; objective: string; plan_revision_id: number }, resolvedInputs: Array<Record<string, unknown>>, roleContract: { documentId: number; identity: string; digest: string }, timestamp: string): ContextManifest {
 		const projection = this.getWorkflowProjection(workflowId);
 		if (!projection) throw new Error("Workflow not found");
-		const inputs = parseJson<InputBinding[]>(task.inputs_json);
 		const policyBundleDigest = projection.workflow.policyBundle.digest;
-		const inputDigest = this.options.hashProvider.digest(inputs);
+		const inputDigest = this.options.hashProvider.digest(resolvedInputs);
 		return {
 			schemaVersion: "context-manifest/v1",
 			workflowId,
@@ -1107,7 +1155,7 @@ export class WorkflowStore {
 			task: { id: task.id, key: task.key, kind: task.kind, role: task.role, objective: task.objective },
 			roleContract: { documentId: roleContract.documentId, identity: roleContract.identity, digest: roleContract.digest },
 			policyBundleDigest,
-			inputs,
+			inputs: resolvedInputs,
 			inputDigest,
 		};
 	}
@@ -1120,10 +1168,23 @@ export class WorkflowStore {
 	private publishAttemptResultRows(workflowId: number, attemptId: number, structuredResult: unknown): CompleteAttemptResult {
 		const timestamp = this.options.clock.now().toISOString();
 		const workflow = this.database.prepare("select version from workflows where id = ?").get(workflowId) as { version: number };
-		const attempt = this.database.prepare("select task_id, attempt_no from task_attempts where id = ?").get(attemptId) as { task_id: number; attempt_no: number };
+		const attempt = this.database.prepare("select task_id, attempt_no, status from task_attempts where id = ?").get(attemptId) as { task_id: number; attempt_no: number; status: string };
 		const task = this.database.prepare("select id, key, role, expected_artifact_effects_json, max_attempts, plan_revision_id from tasks where id = ?").get(attempt.task_id) as { id: number; key: string; role: string; expected_artifact_effects_json: string; max_attempts: number; plan_revision_id: number };
 
-		const result = structuredResult as RoleResult;
+		if (attempt.status === "cancelled" || attempt.status === "superseded" || attempt.status === "failed") {
+			const resultSnapshot = this.insertSnapshot("artifact_content", "role-result/v1", structuredResult, timestamp);
+			this.appendEvent(workflowId, "late_result_audit", workflow.version, "task_attempt", attemptId, 0, { attemptId, terminalStatus: attempt.status, resultDigest: resultSnapshot.digest }, timestamp);
+			return { outcome: "late_result_audit", failureCode: null, workflowVersion: workflow.version, lastEventSeq: this.currentLastEventSeq(workflowId) };
+		}
+
+		const result = structuredResult as RoleResult & { outcome?: string; blockReason?: string; replanReason?: string };
+		if (result.outcome === "blocked") {
+			return this.blockAttemptRows(workflowId, attemptId, result.blockReason ?? "No reason provided", timestamp);
+		}
+		if (result.outcome === "replan_requested") {
+			return this.replanRequestedRows(workflowId, attemptId, result.replanReason ?? "No reason provided", timestamp);
+		}
+
 		if (!result || result.schemaVersion !== "role-result/v1" || typeof result.workflowId !== "number" || typeof result.attemptId !== "number" || !Array.isArray(result.effects)) {
 			return this.failAttemptRows(workflowId, attemptId, "invalid_role_result_schema", "RoleResult schema validation failed");
 		}
@@ -1228,6 +1289,50 @@ export class WorkflowStore {
 
 		this.options.crashInjector.reach("fail_attempt.before_commit");
 		return { outcome, failureCode, workflowVersion: newVersion, lastEventSeq: this.currentLastEventSeq(workflowId) };
+	}
+
+	private blockAttemptRows(workflowId: number, attemptId: number, blockReason: string, timestamp: string): CompleteAttemptResult {
+		const workflow = this.database.prepare("select version from workflows where id = ?").get(workflowId) as { version: number };
+		const attempt = this.database.prepare("select task_id, attempt_no from task_attempts where id = ?").get(attemptId) as { task_id: number; attempt_no: number };
+		const task = this.database.prepare("select key from tasks where id = ?").get(attempt.task_id) as { key: string };
+		const newVersion = workflow.version + 1;
+		const runId = (this.database.prepare("select id from runs where attempt_id = ? order by id desc limit 1").get(attemptId) as { id: number }).id;
+
+		this.database.prepare("update task_attempts set status = 'blocked', result_outcome = 'blocked', completed_at = ? where id = ?").run(timestamp, attemptId);
+		this.database.prepare("update runs set status = 'completed', completed_at = ? where id = ?").run(timestamp, runId);
+		this.database.prepare("update tasks set status = 'blocked' where id = ?").run(attempt.task_id);
+		this.database.prepare("update governance_claims set status = 'released', released_at = ? where attempt_id = ? and status = 'active'").run(timestamp, attemptId);
+		this.database.prepare("update workflows set state = 'waiting_for_human', version = ?, updated_at = ? where id = ?").run(newVersion, timestamp, workflowId);
+
+		this.appendEvent(workflowId, "task_blocked", newVersion, "task", attempt.task_id, 0, { taskKey: task.key, blockReason }, timestamp);
+		this.appendEvent(workflowId, "attempt_blocked", newVersion, "task_attempt", attemptId, 0, { taskId: attempt.task_id, blockReason }, timestamp);
+		this.appendEvent(workflowId, "run_completed", newVersion, "run", runId, 0, { attemptId }, timestamp);
+		this.appendEvent(workflowId, "workflow_attempt_claim_released", newVersion, "task_attempt", attemptId, 0, { attemptId }, timestamp);
+
+		this.options.crashInjector.reach("block_attempt.before_commit");
+		return { outcome: "blocked", failureCode: null, workflowVersion: newVersion, lastEventSeq: this.currentLastEventSeq(workflowId) };
+	}
+
+	private replanRequestedRows(workflowId: number, attemptId: number, replanReason: string, timestamp: string): CompleteAttemptResult {
+		const workflow = this.database.prepare("select version from workflows where id = ?").get(workflowId) as { version: number };
+		const attempt = this.database.prepare("select task_id, attempt_no from task_attempts where id = ?").get(attemptId) as { task_id: number; attempt_no: number };
+		const task = this.database.prepare("select key from tasks where id = ?").get(attempt.task_id) as { key: string };
+		const newVersion = workflow.version + 1;
+		const runId = (this.database.prepare("select id from runs where attempt_id = ? order by id desc limit 1").get(attemptId) as { id: number }).id;
+
+		this.database.prepare("update task_attempts set status = 'replan_requested', result_outcome = 'replan_requested', completed_at = ? where id = ?").run(timestamp, attemptId);
+		this.database.prepare("update runs set status = 'completed', completed_at = ? where id = ?").run(timestamp, runId);
+		this.database.prepare("update tasks set status = 'replan_requested' where id = ?").run(attempt.task_id);
+		this.database.prepare("update governance_claims set status = 'released', released_at = ? where attempt_id = ? and status = 'active'").run(timestamp, attemptId);
+		this.database.prepare("update workflows set version = ?, updated_at = ? where id = ?").run(newVersion, timestamp, workflowId);
+
+		this.appendEvent(workflowId, "replan_requested", newVersion, "task", attempt.task_id, 0, { taskKey: task.key, replanReason }, timestamp);
+		this.appendEvent(workflowId, "attempt_replan_requested", newVersion, "task_attempt", attemptId, 0, { taskId: attempt.task_id, replanReason }, timestamp);
+		this.appendEvent(workflowId, "run_completed", newVersion, "run", runId, 0, { attemptId }, timestamp);
+		this.appendEvent(workflowId, "workflow_attempt_claim_released", newVersion, "task_attempt", attemptId, 0, { attemptId }, timestamp);
+
+		this.options.crashInjector.reach("replan_requested.before_commit");
+		return { outcome: "replan_requested", failureCode: null, workflowVersion: newVersion, lastEventSeq: this.currentLastEventSeq(workflowId) };
 	}
 
 	private currentLastEventSeq(workflowId: number): number {

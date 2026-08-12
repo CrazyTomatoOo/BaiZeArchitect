@@ -127,7 +127,7 @@ export async function openHeadlessWorkflowRuntime(
 			if (input.schemaVersion !== undefined && input.schemaVersion !== "workflow-command/v1") {
 				throw new Error("Command envelope schema is invalid");
 			}
-			const validTypes: readonly WorkflowCommandType[] = ["start", "pause", "resume", "retry-recovery"];
+			const validTypes: readonly WorkflowCommandType[] = ["start", "pause", "resume", "retry-recovery", "cancel-run"];
 			if (!validTypes.includes(input.type)) {
 				throw new Error("Command envelope schema is invalid");
 			}
