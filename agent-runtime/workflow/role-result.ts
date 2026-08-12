@@ -1,11 +1,17 @@
 import type { WritableArtifactKind } from "./plan-types.js";
 
+export interface TraceLinkProposal {
+	evidenceSnapshotId: number;
+	sourceRef: unknown;
+}
+
 export interface ArtifactEffectProposal {
 	effectType: "artifact_revision";
 	artifactKind: WritableArtifactKind;
 	logicalKey: string;
 	content: unknown;
 	baseRevisionId: number | null;
+	traceLinks?: readonly TraceLinkProposal[];
 }
 
 export interface RoleResult {

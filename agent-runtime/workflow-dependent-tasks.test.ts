@@ -20,7 +20,7 @@ import {
 	type RequirementBaseline,
 } from "./workflow/headless-runtime.js";
 import type { PlanProposal } from "./workflow/plan-types.js";
-import type { RoleResult as RoleResultType } from "./workflow/role-result.js";
+import type { RoleResult as RoleResultType, TraceLinkProposal } from "./workflow/role-result.js";
 
 const BASELINE: RequirementBaseline = {
 	schemaVersion: "artifact/requirement/v1",
@@ -151,32 +151,40 @@ function validDesignContent(): unknown {
 		artifactKind: "design",
 		summary: "Design of points expiry solution",
 		sourceRefs: [{ type: "requirement_revision", revisionId: 1 }],
-		goals: ["Design the compensation flow"],
-		nonGoals: ["Implement the code"],
-		constraints: ["Must be backward compatible"],
-		acceptanceCriteria: ["Design is reviewable"],
-		decisions: [],
+		changeUnits: [{ id: "cu1", area: "points", change: "Add expiry", rationale: "Business rule", sourceRefs: [{ type: "requirement_revision", revisionId: 1 }] }],
+		alternatives: ["Do nothing"],
+		failureHandling: ["Retry on failure"],
+		testStrategy: ["Unit and integration tests"],
+		implementationOrder: ["Sequential"],
+		rolloutStrategy: "Canary",
+		rollbackStrategy: "Revert",
 	};
 }
 
-function analysisRoleResult(workflowId: number, attemptId: number): RoleResultType {
+function analysisRoleResult(workflowId: number, attemptId: number, traceLinks?: TraceLinkProposal[]): RoleResultType {
 	return {
 		schemaVersion: "role-result/v1",
 		workflowId,
 		attemptId,
 		effects: [
-			{ effectType: "artifact_revision", artifactKind: "analysis", logicalKey: "analysis", content: validAnalysisContent(), baseRevisionId: null },
+			{ effectType: "artifact_revision", artifactKind: "analysis", logicalKey: "analysis", content: validAnalysisContent(), baseRevisionId: null, traceLinks },
 		],
 	};
 }
 
-function designRoleResult(workflowId: number, attemptId: number): RoleResultType {
+function setupEvidence(runtime: Runtime, workflowId: number): TraceLinkProposal[] {
+	runtime.bindEvidenceSnapshot(workflowId, "sha256:repo1", []);
+	const evidenceSnapshotId = runtime.getEvidenceSnapshots(workflowId)[0]!.id;
+	return [{ evidenceSnapshotId, sourceRef: { type: "requirement_revision", revisionId: 1 } }];
+}
+
+function designRoleResult(workflowId: number, attemptId: number, traceLinks?: TraceLinkProposal[]): RoleResultType {
 	return {
 		schemaVersion: "role-result/v1",
 		workflowId,
 		attemptId,
 		effects: [
-			{ effectType: "artifact_revision", artifactKind: "design", logicalKey: "design", content: validDesignContent(), baseRevisionId: null },
+			{ effectType: "artifact_revision", artifactKind: "design", logicalKey: "design", content: validDesignContent(), baseRevisionId: null, traceLinks },
 		],
 	};
 }
@@ -227,7 +235,7 @@ test("task_output input resolves to exactly one published ancestor revision befo
 
 		// Execute the analyst task first
 		const analystBegin = runtime.beginAttempt(workflowId);
-		runtime.completeAttempt(workflowId, analystBegin.attemptId, analysisRoleResult(workflowId, analystBegin.attemptId));
+		runtime.completeAttempt(workflowId, analystBegin.attemptId, analysisRoleResult(workflowId, analystBegin.attemptId, setupEvidence(runtime, workflowId)));
 
 		// Now begin the architect task — its task_output input should resolve to the published analysis revision
 		const designBegin = runtime.beginAttempt(workflowId);
@@ -279,7 +287,7 @@ test("architect attempting to write analysis artifact is rejected by tool owners
 
 		// Execute analyst first
 		const analystBegin = runtime.beginAttempt(workflowId);
-		runtime.completeAttempt(workflowId, analystBegin.attemptId, analysisRoleResult(workflowId, analystBegin.attemptId));
+		runtime.completeAttempt(workflowId, analystBegin.attemptId, analysisRoleResult(workflowId, analystBegin.attemptId, setupEvidence(runtime, workflowId)));
 
 		// Architect attempts to write analysis (owned by analyst)
 		const designBegin = runtime.beginAttempt(workflowId);
@@ -306,7 +314,7 @@ test("failed task retry takes priority over unrelated ready task", async () => {
 
 		// Execute analyst task (succeeds, publishes analysis)
 		const analystBegin = runtime.beginAttempt(workflowId);
-		runtime.completeAttempt(workflowId, analystBegin.attemptId, analysisRoleResult(workflowId, analystBegin.attemptId));
+		runtime.completeAttempt(workflowId, analystBegin.attemptId, analysisRoleResult(workflowId, analystBegin.attemptId, setupEvidence(runtime, workflowId)));
 
 		// Execute design task — fails (budget remains)
 		const designBegin = runtime.beginAttempt(workflowId);
@@ -379,7 +387,7 @@ test("late result from cancelled attempt only appends audit, does not publish", 
 		// Attempt is now cancelled; late result arrives
 		assert.equal(queryAttemptStatus(databasePath, begin.attemptId), "cancelled");
 
-		const result = runtime.completeAttempt(workflowId, begin.attemptId, analysisRoleResult(workflowId, begin.attemptId));
+		const result = runtime.completeAttempt(workflowId, begin.attemptId, analysisRoleResult(workflowId, begin.attemptId, setupEvidence(runtime, workflowId)));
 
 		assert.equal(result.outcome, "late_result_audit");
 		assert.equal(result.failureCode, null);
@@ -496,7 +504,7 @@ test("tasks execute serially in plan ordinal: analyze before design", async () =
 		assert.equal(first.taskId, firstTask.id, "first dispatch should target analyze-req");
 
 		// Complete analyst
-		runtime.completeAttempt(workflowId, first.attemptId, analysisRoleResult(workflowId, first.attemptId));
+		runtime.completeAttempt(workflowId, first.attemptId, analysisRoleResult(workflowId, first.attemptId, setupEvidence(runtime, workflowId)));
 
 		// Second ready task should be design-sol (deps satisfied)
 		const second = runtime.beginAttempt(workflowId);
@@ -504,7 +512,7 @@ test("tasks execute serially in plan ordinal: analyze before design", async () =
 		assert.equal(second.taskId, secondTask.id, "second dispatch should target design-sol");
 
 		// Complete architect
-		runtime.completeAttempt(workflowId, second.attemptId, designRoleResult(workflowId, second.attemptId));
+		runtime.completeAttempt(workflowId, second.attemptId, designRoleResult(workflowId, second.attemptId, setupEvidence(runtime, workflowId)));
 
 		// No more ready tasks
 		const third = runtime.beginAttempt(workflowId);

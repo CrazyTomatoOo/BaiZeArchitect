@@ -1,6 +1,6 @@
 import type { CrashInjector, FixtureClock, FixtureOperator, FixtureOutboxTransport, HashProvider } from "../testing/deterministic-fixtures.js";
-import { WorkflowStore, type BeginPlanningResult, type CommandReceipt, type CompletePlanningResult, type ExecuteCommandInput, type ReconciliationReport, type WorkflowCommandType, type WorkflowProjection } from "../persistence/workflow-store.js";
-import type { BeginAttemptResult, CompleteAttemptResult, ExecuteTaskResult, RoleResult } from "./role-result.js";
+import { WorkflowStore, type BeginPlanningResult, type CommandReceipt, type CompletePlanningResult, type ExecuteCommandInput, type ReconciliationReport, type WorkflowCommandType, type WorkflowProjection, type EvidenceSnapshotResult, type RequiredArtifactSetResult, type TraceLinkResult } from "../persistence/workflow-store.js";
+import type { BeginAttemptResult, CompleteAttemptResult, ExecuteTaskResult, RoleResult, TraceLinkProposal } from "./role-result.js";
 import { loadWorkflowContracts } from "./contracts/loader.js";
 import { compileWorkflowSchema, type WorkflowSchemaValidator } from "./contracts/schema.js";
 import type { DoctorReport } from "./workflow-doctor.js";
@@ -8,6 +8,7 @@ import type { ModelDriver } from "./model-driver.js";
 import { validatePlanProposal, type PlanValidationContext } from "./plan-validator.js";
 import type { PlanProposal } from "./plan-types.js";
 import type { RequirementBaseline } from "./requirement.js";
+import type { ImpactProfile } from "./impact-profile.js";
 
 export type { RequirementBaseline } from "./requirement.js";
 export type { CommandReceipt, ReconciliationReport, WorkflowCommandType, BeginPlanningResult, CompletePlanningResult } from "../persistence/workflow-store.js";
@@ -63,6 +64,12 @@ export interface HeadlessWorkflowRuntime {
 	reconcile(): ReconciliationReport;
 	processOutbox(): { delivered: number; exhausted: number; incidentsCreated: number };
 	diagnose(): DoctorReport;
+	bindEvidenceSnapshot(workflowId: number, repoDigest: string, files: unknown): EvidenceSnapshotResult;
+	storeImpactProfile(workflowId: number, profile: ImpactProfile): unknown;
+	getRequiredArtifactSet(workflowId: number): RequiredArtifactSetResult | undefined;
+	getTraceLinks(artifactRevisionId: number): readonly TraceLinkResult[];
+	isEvidenceStale(workflowId: number, currentRepoDigest: string): boolean;
+	getEvidenceSnapshots(workflowId: number): readonly EvidenceSnapshotResult[];
 	close(): void;
 }
 
@@ -82,7 +89,7 @@ export async function openHeadlessWorkflowRuntime(
 			}))
 			.sort((left, right) => left.identity.localeCompare(right.identity)),
 	};
-	const store = new WorkflowStore({ ...options, policyBundle });
+	const store = new WorkflowStore({ ...options, policyBundle, artifactValidator });
 
 	function completePlanningInternal(workflowId: number, attemptId: number, structuredResult: unknown): CompletePlanningResult {
 		if (store.isPlanningContextStale(workflowId, attemptId)) {
@@ -204,6 +211,24 @@ export async function openHeadlessWorkflowRuntime(
 		},
 		diagnose() {
 			return store.diagnose();
+		},
+		bindEvidenceSnapshot(workflowId, repoDigest, files) {
+			return store.bindEvidenceSnapshot(workflowId, repoDigest, files);
+		},
+		storeImpactProfile(workflowId, profile) {
+			return store.storeImpactProfile(workflowId, profile);
+		},
+		getRequiredArtifactSet(workflowId) {
+			return store.getRequiredArtifactSet(workflowId);
+		},
+		getTraceLinks(artifactRevisionId) {
+			return store.getTraceLinks(artifactRevisionId);
+		},
+		isEvidenceStale(workflowId, currentRepoDigest) {
+			return store.isEvidenceStale(workflowId, currentRepoDigest);
+		},
+		getEvidenceSnapshots(workflowId) {
+			return store.getEvidenceSnapshots(workflowId);
 		},
 		close() {
 			store.close();

@@ -12,10 +12,12 @@ import { RECOVERY_GOVERNANCE_MIGRATION } from "./migrations/0003-recovery-govern
 import { PLANNING_GOVERNANCE_MIGRATION } from "./migrations/0004-planning-governance.js";
 import { ATTEMPT_EXECUTION_MIGRATION } from "./migrations/0005-attempt-execution-governance.js";
 import { DEPENDENT_TASK_SAFETY_MIGRATION } from "./migrations/0006-dependent-task-safety.js";
+import { REQUIRED_ARTIFACTS_AND_EVIDENCE_MIGRATION } from "./migrations/0007-required-artifacts-and-evidence.js";
 import { ARTIFACT_OWNERSHIP, type InputBinding, type TaskOutputInput } from "../workflow/plan-types.js";
-import type { RoleResult, ContextManifest, RoleContract, BeginAttemptResult, CompleteAttemptResult } from "../workflow/role-result.js";
+import type { RoleResult, ContextManifest, RoleContract, BeginAttemptResult, CompleteAttemptResult, TraceLinkProposal } from "../workflow/role-result.js";
+import { deriveRequiredArtifactSet, type ImpactProfile, type RequiredArtifactSet } from "../workflow/impact-profile.js";
 
-const MIGRATIONS = [WORKFLOW_GOVERNANCE_MIGRATION, COMMAND_GOVERNANCE_MIGRATION, RECOVERY_GOVERNANCE_MIGRATION, PLANNING_GOVERNANCE_MIGRATION, ATTEMPT_EXECUTION_MIGRATION, DEPENDENT_TASK_SAFETY_MIGRATION] as const;
+const MIGRATIONS = [WORKFLOW_GOVERNANCE_MIGRATION, COMMAND_GOVERNANCE_MIGRATION, RECOVERY_GOVERNANCE_MIGRATION, PLANNING_GOVERNANCE_MIGRATION, ATTEMPT_EXECUTION_MIGRATION, DEPENDENT_TASK_SAFETY_MIGRATION, REQUIRED_ARTIFACTS_AND_EVIDENCE_MIGRATION] as const;
 export type WorkflowCommandType = "start" | "pause" | "resume" | "retry-recovery" | "cancel-run";
 
 export type CommandOutcome =
@@ -136,6 +138,7 @@ interface WorkflowStoreOptions {
 	crashInjector: CrashInjector;
 	outboxTransport: FixtureOutboxTransport;
 	policyBundle: PolicyBundleDocument;
+	artifactValidator?: { check(value: unknown): boolean };
 }
 
 interface SnapshotDocument {
@@ -1205,6 +1208,19 @@ export class WorkflowStore {
 				return this.failAttemptRows(workflowId, attemptId, "effect_key_mismatch", `Effect logical key ${effect.logicalKey} must match artifact kind ${effect.artifactKind}`);
 			}
 		}
+		if (this.options.artifactValidator) {
+			for (const effect of result.effects) {
+				if (!this.options.artifactValidator.check(effect.content)) {
+					return this.failAttemptRows(workflowId, attemptId, "artifact_schema_invalid", `Artifact content for kind ${effect.artifactKind} does not match schema`);
+				}
+			}
+		}
+		const traceLinkRequired = ["analysis", "design", "architecture", "data", "api"];
+		for (const effect of result.effects) {
+			if (traceLinkRequired.includes(effect.artifactKind) && (!effect.traceLinks || (effect.traceLinks as unknown[]).length === 0)) {
+				return this.failAttemptRows(workflowId, attemptId, "missing_trace_link", `Artifact kind ${effect.artifactKind} requires at least one TraceLink`);
+			}
+		}
 		for (const expected of expectedEffects) {
 			const found = result.effects.find((e) => e.artifactKind === expected.kind);
 			if (!found) {
@@ -1235,7 +1251,21 @@ export class WorkflowStore {
 			this.database
 				.prepare("insert into attempt_effects(workflow_id, task_id, attempt_id, effect_type, logical_key, artifact_kind, effect_version, payload_document_id, payload_digest, state, published_artifact_revision_id, created_at) values (?, ?, ?, 'artifact_revision', ?, ?, ?, ?, ?, 'published', ?, ?)")
 				.run(workflowId, attempt.task_id, attemptId, effect.logicalKey, effect.artifactKind, 1, contentSnapshot.id, contentSnapshot.digest, revisionId, timestamp);
-			this.appendEvent(workflowId, "artifact_revision_published", newVersion, "artifact_revision", revisionId, 1, { artifactKind: effect.artifactKind, artifactId, revisionNo, contentDigest: contentSnapshot.digest, sourceAttemptId: attemptId }, timestamp);
+		this.appendEvent(workflowId, "artifact_revision_published", newVersion, "artifact_revision", revisionId, 1, { artifactKind: effect.artifactKind, artifactId, revisionNo, contentDigest: contentSnapshot.digest, sourceAttemptId: attemptId }, timestamp);
+		if (effect.traceLinks) {
+			for (const link of effect.traceLinks) {
+				this.database
+					.prepare("insert into trace_links(artifact_revision_id, evidence_snapshot_id, source_ref_json, created_at) values (?, ?, ?, ?)")
+					.run(revisionId, link.evidenceSnapshotId, this.options.hashProvider.canonicalize(link.sourceRef), timestamp);
+			}
+		}
+		}
+		const analysisEffect = result.effects.find((e) => e.artifactKind === "analysis");
+		if (analysisEffect && typeof analysisEffect.content === "object" && analysisEffect.content !== null) {
+			const content = analysisEffect.content as { impactProfile?: ImpactProfile };
+			if (content.impactProfile) {
+				this.storeImpactProfile(workflowId, content.impactProfile);
+			}
 		}
 
 		this.database.prepare("update task_attempts set status = 'succeeded', completed_at = ? where id = ?").run(timestamp, attemptId);
@@ -1342,4 +1372,112 @@ export class WorkflowStore {
 	close(): void {
 		this.database.close();
 	}
+	bindEvidenceSnapshot(workflowId: number, repoDigest: string, files: unknown): EvidenceSnapshotResult {
+		const timestamp = this.options.clock.now().toISOString();
+		const filesSnapshot = this.insertSnapshot("repository_manifest", "repository-snapshot/v1", files, timestamp);
+		this.database
+			.prepare("insert into evidence_snapshots(workflow_id, repo_digest, files_document_id, created_at) values (?, ?, ?, ?) on conflict(workflow_id, repo_digest) do nothing")
+			.run(workflowId, repoDigest, filesSnapshot.id, timestamp);
+		const row = this.database
+			.prepare("select id, workflow_id, repo_digest, created_at from evidence_snapshots where workflow_id = ? and repo_digest = ?")
+			.get(workflowId, repoDigest) as { id: number; workflow_id: number; repo_digest: string; created_at: string };
+		return { id: row.id, workflowId: row.workflow_id, repoDigest: row.repo_digest, createdAt: row.created_at };
+	}
+
+	getEvidenceSnapshots(workflowId: number): readonly EvidenceSnapshotResult[] {
+		return this.database
+			.prepare("select id, workflow_id, repo_digest, created_at from evidence_snapshots where workflow_id = ? order by id")
+			.all(workflowId) as EvidenceSnapshotResult[];
+	}
+
+	isEvidenceStale(workflowId: number, currentRepoDigest: string): boolean {
+		const row = this.database
+			.prepare("select repo_digest from evidence_snapshots where workflow_id = ? order by id desc limit 1")
+			.get(workflowId) as { repo_digest: string } | undefined;
+		if (!row) return true;
+		return row.repo_digest !== currentRepoDigest;
+	}
+
+	storeImpactProfile(workflowId: number, profile: ImpactProfile): RequiredArtifactSet {
+		const timestamp = this.options.clock.now().toISOString();
+		const requiredSet = deriveRequiredArtifactSet(profile);
+		this.database
+			.prepare("insert into impact_profiles(workflow_id, profile_json, required_kinds_json, blocking_dimensions_json, complete, created_at) values (?, ?, ?, ?, ?, ?)")
+			.run(workflowId, this.options.hashProvider.canonicalize(profile), JSON.stringify(requiredSet.requiredKinds), JSON.stringify(requiredSet.blockingDimensions), requiredSet.complete ? 1 : 0, timestamp);
+		return requiredSet;
+	}
+
+	getRequiredArtifactSet(workflowId: number): RequiredArtifactSetResult | undefined {
+		const row = this.database
+			.prepare("select required_kinds_json, blocking_dimensions_json, complete from impact_profiles where workflow_id = ? order by id desc limit 1")
+			.get(workflowId) as { required_kinds_json: string; blocking_dimensions_json: string; complete: number } | undefined;
+		if (!row) return undefined;
+		const requiredKinds = parseJson<string[]>(row.required_kinds_json);
+		const blockingDimensions = parseJson<string[]>(row.blocking_dimensions_json);
+		const projection = this.getWorkflowProjection(workflowId);
+		const requirementId = projection?.requirement.id ?? null;
+		const kindStatuses: RequiredArtifactKindStatus[] = requiredKinds.map((kind) => {
+			const revisionRow = this.database
+				.prepare("select ar.status from artifact_revisions ar join artifacts a on a.id = ar.artifact_id where a.requirement_id = ? and a.kind = ? order by ar.id desc limit 1")
+				.get(requirementId, kind) as { status: string } | undefined;
+			const hasCurrent = revisionRow !== undefined;
+			let hasTraceLinks = false;
+			if (hasCurrent) {
+				const revId = (this.database
+					.prepare("select ar.id from artifact_revisions ar join artifacts a on a.id = ar.artifact_id where a.requirement_id = ? and a.kind = ? order by ar.id desc limit 1")
+					.get(requirementId, kind) as { id: number }).id;
+				const linkCount = (this.database
+					.prepare("select count(*) as count from trace_links where artifact_revision_id = ?")
+					.get(revId) as { count: number }).count;
+				hasTraceLinks = linkCount > 0;
+			}
+			return { kind, hasCurrentRevision: hasCurrent, revisionStatus: revisionRow?.status ?? null, hasTraceLinks };
+		});
+		return { requiredKinds, blockingDimensions, complete: row.complete === 1, kindStatuses };
+	}
+
+	getTraceLinks(artifactRevisionId: number): readonly TraceLinkResult[] {
+		const rows = this.database
+			.prepare("select id, artifact_revision_id, evidence_snapshot_id, source_ref_json, created_at from trace_links where artifact_revision_id = ? order by id")
+			.all(artifactRevisionId) as Array<{ id: number; artifact_revision_id: number; evidence_snapshot_id: number; source_ref_json: string; created_at: string }>;
+		return rows.map((row) => ({ id: row.id, artifactRevisionId: row.artifact_revision_id, evidenceSnapshotId: row.evidence_snapshot_id, sourceRef: parseJson<unknown>(row.source_ref_json), createdAt: row.created_at }));
+	}
+
+	addTraceLinks(revisionId: number, links: readonly TraceLinkProposal[]): void {
+		const timestamp = this.options.clock.now().toISOString();
+		for (const link of links) {
+			this.database
+				.prepare("insert into trace_links(artifact_revision_id, evidence_snapshot_id, source_ref_json, created_at) values (?, ?, ?, ?)")
+				.run(revisionId, link.evidenceSnapshotId, this.options.hashProvider.canonicalize(link.sourceRef), timestamp);
+		}
+	}
+}
+
+export interface EvidenceSnapshotResult {
+	id: number;
+	workflowId: number;
+	repoDigest: string;
+	createdAt: string;
+}
+
+export interface RequiredArtifactKindStatus {
+	kind: string;
+	hasCurrentRevision: boolean;
+	revisionStatus: string | null;
+	hasTraceLinks: boolean;
+}
+
+export interface RequiredArtifactSetResult {
+	requiredKinds: readonly string[];
+	blockingDimensions: readonly string[];
+	complete: boolean;
+	kindStatuses: readonly RequiredArtifactKindStatus[];
+}
+
+export interface TraceLinkResult {
+	id: number;
+	artifactRevisionId: number;
+	evidenceSnapshotId: number;
+	sourceRef: unknown;
+	createdAt: string;
 }

@@ -20,7 +20,7 @@ import {
 	type RequirementBaseline,
 } from "./workflow/headless-runtime.js";
 import type { PlanProposal } from "./workflow/plan-types.js";
-import type { RoleResult } from "./workflow/role-result.js";
+import type { RoleResult, TraceLinkProposal } from "./workflow/role-result.js";
 
 const BASELINE: RequirementBaseline = {
 	schemaVersion: "artifact/requirement/v1",
@@ -134,7 +134,7 @@ function validAnalysisContent(): unknown {
 	};
 }
 
-function validRoleResult(workflowId: number, attemptId: number, content: unknown): RoleResult {
+function validRoleResult(workflowId: number, attemptId: number, content: unknown, traceLinks?: TraceLinkProposal[]): RoleResult {
 	return {
 		schemaVersion: "role-result/v1",
 		workflowId,
@@ -146,6 +146,7 @@ function validRoleResult(workflowId: number, attemptId: number, content: unknown
 				logicalKey: "analysis",
 				content,
 				baseRevisionId: null,
+				traceLinks,
 			},
 		],
 	};
@@ -251,8 +252,10 @@ test("second governance attempt cannot acquire an active claim", async () => {
 test("successful publication creates pending artifact revision, provenance, terminal states, and events", async () => {
 	await withAttemptRuntime(async ({ runtime, databasePath }) => {
 		const { workflowId } = await createWorkflowWithPlan(runtime);
+		runtime.bindEvidenceSnapshot(workflowId, "sha256:repo1", []);
+		const evidenceSnapshotId = runtime.getEvidenceSnapshots(workflowId)[0]!.id;
 		const begin = runtime.beginAttempt(workflowId);
-		const result = runtime.completeAttempt(workflowId, begin.attemptId, validRoleResult(workflowId, begin.attemptId, validAnalysisContent()));
+		const result = runtime.completeAttempt(workflowId, begin.attemptId, validRoleResult(workflowId, begin.attemptId, validAnalysisContent(), [{ evidenceSnapshotId, sourceRef: { type: "requirement_revision", revisionId: 1 } }]));
 
 		assert.equal(result.outcome, "published");
 		assert.equal(result.failureCode, null);
@@ -363,9 +366,11 @@ test("attempt budget exhaustion fails the task and the workflow", async () => {
 test("crash before publish commit rolls back all candidate effects", async () => {
 	await withAttemptRuntime(async ({ runtime, databasePath }) => {
 		const { workflowId } = await createWorkflowWithPlan(runtime);
+		runtime.bindEvidenceSnapshot(workflowId, "sha256:repo1", []);
+		const evidenceSnapshotId = runtime.getEvidenceSnapshots(workflowId)[0]!.id;
 		const begin = runtime.beginAttempt(workflowId);
 		assert.throws(
-			() => runtime.completeAttempt(workflowId, begin.attemptId, validRoleResult(workflowId, begin.attemptId, validAnalysisContent())),
+			() => runtime.completeAttempt(workflowId, begin.attemptId, validRoleResult(workflowId, begin.attemptId, validAnalysisContent(), [{ evidenceSnapshotId, sourceRef: { type: "requirement_revision", revisionId: 1 } }])),
 			/crash point reached: publish_attempt\.before_commit/,
 		);
 		const revision = queryArtifactRevision(databasePath, workflowId, "analysis");
@@ -378,8 +383,10 @@ test("crash before publish commit rolls back all candidate effects", async () =>
 test("executeTask drives analyst model and publishes via the model/tool boundary", async () => {
 	await withAttemptRuntime(async ({ runtime, databasePath }) => {
 		const { workflowId } = await createWorkflowWithPlan(runtime);
+		runtime.bindEvidenceSnapshot(workflowId, "sha256:repo1", []);
+		const evidenceSnapshotId = runtime.getEvidenceSnapshots(workflowId)[0]!.id;
 		const begin = runtime.beginAttempt(workflowId);
-		const structuredResult = validRoleResult(workflowId, begin.attemptId, validAnalysisContent());
+		const structuredResult = validRoleResult(workflowId, begin.attemptId, validAnalysisContent(), [{ evidenceSnapshotId, sourceRef: { type: "requirement_revision", revisionId: 1 } }]);
 		const driver = new ScriptedModelDriver([
 			{
 				role: "analyst",
