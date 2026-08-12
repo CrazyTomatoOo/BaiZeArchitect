@@ -6,11 +6,11 @@
 
 **Blocked by:** 01 — 让 Workflow 契约可执行并建立确定性 ModelDriver 接缝
 
-**Status:** ready-for-agent
+**Status:** completed
 
-- [ ] 一次创建操作在同一事务中产生 Requirement、确定性的 requirement baseline revision、Design Session、唯一 `pending` Workflow、固定 Policy Bundle 引用和 `workflow_created` 事件。
-- [ ] 一个 Requirement 不能创建第二个 Workflow，且 Workflow 创建后不能更换 Policy Bundle。
-- [ ] Workflow current state、version 与连续 event sequence 的初始值符合状态和事件契约。
-- [ ] 大型契约与策略内容以 kind + digest 的不可变 Snapshot Document 去重保存，重复内容不产生可变副本。
-- [ ] 任一插入或校验失败都会回滚全部创建结果，不留下孤立 Requirement、Session、Workflow、快照或事件。
-- [ ] headless 外部测试可读取并验证完整初始治理投影，而无需访问内部 Store 结构。
+- [x] 一次创建操作在同一事务中产生 Requirement、确定性的 requirement baseline revision、Design Session、唯一 `pending` Workflow、固定 Policy Bundle 引用和 `workflow_created` 事件。
+- [x] 一个 Requirement 不能创建第二个 Workflow，且 Workflow 创建后不能更换 Policy Bundle。
+- [x] Workflow current state、version 与连续 event sequence 的初始值符合状态和事件契约。
+- [x] 大型契约与策略内容以 kind + digest 的不可变 Snapshot Document 去重保存，重复内容不产生可变副本。
+- [x] 任一插入或校验失败都会回滚全部创建结果，不留下孤立 Requirement、Session、Workflow、快照或事件。
+- [x] headless 外部测试可读取并验证完整初始治理投影，而无需访问内部 Store 结构。

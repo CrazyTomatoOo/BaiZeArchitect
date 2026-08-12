@@ -75,12 +75,16 @@ function canonicalJson(value: unknown): string {
 
 export interface HashProvider {
 	digest(value: unknown): string;
+	canonicalize(value: unknown): string;
 }
 
 export function createHashProvider(): HashProvider {
 	return {
 		digest(value) {
 			return `sha256:${createHash("sha256").update(canonicalJson(value)).digest("hex")}`;
+		},
+		canonicalize(value) {
+			return canonicalJson(value);
 		},
 	};
 }

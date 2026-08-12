@@ -41,6 +41,7 @@
       "input_schema",
       "output_schema",
       "policy_bundle",
+      "artifact_content",
       "run_result",
       "approval_packet",
       "actor_snapshot",

@@ -34,6 +34,7 @@ test("fixed test dependencies are deterministic and injectable", async () => {
 		hash.digest({ beta: 2, alpha: 1 }),
 		hash.digest({ alpha: 1, beta: 2 }),
 	);
+	assert.equal(hash.canonicalize({ beta: 2, alpha: 1 }), '{"alpha":1,"beta":2}');
 	assert.match(hash.digest({ alpha: 1 }), /^sha256:[a-f0-9]{64}$/);
 	for (const nonJson of [
 		new Date("2026-08-12T00:00:00.000Z"),
