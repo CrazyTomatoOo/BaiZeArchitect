@@ -360,12 +360,12 @@ test("startup refuses an unknown newer Workflow schema migration", async () => {
 	const runtime = await openHeadlessWorkflowRuntime(runtimeOptions(databasePath));
 	runtime.close();
 	const database = new Database(databasePath);
-	database.prepare("insert into schema_migrations(version, name, checksum, applied_at) values (8, 'future', 'sha256:future', ?)").run("2026-08-12T10:00:00.000Z");
+	database.prepare("insert into schema_migrations(version, name, checksum, applied_at) values (9, 'future', 'sha256:future', ?)").run("2026-08-12T10:00:00.000Z");
 	database.close();
 	try {
 		await assert.rejects(
 			openHeadlessWorkflowRuntime(runtimeOptions(databasePath)),
-			/Workflow database migration 8 is newer than supported version 7/,
+			/Workflow database migration 9 is newer than supported version 8/,
 		);
 	} finally {
 		await rm(directory, { recursive: true, force: true });

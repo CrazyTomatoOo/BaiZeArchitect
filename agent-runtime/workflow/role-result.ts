@@ -1,4 +1,4 @@
-import type { WritableArtifactKind } from "./plan-types.js";
+import type { TaskRole, WritableArtifactKind } from "./plan-types.js";
 
 export interface TraceLinkProposal {
 	evidenceSnapshotId: number;
@@ -19,6 +19,7 @@ export interface RoleResult {
 	workflowId: number;
 	attemptId: number;
 	effects: readonly ArtifactEffectProposal[];
+	criticReport?: CriticReport;
 }
 
 export interface ContextManifest {
@@ -43,6 +44,8 @@ export interface RoleContract {
 
 export interface BeginAttemptResult {
 	taskId: number;
+	taskKey: string;
+	taskRole: string;
 	attemptId: number;
 	runId: number;
 	contextDigest: string;
@@ -63,4 +66,35 @@ export interface ExecuteTaskResult {
 	outcome: "published" | "task_exhausted" | "no_ready_task";
 	workflowVersion: number;
 	lastEventSeq: number;
+}
+
+export type FindingSeverity = "critical" | "major" | "minor" | "info";
+
+export interface FindingProposal {
+	fingerprint: string;
+	severity: FindingSeverity;
+	summary: string;
+	targetRevisionId: number;
+	targetArtifactKind: WritableArtifactKind;
+	sourceRef: string;
+	evidence?: unknown;
+	resolved?: boolean;
+}
+
+export interface CoverageTarget {
+	revisionId: number;
+	artifactKind: string;
+}
+
+export interface CoverageAttestation {
+	reviewTargets: readonly CoverageTarget[];
+	complete: boolean;
+}
+
+export interface CriticReport {
+	schemaVersion: "critic-report/v1";
+	workflowId: number;
+	attemptId: number;
+	coverageAttestation: CoverageAttestation;
+	findings: readonly FindingProposal[];
 }

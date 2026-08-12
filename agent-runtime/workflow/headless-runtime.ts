@@ -1,18 +1,19 @@
 import type { CrashInjector, FixtureClock, FixtureOperator, FixtureOutboxTransport, HashProvider } from "../testing/deterministic-fixtures.js";
-import { WorkflowStore, type BeginPlanningResult, type CommandReceipt, type CompletePlanningResult, type ExecuteCommandInput, type ReconciliationReport, type WorkflowCommandType, type WorkflowProjection, type EvidenceSnapshotResult, type RequiredArtifactSetResult, type TraceLinkResult } from "../persistence/workflow-store.js";
-import type { BeginAttemptResult, CompleteAttemptResult, ExecuteTaskResult, RoleResult, TraceLinkProposal } from "./role-result.js";
+import { WorkflowStore, type BeginPlanningResult, type CommandReceipt, type CompletePlanningResult, type ExecuteCommandInput, type ReconciliationReport, type WorkflowCommandType, type WorkflowProjection, type EvidenceSnapshotResult, type RequiredArtifactSetResult, type TraceLinkResult, type FindingRecord, type FindingThreadRecord } from "../persistence/workflow-store.js";
+import type { BeginAttemptResult, CompleteAttemptResult, ExecuteTaskResult, RoleResult, TraceLinkProposal, CriticReport } from "./role-result.js";
 import { loadWorkflowContracts } from "./contracts/loader.js";
 import { compileWorkflowSchema, type WorkflowSchemaValidator } from "./contracts/schema.js";
 import type { DoctorReport } from "./workflow-doctor.js";
 import type { ModelDriver } from "./model-driver.js";
 import { validatePlanProposal, type PlanValidationContext } from "./plan-validator.js";
+import type { TaskRole } from "./plan-types.js";
 import type { PlanProposal } from "./plan-types.js";
 import type { RequirementBaseline } from "./requirement.js";
 import type { ImpactProfile } from "./impact-profile.js";
 
 export type { RequirementBaseline } from "./requirement.js";
-export type { CommandReceipt, ReconciliationReport, WorkflowCommandType, BeginPlanningResult, CompletePlanningResult } from "../persistence/workflow-store.js";
-export type { BeginAttemptResult, CompleteAttemptResult, ExecuteTaskResult, RoleResult } from "./role-result.js";
+export type { CommandReceipt, ReconciliationReport, WorkflowCommandType, BeginPlanningResult, CompletePlanningResult, FindingRecord, FindingThreadRecord } from "../persistence/workflow-store.js";
+export type { BeginAttemptResult, CompleteAttemptResult, ExecuteTaskResult, RoleResult, CriticReport } from "./role-result.js";
 export type { DoctorReport } from "./workflow-doctor.js";
 
 export interface HeadlessWorkflowRuntimeOptions {
@@ -70,6 +71,10 @@ export interface HeadlessWorkflowRuntime {
 	getTraceLinks(artifactRevisionId: number): readonly TraceLinkResult[];
 	isEvidenceStale(workflowId: number, currentRepoDigest: string): boolean;
 	getEvidenceSnapshots(workflowId: number): readonly EvidenceSnapshotResult[];
+	getFindings(workflowId: number): readonly FindingRecord[];
+	getFindingThreads(workflowId: number): readonly FindingThreadRecord[];
+	acceptFindingRisk(workflowId: number, findingId: number, operator: string, reason: string): void;
+	isFindingRiskAcceptanceStale(workflowId: number, findingId: number): boolean;
 	close(): void;
 }
 
@@ -189,10 +194,10 @@ export async function openHeadlessWorkflowRuntime(
 				if (begin.taskId === 0) {
 					return { outcome: "no_ready_task", workflowVersion: begin.workflowVersion, lastEventSeq: begin.lastEventSeq };
 				}
-				const result = await modelDriver.execute(
-					{ role: "analyst", contextDigest: begin.contextDigest, instruction: "Produce the required artifact revisions." },
-					[],
-				);
+			const result = await modelDriver.execute(
+				{ role: begin.taskRole as TaskRole, contextDigest: begin.contextDigest, instruction: "Produce the required output." },
+				[],
+			);
 				const complete = completeAttemptInternal(workflowId, begin.attemptId, result.structuredResult);
 				if (complete.outcome === "published") {
 					return { outcome: "published", workflowVersion: complete.workflowVersion, lastEventSeq: complete.lastEventSeq };
@@ -227,9 +232,21 @@ export async function openHeadlessWorkflowRuntime(
 		isEvidenceStale(workflowId, currentRepoDigest) {
 			return store.isEvidenceStale(workflowId, currentRepoDigest);
 		},
-		getEvidenceSnapshots(workflowId) {
-			return store.getEvidenceSnapshots(workflowId);
-		},
+	getEvidenceSnapshots(workflowId) {
+		return store.getEvidenceSnapshots(workflowId);
+	},
+	getFindings(workflowId) {
+		return store.getFindings(workflowId);
+	},
+	getFindingThreads(workflowId) {
+		return store.getFindingThreads(workflowId);
+	},
+	acceptFindingRisk(workflowId, findingId, operator, reason) {
+		return store.acceptFindingRisk(workflowId, findingId, operator, reason);
+	},
+	isFindingRiskAcceptanceStale(workflowId, findingId) {
+		return store.isFindingRiskAcceptanceStale(workflowId, findingId);
+	},
 		close() {
 			store.close();
 		},

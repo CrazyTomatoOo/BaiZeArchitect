@@ -13,11 +13,12 @@ import { PLANNING_GOVERNANCE_MIGRATION } from "./migrations/0004-planning-govern
 import { ATTEMPT_EXECUTION_MIGRATION } from "./migrations/0005-attempt-execution-governance.js";
 import { DEPENDENT_TASK_SAFETY_MIGRATION } from "./migrations/0006-dependent-task-safety.js";
 import { REQUIRED_ARTIFACTS_AND_EVIDENCE_MIGRATION } from "./migrations/0007-required-artifacts-and-evidence.js";
+import { CRITIC_GOVERNANCE_MIGRATION } from "./migrations/0008-critic-governance.js";
 import { ARTIFACT_OWNERSHIP, type InputBinding, type TaskOutputInput } from "../workflow/plan-types.js";
-import type { RoleResult, ContextManifest, RoleContract, BeginAttemptResult, CompleteAttemptResult, TraceLinkProposal } from "../workflow/role-result.js";
+import type { RoleResult, ContextManifest, RoleContract, BeginAttemptResult, CompleteAttemptResult, TraceLinkProposal, CriticReport, FindingProposal, FindingSeverity } from "../workflow/role-result.js";
 import { deriveRequiredArtifactSet, type ImpactProfile, type RequiredArtifactSet } from "../workflow/impact-profile.js";
 
-const MIGRATIONS = [WORKFLOW_GOVERNANCE_MIGRATION, COMMAND_GOVERNANCE_MIGRATION, RECOVERY_GOVERNANCE_MIGRATION, PLANNING_GOVERNANCE_MIGRATION, ATTEMPT_EXECUTION_MIGRATION, DEPENDENT_TASK_SAFETY_MIGRATION, REQUIRED_ARTIFACTS_AND_EVIDENCE_MIGRATION] as const;
+const MIGRATIONS = [WORKFLOW_GOVERNANCE_MIGRATION, COMMAND_GOVERNANCE_MIGRATION, RECOVERY_GOVERNANCE_MIGRATION, PLANNING_GOVERNANCE_MIGRATION, ATTEMPT_EXECUTION_MIGRATION, DEPENDENT_TASK_SAFETY_MIGRATION, REQUIRED_ARTIFACTS_AND_EVIDENCE_MIGRATION, CRITIC_GOVERNANCE_MIGRATION] as const;
 export type WorkflowCommandType = "start" | "pause" | "resume" | "retry-recovery" | "cancel-run";
 
 export type CommandOutcome =
@@ -1049,12 +1050,12 @@ export class WorkflowStore {
 
 		const task = this.getReadyExecutionTask(workflowId);
 		if (!task) {
-			return { taskId: 0, attemptId: 0, runId: 0, contextDigest: "", workflowVersion: workflow.version, lastEventSeq: this.currentLastEventSeq(workflowId) };
+		return { taskId: 0, taskKey: "", taskRole: "", attemptId: 0, runId: 0, contextDigest: "", workflowVersion: workflow.version, lastEventSeq: this.currentLastEventSeq(workflowId) };
 		}
 
 		const resolvedInputs = this.resolveTaskOutputInputs(workflowId, task);
 		if (!resolvedInputs) {
-			return { taskId: 0, attemptId: 0, runId: 0, contextDigest: "", workflowVersion: workflow.version, lastEventSeq: this.currentLastEventSeq(workflowId) };
+		return { taskId: 0, taskKey: "", taskRole: "", attemptId: 0, runId: 0, contextDigest: "", workflowVersion: workflow.version, lastEventSeq: this.currentLastEventSeq(workflowId) };
 		}
 
 		const roleContract = this.getOrCreateRoleContract(task.role, timestamp);
@@ -1081,7 +1082,7 @@ export class WorkflowStore {
 		this.database.prepare("update workflows set version = ?, updated_at = ? where id = ?").run(newVersion, timestamp, workflowId);
 
 		this.options.crashInjector.reach("begin_attempt.before_commit");
-		return { taskId: task.id, attemptId, runId, contextDigest: contextSnapshot.digest, workflowVersion: newVersion, lastEventSeq: this.currentLastEventSeq(workflowId) };
+	return { taskId: task.id, taskKey: task.key, taskRole: task.role, attemptId, runId, contextDigest: contextSnapshot.digest, workflowVersion: newVersion, lastEventSeq: this.currentLastEventSeq(workflowId) };
 	}
 
 	private getReadyExecutionTask(workflowId: number): { id: number; key: string; kind: string; role: string; objective: string; plan_revision_id: number; depends_on_json: string; inputs_json: string; expected_artifact_effects_json: string; completion_policy_ref: string | null; max_attempts: number } | null {
@@ -1172,7 +1173,7 @@ export class WorkflowStore {
 		const timestamp = this.options.clock.now().toISOString();
 		const workflow = this.database.prepare("select version from workflows where id = ?").get(workflowId) as { version: number };
 		const attempt = this.database.prepare("select task_id, attempt_no, status from task_attempts where id = ?").get(attemptId) as { task_id: number; attempt_no: number; status: string };
-		const task = this.database.prepare("select id, key, role, expected_artifact_effects_json, max_attempts, plan_revision_id from tasks where id = ?").get(attempt.task_id) as { id: number; key: string; role: string; expected_artifact_effects_json: string; max_attempts: number; plan_revision_id: number };
+	const task = this.database.prepare("select id, key, kind, role, expected_artifact_effects_json, max_attempts, plan_revision_id from tasks where id = ?").get(attempt.task_id) as { id: number; key: string; kind: string; role: string; expected_artifact_effects_json: string; max_attempts: number; plan_revision_id: number };
 
 		if (attempt.status === "cancelled" || attempt.status === "superseded" || attempt.status === "failed") {
 			const resultSnapshot = this.insertSnapshot("artifact_content", "role-result/v1", structuredResult, timestamp);
@@ -1194,6 +1195,10 @@ export class WorkflowStore {
 		if (result.workflowId !== workflowId || result.attemptId !== attemptId) {
 			return this.failAttemptRows(workflowId, attemptId, "role_result_mismatch", "RoleResult workflow or attempt mismatch");
 		}
+
+	if (task.role === "critic") {
+		return this.publishCriticReportRows(workflowId, attemptId, result, task, workflow, timestamp);
+	}
 
 		const expectedEffects = parseJson<TaskProposal["expectedArtifactEffects"]>(task.expected_artifact_effects_json);
 		const allowedKinds = ARTIFACT_OWNERSHIP[task.role as keyof typeof ARTIFACT_OWNERSHIP] ?? [];
@@ -1451,6 +1456,168 @@ export class WorkflowStore {
 				.run(revisionId, link.evidenceSnapshotId, this.options.hashProvider.canonicalize(link.sourceRef), timestamp);
 		}
 	}
+
+	getFindings(workflowId: number): readonly FindingRecord[] {
+		const rows = this.database
+			.prepare("select id, workflow_id, task_attempt_id, thread_id, fingerprint, severity, status, summary, target_revision_id, target_artifact_kind, source_ref, created_at, resolved_at, risk_accepted_by, risk_acceptance_reason from findings where workflow_id = ? order by id")
+			.all(workflowId) as Array<{ id: number; workflow_id: number; task_attempt_id: number; thread_id: number; fingerprint: string; severity: string; status: string; summary: string; target_revision_id: number; target_artifact_kind: string; source_ref: string; created_at: string; resolved_at: string | null; risk_accepted_by: string | null; risk_acceptance_reason: string | null }>;
+		return rows.map((row) => ({
+			id: row.id, workflowId: row.workflow_id, attemptId: row.task_attempt_id, threadId: row.thread_id,
+			fingerprint: row.fingerprint, severity: row.severity as FindingSeverity, status: row.status,
+			summary: row.summary, targetRevisionId: row.target_revision_id, targetArtifactKind: row.target_artifact_kind,
+			sourceRef: row.source_ref, createdAt: row.created_at, resolvedAt: row.resolved_at,
+			riskAcceptedBy: row.risk_accepted_by, riskAcceptanceReason: row.risk_acceptance_reason,
+		}));
+	}
+
+	getFindingThreads(workflowId: number): readonly FindingThreadRecord[] {
+		const rows = this.database
+			.prepare("select id, workflow_id, fingerprint, rework_count, status, created_at, updated_at from finding_threads where workflow_id = ? order by id")
+			.all(workflowId) as Array<{ id: number; workflow_id: number; fingerprint: string; rework_count: number; status: string; created_at: string; updated_at: string }>;
+		return rows.map((row) => ({
+			id: row.id, workflowId: row.workflow_id, fingerprint: row.fingerprint,
+			reworkCount: row.rework_count, status: row.status, createdAt: row.created_at, updatedAt: row.updated_at,
+		}));
+	}
+
+	acceptFindingRisk(workflowId: number, findingId: number, operator: string, reason: string): void {
+		const tx = this.database.transaction(() => {
+			const timestamp = this.options.clock.now().toISOString();
+			const finding = this.database
+				.prepare("select severity, status, thread_id from findings where id = ? and workflow_id = ?")
+				.get(findingId, workflowId) as { severity: string; status: string; thread_id: number } | undefined;
+			if (!finding) throw new Error("Finding not found");
+			if (finding.severity === "critical") throw new Error("Critical findings cannot be risk accepted");
+			if (finding.status === "resolved") throw new Error("Resolved findings cannot be risk accepted");
+			this.database
+				.prepare("update findings set status = 'risk_accepted', risk_accepted_by = ?, risk_acceptance_reason = ?, resolved_at = ? where id = ?")
+				.run(operator, reason, timestamp, findingId);
+			this.database
+				.prepare("update finding_threads set status = 'risk_accepted', updated_at = ? where id = ?")
+				.run(timestamp, finding.thread_id);
+			const newVersion = (this.database.prepare("select version from workflows where id = ?").get(workflowId) as { version: number }).version + 1;
+			this.appendEvent(workflowId, "finding_risk_accepted", newVersion, "finding", findingId, 0, { findingId, operator, reason }, timestamp);
+			this.database.prepare("update workflows set version = ?, updated_at = ? where id = ?").run(newVersion, timestamp, workflowId);
+		}).immediate;
+		tx();
+	}
+
+	isFindingRiskAcceptanceStale(workflowId: number, findingId: number): boolean {
+		const finding = this.database
+			.prepare("select target_revision_id, target_artifact_kind, status, risk_accepted_by from findings where id = ? and workflow_id = ?")
+			.get(findingId, workflowId) as { target_revision_id: number; target_artifact_kind: string; status: string; risk_accepted_by: string | null } | undefined;
+		if (!finding || !finding.risk_accepted_by) return false;
+		const requirementId = (this.database
+			.prepare("select a.requirement_id from artifacts a join artifact_revisions ar on ar.artifact_id = a.id where ar.id = ?")
+			.get(finding.target_revision_id) as { requirement_id: number }).requirement_id;
+		const currentRevision = this.database
+			.prepare("select ar.id from artifact_revisions ar join artifacts a on a.id = ar.artifact_id where a.requirement_id = ? and a.kind = ? order by ar.id desc limit 1")
+			.get(requirementId, finding.target_artifact_kind) as { id: number } | undefined;
+		return !currentRevision || currentRevision.id !== finding.target_revision_id;
+	}
+
+	private publishCriticReportRows(
+		workflowId: number,
+		attemptId: number,
+		result: RoleResult,
+		task: { id: number; key: string; kind: string; role: string; expected_artifact_effects_json: string; max_attempts: number; plan_revision_id: number },
+		workflow: { version: number },
+		timestamp: string,
+	): CompleteAttemptResult {
+		if (result.effects.length > 0) {
+			return this.failAttemptRows(workflowId, attemptId, "critic_effect_violation", "Critic cannot produce artifact effects");
+		}
+		const report = result.criticReport;
+		if (!report || report.schemaVersion !== "critic-report/v1" || typeof report.workflowId !== "number" || typeof report.attemptId !== "number" || !report.coverageAttestation || !Array.isArray(report.findings)) {
+			return this.failAttemptRows(workflowId, attemptId, "invalid_critic_report", "CriticReport schema validation failed");
+		}
+		if (report.workflowId !== workflowId || report.attemptId !== attemptId) {
+			return this.failAttemptRows(workflowId, attemptId, "critic_report_mismatch", "CriticReport workflow or attempt mismatch");
+		}
+		if (!report.coverageAttestation.complete) {
+			return this.failAttemptRows(workflowId, attemptId, "incomplete_coverage", "Coverage attestation is not complete");
+		}
+		if (report.findings.length === 0 && !report.coverageAttestation.complete) {
+			return this.failAttemptRows(workflowId, attemptId, "incomplete_coverage", "Zero findings require complete coverage attestation");
+		}
+		const newVersion = workflow.version + 1;
+		const runId = (this.database.prepare("select id from runs where attempt_id = ? order by id desc limit 1").get(attemptId) as { id: number }).id;
+	const isVerify = task.kind === "verify";
+
+		if (isVerify) {
+			const taskRow = this.database.prepare("select inputs_json from tasks where id = ?").get(task.id) as { inputs_json: string };
+			const inputs = parseJson<readonly InputBinding[]>(taskRow.inputs_json);
+			const targetedFindingIds = inputs.filter((i): i is { type: "finding"; findingId: number; targetRevisionId: number; purpose: string } => i.type === "finding").map((i) => i.findingId);
+			const targetedFingerprints = new Set(
+				targetedFindingIds.map((fid) => (this.database.prepare("select fingerprint from findings where id = ?").get(fid) as { fingerprint: string } | undefined)?.fingerprint).filter(Boolean),
+			);
+			for (const proposal of report.findings) {
+				if (!targetedFingerprints.has(proposal.fingerprint)) {
+					return this.failAttemptRows(workflowId, attemptId, "finding_not_in_attempt", `Finding fingerprint ${proposal.fingerprint} does not match any targeted Finding`);
+				}
+			}
+			for (const proposal of report.findings) {
+				const thread = this.database
+					.prepare("select id, rework_count from finding_threads where workflow_id = ? and fingerprint = ?")
+					.get(workflowId, proposal.fingerprint) as { id: number; rework_count: number } | undefined;
+				if (!thread) {
+					return this.failAttemptRows(workflowId, attemptId, "finding_thread_not_found", `No Finding Thread for fingerprint ${proposal.fingerprint}`);
+				}
+				const finding = this.database
+					.prepare("select id, severity from findings where workflow_id = ? and fingerprint = ? and status = 'open' order by id desc limit 1")
+					.get(workflowId, proposal.fingerprint) as { id: number; severity: string } | undefined;
+				if (!finding) {
+					return this.failAttemptRows(workflowId, attemptId, "open_finding_not_found", `No open Finding for fingerprint ${proposal.fingerprint}`);
+				}
+				if (proposal.resolved === true) {
+					this.database.prepare("update findings set status = 'resolved', resolved_at = ? where id = ?").run(timestamp, finding.id);
+					this.database.prepare("update finding_threads set status = 'resolved', updated_at = ? where id = ?").run(timestamp, thread.id);
+					this.appendEvent(workflowId, "finding_resolved", newVersion, "finding", finding.id, 0, { fingerprint: proposal.fingerprint }, timestamp);
+				} else {
+					const newCount = thread.rework_count + 1;
+					if (newCount >= 2) {
+						this.database.prepare("update finding_threads set rework_count = ?, status = 'human_gate', updated_at = ? where id = ?").run(newCount, timestamp, thread.id);
+						this.database.prepare("update workflows set state = 'waiting_for_human', version = ?, updated_at = ? where id = ?").run(newVersion, timestamp, workflowId);
+						this.appendEvent(workflowId, "finding_thread_escalated", newVersion, "finding_thread", thread.id, 0, { fingerprint: proposal.fingerprint, reworkCount: newCount }, timestamp);
+					} else {
+						this.database.prepare("update finding_threads set rework_count = ?, updated_at = ? where id = ?").run(newCount, timestamp, thread.id);
+						this.appendEvent(workflowId, "finding_not_resolved", newVersion, "finding_thread", thread.id, 0, { fingerprint: proposal.fingerprint, reworkCount: newCount }, timestamp);
+					}
+				}
+			}
+		} else {
+			for (const proposal of report.findings) {
+				const severity = proposal.severity as FindingSeverity;
+				let thread = this.database
+					.prepare("select id from finding_threads where workflow_id = ? and fingerprint = ?")
+					.get(workflowId, proposal.fingerprint) as { id: number } | undefined;
+				if (!thread) {
+					const threadId = Number(this.database
+						.prepare("insert into finding_threads(workflow_id, fingerprint, status, created_at, updated_at) values (?, ?, 'open', ?, ?)")
+						.run(workflowId, proposal.fingerprint, timestamp, timestamp).lastInsertRowid);
+					thread = { id: threadId };
+				}
+				const findingId = Number(this.database
+					.prepare("insert into findings(workflow_id, task_attempt_id, thread_id, fingerprint, severity, status, summary, target_revision_id, target_artifact_kind, source_ref, evidence_json, created_at) values (?, ?, ?, ?, ?, 'open', ?, ?, ?, ?, ?, ?)")
+					.run(workflowId, attemptId, thread.id, proposal.fingerprint, severity, proposal.summary, proposal.targetRevisionId, proposal.targetArtifactKind, proposal.sourceRef, proposal.evidence !== undefined ? JSON.stringify(proposal.evidence) : null, timestamp).lastInsertRowid);
+				this.appendEvent(workflowId, "finding_recorded", newVersion, "finding", findingId, 0, { fingerprint: proposal.fingerprint, severity, targetRevisionId: proposal.targetRevisionId, targetArtifactKind: proposal.targetArtifactKind }, timestamp);
+			}
+		}
+
+		this.database.prepare("update task_attempts set status = 'succeeded', completed_at = ? where id = ?").run(timestamp, attemptId);
+		this.database.prepare("update runs set status = 'completed', completed_at = ? where id = ?").run(timestamp, runId);
+		this.database.prepare("update tasks set status = 'completed' where id = ?").run(task.id);
+		this.database.prepare("update governance_claims set status = 'released', released_at = ? where attempt_id = ? and status = 'active'").run(timestamp, attemptId);
+		if (!isVerify || report.findings.every((f) => f.resolved === true) || report.findings.length === 0) {
+			this.database.prepare("update workflows set version = ?, updated_at = ? where id = ?").run(newVersion, timestamp, workflowId);
+		}
+		this.appendEvent(workflowId, "attempt_succeeded", newVersion, "task_attempt", attemptId, 0, { taskId: task.id, attemptNo: (this.database.prepare("select attempt_no from task_attempts where id = ?").get(attemptId) as { attempt_no: number }).attempt_no }, timestamp);
+		this.appendEvent(workflowId, "run_completed", newVersion, "run", runId, 0, { attemptId }, timestamp);
+		this.appendEvent(workflowId, "task_completed", newVersion, "task", task.id, 0, { taskKey: task.key }, timestamp);
+		this.appendEvent(workflowId, "workflow_attempt_claim_released", newVersion, "task_attempt", attemptId, 0, { attemptId }, timestamp);
+		this.options.crashInjector.reach("publish_attempt.before_commit");
+		return { outcome: "published", failureCode: null, workflowVersion: newVersion, lastEventSeq: this.currentLastEventSeq(workflowId) };
+	}
 }
 
 export interface EvidenceSnapshotResult {
@@ -1480,4 +1647,32 @@ export interface TraceLinkResult {
 	evidenceSnapshotId: number;
 	sourceRef: unknown;
 	createdAt: string;
+}
+
+export interface FindingRecord {
+	id: number;
+	workflowId: number;
+	attemptId: number;
+	threadId: number;
+	fingerprint: string;
+	severity: FindingSeverity;
+	status: string;
+	summary: string;
+	targetRevisionId: number;
+	targetArtifactKind: string;
+	sourceRef: string;
+	createdAt: string;
+	resolvedAt: string | null;
+	riskAcceptedBy: string | null;
+	riskAcceptanceReason: string | null;
+}
+
+export interface FindingThreadRecord {
+	id: number;
+	workflowId: number;
+	fingerprint: string;
+	reworkCount: number;
+	status: string;
+	createdAt: string;
+	updatedAt: string;
 }
