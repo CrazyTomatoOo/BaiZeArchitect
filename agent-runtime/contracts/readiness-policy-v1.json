@@ -1,0 +1,271 @@
+{
+  "policyVersion": "readiness-policy/v1",
+  "artifactContentSchemaRef": "./artifact-content-v1.schema.json",
+  "artifactRequirementPolicy": {
+    "alwaysRequired": ["requirement", "analysis", "design"],
+    "impactProfileSchemaVersion": "artifact/analysis/v1",
+    "impactDimensions": {
+      "process": "scenario",
+      "actors": "usecase",
+      "behavior": "function",
+      "architecture": "architecture",
+      "data": "data",
+      "api": "api"
+    },
+    "requiredWhenStatus": "yes",
+    "blockingWhenStatus": "unknown",
+    "notRequiredWhenStatus": "no",
+    "planMayRemoveRequiredKinds": false,
+    "fixedTaskTemplatePerConditionalKind": false
+  },
+  "revisionPolicy": {
+    "stagedStatus": "draft",
+    "publishSuccessfulAttemptAs": "pending",
+    "readinessEligibleStatuses": ["pending", "approved"],
+    "readinessIneligibleStatuses": ["draft", "rejected"],
+    "approvalPacketApprovalTransition": {
+      "from": "pending",
+      "to": "approved",
+      "scope": "all_included_revisions",
+      "atomic": true
+    },
+    "approvalInheritance": false,
+    "rejectedRevisionCanBeCurrent": false
+  },
+  "completionPolicies": {
+    "analyst-task/v1": {
+      "allowedRoles": ["analyst"],
+      "validators": [
+        "expected_effects_present",
+        "owned_artifact_kinds_only",
+        "artifact_content_schema_valid",
+        "source_refs_resolve",
+        "local_evidence_requirements_pass",
+        "impact_profile_complete_when_analysis_written",
+        "open_questions_have_governed_disposition"
+      ]
+    },
+    "architect-task/v1": {
+      "allowedRoles": ["architect"],
+      "validators": [
+        "expected_effects_present",
+        "owned_artifact_kinds_only",
+        "artifact_content_schema_valid",
+        "source_refs_resolve",
+        "local_evidence_requirements_pass"
+      ]
+    },
+    "critic-review/v1": {
+      "allowedRoles": ["critic"],
+      "validators": [
+        "critic_report_schema_valid",
+        "all_review_targets_covered",
+        "finding_refs_belong_to_attempt",
+        "review_snapshot_matches_targets"
+      ]
+    },
+    "rework-task/v1": {
+      "allowedRoles": ["analyst", "architect"],
+      "validators": [
+        "expected_effects_present",
+        "owned_artifact_kinds_only",
+        "artifact_content_schema_valid",
+        "all_target_findings_have_resolution_claims",
+        "successor_revision_links_predecessor",
+        "source_refs_resolve",
+        "local_evidence_requirements_pass"
+      ]
+    },
+    "critic-verify/v1": {
+      "allowedRoles": ["critic"],
+      "validators": [
+        "critic_report_schema_valid",
+        "all_verification_findings_have_results",
+        "verification_targets_are_successor_revisions",
+        "finding_refs_belong_to_attempt",
+        "review_snapshot_matches_targets"
+      ]
+    }
+  },
+  "evidencePolicy": {
+    "singleEvidenceSnapshotPerApprovalPacket": true,
+    "allRequiredRevisionsNeedInputProvenance": true,
+    "directTraceLinkRequiredForKinds": ["analysis", "design", "architecture", "data", "api"],
+    "provenanceOnlyKinds": ["requirement", "scenario", "usecase", "function"],
+    "codeClaimStillRequiresTraceLink": true,
+    "majorDecisionSupport": ["trace_link", "human_directive"],
+    "traceValidators": [
+      "snapshot_matches_approval_packet",
+      "source_revision_or_decision_exists",
+      "target_file_or_node_exists_in_snapshot",
+      "trace_belongs_to_requirement"
+    ],
+    "snapshotChangeInvalidatesReadiness": true
+  },
+  "decisionPolicy": {
+    "severities": ["critical", "major", "minor"],
+    "statuses": ["open", "accepted", "rejected", "deferred"],
+    "openBlocksReadiness": true,
+    "critical": {
+      "allowedReadyStatuses": ["accepted", "rejected"],
+      "requiresHumanApproval": true
+    },
+    "major": {
+      "allowedReadyStatuses": ["accepted", "rejected"],
+      "requiresHumanApproval": true
+    },
+    "minor": {
+      "allowedReadyStatuses": ["accepted", "rejected", "deferred"],
+      "deferredRequires": ["reason", "owner", "followUpTarget"],
+      "deferredMayAffectRequiredArtifacts": false
+    },
+    "agentMayChangeStatus": false
+  },
+  "findingPolicy": {
+    "severities": ["critical", "major", "minor", "info"],
+    "statuses": ["open", "resolution_proposed", "resolved", "accepted_risk"],
+    "critical": {
+      "allowedReadyStatuses": ["resolved"],
+      "riskAcceptanceAllowed": false,
+      "criticVerificationRequired": true
+    },
+    "major": {
+      "allowedReadyStatuses": ["resolved", "accepted_risk"],
+      "riskAcceptanceRequiresHumanApproval": true,
+      "criticVerificationRequiredForResolved": true
+    },
+    "minor": {
+      "allowedReadyStatuses": ["open", "resolution_proposed", "resolved", "accepted_risk"],
+      "openIsDisclosedInApprovalPacket": true,
+      "approvalPacketApprovalAcceptsOpenRisk": true
+    },
+    "info": {
+      "allowedReadyStatuses": ["open", "resolution_proposed", "resolved", "accepted_risk"],
+      "openIsDisclosedInApprovalPacket": true,
+      "approvalPacketApprovalAcceptsOpenRisk": true
+    },
+    "revisionReplacementClosesFinding": false,
+    "threadIdentity": "fingerprint",
+    "maxAutomaticReworkVerifyCyclesPerThread": 2,
+    "onCycleBudgetExhausted": "open_blocking_human_gate",
+    "globalPlanRevisionBudgetRef": "orchestrator-plan-policy/v1#maxConsecutivePlanRevisionsWithoutHuman"
+  },
+  "criticPolicy": {
+    "requiredForEveryWorkflow": true,
+    "initialMode": "initial_blind",
+    "reworkMode": "rework_verification",
+    "coverageScope": "all_approval_packet_revisions",
+    "coverageBoundToExactRevisionIds": true,
+    "changesInvalidatingCoverage": [
+      "artifact_revision_changed",
+      "required_artifact_set_changed",
+      "accepted_major_decision_changed",
+      "evidence_snapshot_changed"
+    ],
+    "zeroFindingReportAllowed": true,
+    "zeroFindingCoverageAttestationRequired": true,
+    "verificationResults": ["resolved", "still_open"]
+  },
+  "consistencyPolicy": {
+    "resultSeverities": ["error", "warning", "info"],
+    "blockingSeverities": ["error"],
+    "humanWaiverForError": false,
+    "discloseSeverities": ["warning", "info"],
+    "mustMatchGovernanceSnapshot": true,
+    "mustMatchRequiredArtifactSet": true,
+    "mustMatchEvidenceSnapshot": true,
+    "requiredErrorChecks": [
+      "revision_current_unique",
+      "schema_and_source_refs_valid",
+      "artifact_ownership_valid",
+      "decision_options_valid",
+      "finding_verification_valid",
+      "trace_link_coverage_valid",
+      "critic_coverage_valid",
+      "plan_task_inputs_resolved",
+      "no_unpublished_staged_effects",
+      "current_provenance_execution_transcripts_present"
+    ]
+  },
+  "readinessChecks": [
+    {
+      "id": "workflow_tasks_terminal",
+      "validator": "no_active_attempts_and_current_plan_terminal",
+      "blocking": true
+    },
+    {
+      "id": "no_blocking_gate",
+      "validator": "no_open_blocking_gate",
+      "blocking": true
+    },
+    {
+      "id": "impact_profile_complete",
+      "validator": "all_impact_dimensions_known",
+      "blocking": true
+    },
+    {
+      "id": "required_artifacts_complete",
+      "validator": "exactly_one_current_eligible_schema_valid_revision_per_required_kind",
+      "blocking": true
+    },
+    {
+      "id": "no_unpublished_effects",
+      "validator": "no_active_or_unpublished_staged_effects",
+      "blocking": true
+    },
+    {
+      "id": "evidence_coverage_complete",
+      "validator": "provenance_and_trace_policy_pass",
+      "blocking": true
+    },
+    {
+      "id": "decisions_disposed",
+      "validator": "decision_policy_pass",
+      "blocking": true
+    },
+    {
+      "id": "findings_disposed",
+      "validator": "finding_policy_pass",
+      "blocking": true
+    },
+    {
+      "id": "critic_coverage_current",
+      "validator": "critic_policy_pass",
+      "blocking": true
+    },
+    {
+      "id": "consistency_errors_clear",
+      "validator": "latest_complete_consistency_report_has_no_error",
+      "blocking": true
+    },
+    {
+      "id": "approval_packet_buildable",
+      "validator": "approval_packet_can_be_built_and_hashed",
+      "blocking": true
+    }
+  ],
+  "approvalPacket": {
+    "immutable": true,
+    "digestAlgorithm": "sha256",
+    "approvalMustBindDigest": true,
+    "rawModelTranscriptsIncluded": false,
+    "auditLinksIncluded": true,
+    "artifactDiffBaseline": "latest_approved_revision_else_predecessor_else_empty",
+    "sections": [
+      "policy_versions",
+      "requirement_and_plan_refs",
+      "repository_and_evidence_snapshot",
+      "impact_profile_and_required_artifact_set",
+      "selected_artifacts_and_diffs",
+      "decisions",
+      "finding_threads_and_dispositions",
+      "critic_coverage_and_verification",
+      "provenance_and_trace_coverage",
+      "consistency_report",
+      "task_and_attempt_summary",
+      "readiness_check_results"
+    ],
+    "anyGovernedInputChangeInvalidatesPacket": true,
+    "humanForceReadyAllowed": false
+  }
+}

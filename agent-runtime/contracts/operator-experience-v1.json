@@ -1,0 +1,212 @@
+{
+  "schemaVersion": "operator-experience/v1",
+  "prototype": {
+    "path": "../prototypes/operator-experience/index.html",
+    "run": "python3 -m http.server 4178 --directory .wayfinder/2026-08-auto-orchestration/prototypes/operator-experience",
+    "selectedVariant": "B",
+    "selectedUrl": "http://localhost:4178/?variant=B&scenario=running&panel=summary"
+  },
+  "informationArchitecture": {
+    "defaultView": "guided_summary",
+    "guidedSummary": {
+      "routeState": "panel=summary",
+      "contents": [
+        "workflow state hero",
+        "single primary action",
+        "five-step progress story",
+        "artifact/pending/audit summaries"
+      ]
+    },
+    "workflowDetails": {
+      "routeState": "panel=workflow",
+      "placement": "expand_in_same_requirement_page",
+      "contents": [
+        "stable task order",
+        "current Run and Attempt",
+        "artifact revisions",
+        "Decision/Finding/Evidence facts",
+        "advanced takeover"
+      ]
+    },
+    "approvalReview": {
+      "routeState": "panel=approval",
+      "placement": "focused_mode_in_same_requirement_page"
+    },
+    "auditView": {
+      "placement": "separate_audit_view",
+      "prototypeVariant": "C",
+      "contents": [
+        "Workflow events",
+        "Run events",
+        "command receipts",
+        "incidents and recovery",
+        "exact versions and digests"
+      ]
+    }
+  },
+  "statePrimaryActions": {
+    "pending": {
+      "label": "开始自动设计",
+      "command": "start"
+    },
+    "running": {
+      "label": "查看后台进度",
+      "command": null,
+      "navigation": "panel=workflow"
+    },
+    "waiting_for_human": {
+      "label": "处理当前门禁",
+      "command": null,
+      "navigation": "gate_queue"
+    },
+    "paused": {
+      "label": "继续自动执行",
+      "command": "resume",
+      "staleVariantLabel": "检查变化并恢复"
+    },
+    "failed": {
+      "label": "查看故障并恢复",
+      "command": null,
+      "navigation": "recovery_choices"
+    },
+    "ready_to_archive": {
+      "label": "审阅并批准设计包",
+      "command": null,
+      "navigation": "panel=approval"
+    },
+    "archived": {
+      "label": "查看已归档设计包",
+      "command": null,
+      "navigation": "design_package"
+    },
+    "taskProjection_reworking": {
+      "label": "查看 Finding Thread",
+      "command": null,
+      "navigation": "finding_thread"
+    }
+  },
+  "commandDisclosure": {
+    "rule": "one_primary_action_per_state",
+    "summary": [
+      "state primary action only"
+    ],
+    "workflowDetails": [
+      "pause",
+      "cancel-run for current Run"
+    ],
+    "advancedTakeover": [
+      "steer",
+      "replace-plan",
+      "diagnostic-run"
+    ],
+    "neverExpose": [
+      "role selector in normal flow",
+      "free-form Run prompt",
+      "Reviewer Agent",
+      "force-skip",
+      "force-ready",
+      "governance force-role"
+    ]
+  },
+  "gateQueue": {
+    "presentation": "one_exact_subject_at_a_time",
+    "showPosition": true,
+    "allowViewingAll": true,
+    "priority": [
+      "critical Decision",
+      "required Human Input",
+      "major Finding risk disposition",
+      "artifact rejection or command conflict recovery"
+    ],
+    "tieBreak": "openedEventSeq ascending",
+    "submission": "one commandId and receipt per subject",
+    "forbidBatchDisposition": true
+  },
+  "liveUpdates": {
+    "projectionSource": "GET current Workflow projection",
+    "streams": [
+      "Workflow SSE afterSeq",
+      "Run SSE afterSeq"
+    ],
+    "disconnect": {
+      "disableGovernanceCommands": true,
+      "showReconnecting": true,
+      "recovery": "replay both streams then refetch projection"
+    },
+    "openFormConflict": {
+      "pinSubjectVersionAndDigest": true,
+      "freezeSubmissionWhenStale": true,
+      "preserveUnsubmittedInput": true,
+      "showDifferenceBeforeReload": true,
+      "neverAutoRebase": true
+    }
+  },
+  "commandFeedback": {
+    "optimisticStateMutation": false,
+    "commandIdCreatedWhenActionOpens": true,
+    "duplicateSubmitReusesCommandIdAndRequestDigest": true,
+    "networkUncertain": "query or resend the same command resource",
+    "acceptedReceiptMeaning": "command transaction persisted",
+    "actualStateAuthority": "SSE and current projection",
+    "rejectedOrConflict": "show expected/actual version in the original action context",
+    "auditFields": [
+      "commandId",
+      "requestDigest",
+      "receipt outcome",
+      "workflowVersion",
+      "eventSeq",
+      "incidentId"
+    ]
+  },
+  "approvalReview": {
+    "subject": "current ApprovalPacket id/version/digest",
+    "sections": [
+      "required artifact revisions",
+      "Decision dispositions",
+      "Finding dispositions and risk acceptance",
+      "Critic coverage",
+      "Consistency warning/info",
+      "Readiness checks",
+      "Policy and Schema versions",
+      "provenance and transcript links"
+    ],
+    "approve": {
+      "label": "批准并归档",
+      "placement": "sticky footer",
+      "requiresRedundantCheckboxes": false
+    },
+    "reject": {
+      "placement": "secondary action",
+      "requiresStructuredTarget": true,
+      "requiresReason": true
+    },
+    "onPacketStale": {
+      "lockPage": true,
+      "disableApproval": true,
+      "offerDiffAndReload": true
+    }
+  },
+  "recoveryPresentation": {
+    "executionFailure": [
+      "retry-task when allowed",
+      "replace-plan",
+      "diagnostic-run"
+    ],
+    "planningFailure": [
+      "retry-planning",
+      "replace-plan",
+      "diagnostic-run"
+    ],
+    "engineOrOutboxIncident": [
+      "retry-recovery",
+      "diagnostic-run"
+    ],
+    "forbidShowingInvalidRecoveryForIncidentClass": true
+  },
+  "authentication": {
+    "bootstrap": "Bearer token exchanged once",
+    "browserSession": "HttpOnly SameSite=Strict operator cookie",
+    "eventSourceUsesCookie": true,
+    "actorAndCapabilitiesAreServerDerived": true
+  }
+}

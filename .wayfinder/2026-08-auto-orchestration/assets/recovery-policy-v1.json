@@ -1,0 +1,136 @@
+{
+  "schemaVersion": "recovery-policy/v1",
+  "startupGate": {
+    "serveBusinessHttpBeforeRecovery": false,
+    "steps": [
+      "open SQLite and apply required pragmas",
+      "validate schema migration checksums and execute pending forward migrations",
+      "run quick_check and foreign_key_check",
+      "reset interrupted outbox processing jobs to pending without adding a delivery failure",
+      "reconcile Runs, Attempts, claims, staged effects and Workflow projections",
+      "append recovery events and enqueue required idempotent outbox jobs",
+      "start HTTP listener",
+      "start outbox worker and scheduler"
+    ],
+    "databaseCorruption": "refuse-start",
+    "unknownSchema": "refuse-start",
+    "migrationFailure": "refuse-start",
+    "singleWorkflowInvariantFailure": "mark only that Workflow failed with a versioned incident and continue"
+  },
+  "runRecovery": {
+    "queued": {
+      "precondition": "valid nonterminal Attempt, matching persistent claim and dispatch outbox exist; model has not started",
+      "action": "keep the same Run and requeue dispatch",
+      "newAttempt": false,
+      "consumesAttemptBudget": false
+    },
+    "running": {
+      "action": "Run and Attempt fail with process_lost, staged effects are discarded, claim is released, scheduler may create a new Attempt",
+      "newAttempt": "only when Workflow state and remaining Task budget allow",
+      "consumesAttemptBudget": true,
+      "resumePiSession": false
+    },
+    "completed_attempt_nonterminal": {
+      "precondition": "full immutable result snapshot exists and execution transcript is available",
+      "action": "requeue deterministic finalize_attempt for the same Attempt",
+      "newAttempt": false,
+      "consumesAttemptBudget": false
+    },
+    "terminal_attempt_nonterminal_task": {
+      "action": "reconcile Task projection from the terminal Attempt transaction evidence; invariant mismatch creates a Workflow incident"
+    },
+    "cancelled_or_superseded": {
+      "action": "preserve terminal state; discard staged effects; release matching claim; late results are audit-only"
+    },
+    "lateResult": {
+      "action": "terminal CAS fails; append Run and Workflow late-result audit events; never publish effects or revive state"
+    }
+  },
+  "claimRecovery": {
+    "validSingleActiveAttemptMissingClaim": "restore the exact WorkflowAttemptClaim and append workflow_attempt_claim_restored",
+    "claimReferencesTerminalAttempt": "release claim and append recovery_reconciled",
+    "multipleActiveAttempts": "fail Workflow with invariant_violation",
+    "claimOwnershipMismatch": "fail Workflow with invariant_violation",
+    "diagnosticFailureAffectsWorkflow": false,
+    "leaseOrTimeoutSteal": false
+  },
+  "stagedEffectRecovery": {
+    "attemptSucceeded": "all referenced effects must already be published in the same terminal transaction",
+    "attemptFailedCancelledOrSuperseded": "mark all remaining staged effects discarded",
+    "attemptRunningWithLostRun": "discard after Attempt is failed",
+    "publishedWithoutSucceededAttempt": "fail Workflow with invariant_violation",
+    "partialPublication": "fail Workflow with invariant_violation; never publish the remainder outside a repaired transaction"
+  },
+  "sessionRecovery": {
+    "missingBeforePublication": {
+      "failureCode": "session_missing",
+      "action": "fail Attempt, discard effects and consume Attempt budget"
+    },
+    "missingAfterPublication": {
+      "action": "keep immutable published facts; emit execution_transcript_missing",
+      "readiness": "Consistency error while current Required Artifact provenance depends on the missing transcript",
+      "repair": ["restore transcript", "execute a new Task that produces successor revisions with complete provenance"]
+    },
+    "resultSnapshotAloneCanPublish": false
+  },
+  "executionFailures": {
+    "modelTimeout": {"run": "failed", "attempt": "failed", "code": "model_timeout", "discardEffects": true, "consumesAttemptBudget": true},
+    "transportFailure": {"run": "failed", "attempt": "failed", "code": "transport_failed", "discardEffects": true, "consumesAttemptBudget": true},
+    "toolInterrupted": {"run": "failed", "attempt": "failed", "code": "tool_interrupted", "discardEffects": true, "consumesAttemptBudget": true},
+    "toolPolicyViolation": {"run": "failed", "attempt": "failed", "code": "tool_policy_violation", "discardEffects": true, "consumesAttemptBudget": true},
+    "outputSchemaInvalid": {"run": "completed", "attempt": "failed", "code": "output_schema_invalid", "discardEffects": true, "consumesAttemptBudget": true},
+    "completionPredicateFailed": {"run": "completed", "attempt": "failed", "code": "completion_predicate_failed", "discardEffects": true, "consumesAttemptBudget": true},
+    "stalePublicationToken": {"run": "completed", "attempt": "superseded", "code": "stale_publication_token", "discardEffects": true, "consumesAttemptBudget": false}
+  },
+  "databaseFailures": {
+    "busyTimeoutMs": 5000,
+    "transactionError": "rollback leaves no partial state/event/receipt/outbox; return 500 and allow the same commandId or dedupe key to retry",
+    "commitOutcomeUnknown": "read command receipt or target CAS state before retrying",
+    "foreignKeyOrCheckViolation": "rollback and create a technical incident only when the originating durable operation can be identified",
+    "noExternalEffectBeforeCommit": true
+  },
+  "outbox": {
+    "kinds": {
+      "dispatch_run": {"maxDeliveryFailures": 5, "backoffSeconds": [1, 2, 5, 15, 30], "onExhausted": "Run and Attempt fail with dispatch_failed; consume one Attempt budget total"},
+      "finalize_attempt": {"maxDeliveryFailures": 5, "backoffSeconds": [1, 2, 5, 15, 30], "onExhausted": "Workflow fails with outbox_exhausted incident; preserve completed Run/result for retry-recovery"},
+      "schedule_workflow": {"maxDeliveryFailures": 5, "backoffSeconds": [1, 2, 5, 15, 30], "onExhausted": "Workflow fails with outbox_exhausted incident"},
+      "abort_run": {"maxDeliveryFailures": 3, "backoffSeconds": [1, 2, 5], "onExhausted": "append abort_delivery_failed warning; governed target remains terminal and late result is discarded"}
+    },
+    "processingOnRestart": "reset to pending without incrementing delivery_failures",
+    "handlers": "idempotent by dedupe key and current target state",
+    "sseUsesOutbox": false
+  },
+  "retryRecoveryCommand": {
+    "type": "retry-recovery",
+    "capability": "workflow:operate",
+    "allowedWorkflowState": "failed",
+    "expectedSubject": "exact workflow_incident id/version",
+    "allowedIncidentTypes": ["outbox_exhausted", "recoverable_reconciliation_failure"],
+    "action": "requeue the exact deterministic job or reconciliation operation",
+    "createsTaskAttemptOrRun": false,
+    "resetsModelBudget": false,
+    "postSuccessState": "recompute waiting_for_human, ready_to_archive or running from current facts",
+    "nonRecoverableInvariant": "reject until an external repair changes the incident subject"
+  },
+  "reconciliationInvariants": [
+    "at most one nonterminal governance Attempt per Workflow",
+    "a nonterminal governance Attempt has exactly one matching Run and WorkflowAttemptClaim",
+    "a queued Run has a dispatch outbox and has never started",
+    "a completed Run has a full result snapshot before Attempt finalization",
+    "a succeeded Attempt has no staged effects and all declared effects are published",
+    "a failed/cancelled/superseded Attempt has no effective staged effects",
+    "a terminal Attempt owns no WorkflowAttemptClaim",
+    "at most one nonterminal Diagnostic Run and matching claim per Requirement",
+    "Workflow archived has no active claim, nonterminal Task/Attempt/Run, open gate or pending outbox",
+    "Readiness is evaluated only with no active governance claim and no staged effect"
+  ],
+  "recoveryEventTypes": [
+    "recovery_reconciled",
+    "recovery_failed",
+    "recovery_retried",
+    "workflow_attempt_claim_restored",
+    "outbox_delivery_exhausted",
+    "execution_transcript_missing",
+    "late_run_result_discarded"
+  ]
+}

@@ -1,0 +1,616 @@
+{
+  "schemaVersion": "implementation-plan/v1",
+  "destination": "Deliver an implementation-ready specification for BaiZe automatic requirement-design orchestration without changing business code in the Wayfinder effort.",
+  "integrationStrategy": {
+    "mode": "dependent_implementation_stack_atomic_deployable_cutover",
+    "deployableVersions": [
+      "legacy_runtime_before_cutover",
+      "complete_automatic_workflow_runtime_after_cutover"
+    ],
+    "preCutoverSlicesRoutable": false,
+    "runtimeFeatureFlag": false,
+    "dualWrite": false,
+    "compatibilityAdapter": false,
+    "oldProductionPathsRemovedInSlice": "S7",
+    "rule": "Slices S1-S6 may be committed and reviewed but are only assembled through test entrypoints. S7 is the first and only deployable version of the new runtime."
+  },
+  "nonNegotiableContracts": [
+    "workflow-state-contract/v1",
+    "role-contract/v1",
+    "plan-proposal/v1",
+    "artifact-policy/v1",
+    "readiness-policy/v1",
+    "concurrency-policy/v1",
+    "persistence-model/v1",
+    "workflow-api/v1",
+    "workflow-event-catalog/v1",
+    "recovery-policy/v1",
+    "operator-experience/v1",
+    "cutover-policy/v1"
+  ],
+  "slices": [
+    {
+      "id": "S1",
+      "name": "Deterministic contract harness",
+      "dependsOn": [],
+      "deployable": false,
+      "goal": "Create one executable contract and deterministic test seam before implementing workflow behavior.",
+      "implementationSurfaces": [
+        "agent-runtime/workflow/contracts/",
+        "agent-runtime/testing/scripted-model-driver.ts",
+        "agent-runtime/testing/fixture-clock.ts",
+        "agent-runtime/testing/fixture-ids.ts",
+        "agent-runtime/testing/crash-injector.ts",
+        "agent-runtime/testing/repository-snapshot-fixtures.ts"
+      ],
+      "requiredBehavior": [
+        "Compile and validate every Wayfinder JSON asset used at runtime.",
+        "Define ModelDriver and production PiModelDriver boundaries.",
+        "Provide ScriptedModelDriver only through test entrypoints; production main cannot select it through environment or HTTP.",
+        "Script fixtures declare expected role, context digest, ordered tool calls, structured result, and optional crash point.",
+        "Provide deterministic clock, IDs, digests, repository snapshots, operator identity, and model usage records."
+      ],
+      "mandatoryTests": [
+        "Every contract asset has a valid schemaVersion and cross-reference.",
+        "ScriptedModelDriver fails on unexpected role, order, tool name, argument, digest, or extra call.",
+        "The production entrypoint cannot construct ScriptedModelDriver.",
+        "Fixture output is byte-stable for the same seed and inputs."
+      ],
+      "completionGate": "Contract validation and deterministic harness tests pass without API keys or network.",
+      "revert": "Revert S1 and all dependent slices before S7; no production data exists."
+    },
+    {
+      "id": "S2",
+      "name": "Workflow governance kernel",
+      "dependsOn": ["S1"],
+      "deployable": false,
+      "goal": "Persist and recover Requirement-level workflow governance through the command/event transaction boundary.",
+      "implementationSurfaces": [
+        "agent-runtime/persistence/migrations/",
+        "agent-runtime/persistence/workflow-store.ts",
+        "agent-runtime/workflow/state-machine.ts",
+        "agent-runtime/workflow/commands.ts",
+        "agent-runtime/workflow/events.ts",
+        "agent-runtime/workflow/outbox.ts",
+        "agent-runtime/workflow/recovery.ts"
+      ],
+      "requiredBehavior": [
+        "Create Requirement and pending Workflow with fixed PolicyBundle in one transaction.",
+        "Implement numbered forward-only target-schema migrations without deleting legacy tables.",
+        "Implement state row plus contiguous Workflow event sequence.",
+        "Persist success, rejection, conflict, and commandId reuse receipts.",
+        "Commit command receipt, state, events, incidents, and outbox jobs atomically.",
+        "Complete startup reconciliation before any HTTP listener can accept traffic."
+      ],
+      "mandatoryTests": [
+        "Every allowed and forbidden state transition from the state contract.",
+        "Command idempotency for same and different payload digests.",
+        "Workflow version and event sequence advance independently and correctly.",
+        "Transaction rollback leaves no partial receipt, state, event, or outbox row.",
+        "Startup recovery is idempotent across repeated restarts."
+      ],
+      "completionGate": "A headless test can create, start, pause, resume, fail, and recover a Workflow with exact receipts and event history.",
+      "revert": "Revert S2-S6 together before S7; reset only disposable test databases."
+    },
+    {
+      "id": "S3",
+      "name": "Planning and task execution",
+      "dependsOn": ["S2"],
+      "deployable": false,
+      "goal": "Execute Planning and role Tasks through isolated Attempts, Runs, claims, and staged effects.",
+      "implementationSurfaces": [
+        "agent-runtime/workflow/planner.ts",
+        "agent-runtime/workflow/plan-validator.ts",
+        "agent-runtime/workflow/scheduler.ts",
+        "agent-runtime/workflow/attempt-runner.ts",
+        "agent-runtime/workflow/context-manifest.ts",
+        "agent-runtime/workflow/effect-ledger.ts",
+        "agent-runtime/model/pi-model-driver.ts"
+      ],
+      "requiredBehavior": [
+        "Create Planning Task to obtain a complete finite PlanProposal DAG.",
+        "Apply all static plan validators including task limits, DAG depth, role/kind mapping, symbolic input binding, and plan write-set conflicts.",
+        "Pin RoleContract, Skill, ContextManifest, RepositorySnapshot, and input version vector per Attempt.",
+        "Allow exactly one active governance Attempt claim per Workflow.",
+        "Give every Attempt an isolated Run session and preserve one Attempt to one governance Run.",
+        "Stage all mutating tool effects and publish them only after output, policy, CAS, and EffectPublicationToken checks.",
+        "Discard or audit late results without publishing or consuming failure budget when superseded."
+      ],
+      "mandatoryTests": [
+        "Positive and one-negative-case-per-rule PlanProposal validation.",
+        "Stable topological scheduling and current-Task retry priority.",
+        "Claim acquisition, release, restore, and competing terminal CAS.",
+        "Output schema, tool policy, completion predicate, and staged-effect rollback failures.",
+        "pause, steer, cancel-run, replace-plan, and input mutation races.",
+        "Process loss and transcript loss recovery consume the correct budget."
+      ],
+      "completionGate": "ScriptedModelDriver can plan and complete ordered Tasks with auditable isolated Runs and no published partial effect.",
+      "revert": "Revert S3-S6 together before S7; no production route references these modules."
+    },
+    {
+      "id": "S4",
+      "name": "Artifact quality and review loop",
+      "dependsOn": ["S3"],
+      "deployable": false,
+      "goal": "Reach a deterministic ApprovalPacket through governed artifacts, evidence, decisions, findings, Critic review, and bounded rework.",
+      "implementationSurfaces": [
+        "agent-runtime/workflow/artifact-policy.ts",
+        "agent-runtime/workflow/completion-policies.ts",
+        "agent-runtime/workflow/readiness.ts",
+        "agent-runtime/workflow/evidence-policy.ts",
+        "agent-runtime/workflow/finding-threads.ts",
+        "agent-runtime/workflow/approval-packet.ts",
+        "agent-runtime/domain-tools.ts"
+      ],
+      "requiredBehavior": [
+        "Derive Required Artifact Set from validated ImpactProfile.",
+        "Validate each Artifact kind with its versioned content schema and exact sourceRefs.",
+        "Require provenance and TraceLink evidence according to Artifact Policy.",
+        "Enforce Decision and Finding severity rules without force-ready or waivers.",
+        "Require initial blind Critic review and targeted verification after rework.",
+        "Limit each Finding Thread to two automatic rework/verify cycles.",
+        "Evaluate all eleven Readiness checks and generate content-addressed ApprovalPacket only when all pass."
+      ],
+      "mandatoryTests": [
+        "Each Artifact schema accepts a minimal valid fixture and rejects missing, extra, and mistyped fields.",
+        "Every ImpactProfile dimension toggles the exact Required Artifact kind; unknown blocks.",
+        "Each of eleven Readiness checks is independently forced false while the other ten pass.",
+        "Critical, major, minor, and info Finding paths including verification and risk acceptance.",
+        "Critic zero-Finding coverage and invalid/missing verification results.",
+        "Two-cycle rework limit, unchanged fingerprint, changed target revision, and stale risk Approval.",
+        "ApprovalPacket digest changes for every governed input change."
+      ],
+      "completionGate": "A deterministic headless workflow reaches ready_to_archive only after complete artifacts, evidence, Critic coverage, and resolved gates.",
+      "revert": "Revert S4-S6 together before S7; target tables remain test-only."
+    },
+    {
+      "id": "S5",
+      "name": "Human control and public API",
+      "dependsOn": ["S4"],
+      "deployable": false,
+      "goal": "Expose the complete automatic workflow through the unified command, projection, SSE, approval, and diagnostic contracts in a test-only server assembly.",
+      "implementationSurfaces": [
+        "agent-runtime/http/operator-session.ts",
+        "agent-runtime/http/workflow-commands.ts",
+        "agent-runtime/http/workflow-projection.ts",
+        "agent-runtime/http/workflow-events.ts",
+        "agent-runtime/http/run-events.ts",
+        "agent-runtime/workflow/human-control.ts",
+        "agent-runtime/workflow/approvals.ts",
+        "agent-runtime/workflow/diagnostic-run.ts"
+      ],
+      "requiredBehavior": [
+        "Bootstrap Bearer credential into HttpOnly SameSite=Strict Operator Session cookie.",
+        "Implement one PUT command resource for all workflow operations.",
+        "Derive ActorRef and capabilities only from the trusted server-side session.",
+        "Return persisted Command Receipt before projection convergence.",
+        "Expose current bounded Workflow projection plus paged history and separate Workflow/Run SSE streams.",
+        "Implement deterministic Gate Queue, stale-subject rejection, immutable DecisionDisposition and Approval records, and atomic packet approval/archive.",
+        "Allow one read-only Diagnostic Run without governance effects.",
+        "Keep all new routes unregistered from the production gateway main until S7."
+      ],
+      "mandatoryTests": [
+        "All command types crossed with allowed states, capabilities, expected versions, and stale subjects.",
+        "Same commandId replay, digest conflict, and concurrent command winner/loser behavior.",
+        "SSE Last-Event-ID replay, reconnect, workflow/run separation, and retention boundary.",
+        "Receipt accepted while projection remains old, followed by deterministic SSE convergence.",
+        "Approval/rejection/revocation subject digest and supersession behavior.",
+        "Diagnostic Run tool policy, one-per-Requirement claim, and governance isolation."
+      ],
+      "completionGate": "A test-only HTTP server completes create-to-archive and recovery flows entirely through workflow-api/v1.",
+      "revert": "Revert S5-S6 together before S7; production gateway registration is unchanged."
+    },
+    {
+      "id": "S6",
+      "name": "Web operator experience",
+      "dependsOn": ["S5"],
+      "deployable": false,
+      "goal": "Implement the accepted guided workflow UI against the new projection and command contracts without exposing it in the production shell.",
+      "implementationSurfaces": [
+        "web/src/baize-workflow-page.ts",
+        "web/src/baize-workflow-summary.ts",
+        "web/src/baize-workflow-detail.ts",
+        "web/src/baize-gate-queue.ts",
+        "web/src/baize-approval-packet.ts",
+        "web/src/baize-workflow-audit.ts",
+        "web/src/workflow-api-client.ts"
+      ],
+      "requiredBehavior": [
+        "Default to guided summary with exactly one primary action per Workflow state.",
+        "Expand workflow detail in the same page and open audit as a separate view.",
+        "Hide pause, cancel, steer, replace-plan, and diagnostic controls by risk level.",
+        "Process one deterministic Gate Queue item at a time.",
+        "Preserve draft and freeze submission when Workflow or subject becomes stale; never auto-rebase.",
+        "Show persisted receipt separately from eventual projection confirmation.",
+        "Use a focused same-page ApprovalPacket review mode."
+      ],
+      "mandatoryTests": [
+        "Vitest projection and command client tests for every state and primary action.",
+        "Playwright running, waiting, rework, failed, ready, and paused-stale scenarios.",
+        "Workflow details, gate receipt, approval, rejection, conflict, and SSE reconnect journeys.",
+        "Desktop, tablet, and mobile viewport coverage.",
+        "Keyboard navigation, focus restoration, dialog labeling, stale lock announcement, and disabled-action accessibility.",
+        "No reviewer role selector, manual Run prompt, direct archive action, or old endpoint call."
+      ],
+      "completionGate": "The accepted operator-experience/v1 journeys pass against the test-only S5 server at all configured viewports.",
+      "revert": "Revert S6 before S7; production shell still renders the legacy page."
+    },
+    {
+      "id": "S7",
+      "name": "Cutover and hard deletion",
+      "dependsOn": ["S1", "S2", "S3", "S4", "S5", "S6"],
+      "deployable": true,
+      "goal": "Produce the only deployable automatic workflow version by migrating history, switching entrypoints, deleting the legacy path, and passing release gates.",
+      "implementationSurfaces": [
+        "agent-runtime/cutover/fixture-builder.ts",
+        "agent-runtime/cutover/check.ts",
+        "agent-runtime/cutover/apply.ts",
+        "agent-runtime/workflow-doctor.ts",
+        "agent-runtime/gateway.ts",
+        "agent-runtime/store.ts",
+        "agent-runtime/agent.ts",
+        "web/src/baize-shell.ts",
+        "scripts/smoke-gateway.mjs",
+        ".github/workflows/runtime-ci.yml"
+      ],
+      "requiredBehavior": [
+        "Generate and verify CutoverReport against paired DB/Session fingerprints.",
+        "Apply the numbered migration exactly once and emit MigrationAttestation.",
+        "Classify legacy_archived, pending_reentry, and manual_asset_source records exactly as cutover-policy/v1 specifies.",
+        "Register the new API and Web entrypoints and remove all test-only assembly restrictions.",
+        "Delete legacy routes, generic Run UI, reviewer Skill/role, shared DesignSession execution, run_locks, compatibility helpers, and obsolete schema in the same version.",
+        "Replace the old network-none smoke with a complete scripted automatic Workflow smoke.",
+        "Provide workflow-doctor JSON output and enforce post-migration gates before first business write."
+      ],
+      "mandatoryTests": [
+        "All S1-S6 tests on the final production assembly.",
+        "All cutover fixtures, anomaly paths, rerun idempotency, and crash points.",
+        "Negative route, symbol, file, role, UI label, SQL table/column, and Skill scans for every removed surface.",
+        "Compose network-none create-to-archive smoke through the production entrypoint.",
+        "Migration rehearsal against a paired copy of real DB and Session data.",
+        "Eight golden Requirements run three times with real model credentials."
+      ],
+      "completionGate": "All PR and Release Candidate gates pass, CutoverReport and MigrationAttestation reconcile, workflow-doctor reports no zero-tolerance violation, and the old path is absent.",
+      "revert": "Before the first post-cutover business write, restore the paired backup and old binary. After that boundary, stop new writes and forward-fix only."
+    }
+  ],
+  "deterministicTestHarness": {
+    "model": {
+      "interface": "ModelDriver",
+      "production": "PiModelDriver",
+      "test": "ScriptedModelDriver",
+      "productionSelectableTestDriver": false,
+      "scriptFields": [
+        "role",
+        "contextDigest",
+        "orderedToolCalls",
+        "structuredResult",
+        "crashPoint"
+      ],
+      "mismatchOutcome": "test_failure"
+    },
+    "fixedDependencies": [
+      "clock",
+      "idGenerator",
+      "hashProvider",
+      "repositorySnapshot",
+      "operatorIdentity",
+      "modelUsage",
+      "outboxTransport",
+      "crashInjector"
+    ],
+    "networkRequired": false
+  },
+  "testMatrix": {
+    "contractAndSchema": [
+      "all machine assets parse and cross-reference",
+      "PlanProposal positive and one negative per static rule",
+      "all Artifact kinds positive plus missing/extra/type negative",
+      "Role input/output schema and version pinning",
+      "removed surface manifests match cutover and API contracts"
+    ],
+    "workflowStateAndCommands": [
+      "seven states crossed with every command",
+      "operate versus approve capability",
+      "expected workflow and subject version mismatch",
+      "same commandId same digest replay",
+      "same commandId different digest conflict",
+      "concurrent valid commands first durable commit wins"
+    ],
+    "rolesAndTools": [
+      "four roles crossed with every domain tool",
+      "Artifact read manifest scope",
+      "Analyst and Architect write ownership",
+      "Critic initial blind and verification contexts",
+      "Diagnostic Run read-only isolation"
+    ],
+    "quality": [
+      "ImpactProfile required-set derivation",
+      "eleven Readiness checks one-at-a-time false",
+      "evidence and provenance completeness",
+      "Decision dispositions and Approval invalidation",
+      "Finding severity, rework, verification, and risk acceptance",
+      "ApprovalPacket digest and atomic archive"
+    ],
+    "concurrencyAndRecovery": [
+      "single governance claim",
+      "single diagnostic claim",
+      "EffectPublicationToken exact CAS",
+      "pause and steer preserve valid in-flight result",
+      "cancel, replace-plan, and input mutation supersede",
+      "late result discard",
+      "queued redispatch, running process_lost, completed finalize",
+      "transcript loss before and after effect publication",
+      "outbox retry and exhausted incident",
+      "retry-recovery incident targeting"
+    ],
+    "httpAndSse": [
+      "operator bootstrap and cookie security",
+      "bounded projection and paged history",
+      "workflow and run stream ordering",
+      "Last-Event-ID replay and reconnect",
+      "receipt before projection convergence",
+      "retention boundary and reload behavior"
+    ],
+    "web": [
+      "six Workflow scenarios",
+      "single primary action",
+      "same-page details",
+      "deterministic Gate Queue",
+      "focused packet approval",
+      "stale draft preservation",
+      "receipt versus projection status",
+      "audit view",
+      "three viewports and accessibility"
+    ],
+    "cutover": [
+      "all legacy classifications",
+      "anomaly abort paths",
+      "fingerprint mismatch",
+      "active legacy Run block",
+      "repeat check and apply",
+      "paired backup restore before first write",
+      "post-migration invariants",
+      "all obsolete surfaces absent"
+    ]
+  },
+  "runtimeCrashPoints": [
+    "after_command_commit_before_outbox_delivery",
+    "after_attempt_run_commit_before_dispatch",
+    "after_model_dispatch_before_running_ack",
+    "after_result_snapshot_before_attempt_finalize",
+    "after_effects_staged_before_publication",
+    "after_effect_publication_commit_before_outbox_delivery",
+    "after_outbox_side_effect_before_delivery_mark",
+    "after_claim_restore_before_redispatch"
+  ],
+  "cutoverFixtures": [
+    "empty",
+    "legacy_archived_complete",
+    "legacy_archived_missing_attachment",
+    "pending_reentry",
+    "manual_asset_source",
+    "mixed_all_classes",
+    "active_legacy_run_blocks",
+    "db_session_fingerprint_mismatch",
+    "invalid_legacy_json",
+    "rerun_already_applied"
+  ],
+  "cutoverCrashPoints": [
+    "after_paired_backup",
+    "after_cutover_report",
+    "inside_migration_before_commit",
+    "after_migration_commit_before_server_start",
+    "after_server_start_before_first_business_write"
+  ],
+  "cutoverFixtureStrategy": {
+    "source": "declarative_manifest",
+    "generates": [
+      "real_legacy_sqlite_database",
+      "real_session_directory_tree"
+    ],
+    "binaryFixturesCommitted": false,
+    "mockStore": false,
+    "crashExecution": "real_child_process_termination",
+    "requiredRecoveryOutcomes": [
+      "complete_legacy_state",
+      "complete_target_state"
+    ],
+    "forbiddenOutcome": "mixed_state"
+  },
+  "goldenRequirements": {
+    "runner": "real PiModelDriver with frozen repository snapshots",
+    "cases": [
+      {
+        "id": "G1",
+        "name": "minimal_design_loop",
+        "expected": "ready_to_archive with minimum required artifacts and Critic coverage"
+      },
+      {
+        "id": "G2",
+        "name": "full_architecture_data_api_impact",
+        "expected": "all conditionally required artifacts with evidence coverage"
+      },
+      {
+        "id": "G3",
+        "name": "required_human_input",
+        "expected": "waiting_for_human at exact Human Input gate then automatic resume"
+      },
+      {
+        "id": "G4",
+        "name": "critical_decision",
+        "expected": "critical Decision requires approved immutable disposition"
+      },
+      {
+        "id": "G5",
+        "name": "critic_rework_resolved",
+        "expected": "Finding Thread closes through rework and targeted verification"
+      },
+      {
+        "id": "G6",
+        "name": "major_finding_risk_acceptance",
+        "expected": "major Finding reaches exact risk Approval gate and resumes"
+      },
+      {
+        "id": "G7",
+        "name": "steer_safe_replan",
+        "expected": "active Attempt settles safely and a new PlanRevision adopts HumanDirective"
+      },
+      {
+        "id": "G8",
+        "name": "invalid_first_output_recovers",
+        "expected": "invalid initial plan or role result recovers within Attempt budgets"
+      }
+    ],
+    "runsPerCase": 3,
+    "releaseCriteria": {
+      "safetyInvariantPassRate": 1.0,
+      "minimumSuccessfulRunsPerCase": 2,
+      "minimumAggregateExpectedOutcomeRate": 0.9,
+      "exactNaturalLanguageComparison": false,
+      "mustRemainWithinPlanAttemptAndReworkBudgets": true
+    },
+    "ordinaryPrCi": false,
+    "releaseCandidateRequired": true
+  },
+  "ci": {
+    "pullRequest": {
+      "apiKeysRequired": false,
+      "requiredJobs": [
+        "contracts-and-static-negative-scans",
+        "agent-runtime-typecheck-and-unit",
+        "workflow-sqlite-integration",
+        "workflow-recovery-and-crash-points",
+        "cutover-fixtures-and-crash-points",
+        "web-typecheck-unit-build",
+        "web-playwright-three-viewports",
+        "compose-network-none-automatic-workflow-smoke"
+      ],
+      "nightlyOnly": false
+    },
+    "releaseCandidate": {
+      "requiredJobs": [
+        "all-pull-request-jobs-on-production-assembly",
+        "golden-requirements-8-by-3",
+        "real-db-session-copy-cutover-rehearsal",
+        "cutover-report-and-migration-attestation-review",
+        "workflow-doctor-zero-tolerance-check"
+      ]
+    },
+    "nightly": {
+      "purpose": "Additional seeds, models, long soak, and non-blocking product metric trends only."
+    }
+  },
+  "requiredPackageScripts": {
+    "agent-runtime": [
+      "typecheck",
+      "test",
+      "test:contracts",
+      "test:integration",
+      "test:recovery",
+      "test:cutover",
+      "test:workflow-smoke",
+      "test:golden",
+      "workflow:doctor",
+      "cutover:check",
+      "cutover:apply"
+    ],
+    "web": [
+      "typecheck",
+      "test",
+      "build",
+      "test:e2e"
+    ]
+  },
+  "release": {
+    "mode": "maintenance_window_full_cutover",
+    "guardPeriodHours": 24,
+    "preflight": [
+      "All pull request and release candidate jobs pass.",
+      "No active legacy queued or running Run exists.",
+      "Paired DB and Session backup is complete and restorable.",
+      "cutover check report digest matches the exact apply inputs.",
+      "Old binary and restore command are available before the first business write."
+    ],
+    "cutover": [
+      "Stop business writes.",
+      "Run cutover check.",
+      "Run cutover apply with exact report digest.",
+      "Start the new production assembly.",
+      "Run workflow-doctor and post-migration gates.",
+      "Run network-none deterministic smoke.",
+      "Run or verify the release candidate golden and rehearsal evidence.",
+      "Open business writes only after every gate passes."
+    ],
+    "rollbackBoundary": {
+      "beforeFirstBusinessWrite": "restore paired backup and old binary",
+      "afterFirstBusinessWrite": "stop new writes and forward-fix only"
+    },
+    "guardPeriod": {
+      "trafficShaping": false,
+      "workspaceAllowlist": false,
+      "shadowWrite": false,
+      "oldPathFallback": false,
+      "actionOnZeroToleranceViolation": "stop_new_writes"
+    }
+  },
+  "observability": {
+    "surface": [
+      "workflow_events",
+      "workflow_incidents",
+      "workflow_commands",
+      "structured_logs",
+      "workflow-doctor JSON report"
+    ],
+    "newMetricsService": false,
+    "workflowDoctorChecks": [
+      "paired DB and Session fingerprint",
+      "claim ownership and orphan claims",
+      "Workflow and Run event sequences",
+      "outbox queue age, retries, and exhaustion",
+      "Attempt terminal state versus published effects",
+      "Approval and ApprovalPacket subject digests",
+      "Consistency and transcript provenance",
+      "removed route, symbol, role, Skill, and schema surface"
+    ],
+    "zeroTolerance": [
+      "archive_without_active_exact_packet_approval",
+      "governed_subject_digest_mismatch",
+      "workflow_event_sequence_gap",
+      "command_receipt_replay_mismatch",
+      "orphan_governance_claim",
+      "failed_cancelled_or_superseded_attempt_published_effect",
+      "consistency_error",
+      "missing_current_provenance_transcript",
+      "outbox_delivery_exhausted",
+      "cutover_reconciliation_difference",
+      "legacy_write_path_reachable"
+    ],
+    "productMetrics": [
+      "plan_first_validation_pass_rate",
+      "plan_revisions_per_workflow",
+      "task_attempt_retry_rate",
+      "finding_rework_rounds",
+      "human_gate_count_by_reason",
+      "human_takeover_command_rate",
+      "time_to_ready_to_archive",
+      "model_calls_tokens_and_latency",
+      "finding_severity_and_closure_rate"
+    ],
+    "initialProductMetricThresholds": null,
+    "thresholdDecisionAfterCompletedWorkflows": 20,
+    "automaticSkillOrGeneLearning": false
+  },
+  "definitionOfDone": [
+    "All seven slices satisfy their completion gates.",
+    "All pull request and release candidate gates pass.",
+    "The production main has exactly one automatic workflow path.",
+    "All cutover-policy removed surfaces are absent by negative scan.",
+    "The target database has no obsolete legacy workflow tables or columns.",
+    "The network-none compose smoke reaches archived through a real human-command simulation and ScriptedModelDriver.",
+    "The real-model golden set meets its release criteria.",
+    "CutoverReport, MigrationAttestation, paired backup evidence, and workflow-doctor report are retained.",
+    "No zero-tolerance observability violation exists at release.",
+    "Business documentation describes only the new path."
+  ]
+}

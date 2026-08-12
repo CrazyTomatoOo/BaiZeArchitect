@@ -1,0 +1,352 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "baize://schemas/plan-proposal/v1",
+  "title": "BaiZe PlanProposal v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "base", "objective", "tasks", "rationale"],
+  "properties": {
+    "schemaVersion": {
+      "const": "plan-proposal/v1"
+    },
+    "base": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "workflowId",
+        "workflowVersion",
+        "basePlanRevisionId",
+        "planningContextDigest"
+      ],
+      "properties": {
+        "workflowId": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "workflowVersion": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "basePlanRevisionId": {
+          "type": ["integer", "null"],
+          "minimum": 1
+        },
+        "planningContextDigest": {
+          "type": "string",
+          "pattern": "^sha256:[a-f0-9]{64}$"
+        }
+      }
+    },
+    "objective": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 4000
+    },
+    "tasks": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 12,
+      "items": {
+        "$ref": "#/$defs/taskProposal"
+      }
+    },
+    "rationale": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 4000
+    }
+  },
+  "$defs": {
+    "taskKey": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9-]{0,63}$"
+    },
+    "artifactKind": {
+      "enum": [
+        "requirement",
+        "analysis",
+        "scenario",
+        "usecase",
+        "function",
+        "design",
+        "architecture",
+        "data",
+        "api"
+      ]
+    },
+    "writableArtifactKind": {
+      "enum": [
+        "analysis",
+        "scenario",
+        "usecase",
+        "function",
+        "design",
+        "architecture",
+        "data",
+        "api"
+      ]
+    },
+    "inputBinding": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["type", "artifactId", "revisionId", "artifactKind", "purpose"],
+          "properties": {
+            "type": {
+              "const": "artifact_revision"
+            },
+            "artifactId": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "revisionId": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "artifactKind": {
+              "$ref": "#/$defs/artifactKind"
+            },
+            "purpose": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 500
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["type", "taskKey", "artifactKind", "purpose"],
+          "properties": {
+            "type": {
+              "const": "task_output"
+            },
+            "taskKey": {
+              "$ref": "#/$defs/taskKey"
+            },
+            "artifactKind": {
+              "$ref": "#/$defs/writableArtifactKind"
+            },
+            "purpose": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 500
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["type", "decisionId", "version", "purpose"],
+          "properties": {
+            "type": {
+              "const": "decision"
+            },
+            "decisionId": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "version": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "purpose": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 500
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["type", "findingId", "targetRevisionId", "purpose"],
+          "properties": {
+            "type": {
+              "const": "finding"
+            },
+            "findingId": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "targetRevisionId": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "purpose": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 500
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["type", "directiveId", "purpose"],
+          "properties": {
+            "type": {
+              "const": "human_directive"
+            },
+            "directiveId": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "purpose": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 500
+            }
+          }
+        }
+      ]
+    },
+    "artifactEffectExpectation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "operation"],
+      "properties": {
+        "kind": {
+          "$ref": "#/$defs/writableArtifactKind"
+        },
+        "operation": {
+          "const": "create_or_revise"
+        }
+      }
+    },
+    "taskProposal": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "key",
+        "kind",
+        "role",
+        "objective",
+        "dependsOn",
+        "inputs",
+        "expectedArtifactEffects",
+        "completionPolicyRef",
+        "maxAttempts"
+      ],
+      "properties": {
+        "key": {
+          "$ref": "#/$defs/taskKey"
+        },
+        "kind": {
+          "enum": ["analyze", "design", "review", "rework", "verify"]
+        },
+        "role": {
+          "enum": ["analyst", "architect", "critic"]
+        },
+        "objective": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 4000
+        },
+        "dependsOn": {
+          "type": "array",
+          "maxItems": 11,
+          "uniqueItems": true,
+          "items": {
+            "$ref": "#/$defs/taskKey"
+          }
+        },
+        "inputs": {
+          "type": "array",
+          "maxItems": 32,
+          "items": {
+            "$ref": "#/$defs/inputBinding"
+          }
+        },
+        "expectedArtifactEffects": {
+          "type": "array",
+          "maxItems": 8,
+          "uniqueItems": true,
+          "items": {
+            "$ref": "#/$defs/artifactEffectExpectation"
+          }
+        },
+        "completionPolicyRef": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9-]*/v[1-9][0-9]*$"
+        },
+        "maxAttempts": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 3
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "kind": {
+                "const": "analyze"
+              }
+            },
+            "required": ["kind"]
+          },
+          "then": {
+            "properties": {
+              "role": {
+                "const": "analyst"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "kind": {
+                "const": "design"
+              }
+            },
+            "required": ["kind"]
+          },
+          "then": {
+            "properties": {
+              "role": {
+                "const": "architect"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "kind": {
+                "enum": ["review", "verify"]
+              }
+            },
+            "required": ["kind"]
+          },
+          "then": {
+            "properties": {
+              "role": {
+                "const": "critic"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "kind": {
+                "const": "rework"
+              }
+            },
+            "required": ["kind"]
+          },
+          "then": {
+            "properties": {
+              "role": {
+                "enum": ["analyst", "architect"]
+              }
+            }
+          }
+        }
+      ]
+    }
+  }
+}

@@ -1,0 +1,435 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://baize.local/schemas/artifact-content-v1.schema.json",
+  "title": "BaiZe Artifact Content v1",
+  "oneOf": [
+    { "$ref": "#/$defs/requirement" },
+    { "$ref": "#/$defs/analysis" },
+    { "$ref": "#/$defs/scenario" },
+    { "$ref": "#/$defs/usecase" },
+    { "$ref": "#/$defs/function" },
+    { "$ref": "#/$defs/design" },
+    { "$ref": "#/$defs/architecture" },
+    { "$ref": "#/$defs/data" },
+    { "$ref": "#/$defs/api" }
+  ],
+  "$defs": {
+    "sourceRef": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["type", "revisionId"],
+          "properties": {
+            "type": { "const": "requirement_revision" },
+            "revisionId": { "type": "integer", "minimum": 1 }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["type", "artifactKind", "revisionId"],
+          "properties": {
+            "type": { "const": "artifact_revision" },
+            "artifactKind": {
+              "enum": ["analysis", "scenario", "usecase", "function", "design", "architecture", "data", "api"]
+            },
+            "revisionId": { "type": "integer", "minimum": 1 }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["type", "decisionId"],
+          "properties": {
+            "type": { "const": "decision" },
+            "decisionId": { "type": "integer", "minimum": 1 }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["type", "findingId"],
+          "properties": {
+            "type": { "const": "finding" },
+            "findingId": { "type": "integer", "minimum": 1 }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["type", "directiveId"],
+          "properties": {
+            "type": { "const": "human_directive" },
+            "directiveId": { "type": "integer", "minimum": 1 }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["type", "traceLinkId"],
+          "properties": {
+            "type": { "const": "trace_link" },
+            "traceLinkId": { "type": "integer", "minimum": 1 }
+          }
+        }
+      ]
+    },
+    "stringList": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1 },
+      "uniqueItems": true
+    },
+    "common": {
+      "type": "object",
+      "required": ["schemaVersion", "artifactKind", "summary", "sourceRefs"],
+      "properties": {
+        "schemaVersion": { "type": "string", "minLength": 1 },
+        "artifactKind": {
+          "enum": ["requirement", "analysis", "scenario", "usecase", "function", "design", "architecture", "data", "api"]
+        },
+        "summary": { "type": "string", "minLength": 1 },
+        "sourceRefs": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/sourceRef" },
+          "uniqueItems": true
+        }
+      }
+    },
+    "impactDimension": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status", "rationale"],
+      "properties": {
+        "status": { "enum": ["yes", "no", "unknown"] },
+        "rationale": { "type": "string", "minLength": 1 },
+        "sourceRefs": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/sourceRef" },
+          "uniqueItems": true
+        }
+      }
+    },
+    "impactProfile": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["process", "actors", "behavior", "architecture", "data", "api"],
+      "properties": {
+        "process": { "$ref": "#/$defs/impactDimension" },
+        "actors": { "$ref": "#/$defs/impactDimension" },
+        "behavior": { "$ref": "#/$defs/impactDimension" },
+        "architecture": { "$ref": "#/$defs/impactDimension" },
+        "data": { "$ref": "#/$defs/impactDimension" },
+        "api": { "$ref": "#/$defs/impactDimension" }
+      }
+    },
+    "requirement": {
+      "allOf": [
+        { "$ref": "#/$defs/common" },
+        {
+          "type": "object",
+          "required": ["title", "description"],
+          "properties": {
+            "schemaVersion": { "const": "artifact/requirement/v1" },
+            "artifactKind": { "const": "requirement" },
+            "title": { "type": "string", "minLength": 1 },
+            "description": { "type": "string", "minLength": 1 },
+            "goals": { "$ref": "#/$defs/stringList" },
+            "nonGoals": { "$ref": "#/$defs/stringList" },
+            "constraints": { "$ref": "#/$defs/stringList" }
+          }
+        }
+      ],
+      "unevaluatedProperties": false
+    },
+    "analysis": {
+      "allOf": [
+        { "$ref": "#/$defs/common" },
+        {
+          "type": "object",
+          "required": ["goals", "nonGoals", "constraints", "acceptanceCriteria", "impactProfile", "openQuestions"],
+          "properties": {
+            "schemaVersion": { "const": "artifact/analysis/v1" },
+            "artifactKind": { "const": "analysis" },
+            "sourceRefs": { "minItems": 1 },
+            "goals": { "$ref": "#/$defs/stringList", "minItems": 1 },
+            "nonGoals": { "$ref": "#/$defs/stringList" },
+            "constraints": { "$ref": "#/$defs/stringList" },
+            "acceptanceCriteria": { "$ref": "#/$defs/stringList", "minItems": 1 },
+            "impactProfile": { "$ref": "#/$defs/impactProfile" },
+            "openQuestions": { "$ref": "#/$defs/stringList" }
+          }
+        }
+      ],
+      "unevaluatedProperties": false
+    },
+    "scenarioItem": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "title", "actors", "preconditions", "trigger", "mainFlow", "alternateFlows", "expectedOutcome"],
+      "properties": {
+        "id": { "type": "string", "minLength": 1 },
+        "title": { "type": "string", "minLength": 1 },
+        "actors": { "$ref": "#/$defs/stringList", "minItems": 1 },
+        "preconditions": { "$ref": "#/$defs/stringList" },
+        "trigger": { "type": "string", "minLength": 1 },
+        "mainFlow": { "$ref": "#/$defs/stringList", "minItems": 1 },
+        "alternateFlows": { "$ref": "#/$defs/stringList" },
+        "expectedOutcome": { "type": "string", "minLength": 1 }
+      }
+    },
+    "scenario": {
+      "allOf": [
+        { "$ref": "#/$defs/common" },
+        {
+          "type": "object",
+          "required": ["scenarios"],
+          "properties": {
+            "schemaVersion": { "const": "artifact/scenario/v1" },
+            "artifactKind": { "const": "scenario" },
+            "sourceRefs": { "minItems": 1 },
+            "scenarios": {
+              "type": "array",
+              "minItems": 1,
+              "items": { "$ref": "#/$defs/scenarioItem" }
+            }
+          }
+        }
+      ],
+      "unevaluatedProperties": false
+    },
+    "usecaseItem": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "actor", "goal", "preconditions", "mainFlow", "alternativeFlows", "postconditions"],
+      "properties": {
+        "id": { "type": "string", "minLength": 1 },
+        "actor": { "type": "string", "minLength": 1 },
+        "goal": { "type": "string", "minLength": 1 },
+        "preconditions": { "$ref": "#/$defs/stringList" },
+        "mainFlow": { "$ref": "#/$defs/stringList", "minItems": 1 },
+        "alternativeFlows": { "$ref": "#/$defs/stringList" },
+        "postconditions": { "$ref": "#/$defs/stringList", "minItems": 1 }
+      }
+    },
+    "usecase": {
+      "allOf": [
+        { "$ref": "#/$defs/common" },
+        {
+          "type": "object",
+          "required": ["useCases"],
+          "properties": {
+            "schemaVersion": { "const": "artifact/usecase/v1" },
+            "artifactKind": { "const": "usecase" },
+            "sourceRefs": { "minItems": 1 },
+            "useCases": {
+              "type": "array",
+              "minItems": 1,
+              "items": { "$ref": "#/$defs/usecaseItem" }
+            }
+          }
+        }
+      ],
+      "unevaluatedProperties": false
+    },
+    "functionItem": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "name", "responsibility", "inputs", "outputs", "businessRules", "acceptanceCriteria"],
+      "properties": {
+        "id": { "type": "string", "minLength": 1 },
+        "name": { "type": "string", "minLength": 1 },
+        "responsibility": { "type": "string", "minLength": 1 },
+        "inputs": { "$ref": "#/$defs/stringList" },
+        "outputs": { "$ref": "#/$defs/stringList" },
+        "businessRules": { "$ref": "#/$defs/stringList" },
+        "acceptanceCriteria": { "$ref": "#/$defs/stringList", "minItems": 1 }
+      }
+    },
+    "function": {
+      "allOf": [
+        { "$ref": "#/$defs/common" },
+        {
+          "type": "object",
+          "required": ["functions"],
+          "properties": {
+            "schemaVersion": { "const": "artifact/function/v1" },
+            "artifactKind": { "const": "function" },
+            "sourceRefs": { "minItems": 1 },
+            "functions": {
+              "type": "array",
+              "minItems": 1,
+              "items": { "$ref": "#/$defs/functionItem" }
+            }
+          }
+        }
+      ],
+      "unevaluatedProperties": false
+    },
+    "changeUnit": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "area", "change", "rationale", "sourceRefs"],
+      "properties": {
+        "id": { "type": "string", "minLength": 1 },
+        "area": { "type": "string", "minLength": 1 },
+        "change": { "type": "string", "minLength": 1 },
+        "rationale": { "type": "string", "minLength": 1 },
+        "sourceRefs": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "$ref": "#/$defs/sourceRef" },
+          "uniqueItems": true
+        }
+      }
+    },
+    "design": {
+      "allOf": [
+        { "$ref": "#/$defs/common" },
+        {
+          "type": "object",
+          "required": ["changeUnits", "alternatives", "failureHandling", "testStrategy", "implementationOrder", "rolloutStrategy", "rollbackStrategy"],
+          "properties": {
+            "schemaVersion": { "const": "artifact/design/v1" },
+            "artifactKind": { "const": "design" },
+            "sourceRefs": { "minItems": 1 },
+            "changeUnits": {
+              "type": "array",
+              "minItems": 1,
+              "items": { "$ref": "#/$defs/changeUnit" }
+            },
+            "alternatives": { "$ref": "#/$defs/stringList", "minItems": 1 },
+            "failureHandling": { "$ref": "#/$defs/stringList", "minItems": 1 },
+            "testStrategy": { "$ref": "#/$defs/stringList", "minItems": 1 },
+            "implementationOrder": { "$ref": "#/$defs/stringList", "minItems": 1 },
+            "rolloutStrategy": { "type": "string", "minLength": 1 },
+            "rollbackStrategy": { "type": "string", "minLength": 1 }
+          }
+        }
+      ],
+      "unevaluatedProperties": false
+    },
+    "component": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "name", "responsibility"],
+      "properties": {
+        "id": { "type": "string", "minLength": 1 },
+        "name": { "type": "string", "minLength": 1 },
+        "responsibility": { "type": "string", "minLength": 1 }
+      }
+    },
+    "relationship": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["from", "to", "interaction"],
+      "properties": {
+        "from": { "type": "string", "minLength": 1 },
+        "to": { "type": "string", "minLength": 1 },
+        "interaction": { "type": "string", "minLength": 1 }
+      }
+    },
+    "architecture": {
+      "allOf": [
+        { "$ref": "#/$defs/common" },
+        {
+          "type": "object",
+          "required": ["components", "relationships", "constraints", "nonFunctionalRequirements", "decisions"],
+          "properties": {
+            "schemaVersion": { "const": "artifact/architecture/v1" },
+            "artifactKind": { "const": "architecture" },
+            "sourceRefs": { "minItems": 1 },
+            "components": {
+              "type": "array",
+              "minItems": 1,
+              "items": { "$ref": "#/$defs/component" }
+            },
+            "relationships": {
+              "type": "array",
+              "items": { "$ref": "#/$defs/relationship" }
+            },
+            "constraints": { "$ref": "#/$defs/stringList" },
+            "nonFunctionalRequirements": { "$ref": "#/$defs/stringList", "minItems": 1 },
+            "decisions": {
+              "type": "array",
+              "items": { "type": "integer", "minimum": 1 },
+              "uniqueItems": true
+            }
+          }
+        }
+      ],
+      "unevaluatedProperties": false
+    },
+    "dataEntity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "purpose", "fields", "lifecycle"],
+      "properties": {
+        "name": { "type": "string", "minLength": 1 },
+        "purpose": { "type": "string", "minLength": 1 },
+        "fields": { "$ref": "#/$defs/stringList", "minItems": 1 },
+        "lifecycle": { "type": "string", "minLength": 1 }
+      }
+    },
+    "data": {
+      "allOf": [
+        { "$ref": "#/$defs/common" },
+        {
+          "type": "object",
+          "required": ["entities", "relationships", "migrationPlan", "rollbackPlan", "privacyAndRetention"],
+          "properties": {
+            "schemaVersion": { "const": "artifact/data/v1" },
+            "artifactKind": { "const": "data" },
+            "sourceRefs": { "minItems": 1 },
+            "entities": {
+              "type": "array",
+              "minItems": 1,
+              "items": { "$ref": "#/$defs/dataEntity" }
+            },
+            "relationships": { "$ref": "#/$defs/stringList" },
+            "migrationPlan": { "type": "string", "minLength": 1 },
+            "rollbackPlan": { "type": "string", "minLength": 1 },
+            "privacyAndRetention": { "$ref": "#/$defs/stringList", "minItems": 1 }
+          }
+        }
+      ],
+      "unevaluatedProperties": false
+    },
+    "apiInterface": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "kind", "name", "contract", "errors", "compatibility"],
+      "properties": {
+        "id": { "type": "string", "minLength": 1 },
+        "kind": { "enum": ["http", "event", "message", "rpc", "function"] },
+        "name": { "type": "string", "minLength": 1 },
+        "contract": { "type": "string", "minLength": 1 },
+        "errors": { "$ref": "#/$defs/stringList" },
+        "compatibility": { "type": "string", "minLength": 1 }
+      }
+    },
+    "api": {
+      "allOf": [
+        { "$ref": "#/$defs/common" },
+        {
+          "type": "object",
+          "required": ["interfaces", "security", "versioning", "testStrategy"],
+          "properties": {
+            "schemaVersion": { "const": "artifact/api/v1" },
+            "artifactKind": { "const": "api" },
+            "sourceRefs": { "minItems": 1 },
+            "interfaces": {
+              "type": "array",
+              "minItems": 1,
+              "items": { "$ref": "#/$defs/apiInterface" }
+            },
+            "security": { "$ref": "#/$defs/stringList", "minItems": 1 },
+            "versioning": { "type": "string", "minLength": 1 },
+            "testStrategy": { "$ref": "#/$defs/stringList", "minItems": 1 }
+          }
+        }
+      ],
+      "unevaluatedProperties": false
+    }
+  }
+}

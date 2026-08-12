@@ -1,0 +1,149 @@
+{
+  "schemaVersion": "concurrency-policy/v1",
+  "scope": {
+    "runtime": "single-process-sqlite",
+    "coordinationKey": "workflowId",
+    "distributedCoordination": false
+  },
+  "governanceExecution": {
+    "maxActiveAttemptsPerWorkflow": 1,
+    "planningUsesGovernanceClaim": true,
+    "dispatchOrder": "stable-plan-array-topological-order",
+    "retryOrder": "same-task-before-other-ready-tasks",
+    "onBlocked": "stop-workflow-and-wait-for-human",
+    "onReplanRequested": "stop-old-plan-and-run-planning-task",
+    "onRetryExhausted": "fail-workflow",
+    "readyTaskParallelism": false
+  },
+  "diagnosticExecution": {
+    "maxActiveRunsPerRequirement": 1,
+    "canCoexistWithGovernanceAttempt": true,
+    "createsTaskOrAttempt": false,
+    "canReadStagedEffects": false,
+    "canWriteGovernanceFacts": false,
+    "affectsReadiness": false
+  },
+  "planValidation": {
+    "artifactWriteKey": [
+      "requirementId",
+      "artifactKind"
+    ],
+    "maxWriterTasksPerKeyPerPlanRevision": 1,
+    "duplicateWriteKeyError": "plan_write_set_conflict",
+    "artifactOwnerPolicies": {
+      "analyst": [
+        "analysis",
+        "scenario",
+        "usecase",
+        "function"
+      ],
+      "architect": [
+        "design",
+        "architecture",
+        "data",
+        "api"
+      ],
+      "critic": [],
+      "orchestrator": [],
+      "diagnostic": []
+    },
+    "sameKindReworkRequiresNewPlanRevision": true
+  },
+  "claims": {
+    "workflowAttempt": {
+      "key": "workflowId",
+      "target": "attemptId",
+      "persistent": true,
+      "lease": false,
+      "ttl": null,
+      "acquireTransaction": "begin-immediate",
+      "acquireWith": [
+        "attempt",
+        "run",
+        "queued-events",
+        "dispatch-outbox"
+      ],
+      "releaseWithAttemptTerminalTransaction": true
+    },
+    "diagnosticRun": {
+      "key": "requirementId",
+      "target": "runId",
+      "persistent": true,
+      "lease": false,
+      "ttl": null,
+      "releaseWithRunTerminalTransaction": true
+    },
+    "removeLegacyRunLocks": true
+  },
+  "publication": {
+    "guard": "effect-publication-token/v1",
+    "allowedWorkflowStates": [
+      "running",
+      "paused"
+    ],
+    "tokenFields": [
+      "attemptId",
+      "planRevisionId",
+      "taskId",
+      "taskVersion",
+      "contextManifestDigest",
+      "roleContractDigest",
+      "inputVersionVector",
+      "writeBases",
+      "tokenDigest"
+    ],
+    "requireCurrentClaim": true,
+    "requireCurrentPlanAndTask": true,
+    "requireExactInputVersionsAndDigests": true,
+    "requireArtifactBaseCas": true,
+    "publishStagedEffects": "all-or-nothing",
+    "staleAttemptStatus": "superseded",
+    "staleError": "stale_publication_token",
+    "staleConsumesRetryBudget": false
+  },
+  "commandInteractions": {
+    "pauseRunningAttempt": "preserve-claim-and-token",
+    "pauseQueuedUndispatchedAttempt": "cancel-and-release",
+    "steer": "preserve-active-attempt-then-replan-at-safe-point",
+    "cancelRun": "cancel-release-and-abort-after-commit",
+    "replacePlan": "supersede-release-and-abort-after-commit",
+    "inputSubjectChanged": "supersede-only-if-token-hit",
+    "diagnosticRun": "no-governance-effect"
+  },
+  "terminalRace": {
+    "policy": "first-valid-terminal-transaction-wins",
+    "stateTransition": "expected-status-cas",
+    "abort": "best-effort-after-commit",
+    "lateResult": "audit-only",
+    "lateResultEvent": "late_run_result_discarded",
+    "lateResultCanPublishEffects": false
+  },
+  "readiness": {
+    "requireNoWorkflowAttemptClaim": true,
+    "requireAllCurrentPlanTasksTerminal": true,
+    "requireNoUnpublishedStagedEffects": true,
+    "diagnosticClaimsIgnored": true
+  },
+  "eventOrdering": {
+    "governanceKey": [
+      "workflowId",
+      "seq"
+    ],
+    "governanceOrder": "sqlite-transaction-commit-order",
+    "runKey": [
+      "runId",
+      "seq"
+    ],
+    "runProgressAffectsGovernanceOrder": false,
+    "timestampsAreAuthoritative": false
+  },
+  "recovery": {
+    "reconcileBeforeDispatch": true,
+    "stealClaimAfterTimeout": false,
+    "restoreMissingClaimForSingleActiveAttempt": true,
+    "multipleActiveAttempts": "fail-workflow-invariant-violation",
+    "ownershipMismatch": "fail-workflow-invariant-violation",
+    "outboxConsumptionIdempotent": true,
+    "diagnosticRecoveryFailureAffectsWorkflow": false
+  }
+}

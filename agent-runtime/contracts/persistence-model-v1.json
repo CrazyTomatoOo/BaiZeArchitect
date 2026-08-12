@@ -1,0 +1,402 @@
+{
+  "schemaVersion": "persistence-model/v1",
+  "database": {
+    "engine": "sqlite",
+    "singleProcessWriter": true,
+    "pragmas": {
+      "foreign_keys": "ON",
+      "journal_mode": "WAL",
+      "synchronous": "FULL",
+      "busy_timeout_ms": 5000
+    },
+    "transactionMode": "BEGIN IMMEDIATE"
+  },
+  "migration": {
+    "table": "schema_migrations",
+    "fields": ["version", "name", "checksum", "applied_at"],
+    "direction": "forward-only",
+    "transactional": true,
+    "tableReshape": "create-copy-validate-swap-drop",
+    "unknownNewerVersion": "refuse-start",
+    "checksumMismatch": "refuse-start",
+    "legacyCompatibilityReads": false,
+    "legacyCutoverPolicyRef": "cutover-policy/v1",
+    "legacyPrecondition": "non-empty legacy-v0 database requires an accepted CutoverReport with matching database and session fingerprints",
+    "legacyDataDisposition": "normal Requirements become legacy_imports plus baseline and Workflow; manual asset sources become ReusableAssets; old tables are dropped after reconciliation"
+  },
+  "snapshotDocuments": {
+    "table": "snapshot_documents",
+    "immutable": true,
+    "fields": ["id", "kind", "schema_ref", "media_type", "content", "digest", "created_at"],
+    "unique": [["kind", "digest"]],
+    "allowedKinds": [
+      "plan_proposal",
+      "task_spec",
+      "context_manifest",
+      "diagnostic_context",
+      "effect_publication_token",
+      "role_contract",
+      "role_contract_bundle",
+      "skill",
+      "input_schema",
+      "output_schema",
+      "policy_bundle",
+      "run_result",
+      "approval_packet",
+      "actor_snapshot",
+      "command_request",
+      "command_response",
+      "outbox_payload",
+      "repository_manifest",
+      "cutover_report",
+      "migration_attestation",
+      "legacy_requirement_bundle",
+      "reusable_asset_content"
+    ]
+  },
+  "tables": {
+    "workspaces": {
+      "purpose": "Repository registration and snapshot ownership",
+      "key": ["id"]
+    },
+    "requirements": {
+      "purpose": "Requirement identity and current baseline projection",
+      "key": ["id"],
+      "fields": ["id", "workspace_id", "title", "version", "current_revision_id", "created_at", "updated_at"],
+      "constraints": ["current_revision_id references a published requirement Artifact revision"]
+    },
+    "design_sessions": {
+      "purpose": "Requirement-level human governance transcript only",
+      "key": ["id"],
+      "unique": [["requirement_id"]],
+      "fields": ["id", "requirement_id", "session_file", "session_id", "status", "created_at", "updated_at", "archived_at"]
+    },
+    "workflows": {
+      "purpose": "Current Workflow governance state row",
+      "key": ["id"],
+      "unique": [["requirement_id"]],
+      "fields": [
+        "id", "requirement_id", "state", "version", "last_event_seq", "current_plan_revision_id",
+        "policy_bundle_document_id", "current_approval_packet_id", "current_failure_code",
+        "current_failure_subject_id", "created_at", "updated_at", "archived_at"
+      ],
+      "stateEnum": ["pending", "running", "waiting_for_human", "paused", "failed", "ready_to_archive", "archived"],
+      "constraints": ["archived has no outgoing transition", "policy bundle is fixed for Workflow lifetime"]
+    },
+    "repository_snapshots": {
+      "purpose": "Content-addressed immutable repository read view",
+      "key": ["id"],
+      "unique": [["workspace_id", "content_digest"]],
+      "fields": ["id", "workspace_id", "content_digest", "head_sha", "manifest_document_id", "storage_ref", "created_at"]
+    },
+    "plan_revisions": {
+      "purpose": "Immutable adopted Plan DAG revision",
+      "key": ["id"],
+      "unique": [["workflow_id", "revision_no"]],
+      "fields": [
+        "id", "workflow_id", "revision_no", "source", "base_plan_revision_id", "proposal_document_id",
+        "role_contract_bundle_document_id", "planning_task_id", "planning_attempt_id", "planning_run_id",
+        "status", "adopted_at", "completed_at"
+      ],
+      "sourceEnum": ["orchestrator", "human_override"],
+      "statusEnum": ["active", "superseded", "completed"]
+    },
+    "tasks": {
+      "purpose": "Current Task governance state",
+      "key": ["id"],
+      "unique": [["plan_revision_id", "task_key"]],
+      "fields": [
+        "id", "workflow_id", "plan_revision_id", "task_key", "ordinal", "kind", "role", "objective",
+        "spec_document_id", "completion_policy_ref", "max_attempts", "status", "version",
+        "created_at", "started_at", "finished_at"
+      ],
+      "kindEnum": ["plan", "analyze", "design", "review", "rework", "verify"],
+      "statusEnum": ["pending", "running", "waiting_for_human", "waiting_for_replan", "completed", "failed", "superseded", "skipped_satisfied"]
+    },
+    "task_dependencies": {
+      "purpose": "Normalized Plan DAG edges",
+      "key": ["task_id", "depends_on_task_id"],
+      "constraints": ["both Tasks belong to the same PlanRevision", "graph is acyclic"]
+    },
+    "task_write_keys": {
+      "purpose": "Plan-level single writer validation",
+      "key": ["plan_revision_id", "requirement_id", "artifact_kind"],
+      "fields": ["plan_revision_id", "requirement_id", "artifact_kind", "task_id"],
+      "constraints": ["one writer Task per ArtifactKind in a PlanRevision"]
+    },
+    "task_attempts": {
+      "purpose": "One versioned execution attempt for a Task",
+      "key": ["id"],
+      "unique": [["task_id", "attempt_no"]],
+      "fields": [
+        "id", "workflow_id", "task_id", "attempt_no", "status", "version", "failure_code", "failure_detail",
+        "context_manifest_document_id", "role_contract_document_id", "skill_document_id",
+        "effect_publication_token_document_id", "result_document_id", "created_at", "started_at", "finished_at"
+      ],
+      "statusEnum": ["queued", "running", "succeeded", "failed", "cancelled", "superseded"]
+    },
+    "runs": {
+      "purpose": "Model/tool process facts and Attempt-isolated Pi session metadata",
+      "key": ["id"],
+      "unique": [["attempt_id"]],
+      "fields": [
+        "id", "requirement_id", "workflow_id", "attempt_id", "diagnostic_context_document_id", "mode", "role", "status", "version",
+        "session_file", "pi_session_id", "model_ref", "result_document_id", "error_code", "error_detail",
+        "last_event_seq", "created_at", "started_at", "finished_at"
+      ],
+      "modeEnum": ["governance", "diagnostic"],
+      "statusEnum": ["queued", "running", "completed", "failed", "cancelled"],
+      "constraints": [
+        "governance Run has exactly one Attempt",
+        "diagnostic Run has no Attempt and has a diagnostic context document",
+        "Run does not reference DesignSession"
+      ]
+    },
+    "workflow_attempt_claims": {
+      "purpose": "Persistent no-lease single active governance Attempt claim",
+      "key": ["workflow_id"],
+      "unique": [["attempt_id"]],
+      "fields": ["workflow_id", "attempt_id", "run_id", "acquired_at"]
+    },
+    "diagnostic_run_claims": {
+      "purpose": "Persistent no-lease single Diagnostic Run claim per Requirement",
+      "key": ["requirement_id"],
+      "unique": [["run_id"]],
+      "fields": ["requirement_id", "run_id", "acquired_at"]
+    },
+    "attempt_effects": {
+      "purpose": "Attempt-scoped candidate side-effect ledger",
+      "key": ["id"],
+      "unique": [["attempt_id", "logical_key", "effect_version"]],
+      "fields": [
+        "id", "workflow_id", "task_id", "attempt_id", "effect_type", "logical_key", "effect_version",
+        "supersedes_effect_id", "payload", "payload_digest", "state", "published_entity_type",
+        "published_entity_id", "created_at", "finalized_at"
+      ],
+      "effectTypeEnum": ["artifact_revision", "decision", "finding", "blocking_gate"],
+      "stateEnum": ["staged", "published", "discarded"],
+      "constraints": ["payload and digest are immutable", "publication is all-or-nothing per Attempt"]
+    },
+    "workflow_events": {
+      "purpose": "Immutable low-volume Workflow governance and audit stream",
+      "key": ["workflow_id", "seq"],
+      "fields": [
+        "id", "workflow_id", "seq", "type", "schema_version", "workflow_version", "entity_type",
+        "entity_id", "entity_version", "command_id", "actor_snapshot_document_id", "payload", "created_at"
+      ],
+      "constraints": ["seq is contiguous per Workflow", "timestamps are not ordering authority"]
+    },
+    "run_events": {
+      "purpose": "Immutable Run-local model, token, tool and execution stream",
+      "key": ["run_id", "seq"],
+      "fields": ["id", "run_id", "seq", "type", "schema_version", "payload", "created_at"]
+    },
+    "tool_calls": {
+      "purpose": "Audited domain tool calls scoped to a Run and Attempt",
+      "key": ["id"],
+      "fields": ["id", "run_id", "attempt_id", "name", "input", "output", "status", "error", "started_at", "finished_at"]
+    },
+    "outbox_jobs": {
+      "purpose": "Transactional post-commit external and deterministic work",
+      "key": ["id"],
+      "unique": [["dedupe_key"]],
+      "fields": [
+        "id", "workflow_id", "kind", "dedupe_key", "payload_document_id", "state", "delivery_failures",
+        "available_at", "last_error", "created_at", "updated_at", "finished_at"
+      ],
+      "kindEnum": ["dispatch_run", "finalize_attempt", "abort_run", "schedule_workflow"],
+      "stateEnum": ["pending", "processing", "done", "dead"]
+    },
+    "workflow_commands": {
+      "purpose": "Immutable idempotent command receipt",
+      "key": ["command_id"],
+      "fields": [
+        "command_id", "workflow_id", "request_digest", "request_document_id", "actor_snapshot_document_id",
+        "outcome", "http_status", "expected_workflow_version", "actual_workflow_version",
+        "response_document_id", "first_event_seq", "created_at"
+      ],
+      "constraints": ["same commandId and request digest replays the original outcome"]
+    },
+    "workflow_command_conflicts": {
+      "purpose": "Deduplicated audit of commandId reuse with a different digest",
+      "key": ["command_id", "attempted_digest"],
+      "fields": ["command_id", "workflow_id", "attempted_digest", "actor_snapshot_document_id", "event_seq", "created_at"]
+    },
+    "blocking_gates": {
+      "purpose": "Current versioned human blocking condition",
+      "key": ["id"],
+      "fields": ["id", "workflow_id", "type", "status", "version", "subject_type", "subject_id", "answer_schema_document_id", "opened_at", "resolved_at"]
+    },
+    "human_directives": {
+      "purpose": "Immutable steer directive for a later PlanningContext",
+      "key": ["id"],
+      "fields": ["id", "workflow_id", "version", "content_document_id", "actor_snapshot_document_id", "command_id", "created_at"]
+    },
+    "human_responses": {
+      "purpose": "Immutable typed response to one Blocking Gate version",
+      "key": ["id"],
+      "fields": ["id", "workflow_id", "gate_id", "gate_version", "response_document_id", "actor_snapshot_document_id", "command_id", "created_at"]
+    },
+    "workflow_incidents": {
+      "purpose": "Versioned recoverable or invariant technical failure subject",
+      "key": ["id"],
+      "fields": ["id", "workflow_id", "type", "severity", "status", "version", "subject_type", "subject_id", "detail_document_id", "created_at", "resolved_at"]
+    },
+    "legacy_imports": {
+      "purpose": "Read-only mapping from a migrated Requirement to its legacy bundle and cutover attestation",
+      "key": ["requirement_id"],
+      "fields": ["requirement_id", "workflow_id", "import_class", "bundle_document_id", "attestation_document_id", "anomaly_count", "created_at"],
+      "importClassEnum": ["legacy_archived", "pending_reentry"],
+      "constraints": ["never created by runtime commands", "legacy_archived Workflow is archived and has no governed ApprovalPacket"]
+    },
+    "reusable_assets": {
+      "purpose": "Workspace-level reusable scenario, usecase or function identity outside Requirement governance",
+      "key": ["id"],
+      "fields": ["id", "workspace_id", "kind", "title", "current_revision_id", "legacy_origin_requirement_id", "created_at", "updated_at"],
+      "constraints": ["legacy_origin_requirement_id is audit metadata and has no foreign key because manual-assets Requirements are removed"],
+      "kindEnum": ["scenario", "usecase", "function"]
+    },
+    "reusable_asset_revisions": {
+      "purpose": "Immutable content revision of one ReusableAsset",
+      "key": ["id"],
+      "unique": [["reusable_asset_id", "revision_no"]],
+      "fields": ["id", "reusable_asset_id", "revision_no", "content_document_id", "content_digest", "source", "actor_snapshot_document_id", "migration_attestation_document_id", "created_at"],
+      "sourceEnum": ["manual", "import", "migration"]
+    },
+    "artifacts": {
+      "purpose": "Stable Artifact identity",
+      "key": ["id"],
+      "unique": [["requirement_id", "kind"]],
+      "fields": ["id", "requirement_id", "kind", "title", "current_revision_id", "created_at"]
+    },
+    "artifact_revisions": {
+      "purpose": "Immutable published Artifact content revision",
+      "key": ["id"],
+      "unique": [["artifact_id", "revision_no"]],
+      "fields": [
+        "id", "artifact_id", "revision_no", "content_document_id", "content_digest", "schema_ref",
+        "status", "source_attempt_id", "source_command_id", "source_migration_document_id", "base_revision_id", "created_at"
+      ],
+      "statusEnum": ["draft", "pending", "approved", "rejected"]
+    },
+    "evidence_snapshots": {
+      "purpose": "Versioned evidence capture bound to one Repository Snapshot",
+      "key": ["id"],
+      "fields": ["id", "requirement_id", "repository_snapshot_id", "architecture_document_id", "digest", "source_run_id", "created_at"],
+      "constraints": ["multiple snapshots are allowed per Requirement"]
+    },
+    "trace_links": {
+      "purpose": "Evidence link from a governed revision to an Evidence Snapshot location",
+      "key": ["id"],
+      "fields": ["id", "requirement_id", "source_type", "source_id", "evidence_snapshot_id", "file_path", "symbol", "line_start", "line_end", "node", "created_at"]
+    },
+    "decisions": {
+      "purpose": "Stable immutable Decision question/options plus latest disposition projection",
+      "key": ["id"],
+      "fields": ["id", "requirement_id", "version", "title", "question", "severity", "status", "selected_option_id", "source_attempt_id", "created_at", "updated_at"]
+    },
+    "decision_options": {
+      "purpose": "Immutable option owned by one Decision",
+      "key": ["id"],
+      "fields": ["id", "decision_id", "title", "description", "created_at"]
+    },
+    "decision_dispositions": {
+      "purpose": "Immutable human disposition history",
+      "key": ["id"],
+      "unique": [["decision_id", "disposition_version"]],
+      "fields": [
+        "id", "decision_id", "decision_version", "disposition_version", "outcome", "option_id", "reason",
+        "owner", "follow_up_target", "subject_digest", "supersedes_disposition_id",
+        "actor_snapshot_document_id", "command_id", "created_at"
+      ]
+    },
+    "finding_threads": {
+      "purpose": "Stable fingerprint identity and rework budget across Finding versions",
+      "key": ["id"],
+      "unique": [["requirement_id", "fingerprint"]],
+      "fields": ["id", "requirement_id", "fingerprint", "status", "version", "current_finding_id", "rework_rounds", "created_at", "updated_at"]
+    },
+    "findings": {
+      "purpose": "Immutable Finding version produced by one Critic Attempt",
+      "key": ["id"],
+      "unique": [["thread_id", "finding_version"]],
+      "fields": [
+        "id", "thread_id", "finding_version", "severity", "title", "content_document_id", "target_revision_id",
+        "evidence_snapshot_id", "source_attempt_id", "verification_outcome", "created_at"
+      ]
+    },
+    "approvals": {
+      "purpose": "Immutable trusted human judgment bound to exact subject version and digest",
+      "key": ["id"],
+      "fields": [
+        "id", "requirement_id", "subject_type", "subject_id", "subject_version", "subject_digest", "outcome",
+        "actor_snapshot_document_id", "reason", "supersedes_approval_id", "command_id", "created_at"
+      ]
+    },
+    "approval_revocations": {
+      "purpose": "Immutable revocation of an active Approval",
+      "key": ["id"],
+      "unique": [["approval_id"]],
+      "fields": ["id", "approval_id", "actor_snapshot_document_id", "reason", "command_id", "created_at"]
+    },
+    "approval_packets": {
+      "purpose": "Deterministic immutable approval material identity and validity projection",
+      "key": ["id"],
+      "unique": [["workflow_id", "packet_version"]],
+      "fields": [
+        "id", "workflow_id", "packet_version", "document_id", "digest", "policy_bundle_document_id",
+        "state", "invalidated_reason", "created_at", "invalidated_at"
+      ],
+      "stateEnum": ["current", "invalidated", "rejected", "approved"]
+    },
+    "design_packages": {
+      "purpose": "Immutable archived Design Package bound to either a governed Packet Approval or a legacy MigrationAttestation",
+      "key": ["id"],
+      "unique": [["requirement_id"]],
+      "fields": ["id", "requirement_id", "workspace_id", "document_id", "digest", "approval_packet_id", "approval_id", "migration_attestation_document_id", "archive_class", "archived_at"],
+      "archiveClassEnum": ["governed", "legacy_pre_policy"],
+      "constraints": ["governed requires approval_packet_id and approval_id", "legacy_pre_policy requires migration_attestation_document_id and both approval references null"]
+    },
+    "requirement_genes": {
+      "purpose": "Existing post-archive gene links",
+      "key": ["requirement_id", "gene_id"]
+    }
+  },
+  "atomicCreation": {
+    "operation": "create-requirement",
+    "creates": ["Requirement identity", "requirement Artifact revision v1", "DesignSession", "Workflow pending", "fixed PolicyBundle reference", "workflow_created event"],
+    "externalFiles": "created lazily after commit; deterministic paths are persisted"
+  },
+  "transactionBundles": {
+    "adoptPlan": ["PlanRevision", "Tasks", "dependencies", "write keys", "supersede old work", "Workflow version", "events", "schedule outbox"],
+    "createAttempt": ["Attempt", "Run queued", "WorkflowAttemptClaim", "ContextManifest", "EffectPublicationToken", "events", "dispatch outbox"],
+    "completeRun": ["Run terminal CAS", "full result snapshot", "Run event", "Workflow event summary", "finalize outbox"],
+    "finalizeAttempt": ["validate publication token", "publish or discard all effects", "Attempt and Task terminal state", "release claim", "Workflow version", "events", "schedule outbox"],
+    "humanCommand": ["command receipt", "state/domain mutations", "Workflow version", "events", "outbox jobs"]
+  },
+  "counters": {
+    "workflowVersion": "increments once per successful governance-changing transaction",
+    "workflowEventSeq": "increments once per Workflow event, including audit-only rejection events",
+    "entityVersion": "increments on the affected mutable projection",
+    "runEventSeq": "increments once per Run event"
+  },
+  "retention": {
+    "workflowEvents": "retain",
+    "runEvents": "retain",
+    "commandReceipts": "retain",
+    "referencedSnapshots": "retain",
+    "automaticPruningV1": false
+  },
+  "removed": [
+    "run_locks",
+    "RunInProgressError",
+    "runs.session_id DesignSession foreign key",
+    "runs.parent_run_id manual chaining",
+    "main/critic/manual-asset Run kind authority",
+    "manual-assets hidden Requirement and fake Run provenance",
+    "mutable Decision selection writes",
+    "mutable Approval rows",
+    "single-row EvidenceSnapshot overwrite",
+    "legacy DesignPackage approved flag as archive authority"
+  ]
+}

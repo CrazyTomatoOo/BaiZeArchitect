@@ -1,0 +1,560 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>BaiZe 自动工作流交互原型</title>
+  <link rel="icon" href="data:," />
+  <style>
+    :root {
+      color-scheme: dark;
+      --bg: #0a0e13;
+      --surface: #111821;
+      --surface-2: #17212c;
+      --surface-3: #1e2a37;
+      --border: #263443;
+      --border-hi: #3d5268;
+      --text: #e8eef5;
+      --muted: #8fa0b3;
+      --accent: #58d6c2;
+      --accent-soft: rgba(88, 214, 194, .13);
+      --warn: #f2bb62;
+      --warn-soft: rgba(242, 187, 98, .14);
+      --danger: #ff7c87;
+      --danger-soft: rgba(255, 124, 135, .12);
+      --ok: #72dc98;
+      --ok-soft: rgba(114, 220, 152, .12);
+      --blue: #78aefc;
+      --shadow: 0 18px 48px rgba(0,0,0,.34);
+      --radius: 13px;
+      --mono: ui-monospace, SFMono-Regular, Menlo, monospace;
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+    * { box-sizing: border-box; }
+    body { margin: 0; background: var(--bg); color: var(--text); min-width: 320px; }
+    button, select, textarea, input { font: inherit; }
+    button { color: inherit; }
+    button:focus-visible, select:focus-visible, textarea:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+    .prototype-note { position: fixed; top: 10px; left: 50%; transform: translateX(-50%); z-index: 30; padding: 5px 11px; border: 1px solid #62491e; border-radius: 999px; background: #261c0d; color: #f6cc83; font-size: 11px; letter-spacing: .04em; }
+    .app { min-height: 100vh; display: grid; grid-template-rows: 58px 1fr; }
+    .topbar { display: flex; align-items: center; gap: 18px; padding: 0 22px; border-bottom: 1px solid var(--border); background: #0d131a; }
+    .brand { font-weight: 700; letter-spacing: .01em; white-space: nowrap; }
+    .brand b { color: var(--accent); margin-right: 7px; }
+    .crumb { color: var(--muted); font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .top-actions { margin-left: auto; display: flex; align-items: center; gap: 9px; }
+    .operator { color: var(--muted); font-size: 12px; }
+    .scenario { border: 1px solid var(--border-hi); background: var(--surface); color: var(--text); border-radius: 8px; padding: 7px 10px; }
+    .connection { display: inline-flex; gap: 6px; align-items: center; color: var(--muted); font-size: 12px; }
+    .connection i { width: 7px; height: 7px; border-radius: 50%; background: var(--ok); box-shadow: 0 0 10px var(--ok); }
+    #page { min-height: 0; }
+    .shell { min-height: calc(100vh - 58px); display: grid; grid-template-columns: 205px 1fr; }
+    .sidebar { border-right: 1px solid var(--border); background: #0d131a; padding: 18px 12px; }
+    .workspace { padding: 10px; border: 1px solid var(--border); border-radius: 9px; background: var(--surface); margin-bottom: 18px; }
+    .workspace small { color: var(--muted); display: block; margin-bottom: 3px; }
+    .nav-label { margin: 18px 10px 7px; color: #65778a; font-size: 10px; text-transform: uppercase; letter-spacing: .14em; }
+    .nav-item { display: flex; align-items: center; gap: 10px; width: 100%; border: 0; background: transparent; padding: 9px 10px; border-radius: 8px; color: var(--muted); text-align: left; }
+    .nav-item.active { background: var(--accent-soft); color: var(--accent); }
+    .status-foot { position: absolute; bottom: 30px; left: 20px; color: var(--muted); font-size: 11px; }
+    .content { min-width: 0; padding: 20px 24px 96px; }
+    .page-head { display: flex; align-items: flex-start; gap: 16px; margin-bottom: 16px; }
+    .page-head h1 { margin: 0; font-size: 21px; }
+    .page-head p { color: var(--muted); margin: 6px 0 0; font-size: 13px; }
+    .head-actions { margin-left: auto; display: flex; gap: 8px; }
+    .btn { border: 1px solid var(--border-hi); background: var(--surface); border-radius: 8px; padding: 8px 12px; cursor: pointer; }
+    .btn:hover { border-color: var(--accent); }
+    .btn.primary { border-color: var(--accent); background: var(--accent); color: #06241f; font-weight: 700; }
+    .btn.danger { border-color: rgba(255,124,135,.5); color: var(--danger); }
+    .btn.ghost { border-color: transparent; color: var(--muted); background: transparent; }
+    .btn:disabled { opacity: .4; cursor: not-allowed; }
+    .pill { display: inline-flex; align-items: center; gap: 6px; border-radius: 999px; padding: 4px 9px; font-size: 11px; font-weight: 650; }
+    .pill.running { color: var(--blue); background: rgba(120,174,252,.14); }
+    .pill.waiting, .pill.rework { color: var(--warn); background: var(--warn-soft); }
+    .pill.failed, .pill.stale { color: var(--danger); background: var(--danger-soft); }
+    .pill.ready, .pill.done { color: var(--ok); background: var(--ok-soft); }
+    .pill.paused { color: #bec7d0; background: rgba(190,199,208,.12); }
+    .card { border: 1px solid var(--border); background: var(--surface); border-radius: var(--radius); }
+    .card-head { display: flex; gap: 10px; align-items: center; padding: 13px 15px; border-bottom: 1px solid var(--border); }
+    .card-head h2, .card-head h3 { margin: 0; font-size: 14px; }
+    .card-head small { margin-left: auto; color: var(--muted); }
+    .card-body { padding: 15px; }
+    .muted { color: var(--muted); }
+    .mono { font-family: var(--mono); font-size: 11px; }
+    .notice { padding: 11px 13px; border: 1px solid var(--border); border-radius: 9px; margin-bottom: 12px; font-size: 12px; display: flex; gap: 10px; align-items: flex-start; }
+    .notice.warn { border-color: rgba(242,187,98,.35); background: var(--warn-soft); }
+    .notice.danger { border-color: rgba(255,124,135,.4); background: var(--danger-soft); }
+    .notice.info { border-color: rgba(120,174,252,.35); background: rgba(120,174,252,.09); }
+    .notice strong { display: block; margin-bottom: 3px; }
+    .metric { padding: 12px; border: 1px solid var(--border); border-radius: 9px; background: var(--surface-2); }
+    .metric small { color: var(--muted); display: block; margin-bottom: 6px; }
+    .metric b { font-size: 18px; }
+    .progress { height: 6px; border-radius: 99px; overflow: hidden; background: #273442; }
+    .progress span { display: block; height: 100%; background: var(--accent); }
+    .task { display: grid; grid-template-columns: 25px 1fr auto; gap: 10px; padding: 12px 0; border-bottom: 1px solid var(--border); }
+    .task:last-child { border-bottom: 0; }
+    .task .mark { width: 22px; height: 22px; border: 1px solid var(--border-hi); border-radius: 50%; display: grid; place-items: center; font-size: 11px; color: var(--muted); }
+    .task.done .mark { border-color: var(--ok); color: var(--ok); background: var(--ok-soft); }
+    .task.active .mark { border-color: var(--blue); color: var(--blue); box-shadow: 0 0 0 4px rgba(120,174,252,.08); }
+    .task.blocked .mark { border-color: var(--warn); color: var(--warn); }
+    .task-title { font-weight: 650; font-size: 13px; }
+    .task-meta { color: var(--muted); font-size: 11px; margin-top: 4px; }
+    .artifact-row, .fact-row, .event-row { display: grid; gap: 8px; padding: 9px 0; border-bottom: 1px solid var(--border); font-size: 12px; }
+    .artifact-row { grid-template-columns: 110px 1fr auto; }
+    .fact-row { grid-template-columns: 90px 1fr auto; }
+    .event-row { grid-template-columns: 64px 145px 1fr; }
+    .artifact-row:last-child, .fact-row:last-child, .event-row:last-child { border-bottom: 0; }
+    .action-stack { display: flex; flex-direction: column; gap: 8px; }
+    .action-stack .btn { width: 100%; text-align: left; }
+    details { border-top: 1px solid var(--border); }
+    details summary { padding: 12px 15px; cursor: pointer; color: var(--muted); font-size: 12px; }
+    details .details-body { padding: 0 15px 15px; }
+    .switcher { position: fixed; z-index: 40; bottom: 18px; left: 50%; transform: translateX(-50%); display: flex; align-items: center; gap: 8px; padding: 7px; background: #eef5f7; color: #0a1318; border-radius: 999px; box-shadow: var(--shadow); }
+    .switcher button { border: 0; background: #dce7ea; color: #0a1318; border-radius: 50%; width: 32px; height: 32px; cursor: pointer; font-weight: 800; }
+    .switcher .variant-name { min-width: 210px; text-align: center; font-weight: 750; font-size: 12px; }
+    .modal-backdrop { position: fixed; inset: 0; z-index: 50; display: grid; place-items: center; background: rgba(2,5,8,.76); padding: 20px; }
+    .modal { width: min(540px, 100%); border: 1px solid var(--border-hi); background: var(--surface); border-radius: 15px; box-shadow: var(--shadow); }
+    .modal h2 { margin: 0; font-size: 17px; }
+    .modal p { color: var(--muted); font-size: 13px; line-height: 1.6; }
+    .modal textarea { width: 100%; min-height: 86px; color: var(--text); background: var(--surface-2); border: 1px solid var(--border); border-radius: 8px; padding: 10px; resize: vertical; }
+    .modal-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 16px; }
+
+    /* A — three-column operational console */
+    .variant-a .workspace-grid { display: grid; grid-template-columns: minmax(0,1.5fr) 330px; gap: 14px; align-items: start; }
+    .variant-a .summary-strip { display: grid; grid-template-columns: 1.2fr repeat(3, minmax(110px,.6fr)); gap: 10px; margin-bottom: 14px; }
+    .variant-a .right-rail { display: flex; flex-direction: column; gap: 12px; position: sticky; top: 14px; }
+    .variant-a .lower-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin-top: 14px; }
+
+    /* B — guided single-focus story */
+    .variant-b .focus-wrap { width: min(940px, 100%); margin: 0 auto; }
+    .variant-b .state-hero { border: 1px solid var(--border-hi); background: linear-gradient(135deg, #15232c, #111821 66%); border-radius: 18px; padding: 28px; margin-bottom: 18px; }
+    .variant-b .state-hero .eyebrow { color: var(--accent); text-transform: uppercase; letter-spacing: .13em; font-size: 10px; }
+    .variant-b .state-hero h2 { margin: 10px 0 7px; font-size: 26px; }
+    .variant-b .state-hero p { margin: 0; color: var(--muted); max-width: 680px; line-height: 1.55; }
+    .variant-b .hero-action { display: flex; align-items: center; gap: 10px; margin-top: 20px; }
+    .variant-b .story { position: relative; margin: 26px 0; padding-left: 34px; }
+    .variant-b .story::before { content: ""; position: absolute; left: 10px; top: 10px; bottom: 10px; width: 1px; background: var(--border-hi); }
+    .variant-b .story-step { position: relative; padding: 0 0 24px 15px; }
+    .variant-b .story-step::before { content: ""; position: absolute; left: -29px; top: 3px; width: 10px; height: 10px; border: 2px solid var(--border-hi); border-radius: 50%; background: var(--bg); }
+    .variant-b .story-step.done::before { border-color: var(--ok); background: var(--ok); }
+    .variant-b .story-step.active::before { border-color: var(--accent); box-shadow: 0 0 0 5px var(--accent-soft); }
+    .variant-b .story-step h3 { margin: 0 0 5px; font-size: 14px; }
+    .variant-b .story-step p { margin: 0; color: var(--muted); font-size: 12px; }
+    .variant-b .drawer-grid { display: grid; grid-template-columns: repeat(3,1fr); gap: 12px; }
+    .variant-b .drawer { padding: 14px; }
+    .variant-b .drawer h3 { margin: 0 0 8px; font-size: 13px; }
+    .variant-b .workflow-detail { margin-top: 14px; }
+    .variant-b .workflow-detail-grid { display: grid; grid-template-columns: minmax(0,1.45fr) minmax(280px,.55fr); gap: 14px; align-items: start; }
+    .variant-b .detail-stack { display: flex; flex-direction: column; gap: 14px; }
+    .variant-b .approval-head { display: flex; align-items: flex-start; gap: 18px; margin-bottom: 16px; }
+    .variant-b .approval-head .btn { margin-left: auto; }
+    .variant-b .approval-section { margin-bottom: 12px; }
+    .variant-b .approval-summary { display: grid; grid-template-columns: repeat(4,1fr); gap: 10px; margin-bottom: 14px; }
+    .variant-b .approval-footer { position: sticky; bottom: 12px; display: flex; align-items: center; gap: 10px; padding: 12px 14px; border: 1px solid var(--border-hi); border-radius: 12px; background: rgba(17,24,33,.96); box-shadow: var(--shadow); }
+    .variant-b .approval-footer .muted { margin-right: auto; }
+    .gate-progress { display: flex; align-items: center; gap: 8px; margin-bottom: 12px; color: var(--muted); font-size: 12px; }
+    .gate-progress span { width: 28px; height: 4px; border-radius: 99px; background: var(--border-hi); }
+    .gate-progress span.active { background: var(--accent); }
+    .receipt { padding: 11px; border: 1px solid rgba(120,174,252,.35); border-radius: 9px; background: rgba(120,174,252,.09); margin-top: 12px; font-size: 12px; }
+    /* C — dense audit cockpit */
+    .variant-c .content { padding: 12px 14px 90px; }
+    .variant-c .cockpit { display: grid; grid-template-columns: minmax(620px,1.35fr) minmax(360px,.65fr); gap: 10px; }
+    .variant-c .dense-head { display: flex; align-items: center; gap: 8px; padding: 9px 11px; border-bottom: 1px solid var(--border); font-family: var(--mono); font-size: 11px; }
+    .variant-c .dense-head strong { font-family: inherit; }
+    .variant-c table { width: 100%; border-collapse: collapse; font-size: 11px; }
+    .variant-c th, .variant-c td { padding: 8px 9px; border-bottom: 1px solid var(--border); text-align: left; vertical-align: top; }
+    .variant-c th { color: var(--muted); font-weight: 500; background: #0e151d; position: sticky; top: 0; }
+    .variant-c .console-grid { display: grid; grid-template-rows: auto auto; gap: 10px; }
+    .variant-c .log { max-height: 330px; overflow: auto; padding: 5px 11px; font-family: var(--mono); }
+    .variant-c .command-bar { display: flex; flex-wrap: wrap; gap: 6px; padding: 10px; }
+    .variant-c .command-bar .btn { font-family: var(--mono); font-size: 10px; padding: 6px 8px; }
+    .variant-c .projection { display: grid; grid-template-columns: repeat(5,1fr); gap: 7px; margin-bottom: 10px; }
+    .variant-c .projection .metric { padding: 8px; font-family: var(--mono); }
+    .variant-c .projection .metric b { font-size: 13px; }
+
+    @media (max-width: 1050px) {
+      .shell { grid-template-columns: 72px 1fr; }
+      .sidebar .workspace, .sidebar .nav-label, .sidebar .nav-item span:last-child { display: none; }
+      .sidebar .nav-item { justify-content: center; }
+      .variant-a .workspace-grid, .variant-b .workflow-detail-grid, .variant-c .cockpit { grid-template-columns: 1fr; }
+      .variant-a .right-rail { position: static; }
+    }
+    @media (max-width: 700px) {
+      .topbar { padding: 0 10px; gap: 8px; }
+      .crumb, .operator { display: none; }
+      .shell { display: block; }
+      .sidebar { display: none; }
+      .content { padding: 15px 12px 90px; }
+      .page-head { flex-direction: column; }
+      .head-actions { margin-left: 0; }
+      .variant-a .summary-strip, .variant-a .lower-grid, .variant-b .drawer-grid, .variant-b .approval-summary, .variant-c .projection { grid-template-columns: 1fr; }
+      .variant-b .approval-head, .variant-b .approval-footer { align-items: stretch; flex-direction: column; }
+      .variant-b .approval-head .btn { margin-left: 0; }
+      .switcher .variant-name { min-width: 160px; }
+    }
+  </style>
+</head>
+<body>
+  <div class="prototype-note">THROWAWAY PROTOTYPE · 不连接真实 Gateway</div>
+  <div class="app">
+    <header class="topbar">
+      <div class="brand"><b>◇</b>BaiZe Architect</div>
+      <div class="crumb">需求 / 会员积分过期与补偿机制</div>
+      <div class="top-actions">
+        <span class="connection"><i></i> Workflow SSE · #1842</span>
+        <select id="scenario" class="scenario" aria-label="原型场景">
+          <option value="running">运行中</option>
+          <option value="waiting">等待人工</option>
+          <option value="rework">返工验证</option>
+          <option value="failed">执行失败</option>
+          <option value="ready">等待最终批准</option>
+          <option value="paused">暂停 / 投影过期</option>
+        </select>
+        <span class="operator">本地操作员 · 已验证</span>
+      </div>
+    </header>
+    <div id="page"></div>
+  </div>
+  <div class="switcher" aria-label="原型变体切换器">
+    <button id="prev" aria-label="上一个变体">←</button>
+    <div class="variant-name" id="variantName"></div>
+    <button id="next" aria-label="下一个变体">→</button>
+  </div>
+  <div id="modal"></div>
+
+  <script>
+    const variants = {
+      A: "A — 运行控制台",
+      B: "B — 引导式焦点",
+      C: "C — 审计驾驶舱",
+    };
+    const states = {
+      running: {
+        label: "自动执行中", tone: "running", phase: "架构设计", progress: 56,
+        headline: "Architect 正在形成接口与数据设计",
+        message: "系统会在当前任务完成后自动启动独立 Critic 评审，无需手动选择角色。",
+        action: "查看当前 Run", command: "pause",
+      },
+      waiting: {
+        label: "等待人工输入", tone: "waiting", phase: "需求澄清", progress: 28,
+        headline: "需要确认积分补偿是否允许跨账户转移",
+        message: "Analyst 已打开阻塞门禁。回答只解决当前问题，不会静默修改需求基线。",
+        action: "回答并继续", command: "answer",
+      },
+      rework: {
+        label: "返工验证", tone: "rework", phase: "Critic 复审", progress: 73,
+        headline: "Major Finding 进入第 2 轮定向验证",
+        message: "Architect 已提交 successor revision；Critic 只验证原问题和处置证据。",
+        action: "查看 Finding Thread", command: "finding",
+      },
+      failed: {
+        label: "需要恢复", tone: "failed", phase: "执行故障", progress: 41,
+        headline: "Architect Attempt 已耗尽自动重试预算",
+        message: "模型传输连续失败。已发布事实保持不变，可授权单次 Task 重试或提交替代计划。",
+        action: "选择恢复方式", command: "recover",
+      },
+      ready: {
+        label: "等待最终批准", tone: "ready", phase: "人工审批", progress: 100,
+        headline: "所有 Readiness 检查已通过",
+        message: "ApprovalPacket 已冻结。批准会同时批准包内 pending revisions 并归档 Workflow。",
+        action: "审阅审批包", command: "approve",
+      },
+      paused: {
+        label: "已暂停", tone: "paused", phase: "人工接管", progress: 56,
+        headline: "自动派发已停止，当前投影需要刷新",
+        message: "另一个命令已更新 Workflow version。请先读取最新投影；系统不会把旧意图自动应用到新版本。",
+        action: "刷新并检查冲突", command: "stale",
+      },
+    };
+    const tasks = [
+      ["需求影响分析", "Analyst", "done", "analysis r4 · 4m12s"],
+      ["场景与用例边界", "Analyst", "done", "scenario r2 · usecase r3"],
+      ["接口与数据设计", "Architect", "active", "Run #86 · 01:42"],
+      ["独立完整性评审", "Critic", "pending", "等待设计产物"],
+      ["定向返工验证", "Critic", "pending", "按 Finding 策略创建"],
+    ];
+    const artifacts = [
+      ["analysis", "需求与影响分析", "r4 · approved"],
+      ["scenario", "积分过期与补偿场景", "r2 · pending"],
+      ["usecase", "补偿申请与撤回", "r3 · pending"],
+      ["architecture", "积分域边界", "r5 · draft"],
+      ["api", "补偿 API", "r3 · staged"],
+    ];
+    const events = [
+      ["14:32:08", "artifact_revision_published", "analysis r4 进入当前投影"],
+      ["14:32:09", "task_completed", "analyze-impact · Attempt #32"],
+      ["14:32:10", "attempt_created", "design-api · Attempt #33"],
+      ["14:32:11", "run_running", "Run #86 · session 9f2…"],
+      ["14:33:52", "tool_completed", "patch_artifact(api) staged"],
+    ];
+
+    const page = document.querySelector("#page");
+    const replaceMarkup = (target, markup) => {
+      const parsed = new DOMParser().parseFromString(markup, "text/html");
+      const nodes = [...parsed.body.childNodes].map((node) => document.importNode(node, true));
+      target.replaceChildren(...nodes);
+    };
+    const scenarioSelect = document.querySelector("#scenario");
+    const params = new URLSearchParams(location.search);
+    let variant = variants[params.get("variant")] ? params.get("variant") : "B";
+    let scenario = states[params.get("scenario")] ? params.get("scenario") : "running";
+    let panel = ["summary", "workflow", "approval"].includes(params.get("panel")) ? params.get("panel") : "summary";
+    scenarioSelect.value = scenario;
+
+    const pill = (s) => `<span class="pill ${s.tone}">${s.label}</span>`;
+    const shellStart = (inner, cls) => `
+      <div class="shell ${cls}">
+        <aside class="sidebar">
+          <div class="workspace"><small>当前工作区</small><strong>loyalty-platform</strong></div>
+          <div class="nav-label">工作</div>
+          <button class="nav-item">⌂ <span>总览</span></button>
+          <button class="nav-item active">✎ <span>需求</span></button>
+          <button class="nav-item">◇ <span>待决策</span></button>
+          <div class="nav-label">资产库</div>
+          <button class="nav-item">▤ <span>需求管理</span></button>
+          <button class="nav-item">⌬ <span>架构</span></button>
+          <div class="status-foot">● 事件流已连接<br/>workspace · local</div>
+        </aside>
+        <main class="content">${inner}</main>
+      </div>`;
+    const headActions = (compact) => {
+      if (compact) return `<button class="btn ghost" data-command="audit">审计记录</button>`;
+      const paused = scenario === "paused";
+      const command = paused ? "resume" : "pause";
+      const label = paused ? "继续" : "暂停";
+      return `<button class="btn" data-command="${command}">${label}</button><button class="btn ghost" data-command="takeover">接管 ▾</button><button class="btn ghost" data-command="audit">审计记录</button>`;
+    };
+    const head = (s, compact=false) => `
+      <div class="page-head">
+        <div><div>${pill(s)}</div><h1>会员积分过期与补偿机制</h1><p>为存量积分平台补充到期提醒、过期处理和受控补偿能力。</p></div>
+        <div class="head-actions">${headActions(compact)}</div>
+      </div>`;
+    const notices = (s) => {
+      if (scenario === "paused") return `<div class="notice danger"><span>↻</span><div><strong>命令未执行：版本冲突</strong>你基于 Workflow v27 发出的 pause 已过期；当前为 v29。刷新后再决定，不会自动重放。 <button class="btn ghost" data-command="refresh">刷新投影</button></div></div>`;
+      if (scenario === "failed") return `<div class="notice danger"><span>!</span><div><strong>Workflow Incident · process_lost</strong>Run #86 已终止，Attempt 预算已消耗。治理事实与暂存副作用已完成收敛。</div></div>`;
+      if (scenario === "waiting") return `<div class="notice warn"><span>?</span><div><strong>Blocking Gate 已打开</strong>自动调度暂停，直到这个问题得到结构化回答。</div></div>`;
+      return "";
+    };
+    const taskList = () => tasks.map((t,i) => {
+      let status = t[2];
+      if (scenario === "waiting" && i === 1) status = "blocked";
+      if (scenario === "rework" && i === 4) status = "active";
+      if (scenario === "ready") status = "done";
+      if (scenario === "failed" && i === 2) status = "blocked";
+      const visuals = {
+        done: { mark: "✓", pill: "done", label: "完成" },
+        active: { mark: "▶", pill: "running", label: "执行中" },
+        blocked: { mark: "!", pill: "waiting", label: "阻塞" },
+      };
+      const visual = visuals[status] ?? { mark: i + 1, pill: "paused", label: "待执行" };
+      return `<div class="task ${status}"><span class="mark">${visual.mark}</span><div><div class="task-title">${t[0]}</div><div class="task-meta">${t[1]} · ${t[3]}</div></div><span class="pill ${visual.pill}">${visual.label}</span></div>`;
+    }).join("");
+    const artifactRows = () => artifacts.map(a => {
+      const revision = a[2].split(" · ")[0];
+      let status = a[2];
+      if (scenario === "ready") {
+        const approvalStatus = a[0] === "analysis" ? "approved" : "pending";
+        status = `${revision} · ${approvalStatus}`;
+      }
+      return `<div class="artifact-row"><span class="mono">${a[0]}</span><span>${a[1]}</span><span class="muted">${status}</span></div>`;
+    }).join("");
+    const governanceFacts = () => scenario === "ready"
+      ? `<div class="fact-row"><span>Decision</span><span>补偿跨账户策略</span><span class="pill done">已接受</span></div><div class="fact-row"><span>Finding</span><span>幂等键重放风险</span><span class="pill done">已接受风险</span></div><div class="fact-row"><span>Evidence</span><span>TraceLink coverage</span><span class="pill done">完整</span></div>`
+      : `<div class="fact-row"><span>Decision</span><span>补偿跨账户策略</span><span class="pill waiting">待处理</span></div><div class="fact-row"><span>Finding</span><span>幂等键重放风险</span><span class="pill rework">Major</span></div><div class="fact-row"><span>Evidence</span><span>TraceLink coverage</span><span class="pill done">完整</span></div>`;
+    const eventRows = () => events.map(e => `<div class="event-row"><span class="muted">${e[0]}</span><span class="mono">${e[1]}</span><span>${e[2]}</span></div>`).join("");
+
+    function currentAction(s) {
+      if (scenario === "waiting") return `<div class="card"><div class="card-head"><h3>需要你的回答</h3><span class="pill waiting">阻塞</span></div><div class="card-body"><strong>积分补偿是否允许跨账户转移？</strong><p class="muted">这个回答只解决 Gate #G-17，不会自动修改 Requirement。</p><textarea placeholder="输入结构化补充说明"></textarea><div style="display:flex;gap:8px;margin-top:10px"><button class="btn primary" data-command="answer">提交并继续</button><button class="btn" data-command="revise">修改需求基线</button></div></div></div>`;
+      if (scenario === "failed") return `<div class="card"><div class="card-head"><h3>恢复工作流</h3></div><div class="card-body action-stack"><button class="btn primary" data-command="retry">授权一次 Task 重试</button><button class="btn" data-command="replace">提交完整替代计划</button><button class="btn" data-command="diagnostic">运行只读诊断</button><p class="muted">不存在 force-skip 或 force-ready。</p></div></div>`;
+      if (scenario === "ready") return `<div class="card"><div class="card-head"><h3>ApprovalPacket</h3><span class="pill ready">11/11 通过</span></div><div class="card-body"><div class="mono">sha256:7df3…94ac · Workflow v31</div><p class="muted">5 个必需产物 · 2 个已处置 Decision · 1 个已接受 Major 风险 · Critic coverage 完整</p><button class="btn primary" data-command="approve">审阅并批准归档</button><button class="btn" data-command="reject">打回</button></div></div>`;
+      if (scenario === "rework") return `<div class="card"><div class="card-head"><h3>Finding Thread</h3><span class="pill rework">Major · 第 2/2 轮</span></div><div class="card-body"><strong>补偿幂等键未覆盖撤回后重放</strong><p class="muted">Critic 正在验证 architecture r6 与 api r4 的修复证据。若仍未解决将转人工门禁。</p><button class="btn" data-command="finding">查看完整线程</button></div></div>`;
+      if (scenario === "paused") return `<div class="card"><div class="card-head"><h3>暂停中的接管</h3></div><div class="card-body action-stack"><button class="btn primary" data-command="refresh">刷新当前投影</button><button class="btn" data-command="resume">继续自动执行</button><button class="btn" data-command="replace">提交完整替代计划</button></div></div>`;
+      return `<div class="card"><div class="card-head"><h3>当前 Run</h3><span class="pill running">Architect</span></div><div class="card-body"><strong>接口与数据设计</strong><p class="muted">Run #86 · Attempt #33 · Context 91ad…</p><div class="progress"><span style="width:64%"></span></div><p class="muted">最近：patch_artifact(api) 已暂存，等待 RoleResult 校验。</p><button class="btn" data-command="run">查看 Run 实时输出</button><button class="btn danger" data-command="cancel">取消 Run 并暂停</button></div></div>`;
+    }
+
+    function renderA(s) {
+      return shellStart(`
+        ${head(s)}${notices(s)}
+        <div class="summary-strip">
+          <div class="metric"><small>当前阶段</small><b>${s.phase}</b><div class="progress" style="margin-top:9px"><span style="width:${s.progress}%"></span></div></div>
+          <div class="metric"><small>计划版本</small><b>v4</b></div>
+          <div class="metric"><small>当前任务</small><b>3 / 5</b></div>
+          <div class="metric"><small>开放门禁</small><b>${scenario === "waiting" ? 1 : 0}</b></div>
+        </div>
+        <div class="workspace-grid">
+          <div>
+            <section class="card"><div class="card-head"><h2>自动计划</h2><small>稳定串行 · 最近更新 14:33</small></div><div class="card-body">${taskList()}</div></section>
+            <div class="lower-grid">
+              <section class="card"><div class="card-head"><h3>设计产物</h3><small>Required 5/5</small></div><div class="card-body">${artifactRows()}</div></section>
+              <section class="card"><div class="card-head"><h3>治理事实</h3><small>Readiness ${scenario === "ready" ? "11/11" : "6/11"}</small></div><div class="card-body">${governanceFacts()}</div></section>
+            </div>
+          </div>
+          <aside class="right-rail">
+            ${currentAction(s)}
+            <section class="card"><div class="card-head"><h3>下一步</h3></div><div class="card-body"><strong>${s.headline}</strong><p class="muted">${s.message}</p></div><details><summary>高级接管与审计</summary><div class="details-body action-stack"><button class="btn" data-command="steer">调整后续方向</button><button class="btn" data-command="replace">替换完整计划</button><button class="btn" data-command="diagnostic">只读诊断 Run</button></div></details></section>
+          </aside>
+        </div>
+      `, "variant-a");
+    }
+
+    function renderWorkflowDetail(s) {
+      return `<section class="card workflow-detail"><div class="card-head"><h2>工作流详情</h2><small>Plan v4 · Workflow event #1842</small><button class="btn ghost" data-command="summary">收起</button></div><div class="card-body workflow-detail-grid"><div class="detail-stack"><section><h3>稳定任务顺序</h3>${taskList()}</section><section class="card"><div class="card-head"><h3>设计产物</h3><small>Required ${scenario === "ready" ? "5/5" : "3/5"}</small></div><div class="card-body">${artifactRows()}</div></section><section class="card"><div class="card-head"><h3>治理事实</h3><small>Readiness ${scenario === "ready" ? "11/11" : "6/11"}</small></div><div class="card-body">${governanceFacts()}</div></section></div><aside class="detail-stack">${currentAction(s)}<section class="card"><div class="card-head"><h3>高级接管</h3></div><div class="card-body action-stack"><button class="btn" data-command="${scenario === "paused" ? "resume" : "pause"}">${scenario === "paused" ? "继续自动执行" : "暂停自动派发"}</button><button class="btn" data-command="steer">调整后续方向</button><button class="btn" data-command="replace">提交完整替代计划</button><button class="btn" data-command="diagnostic">只读诊断 Run</button><button class="btn" data-command="audit">查看完整审计</button></div></section></aside></div></section>`;
+    }
+
+    function renderApproval(s) {
+      return shellStart(`<div class="focus-wrap">${head(s, true)}<div class="approval-head"><div><div class="eyebrow">专注审批模式</div><h2 style="margin:7px 0">审阅 ApprovalPacket</h2><div class="mono">sha256:7df3…94ac · Workflow v31 · policy-bundle/1</div></div><button class="btn" data-command="summary">返回概览</button></div><div class="notice info"><span>✓</span><div><strong>当前 Packet 仍有效</strong>任何相关 SSE 事件都会锁定本页；系统不会把批准意图自动应用到新 digest。</div></div><div class="approval-summary"><div class="metric"><small>必需产物</small><b>5 / 5</b></div><div class="metric"><small>Decision</small><b>2 / 2</b></div><div class="metric"><small>Finding</small><b>3 已处置</b></div><div class="metric"><small>Readiness</small><b>11 / 11</b></div></div><section class="card approval-section"><div class="card-head"><h3>必需产物与版本</h3><small>Schema / evidence / completion 均通过</small></div><div class="card-body">${artifactRows()}</div></section><section class="card approval-section"><div class="card-head"><h3>Decision 与 Finding</h3><small>精确绑定当前 subject digest</small></div><div class="card-body">${governanceFacts()}</div></section><section class="card approval-section"><div class="card-head"><h3>独立评审、Consistency 与 Provenance</h3><small>可展开审计</small></div><div class="card-body"><div class="fact-row"><span>Critic</span><span>首次盲审 + 2 项定向复审</span><span class="pill done">覆盖完整</span></div><div class="fact-row"><span>Consistency</span><span>0 error · 2 warning 已披露</span><span class="pill done">通过</span></div><div class="fact-row"><span>Transcript</span><span>7 Attempts · 7 Runs · session refs 完整</span><span class="pill done">完整</span></div><button class="btn ghost" data-command="audit">查看 Workflow / Run 审计</button></div></section><div class="approval-footer"><span class="muted">批准将绑定当前 Packet digest，并在同一事务中归档。</span><button class="btn" data-command="reject">打回</button><button class="btn primary" data-command="approve">批准并归档</button></div></div>`, "variant-b");
+    }
+
+    function renderB(s) {
+      if (panel === "approval" && scenario === "ready") return renderApproval(s);
+      const command = { running: "details", waiting: "gates", rework: "finding", failed: "recover", ready: "approval", paused: "stale" }[scenario];
+      const label = { running: "查看后台进度", waiting: "处理当前门禁", rework: "查看 Finding Thread", failed: "查看故障并恢复", ready: "审阅并批准设计包", paused: "检查变化并恢复" }[scenario];
+      let designStepClass = "";
+      if (["running", "failed"].includes(scenario)) designStepClass = "active";
+      if (["rework", "ready"].includes(scenario)) designStepClass = "done";
+      let reviewStepClass = "";
+      if (scenario === "rework") reviewStepClass = "active";
+      if (scenario === "ready") reviewStepClass = "done";
+      let pendingCount = 0;
+      if (scenario === "waiting") pendingCount = 3;
+      if (scenario === "rework") pendingCount = 1;
+      return shellStart(`
+        <div class="focus-wrap">
+          ${head(s, true)}${notices(s)}
+          <section class="state-hero">
+            <div class="eyebrow">${s.phase} · 自动工作流</div>
+            <h2>${s.headline}</h2><p>${s.message}</p>
+            <div class="hero-action"><button class="btn primary" data-command="${command}">${label}</button>${scenario === "running" ? `<span class="muted">无需操作，预计 3–5 分钟</span>` : ""}</div>
+          </section>
+          <section class="story">
+            <div class="story-step done"><h3>理解需求</h3><p>影响画像已确认，Required Artifact Set 已派生。</p></div>
+            <div class="story-step ${scenario === "waiting" ? "active" : "done"}"><h3>补全分析</h3><p>场景、用例和约束形成可追溯产物。</p></div>
+            <div class="story-step ${designStepClass}"><h3>形成设计</h3><p>Architect 根据精确 analysis revision 产出架构、数据与接口方案。</p></div>
+            <div class="story-step ${reviewStepClass}"><h3>独立评审与返工</h3><p>Critic 首次盲审；返工后只验证目标 Finding。</p></div>
+            <div class="story-step ${scenario === "ready" ? "active" : ""}"><h3>人工批准并归档</h3><p>ApprovalPacket 的 digest 与所有治理事实冻结一致。</p></div>
+          </section>
+          <div class="drawer-grid">
+            <section class="card drawer"><h3>产物 ${scenario === "ready" ? "5/5" : "3/5"}</h3><div class="progress"><span style="width:${scenario === "ready" ? 100 : 60}%"></span></div><p class="muted">版本、证据与审批状态</p></section>
+            <section class="card drawer"><h3>待处理 ${pendingCount}</h3><p class="muted">按严重度与 openedEventSeq 排队</p></section>
+            <section class="card drawer"><h3>执行记录</h3><p class="muted">Plan v4 · 7 Attempts · 86 Workflow events</p></section>
+          </div>
+          ${panel === "workflow" ? renderWorkflowDetail(s) : `<section class="card workflow-detail"><div class="card-body" style="display:flex;align-items:center;gap:12px"><div><strong>工作流详情</strong><div class="muted" style="margin-top:4px">计划、Task、Run、证据与高级接管</div></div><button class="btn" style="margin-left:auto" data-command="details">同页展开</button></div></section>`}
+        </div>
+      `, "variant-b");
+    }
+
+    function renderC(s) {
+      const tableRows = tasks.map((t,i) => {
+        let status = "pending";
+        if (i < 2 || scenario === "ready") status = "completed";
+        else if (i === 2) status = s.tone;
+        let guard = "—";
+        if (scenario === "ready" || i < 2) guard = "published";
+        else if (i === 2) guard = "claim:33";
+        return `<tr><td class="mono">T-${i+1}</td><td>${t[0]}</td><td>${t[1]}</td><td>${status}</td><td>${t[3]}</td><td class="mono">${guard}</td></tr>`;
+      }).join("");
+      return shellStart(`
+        ${head(s, true)}${notices(s)}
+        <div class="projection">
+          <div class="metric"><small>workflow</small><b>${s.tone} · v29</b></div>
+          <div class="metric"><small>event seq</small><b>#1842</b></div>
+          <div class="metric"><small>plan</small><b>r4 · 5 tasks</b></div>
+          <div class="metric"><small>claim</small><b>${scenario === "running" ? "attempt:33" : "none"}</b></div>
+          <div class="metric"><small>readiness</small><b>${scenario === "ready" ? "11/11" : "6/11"}</b></div>
+        </div>
+        <div class="cockpit">
+          <div class="console-grid">
+            <section class="card"><div class="dense-head"><strong>PLAN TASKS</strong><span class="muted">stable topological order</span><span style="margin-left:auto">PlanRevision 4</span></div><div style="overflow:auto"><table><thead><tr><th>ID</th><th>Task</th><th>Role</th><th>Status</th><th>Result</th><th>Guard</th></tr></thead><tbody>${tableRows}</tbody></table></div></section>
+            <section class="card"><div class="dense-head"><strong>GOVERNED ARTIFACTS</strong><span style="margin-left:auto">policy artifact/v1</span></div><div class="card-body">${artifactRows()}${governanceFacts()}</div></section>
+          </div>
+          <aside class="console-grid">
+            ${currentAction(s)}
+            <section class="card"><div class="dense-head"><strong>WORKFLOW EVENT STREAM</strong><span style="margin-left:auto;color:var(--ok)">LIVE</span></div><div class="log">${eventRows()}</div></section>
+            <section class="card"><div class="dense-head"><strong>COMMANDS</strong><span style="margin-left:auto">operator/local</span></div><div class="command-bar"><button class="btn" data-command="pause">pause</button><button class="btn" data-command="steer">steer</button><button class="btn" data-command="cancel">cancel-run</button><button class="btn" data-command="replace">replace-plan</button><button class="btn" data-command="diagnostic">diagnostic-run</button><button class="btn" data-command="audit">receipts</button></div></section>
+          </aside>
+        </div>
+      `, "variant-c");
+    }
+
+    function render() {
+      const s = states[scenario];
+      let markup = renderC(s);
+      if (variant === "A") markup = renderA(s);
+      if (variant === "B") markup = renderB(s);
+      replaceMarkup(page, markup);
+      document.querySelector("#variantName").textContent = variants[variant];
+      params.set("variant", variant); params.set("scenario", scenario); params.set("panel", panel);
+      history.replaceState(null, "", `?${params.toString()}`);
+      page.querySelectorAll("[data-command]").forEach(el => el.addEventListener("click", () => handleAction(el.dataset.command)));
+    }
+    function handleAction(command) {
+      if (command === "details") { panel = "workflow"; render(); return; }
+      if (command === "summary") { panel = "summary"; render(); return; }
+      if (command === "approval") { panel = "approval"; render(); return; }
+      if (command === "audit" && variant !== "C") { variant = "C"; panel = "summary"; render(); return; }
+      openModal(command);
+    }
+    function openModal(command) {
+      if (command === "gates") {
+        replaceMarkup(document.querySelector("#modal"), `<div class="modal-backdrop"><div class="modal"><div class="card-head"><h2>处理当前门禁</h2><span class="pill waiting">第 1 / 3 项</span></div><div class="card-body"><div class="gate-progress"><span class="active"></span><span></span><span></span> critical Decision 优先</div><div class="mono">Gate G-17 · subject v3 · event #1838</div><h3>积分补偿是否允许跨账户转移？</h3><p>回答只解决当前 Gate，不会修改 Requirement 或替你处置其他门禁。</p><textarea placeholder="输入结构化补充说明"></textarea><div class="receipt">后续队列：必填 Human Input → Major Finding 风险处置；每项单独提交 commandId。</div><div class="modal-actions"><button class="btn" id="closeModal">稍后处理</button><button class="btn primary" id="confirmModal">提交当前回答</button></div></div></div></div>`);
+        bindModal(() => showReceipt("人工回答已接收"));
+        return;
+      }
+      if (command === "stale") {
+        replaceMarkup(document.querySelector("#modal"), `<div class="modal-backdrop"><div class="modal"><div class="card-head"><h2>底稿已过期</h2><span class="pill stale">Workflow v27 → v29</span></div><div class="card-body"><div class="notice danger"><span>!</span><div><strong>提交已锁定</strong>SSE 显示当前 subject 已变化。你的文字会保留，但不会自动应用到新版本。</div></div><textarea>允许跨账户，但仅限同一实名主体。</textarea><p>重新读取后会展示差异，再由你明确决定是否重新应用。</p><div class="modal-actions"><button class="btn" id="closeModal">保留并返回</button><button class="btn primary" id="confirmModal">查看变化并重载</button></div></div></div></div>`);
+        bindModal(() => { closeModal(); toast("已补齐 afterSeq；请基于 Workflow v29 重新确认"); });
+        return;
+      }
+      const copy = {
+        pause: ["暂停自动工作流", "停止派发新 Attempt；当前 running Attempt 默认可按精确输入守卫完成。"],
+        resume: ["继续自动工作流", "系统会重新读取门禁与 Readiness，再决定进入 waiting、running 或 ready。"],
+        cancel: ["取消当前 Run 并暂停", "当前 Attempt 将 cancelled，暂存副作用不会发布。这个动作不可撤销。"],
+        steer: ["调整后续方向", "指令不会注入当前 Session；系统将在安全点创建新的 Planning Task。"],
+        replace: ["提交完整替代计划", "新计划使用相同 Schema 与质量策略；旧非终态 Task 将 superseded。"],
+        takeover: ["高级接管", "这里只提供 steer、完整 replace-plan 和只读 diagnostic-run，不暴露角色选择或强制跳过。"],
+        diagnostic: ["启动只读诊断", "诊断使用独立 Session，不占治理 claim，不能写 Artifact、Finding 或 Decision。"],
+        approve: ["批准 ApprovalPacket", "批准绑定 sha256:7df3…94ac；事务成功后 Workflow 归档且不可重开。"],
+        reject: ["打回审批包", "需要选择至少一个结构化目标并填写原因；系统随后重新规划。"],
+        answer: ["提交人工回答", "回答绑定当前 Blocking Gate，只解决该门禁。"],
+        revise: ["创建 Requirement successor", "这会使依赖旧 revision 的计划、证据和审批包失效并触发重新规划。"],
+        retry: ["授权一次 Task 重试", "只增加当前失败 Task 的一个 Attempt，不重置自动预算。"],
+        refresh: ["刷新当前投影", "将通过 GET projection + event cursor 恢复到最新 Workflow version。"],
+        finding: ["Finding Thread F-09", "Major · 当前第 2/2 轮验证；若仍未解决将打开人工处置门禁。"],
+        run: ["Run #86 实时输出", "Run 事件流与 Workflow 事件流独立；离开后可从 cursor 恢复。"],
+        audit: ["命令回执与审计", "成功、业务拒绝和版本冲突都保留不可变 Command Receipt。"],
+        recover: ["选择恢复方式", "执行失败可 retry-task 或 replace-plan；Engine/Outbox 故障只提供 retry-recovery。"],
+      };
+      const [title, text] = copy[command] || ["原型动作", "此动作只用于检查层级，不会调用真实 API。"];
+      replaceMarkup(document.querySelector("#modal"), `<div class="modal-backdrop"><div class="modal"><div class="card-head"><h2>${title}</h2></div><div class="card-body"><p>${text}</p>${["steer","replace","reject","answer","revise"].includes(command) ? `<textarea placeholder="在原型中输入不会保存"></textarea>` : ""}<div class="modal-actions"><button class="btn" id="closeModal">取消</button><button class="btn primary" id="confirmModal">确认（原型）</button></div></div></div></div>`);
+      const mutating = ["pause","resume","cancel","steer","replace","approve","reject","answer","revise","retry","refresh"].includes(command);
+      bindModal(() => mutating ? showReceipt(title) : (closeModal(), toast(`${title} · 已查看`)));
+    }
+    function bindModal(onConfirm) {
+      document.querySelector("#closeModal").onclick = closeModal;
+      document.querySelector("#confirmModal").onclick = onConfirm;
+      document.querySelector(".modal-backdrop").addEventListener("click", e => { if (e.target.classList.contains("modal-backdrop")) closeModal(); });
+    }
+    function showReceipt(title) {
+      const id = `cmd_demo_${String(Math.floor(performance.now())).padStart(6,"0")}`;
+      replaceMarkup(document.querySelector("#modal"), `<div class="modal-backdrop"><div class="modal"><div class="card-head"><h2>命令已持久化</h2><span class="pill running">accepted</span></div><div class="card-body"><p>${title}</p><div class="receipt"><strong>Command Receipt</strong><div class="mono" style="margin-top:5px">${id} · request digest 72ac…e10f</div><div style="margin-top:7px">Receipt 只确认命令已接收；界面正在等待 SSE/Projection 的实际状态变化。</div></div><div class="modal-actions"><button class="btn primary" id="closeModal">知道了</button></div></div></div></div>`);
+      document.querySelector("#closeModal").onclick = closeModal;
+    }
+    function closeModal() { document.querySelector("#modal").replaceChildren(); }
+    function toast(text) {
+      const el = document.createElement("div"); el.className = "notice info"; el.style.cssText = "position:fixed;right:18px;bottom:82px;z-index:60;box-shadow:var(--shadow)"; el.textContent = text; document.body.append(el); setTimeout(() => el.remove(), 1800);
+    }
+    function cycle(delta) {
+      const keys = Object.keys(variants); variant = keys[(keys.indexOf(variant)+delta+keys.length)%keys.length]; panel = "summary"; render();
+    }
+    document.querySelector("#prev").onclick = () => cycle(-1);
+    document.querySelector("#next").onclick = () => cycle(1);
+    scenarioSelect.onchange = () => { scenario = scenarioSelect.value; panel = "summary"; render(); };
+    addEventListener("keydown", e => {
+      const tag = document.activeElement?.tagName;
+      if (["INPUT","TEXTAREA","SELECT"].includes(tag) || document.activeElement?.isContentEditable) return;
+      if (e.key === "ArrowLeft") cycle(-1);
+      if (e.key === "ArrowRight") cycle(1);
+      if (e.key === "Escape") closeModal();
+    });
+    render();
+  </script>
+</body>
+</html>

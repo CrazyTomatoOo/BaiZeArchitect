@@ -1,0 +1,245 @@
+{
+  "schemaVersion": "cutover-policy/v1",
+  "strategy": {
+    "mode": "stop-the-world-single-cutover",
+    "writePauseRequired": true,
+    "dualWrite": false,
+    "runtimeFeatureFlag": false,
+    "legacyRuntimeReads": false,
+    "rollbackBoundary": "restore the database and Pi session directory snapshot with the old binary only before the first post-cutover business write; after that boundary roll forward only"
+  },
+  "commands": {
+    "check": {
+      "mode": "read-only",
+      "output": "CutoverReport@v1",
+      "records": [
+        "legacy schema fingerprint and migration checksum",
+        "database and Pi session directory fingerprint",
+        "Requirement classification and row counts",
+        "active legacy Runs",
+        "expected LegacyRequirementBundle and ReusableAsset mappings",
+        "attachment anomalies",
+        "blocking invariant violations",
+        "obsolete tables, routes, symbols and files to remove"
+      ]
+    },
+    "apply": {
+      "requires": "accepted CutoverReport digest",
+      "staleReportBehavior": "refuse",
+      "transaction": "BEGIN IMMEDIATE create-copy-validate-swap-drop",
+      "output": "MigrationAttestation@v1"
+    }
+  },
+  "preflight": {
+    "required": [
+      "Gateway is stopped and no process can write the SQLite database or Pi session directory",
+      "legacy schema fingerprint exactly matches the supported pre-cutover schema",
+      "PRAGMA quick_check and foreign_key_check pass",
+      "there are no queued or running legacy Runs",
+      "every Requirement is classified exactly once",
+      "every archived DesignSession has exactly one DesignPackage",
+      "manual asset sources resolve to exactly one workspace",
+      "generated requirement baseline documents validate against artifact/requirement/v1",
+      "database and session fingerprints match the accepted CutoverReport"
+    ],
+    "forbiddenOverrides": ["force", "skip-active-run", "skip-requirement", "ignore-count-mismatch"]
+  },
+  "classifications": {
+    "legacy_archived": {
+      "predicate": "normal Requirement with archived DesignSession and exactly one DesignPackage",
+      "workflow": {
+        "state": "archived",
+        "policyBundle": "legacy-import/v1",
+        "archiveClass": "legacy_pre_policy",
+        "commands": "none"
+      },
+      "approval": "do not create a governed ApprovalPacket or Approval",
+      "designPackage": "preserve as immutable document bound to MigrationAttestation",
+      "projectionLabel": "历史归档（切换前）",
+      "baseline": "create one artifact/requirement/v1 identity revision; summary and description are trim(legacy description) or title, sourceRefs is empty, and source_migration_document_id references the attestation"
+    },
+    "pending_reentry": {
+      "predicate": "normal Requirement not archived",
+      "workflow": {
+        "state": "pending",
+        "policyBundle": "current production PolicyBundle",
+        "start": "requires the first explicit human start command"
+      },
+      "baseline": "create one artifact/requirement/v1 identity revision; summary and description are trim(legacy description) or title, sourceRefs is empty, and source_migration_document_id references the attestation",
+      "legacyFacts": "preserve only in LegacyRequirementBundle; do not activate them for Readiness",
+      "designSession": "create a new human-governance session; never append new Attempts to the legacy shared transcript"
+    },
+    "manual_asset_source": {
+      "predicate": "Requirement source is manual-assets, or a scenario/usecase/function Artifact has only manual-asset Run provenance",
+      "hardPrecondition": "no DesignPackage, requirement gene link, non-library Artifact kind, non-manual Run, Decision, Finding or human Approval",
+      "workflow": "none",
+      "target": "workspace-level ReusableAsset and ReusableAssetRevision",
+      "mixedProvenance": "refuse and require explicit repair"
+    }
+  },
+  "legacyRequirementBundle": {
+    "snapshotKind": "legacy_requirement_bundle",
+    "schemaRef": "legacy-requirement-bundle/v1",
+    "contentAddressed": true,
+    "includes": [
+      "legacy Requirement row",
+      "DesignSession row and transcript manifest",
+      "terminal Runs, Run events and tool calls",
+      "Artifacts and revisions",
+      "Decisions and options",
+      "Findings and Approvals",
+      "EvidenceSnapshot and TraceLinks",
+      "DesignPackage and requirement gene links",
+      "source table row counts and ordered primary-key digests"
+    ],
+    "invalidJson": "preserve raw text or bytes and digest; do not repair",
+    "missingAttachment": "record a typed anomaly and continue because the bundle is read-only",
+    "runtimeAuthority": "audit only; never an input to Readiness unless a later governed Task explicitly cites a reusable source revision"
+  },
+  "historicalArchive": {
+    "attestationKind": "migration_attestation",
+    "archiveClass": "legacy_pre_policy",
+    "runtimeTransitionCanCreate": false,
+    "requiresGovernedApproval": false,
+    "reason": "the archive predates ApprovalPacket and trusted Actor semantics",
+    "commandsAllowed": [],
+    "viewsAllowed": ["read", "audit", "export"]
+  },
+  "reusableAssets": {
+    "aggregate": "ReusableAsset",
+    "scope": "workspace",
+    "kinds": ["scenario", "usecase", "function"],
+    "tables": ["reusable_assets", "reusable_asset_revisions"],
+    "provenance": ["manual", "import", "migration"],
+    "workflowUse": "a Task may cite one exact ReusableAssetRevision as an input source; a professional role still publishes a new Requirement Artifact revision",
+    "retainedHttpPaths": [
+      "GET /api/assets",
+      "GET /api/assets/export",
+      "POST /api/assets",
+      "POST /api/assets/import",
+      "DELETE /api/assets/:id"
+    ],
+    "removedHelpers": ["Store.ensureAssetRequirement", "Store.ensureManualAssetRun"]
+  },
+  "activeLegacyRuns": {
+    "queuedOrRunning": "refuse cutover; wait for completion or explicitly cancel in the old release",
+    "terminal": "preserve only in the LegacyRequirementBundle",
+    "createTaskAttempt": false,
+    "publishLegacyOutput": false
+  },
+  "migration": {
+    "numbered": true,
+    "forwardOnly": true,
+    "legacyReaderScope": "private migration module only",
+    "steps": [
+      "verify the accepted CutoverReport and create a database plus Pi session directory snapshot",
+      "BEGIN IMMEDIATE and record the migration run",
+      "create target tables under temporary names and insert immutable policy, schema and actor snapshots",
+      "migrate manual asset sources to ReusableAsset aggregates",
+      "create and validate one LegacyRequirementBundle and MigrationAttestation per normal Requirement",
+      "create one Workflow per normal Requirement using legacy_archived or pending_reentry rules",
+      "create current requirement baseline revisions for every normal Requirement",
+      "copy requirement gene links and create legacy DesignPackage rows where applicable",
+      "validate classifications, row counts, primary-key digests, foreign keys, bundle digests and target invariants",
+      "drop obsolete legacy tables and columns, rename target tables and record schema_migrations checksum",
+      "COMMIT, run quick_check and foreign_key_check, then execute normal startup recovery before binding HTTP"
+    ],
+    "onFailure": "ROLLBACK and refuse startup; do not modify the Pi session directory"
+  },
+  "targetSchemaAdditions": {
+    "tables": ["legacy_imports", "reusable_assets", "reusable_asset_revisions"],
+    "snapshotKinds": ["cutover_report", "migration_attestation", "legacy_requirement_bundle", "reusable_asset_content"],
+    "artifactRevisionField": "source_migration_document_id",
+    "eventType": "legacy_data_imported"
+  },
+  "removedHttpPaths": [
+    "GET /api/requirements/:id/runs",
+    "POST /api/requirements/:id/runs",
+    "POST /api/runs/:id/steer",
+    "POST /api/runs/:id/cancel",
+    "POST /api/requirements/:id/archive",
+    "GET /api/runs/stream",
+    "GET /api/requirements/:id/evidence-snapshot",
+    "GET /api/requirements/:id/design-package"
+  ],
+  "replacementReads": [
+    "GET /api/requirements/:requirementId",
+    "GET /api/workflows/:workflowId",
+    "GET /api/workflows/:workflowId/events",
+    "GET /api/runs/:runId",
+    "GET /api/runs/:runId/events",
+    "GET /api/design-packages/:designPackageId",
+    "GET /api/legacy-imports/:requirementId"
+  ],
+  "removedCode": {
+    "agent-runtime/agent.ts": ["reviewer AgentRole", "shared main-session role execution"],
+    "agent-runtime/gateway.ts": [
+      "manual role Run handler",
+      "direct Run steer/cancel handler",
+      "direct archive handler",
+      "global Run SSE stream",
+      "openRequirementSession shared-Agent path",
+      "client role/prompt/parentRunId execution input"
+    ],
+    "agent-runtime/store.ts": [
+      "RunInProgressError",
+      "run_locks schema and DAO",
+      "Store.ensureAssetRequirement",
+      "Store.ensureManualAssetRun",
+      "Store.selectDecisionOption",
+      "Store.setDecisionStatus",
+      "mutable Store.createApproval contract",
+      "direct Store.archiveDesignSession flow",
+      "blanket recoverActiveRuns behavior",
+      "Run to DesignSession foreign key"
+    ],
+    "web/src/baize-requirement.ts": ["AgentRole and ROLES", "free prompt", "runAgent", "direct archive", "manual Run controls"],
+    "web/src/baize-run-rail.ts": ["global and requirement-column legacy Run rail"],
+    "web/src/baize-shell.ts": ["baize-run-rail mount and suppress behavior"],
+    "web/src/main.ts": ["baize-run-rail import"],
+    ".pi/skills/reviewer/SKILL.md": ["entire file"],
+    "documentation": ["Reviewer as Agent", "manual role Run instructions", "direct archive instructions"]
+  },
+  "obsoleteDatabaseSurface": [
+    "run_locks",
+    "runs.session_id foreign key to design_sessions",
+    "runs.parent_run_id manual chaining semantics",
+    "runs.kind main/critic/manual-asset semantics",
+    "mutable decisions.status and selected_option_id as write authority",
+    "legacy approvals decision/actor/diff shape",
+    "single-row evidence_snapshots requirement_id key",
+    "legacy Artifact revision run_id provenance",
+    "legacy DesignPackage approved status as archive authority"
+  ],
+  "oldClientBehavior": {
+    "unregisteredRoutes": 404,
+    "tombstoneAdapters": false,
+    "schemaMismatch": "disable commands and require a full page reload",
+    "fallbackUi": false
+  },
+  "rollback": {
+    "beforeFirstBusinessWrite": "stop the new binary, restore the paired database and Pi session directory snapshot, start the old binary",
+    "afterFirstBusinessWrite": "roll forward only",
+    "notAllowed": ["down migration", "feeding target schema to the old binary", "copying selected rows backward", "re-enabling old routes"]
+  },
+  "postMigrationGates": [
+    "every normal Requirement has exactly one Workflow",
+    "every Workflow is pending or archived and owns no active claim, Task, Attempt, Run, Gate or outbox job",
+    "every normal Requirement has one valid current requirement revision",
+    "every pending Workflow is pinned to the current PolicyBundle",
+    "every legacy_pre_policy archive has one LegacyRequirementBundle, MigrationAttestation and legacy DesignPackage but no governed ApprovalPacket",
+    "every manual asset source maps to exactly one ReusableAsset revision and no manual-assets Requirement remains",
+    "all source row counts and primary-key digests are covered by bundles or reusable asset mappings",
+    "the old tables, old columns, Reviewer role, reviewer Skill, legacy routes and legacy Web controls are absent",
+    "normal startup reconciliation succeeds before HTTP is bound"
+  ],
+  "forbidden": [
+    "dual write",
+    "old schema read fallback",
+    "runtime cutover feature flag",
+    "synthetic governed Approval for legacy archives",
+    "automatic conversion of a legacy Run into a Task Attempt",
+    "keeping _legacy tables or compatibility views",
+    "force migration past a blocking preflight failure"
+  ]
+}
