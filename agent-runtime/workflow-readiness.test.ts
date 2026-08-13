@@ -790,11 +790,11 @@ test("ApprovalPacket is immutable once stored", async () => {
 		try {
 			assert.throws(
 				() => db.prepare("update approval_packets set digest = 'sha256:tampered' where id = ?").run(built.packetId),
-				/ApprovalPacket is immutable/,
+				/ApprovalPacket (content )?is immutable/,
 			);
 			assert.throws(
 				() => db.prepare("delete from approval_packets where id = ?").run(built.packetId),
-				/ApprovalPacket is immutable/,
+				/ApprovalPacket (content )?is immutable/,
 			);
 		} finally {
 			db.close();

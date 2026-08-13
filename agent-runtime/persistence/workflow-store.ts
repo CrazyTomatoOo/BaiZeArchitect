@@ -4,6 +4,7 @@ import path from "node:path";
 import type { CrashInjector, FixtureClock, FixtureOutboxTransport, HashProvider } from "../testing/deterministic-fixtures.js";
 import { WorkflowDoctor, type DoctorReport } from "../workflow/workflow-doctor.js";
 import { PLAN_TASK_LIMITS, type PlanProposal, type TaskProposal } from "../workflow/plan-types.js";
+import { validatePlanProposal } from "../workflow/plan-validator.js";
 import type { RequirementBaseline } from "../workflow/requirement.js";
 
 import { WORKFLOW_GOVERNANCE_MIGRATION } from "./migrations/0001-workflow-governance.js";
@@ -15,12 +16,32 @@ import { DEPENDENT_TASK_SAFETY_MIGRATION } from "./migrations/0006-dependent-tas
 import { REQUIRED_ARTIFACTS_AND_EVIDENCE_MIGRATION } from "./migrations/0007-required-artifacts-and-evidence.js";
 import { CRITIC_GOVERNANCE_MIGRATION } from "./migrations/0008-critic-governance.js";
 import { DECISIONS_AND_READINESS_MIGRATION } from "./migrations/0009-decisions-and-readiness.js";
+import { HUMAN_GOVERNANCE_MIGRATION } from "./migrations/0010-human-governance.js";
 import { ARTIFACT_OWNERSHIP, type InputBinding, type TaskOutputInput } from "../workflow/plan-types.js";
 import type { RoleResult, ContextManifest, RoleContract, BeginAttemptResult, CompleteAttemptResult, TraceLinkProposal, CriticReport, FindingProposal, FindingSeverity } from "../workflow/role-result.js";
 import { deriveRequiredArtifactSet, type ImpactProfile, type RequiredArtifactSet } from "../workflow/impact-profile.js";
 
-const MIGRATIONS = [WORKFLOW_GOVERNANCE_MIGRATION, COMMAND_GOVERNANCE_MIGRATION, RECOVERY_GOVERNANCE_MIGRATION, PLANNING_GOVERNANCE_MIGRATION, ATTEMPT_EXECUTION_MIGRATION, DEPENDENT_TASK_SAFETY_MIGRATION, REQUIRED_ARTIFACTS_AND_EVIDENCE_MIGRATION, CRITIC_GOVERNANCE_MIGRATION, DECISIONS_AND_READINESS_MIGRATION] as const;
-export type WorkflowCommandType = "start" | "pause" | "resume" | "retry-recovery" | "cancel-run" | "dispose-decision";
+const MIGRATIONS = [WORKFLOW_GOVERNANCE_MIGRATION, COMMAND_GOVERNANCE_MIGRATION, RECOVERY_GOVERNANCE_MIGRATION, PLANNING_GOVERNANCE_MIGRATION, ATTEMPT_EXECUTION_MIGRATION, DEPENDENT_TASK_SAFETY_MIGRATION, REQUIRED_ARTIFACTS_AND_EVIDENCE_MIGRATION, CRITIC_GOVERNANCE_MIGRATION, DECISIONS_AND_READINESS_MIGRATION, HUMAN_GOVERNANCE_MIGRATION] as const;
+export type WorkflowCommandType =
+	| "start"
+	| "pause"
+	| "resume"
+	| "retry-recovery"
+	| "cancel-run"
+	| "dispose-decision"
+	| "steer"
+	| "retry-task"
+	| "retry-planning"
+	| "replace-plan"
+	| "diagnostic-run"
+	| "provide-human-input"
+	| "revise-requirement"
+	| "approve-artifact"
+	| "reject-artifact"
+	| "accept-finding-risk"
+	| "revoke-approval"
+	| "approve-packet"
+	| "reject-packet";
 
 export type CommandOutcome =
 	| "accepted"
@@ -114,6 +135,70 @@ const COMMAND_TRANSITIONS: Record<WorkflowCommandType, readonly CommandTransitio
 		{ from: "running", to: "running", eventType: "decision_disposed" },
 		{ from: "waiting_for_human", to: "running", eventType: "decision_disposed" },
 	],
+	steer: [
+		{ from: "running", to: "running", eventType: "human_directive_recorded" },
+		{ from: "paused", to: "paused", eventType: "human_directive_recorded" },
+		{ from: "waiting_for_human", to: "waiting_for_human", eventType: "human_directive_recorded" },
+	],
+	"retry-task": [{ from: "failed", to: "running", eventType: "task_retried" }],
+	"retry-planning": [{ from: "failed", to: "running", eventType: "planning_retried" }],
+	"replace-plan": [
+		{ from: "running", to: "running", eventType: "plan_replaced" },
+		{ from: "waiting_for_human", to: "waiting_for_human", eventType: "plan_replaced" },
+	],
+	"diagnostic-run": [
+		{ from: "running", to: "running", eventType: "diagnostic_run_completed" },
+		{ from: "paused", to: "paused", eventType: "diagnostic_run_completed" },
+		{ from: "waiting_for_human", to: "waiting_for_human", eventType: "diagnostic_run_completed" },
+		{ from: "failed", to: "failed", eventType: "diagnostic_run_completed" },
+	],
+	"provide-human-input": [
+		{ from: "waiting_for_human", to: "running", eventType: "human_input_provided" },
+	],
+	"revise-requirement": [
+		{ from: "running", to: "running", eventType: "requirement_revised" },
+		{ from: "paused", to: "paused", eventType: "requirement_revised" },
+		{ from: "waiting_for_human", to: "waiting_for_human", eventType: "requirement_revised" },
+	],
+	"approve-artifact": [
+		{ from: "running", to: "running", eventType: "artifact_revision_approved" },
+		{ from: "waiting_for_human", to: "waiting_for_human", eventType: "artifact_revision_approved" },
+		{ from: "paused", to: "paused", eventType: "artifact_revision_approved" },
+	],
+	"reject-artifact": [
+		{ from: "running", to: "running", eventType: "artifact_revision_rejected" },
+		{ from: "waiting_for_human", to: "waiting_for_human", eventType: "artifact_revision_rejected" },
+		{ from: "paused", to: "paused", eventType: "artifact_revision_rejected" },
+	],
+	"accept-finding-risk": [
+		{ from: "waiting_for_human", to: "running", eventType: "finding_risk_accepted" },
+		{ from: "running", to: "running", eventType: "finding_risk_accepted" },
+	],
+	"revoke-approval": [{ from: "archived", to: "archived", eventType: "approval_revoked" }],
+	"approve-packet": [{ from: "ready_to_archive", to: "archived", eventType: "workflow_archived" }],
+	"reject-packet": [{ from: "ready_to_archive", to: "running", eventType: "packet_rejected" }],
+};
+
+const COMMAND_CAPABILITIES: Record<WorkflowCommandType, string> = {
+	start: "workflow:operate",
+	pause: "workflow:operate",
+	resume: "workflow:operate",
+	"retry-recovery": "workflow:operate",
+	"cancel-run": "workflow:operate",
+	steer: "workflow:operate",
+	"retry-task": "workflow:operate",
+	"retry-planning": "workflow:operate",
+	"replace-plan": "workflow:operate",
+	"diagnostic-run": "workflow:operate",
+	"provide-human-input": "workflow:operate",
+	"revise-requirement": "workflow:operate",
+	"dispose-decision": "workflow:approve",
+	"approve-artifact": "workflow:approve",
+	"reject-artifact": "workflow:approve",
+	"accept-finding-risk": "workflow:approve",
+	"revoke-approval": "workflow:approve",
+	"approve-packet": "workflow:approve",
+	"reject-packet": "workflow:approve",
 };
 export interface PolicyBundleDocument {
 	schemaVersion: "policy-bundle/v1";
@@ -145,6 +230,7 @@ interface WorkflowStoreOptions {
 	outboxTransport: FixtureOutboxTransport;
 	policyBundle: PolicyBundleDocument;
 	artifactValidator?: { check(value: unknown): boolean };
+	planValidator?: { check(value: unknown): boolean; errors(value: unknown): readonly unknown[] };
 }
 
 interface SnapshotDocument {
@@ -550,15 +636,15 @@ export class WorkflowStore {
 			};
 		}
 		const workflow = this.database
-			.prepare("select state, version, last_event_seq from workflows where id = ?")
-			.get(input.workflowId) as { state: string; version: number; last_event_seq: number };
+			.prepare("select state, version, last_event_seq, current_failure_code, current_plan_revision_id, current_approval_packet_id, requirement_id from workflows where id = ?")
+			.get(input.workflowId) as { state: string; version: number; last_event_seq: number; current_failure_code: string | null; current_plan_revision_id: number | null; current_approval_packet_id: number | null; requirement_id: number };
 		const actorSnapshot = this.insertSnapshot(
 			"actor_snapshot",
 			"actor/v1",
 			{ actorRef: input.operator.actorRef, capabilities: input.operator.capabilities },
 			timestamp,
 		);
-		const capability = `workflow:operate`;
+		const capability = COMMAND_CAPABILITIES[input.type];
 		if (!input.operator.capabilities.includes(capability)) {
 			return this.persistRejection(input, timestamp, requestDigest, workflow, actorSnapshot.id, "capability_denied", 403);
 		}
@@ -570,6 +656,7 @@ export class WorkflowStore {
 		if (!transition) {
 			return this.persistRejection(input, timestamp, requestDigest, workflow, actorSnapshot.id, "state_conflict", 409);
 		}
+		let toState = transition.to;
 		if (input.type === "retry-recovery") {
 			const incidentId = input.payload?.incidentId;
 			if (typeof incidentId !== "number") {
@@ -640,10 +727,224 @@ export class WorkflowStore {
 					.run(disposition, timestamp, decisionId);
 			}
 		}
+		if (input.type === "steer") {
+			const directive = input.payload?.directive;
+			if (typeof directive !== "string" || directive.length === 0) {
+				return this.persistRejection(input, timestamp, requestDigest, workflow, actorSnapshot.id, "business_rule_rejected", 422);
+			}
+			this.database
+				.prepare("insert into human_directives(workflow_id, directive_text, actor_snapshot_document_id, command_id, created_at) values (?, ?, ?, ?, ?)")
+				.run(input.workflowId, directive, actorSnapshot.id, input.commandId, timestamp);
+		}
+		if (input.type === "retry-task") {
+			const taskId = input.payload?.taskId;
+			if (typeof taskId !== "number" || workflow.current_failure_code !== "task_budget_exhausted") {
+				return this.persistRejection(input, timestamp, requestDigest, workflow, actorSnapshot.id, "business_rule_rejected", 422);
+			}
+			const task = this.database
+				.prepare("select id, status, kind from tasks where id = ? and workflow_id = ?")
+				.get(taskId, input.workflowId) as { id: number; status: string; kind: string } | undefined;
+			if (!task || task.kind === "plan" || task.status !== "failed") {
+				return this.persistRejection(input, timestamp, requestDigest, workflow, actorSnapshot.id, "business_rule_rejected", 422);
+			}
+			this.database.prepare("update tasks set status = 'pending' where id = ?").run(taskId);
+			this.database.prepare("update workflows set current_failure_code = null where id = ?").run(input.workflowId);
+		}
+		if (input.type === "retry-planning") {
+			if (workflow.current_failure_code !== "planning_exhausted" && workflow.current_failure_code !== "plan_budget_exhausted") {
+				return this.persistRejection(input, timestamp, requestDigest, workflow, actorSnapshot.id, "business_rule_rejected", 422);
+			}
+			this.database.prepare("update workflows set current_failure_code = null where id = ?").run(input.workflowId);
+		}
+		if (input.type === "replace-plan") {
+			const proposal = input.payload?.proposal;
+			if (!this.options.planValidator || !this.options.planValidator.check(proposal)) {
+				return this.persistRejection(input, timestamp, requestDigest, workflow, actorSnapshot.id, "business_rule_rejected", 422);
+			}
+			const validation = validatePlanProposal(proposal, {
+				workflowId: input.workflowId,
+				workflowVersion: workflow.version,
+				planningContextDigest: this.computePlanningContextDigest(input.workflowId),
+				basePlanRevisionId: workflow.current_plan_revision_id,
+			}, this.options.planValidator);
+			if (!validation.valid) {
+				return this.persistRejection(input, timestamp, requestDigest, workflow, actorSnapshot.id, "business_rule_rejected", 422);
+			}
+			this.adoptReplacementPlanRows(input.workflowId, workflow, proposal as PlanProposal, timestamp);
+		}
+		if (input.type === "diagnostic-run") {
+			const purpose = input.payload?.purpose;
+			if (typeof purpose !== "string" || purpose.length === 0) {
+				return this.persistRejection(input, timestamp, requestDigest, workflow, actorSnapshot.id, "business_rule_rejected", 422);
+			}
+			this.database
+				.prepare("insert into diagnostic_runs(workflow_id, purpose, status, actor_snapshot_document_id, command_id, created_at) values (?, ?, 'completed', ?, ?, ?)")
+				.run(input.workflowId, purpose, actorSnapshot.id, input.commandId, timestamp);
+		}
+		if (input.type === "provide-human-input") {
+			const gateId = input.payload?.gateId;
+			const humanInput = input.payload?.input;
+			if (typeof gateId !== "number" || humanInput === undefined) {
+				return this.persistRejection(input, timestamp, requestDigest, workflow, actorSnapshot.id, "business_rule_rejected", 422);
+			}
+			const gate = this.database
+				.prepare("select id, gate_type, subject_id, status from human_gates where id = ? and workflow_id = ?")
+				.get(gateId, input.workflowId) as { id: number; gate_type: string; subject_id: number; status: string } | undefined;
+			if (!gate || gate.status !== "open") {
+				return this.persistRejection(input, timestamp, requestDigest, workflow, actorSnapshot.id, "business_rule_rejected", 422);
+			}
+			this.database
+				.prepare("update human_gates set status = 'resolved', resolution_json = ?, resolved_at = ? where id = ?")
+				.run(JSON.stringify({ input: humanInput }), timestamp, gateId);
+			if (gate.gate_type === "human_input") {
+				this.database
+					.prepare("update tasks set status = 'pending' where id = (select task_id from task_attempts where id = ?) and status = 'blocked'")
+					.run(gate.subject_id);
+			}
+			if (this.openGateCount(input.workflowId) > 0) {
+				toState = "waiting_for_human";
+			}
+		}
+		if (input.type === "revise-requirement") {
+			const baseline = input.payload?.baseline;
+			if (!this.options.artifactValidator || !this.options.artifactValidator.check(baseline)) {
+				return this.persistRejection(input, timestamp, requestDigest, workflow, actorSnapshot.id, "business_rule_rejected", 422);
+			}
+			this.reviseRequirementRows(input.workflowId, workflow.requirement_id, baseline as RequirementBaseline, actorSnapshot.id, input.commandId, timestamp);
+		}
+		if (input.type === "approve-artifact" || input.type === "reject-artifact") {
+			const artifactId = input.payload?.artifactId;
+			const revisionId = input.payload?.revisionId;
+			const reason = input.payload?.reason;
+			if (typeof artifactId !== "number" || typeof revisionId !== "number") {
+				return this.persistRejection(input, timestamp, requestDigest, workflow, actorSnapshot.id, "business_rule_rejected", 422);
+			}
+			if (input.type === "reject-artifact" && (typeof reason !== "string" || reason.length === 0)) {
+				return this.persistRejection(input, timestamp, requestDigest, workflow, actorSnapshot.id, "business_rule_rejected", 422);
+			}
+			const artifact = this.database
+				.prepare("select id, current_revision_id from artifacts where id = ? and requirement_id = ?")
+				.get(artifactId, workflow.requirement_id) as { id: number; current_revision_id: number | null } | undefined;
+			const revision = artifact
+				? this.database
+						.prepare("select id, status, content_digest from artifact_revisions where id = ? and artifact_id = ?")
+						.get(revisionId, artifactId) as { id: number; status: string; content_digest: string } | undefined
+				: undefined;
+			const latest = artifact
+				? this.database
+						.prepare("select id from artifact_revisions where artifact_id = ? order by id desc limit 1")
+						.get(artifactId) as { id: number } | undefined
+				: undefined;
+			if (!artifact || !revision || revision.status !== "pending" || !latest || latest.id !== revisionId) {
+				return this.persistRejection(input, timestamp, requestDigest, workflow, actorSnapshot.id, "business_rule_rejected", 422);
+			}
+			const newStatus = input.type === "approve-artifact" ? "approved" : "rejected";
+			this.database.prepare("update artifact_revisions set status = ? where id = ?").run(newStatus, revisionId);
+			if (input.type === "approve-artifact") {
+				this.database.prepare("update artifacts set current_revision_id = ? where id = ?").run(revisionId, artifactId);
+			}
+			this.database
+				.prepare("insert into approval_records(workflow_id, record_type, subject_type, subject_id, subject_digest, reason, targets_json, actor_snapshot_document_id, command_id, created_at) values (?, ?, 'artifact_revision', ?, ?, ?, null, ?, ?, ?)")
+				.run(input.workflowId, input.type === "approve-artifact" ? "artifact_approval" : "artifact_rejection", revisionId, revision.content_digest, typeof reason === "string" ? reason : null, actorSnapshot.id, input.commandId, timestamp);
+		}
+		if (input.type === "accept-finding-risk") {
+			const findingId = input.payload?.findingId;
+			const targetRevisionId = input.payload?.targetRevisionId;
+			const impact = input.payload?.impact;
+			const reason = input.payload?.reason;
+			if (typeof findingId !== "number" || typeof targetRevisionId !== "number" || typeof impact !== "string" || impact.length === 0 || typeof reason !== "string" || reason.length === 0) {
+				return this.persistRejection(input, timestamp, requestDigest, workflow, actorSnapshot.id, "business_rule_rejected", 422);
+			}
+			const finding = this.database
+				.prepare("select id, severity, status, thread_id, target_revision_id, fingerprint from findings where id = ? and workflow_id = ?")
+				.get(findingId, input.workflowId) as { id: number; severity: string; status: string; thread_id: number; target_revision_id: number; fingerprint: string } | undefined;
+			if (!finding || finding.status !== "open" || finding.severity !== "major" || finding.target_revision_id !== targetRevisionId) {
+				return this.persistRejection(input, timestamp, requestDigest, workflow, actorSnapshot.id, "business_rule_rejected", 422);
+			}
+			this.database
+				.prepare("update findings set status = 'risk_accepted', risk_accepted_by = ?, risk_acceptance_reason = ?, resolved_at = ? where id = ?")
+				.run(input.operator.actorRef, reason, timestamp, findingId);
+			this.database.prepare("update finding_threads set status = 'risk_accepted', updated_at = ? where id = ?").run(timestamp, finding.thread_id);
+			this.database
+				.prepare("update human_gates set status = 'resolved', resolution_json = ?, resolved_at = ? where workflow_id = ? and gate_type = 'finding_disposition' and subject_id = ? and status = 'open'")
+				.run(JSON.stringify({ findingId, impact, reason }), timestamp, input.workflowId, finding.thread_id);
+			this.database
+				.prepare("insert into approval_records(workflow_id, record_type, subject_type, subject_id, subject_digest, reason, targets_json, actor_snapshot_document_id, command_id, created_at) values (?, 'finding_risk_acceptance', 'finding', ?, ?, ?, ?, ?, ?, ?)")
+				.run(input.workflowId, findingId, finding.fingerprint, reason, JSON.stringify({ impact, targetRevisionId }), actorSnapshot.id, input.commandId, timestamp);
+			if (workflow.state === "waiting_for_human" && this.openGateCount(input.workflowId) > 0) {
+				toState = "waiting_for_human";
+			}
+		}
+		if (input.type === "revoke-approval") {
+			const approvalRecordId = input.payload?.approvalRecordId;
+			if (typeof approvalRecordId !== "number") {
+				return this.persistRejection(input, timestamp, requestDigest, workflow, actorSnapshot.id, "business_rule_rejected", 422);
+			}
+			const record = this.database
+				.prepare("select id, record_type from approval_records where id = ? and workflow_id = ?")
+				.get(approvalRecordId, input.workflowId) as { id: number; record_type: string } | undefined;
+			if (!record || record.record_type !== "packet_approval") {
+				return this.persistRejection(input, timestamp, requestDigest, workflow, actorSnapshot.id, "business_rule_rejected", 422);
+			}
+			const reason = typeof input.payload?.reason === "string" ? input.payload.reason : null;
+			this.database
+				.prepare("insert into approval_records(workflow_id, record_type, subject_type, subject_id, subject_digest, reason, targets_json, actor_snapshot_document_id, command_id, created_at) values (?, 'approval_revocation', 'approval_record', ?, null, ?, null, ?, ?, ?)")
+				.run(input.workflowId, approvalRecordId, reason, actorSnapshot.id, input.commandId, timestamp);
+		}
+		if (input.type === "approve-packet") {
+			const packetDigest = input.payload?.packetDigest;
+			if (typeof packetDigest !== "string" || workflow.current_approval_packet_id === null) {
+				return this.persistRejection(input, timestamp, requestDigest, workflow, actorSnapshot.id, "business_rule_rejected", 422);
+			}
+			const packet = this.database
+				.prepare("select id, digest, content_json, status from approval_packets where id = ? and workflow_id = ?")
+				.get(workflow.current_approval_packet_id, input.workflowId) as { id: number; digest: string; content_json: string; status: string } | undefined;
+			if (!packet || packet.status !== "current" || packet.digest !== packetDigest) {
+				return this.persistRejection(input, timestamp, requestDigest, workflow, actorSnapshot.id, "business_rule_rejected", 422);
+			}
+			const readiness = this.checkReadiness(input.workflowId);
+			if (!readiness.ready) {
+				return this.persistRejection(input, timestamp, requestDigest, workflow, actorSnapshot.id, "business_rule_rejected", 422);
+			}
+			const content = parseJson<{ artifacts?: ReadonlyArray<{ revisionId: number; status: string }> }>(packet.content_json);
+			for (const artifact of content.artifacts ?? []) {
+				if (artifact.status === "pending") {
+					this.database.prepare("update artifact_revisions set status = 'approved' where id = ?").run(artifact.revisionId);
+				}
+			}
+			this.database
+				.prepare("update design_sessions set status = 'archived', archived_at = ?, updated_at = ? where requirement_id = ?")
+				.run(timestamp, timestamp, workflow.requirement_id);
+			this.database
+				.prepare("insert into approval_records(workflow_id, record_type, subject_type, subject_id, subject_digest, reason, targets_json, actor_snapshot_document_id, command_id, created_at) values (?, 'packet_approval', 'approval_packet', ?, ?, null, null, ?, ?, ?)")
+				.run(input.workflowId, packet.id, packet.digest, actorSnapshot.id, input.commandId, timestamp);
+			this.appendEvent(input.workflowId, "packet_approved", workflow.version + 1, "approval_packet", packet.id, 0, { digest: packet.digest }, timestamp, actorSnapshot.id, input.commandId);
+		}
+		if (input.type === "reject-packet") {
+			const reason = input.payload?.reason;
+			const targets = input.payload?.targets;
+			if (typeof reason !== "string" || reason.length === 0 || !Array.isArray(targets) || targets.length === 0) {
+				return this.persistRejection(input, timestamp, requestDigest, workflow, actorSnapshot.id, "business_rule_rejected", 422);
+			}
+			if (workflow.current_approval_packet_id === null) {
+				return this.persistRejection(input, timestamp, requestDigest, workflow, actorSnapshot.id, "business_rule_rejected", 422);
+			}
+			const packet = this.database
+				.prepare("select id, digest, status from approval_packets where id = ? and workflow_id = ?")
+				.get(workflow.current_approval_packet_id, input.workflowId) as { id: number; digest: string; status: string } | undefined;
+			if (!packet || packet.status !== "current") {
+				return this.persistRejection(input, timestamp, requestDigest, workflow, actorSnapshot.id, "business_rule_rejected", 422);
+			}
+			this.database.prepare("update approval_packets set status = 'rejected' where id = ?").run(packet.id);
+			this.database.prepare("update workflows set current_approval_packet_id = null where id = ?").run(input.workflowId);
+			this.database
+				.prepare("insert into approval_records(workflow_id, record_type, subject_type, subject_id, subject_digest, reason, targets_json, actor_snapshot_document_id, command_id, created_at) values (?, 'packet_rejection', 'approval_packet', ?, ?, ?, ?, ?, ?, ?)")
+				.run(input.workflowId, packet.id, packet.digest, reason, JSON.stringify(targets), actorSnapshot.id, input.commandId, timestamp);
+		}
 		const newVersion = workflow.version + 1;
 	this.database
 		.prepare("update workflows set state = ?, version = ?, consecutive_plan_revisions = 0, updated_at = ? where id = ?")
-		.run(transition.to, newVersion, timestamp, input.workflowId);
+		.run(toState, newVersion, timestamp, input.workflowId);
 		const seq = this.appendEvent(input.workflowId, transition.eventType, newVersion, "workflow", input.workflowId, newVersion, input.payload ?? {}, timestamp, actorSnapshot.id, input.commandId);
 		if (input.type !== "retry-recovery") {
 			this.database
@@ -665,6 +966,74 @@ export class WorkflowStore {
 			.run(receipt.commandId, receipt.workflowId, requestDigest, receipt.commandType, input.expectedWorkflowVersion, actorSnapshot.id, receipt.outcome, receipt.httpStatus, receipt.workflowVersion, receipt.lastEventSeq, receipt.createdAt);
 		this.options.crashInjector.reach("execute_command.before_commit");
 		return receipt;
+	}
+
+	private openGateCount(workflowId: number): number {
+		const gates = (this.database.prepare("select count(*) as count from human_gates where workflow_id = ? and status = 'open'").get(workflowId) as { count: number }).count;
+		const findingThreads = (this.database.prepare("select count(*) as count from finding_threads where workflow_id = ? and status = 'human_gate'").get(workflowId) as { count: number }).count;
+		return gates + findingThreads;
+	}
+
+	private reviseRequirementRows(workflowId: number, requirementId: number, baseline: RequirementBaseline, actorSnapshotId: number, commandId: string, timestamp: string): void {
+		const requirement = this.database
+			.prepare("select id, version from requirements where id = ?")
+			.get(requirementId) as { id: number; version: number };
+		const artifact = this.database
+			.prepare("select id from artifacts where requirement_id = ? and kind = 'requirement'")
+			.get(requirementId) as { id: number };
+		const snapshot = this.insertSnapshot("artifact_content", "artifact/requirement/v1", baseline, timestamp);
+		const revisionNo = (this.database.prepare("select coalesce(max(revision_no), 0) + 1 as next from artifact_revisions where artifact_id = ?").get(artifact.id) as { next: number }).next;
+		const revisionId = Number(
+			this.database
+				.prepare("insert into artifact_revisions(artifact_id, revision_no, content_document_id, content_digest, schema_ref, status, source_command_id, created_at) values (?, ?, ?, ?, 'artifact/requirement/v1', 'approved', ?, ?)")
+				.run(artifact.id, revisionNo, snapshot.id, snapshot.digest, commandId, timestamp).lastInsertRowid,
+		);
+		this.database.prepare("update artifacts set current_revision_id = ? where id = ?").run(revisionId, artifact.id);
+		this.database
+			.prepare("update requirements set current_revision_id = ?, version = ?, title = ?, updated_at = ? where id = ?")
+			.run(revisionId, requirement.version + 1, baseline.title, timestamp, requirementId);
+		this.appendEvent(workflowId, "requirement_revision_created", this.currentWorkflowVersion(workflowId), "artifact_revision", revisionId, revisionNo, { requirementId, revisionNo, contentDigest: snapshot.digest }, timestamp, actorSnapshotId, commandId);
+	}
+
+	private adoptReplacementPlanRows(workflowId: number, workflow: { version: number; current_plan_revision_id: number | null }, proposal: PlanProposal, timestamp: string): number {
+		const proposalSnapshot = this.insertSnapshot("plan_proposal", "plan-proposal/v1", proposal, timestamp);
+		const revisionNo = (this.database.prepare("select coalesce(max(revision_no), 0) + 1 as next from plan_revisions where workflow_id = ?").get(workflowId) as { next: number }).next;
+		const newVersion = workflow.version + 1;
+
+		if (workflow.current_plan_revision_id !== null) {
+			this.database.prepare("update plan_revisions set status = 'superseded' where id = ?").run(workflow.current_plan_revision_id);
+		}
+		const nonTerminalTasks = this.database
+			.prepare("select id from tasks where workflow_id = ? and kind != 'plan' and status in ('pending', 'in_progress', 'blocked', 'replan_requested')")
+			.all(workflowId) as Array<{ id: number }>;
+		for (const task of nonTerminalTasks) {
+			this.database.prepare("update tasks set status = 'superseded' where id = ?").run(task.id);
+		}
+		const runningAttempts = this.database
+			.prepare("select id from task_attempts where workflow_id = ? and status = 'running'")
+			.all(workflowId) as Array<{ id: number }>;
+		for (const attempt of runningAttempts) {
+			this.database.prepare("update task_attempts set status = 'superseded', completed_at = ? where id = ?").run(timestamp, attempt.id);
+			this.database.prepare("update runs set status = 'cancelled', completed_at = ? where attempt_id = ? and status in ('queued', 'running')").run(timestamp, attempt.id);
+			this.database.prepare("update governance_claims set status = 'released', released_at = ? where attempt_id = ? and status = 'active'").run(timestamp, attempt.id);
+		}
+
+		const planRevisionId = Number(
+			this.database
+				.prepare("insert into plan_revisions(workflow_id, revision_no, proposal_document_id, proposal_digest, base_plan_revision_id, planning_context_digest, status, created_at) values (?, ?, ?, ?, ?, ?, 'active', ?)")
+				.run(workflowId, revisionNo, proposalSnapshot.id, proposalSnapshot.digest, workflow.current_plan_revision_id, this.computePlanningContextDigest(workflowId), timestamp).lastInsertRowid,
+		);
+		for (const task of proposal.tasks) {
+			const taskId = Number(
+				this.database
+					.prepare("insert into tasks(workflow_id, plan_revision_id, key, kind, role, objective, depends_on_json, inputs_json, expected_artifact_effects_json, completion_policy_ref, max_attempts, status, created_at) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?)")
+					.run(workflowId, planRevisionId, task.key, task.kind, task.role, task.objective, JSON.stringify(task.dependsOn), JSON.stringify(task.inputs), JSON.stringify(task.expectedArtifactEffects), task.completionPolicyRef, task.maxAttempts, timestamp).lastInsertRowid,
+			);
+			this.appendEvent(workflowId, "task_created", newVersion, "task", taskId, 0, { planRevisionId, key: task.key, kind: task.kind, role: task.role }, timestamp);
+		}
+		this.database.prepare("update workflows set current_plan_revision_id = ? where id = ?").run(planRevisionId, workflowId);
+		this.appendEvent(workflowId, "plan_adopted", newVersion, "plan_revision", planRevisionId, revisionNo, { proposalDigest: proposalSnapshot.digest, revisionNo, basePlanRevisionId: workflow.current_plan_revision_id, source: "replace-plan" }, timestamp);
+		return planRevisionId;
 	}
 
 	private persistRejection(
@@ -940,10 +1309,12 @@ export class WorkflowStore {
 		const row = this.database
 			.prepare(`select w.current_plan_revision_id, ar.content_digest as requirement_digest, policy.digest as policy_digest from workflows w join requirements r on r.id = w.requirement_id join artifact_revisions ar on ar.id = r.current_revision_id join snapshot_documents policy on policy.id = w.policy_bundle_document_id where w.id = ?`)
 			.get(workflowId) as { current_plan_revision_id: number | null; requirement_digest: string; policy_digest: string };
+		const latestDirective = (this.database.prepare("select coalesce(max(id), 0) as latest from human_directives where workflow_id = ?").get(workflowId) as { latest: number }).latest;
 		return this.options.hashProvider.digest({
 			requirementRevisionDigest: row.requirement_digest,
 			policyBundleDigest: row.policy_digest,
 			basePlanRevisionId: row.current_plan_revision_id,
+			latestDirectiveId: latestDirective,
 		});
 	}
 
@@ -1244,7 +1615,8 @@ export class WorkflowStore {
 
 		if (result.decisionProposals) {
 			for (const proposal of result.decisionProposals) {
-				if (!["critical", "major", "minor"].includes(proposal.severity) || typeof proposal.summary !== "string" || proposal.summary.length === 0) {
+				const keys = Object.keys(proposal as unknown as Record<string, unknown>).sort();
+				if (keys.join(",") !== "severity,summary" || !["critical", "major", "minor"].includes(proposal.severity) || typeof proposal.summary !== "string" || proposal.summary.length === 0) {
 					return this.failAttemptRows(workflowId, attemptId, "invalid_decision_proposal", "DecisionProposal schema validation failed");
 				}
 			}
@@ -1399,6 +1771,9 @@ export class WorkflowStore {
 		this.database.prepare("update tasks set status = 'blocked' where id = ?").run(attempt.task_id);
 		this.database.prepare("update governance_claims set status = 'released', released_at = ? where attempt_id = ? and status = 'active'").run(timestamp, attemptId);
 		this.database.prepare("update workflows set state = 'waiting_for_human', version = ?, updated_at = ? where id = ?").run(newVersion, timestamp, workflowId);
+		this.database
+			.prepare("insert into human_gates(workflow_id, gate_type, subject_type, subject_id, status, opened_at) values (?, 'human_input', 'task_attempt', ?, 'open', ?)")
+			.run(workflowId, attemptId, timestamp);
 
 		this.appendEvent(workflowId, "task_blocked", newVersion, "task", attempt.task_id, 0, { taskKey: task.key, blockReason }, timestamp);
 		this.appendEvent(workflowId, "attempt_blocked", newVersion, "task_attempt", attemptId, 0, { taskId: attempt.task_id, blockReason }, timestamp);
@@ -1645,6 +2020,9 @@ export class WorkflowStore {
 					if (newCount >= 2) {
 						this.database.prepare("update finding_threads set rework_count = ?, status = 'human_gate', updated_at = ? where id = ?").run(newCount, timestamp, thread.id);
 						this.database.prepare("update workflows set state = 'waiting_for_human', version = ?, updated_at = ? where id = ?").run(newVersion, timestamp, workflowId);
+						this.database
+							.prepare("insert into human_gates(workflow_id, gate_type, subject_type, subject_id, status, opened_at) values (?, 'finding_disposition', 'finding_thread', ?, 'open', ?)")
+							.run(workflowId, thread.id, timestamp);
 						this.appendEvent(workflowId, "finding_thread_escalated", newVersion, "finding_thread", thread.id, 0, { fingerprint: proposal.fingerprint, reworkCount: newCount }, timestamp);
 					} else {
 						this.database.prepare("update finding_threads set rework_count = ?, updated_at = ? where id = ?").run(newCount, timestamp, thread.id);
@@ -1728,9 +2106,10 @@ export class WorkflowStore {
 			.get(workflowId, workflowId) as { count: number }).count;
 		push("terminal_current_work", activeClaims === 0 && activeAttempts === 0 && activeRuns === 0 && nonTerminalTasks === 0, `activeClaims=${activeClaims} activeAttempts=${activeAttempts} activeRuns=${activeRuns} nonTerminalTasks=${nonTerminalTasks}`);
 
-		// 2. No gate: no Finding Thread escalated to a human gate
+		// 2. No gate: no Finding Thread escalated to a human gate and no open Human Gate
 		const humanGateThreads = (this.database.prepare("select count(*) as count from finding_threads where workflow_id = ? and status = 'human_gate'").get(workflowId) as { count: number }).count;
-		push("no_gate", humanGateThreads === 0, `humanGateThreads=${humanGateThreads}`);
+		const openHumanGates = (this.database.prepare("select count(*) as count from human_gates where workflow_id = ? and status = 'open'").get(workflowId) as { count: number }).count;
+		push("no_gate", humanGateThreads === 0 && openHumanGates === 0, `humanGateThreads=${humanGateThreads} openHumanGates=${openHumanGates}`);
 
 		// 3. Complete Impact Profile
 		const impactRow = this.database.prepare("select complete from impact_profiles where workflow_id = ? order by id desc limit 1").get(workflowId) as { complete: number } | undefined;
@@ -1899,7 +2278,12 @@ export class WorkflowStore {
 		}
 		const content = this.assembleApprovalPacketContent(workflowId);
 		const digest = this.options.hashProvider.digest(content);
-		let packetId = (this.database.prepare("select id from approval_packets where workflow_id = ? and digest = ?").get(workflowId, digest) as { id: number } | undefined)?.id;
+		const existingPacket = this.database.prepare("select id, status from approval_packets where workflow_id = ? and digest = ?").get(workflowId, digest) as { id: number; status: string } | undefined;
+		if (existingPacket && existingPacket.status === "rejected") {
+			const checks = [...report.checks, { name: "packet_not_previously_rejected", passed: false, detail: "ApprovalPacket with the same digest was rejected; governed inputs must change before resubmission" }];
+			return { ready: false, packetId: null, digest: null, checks, warnings: report.warnings, workflowVersion: workflow.version, lastEventSeq: this.currentLastEventSeq(workflowId) };
+		}
+		let packetId = existingPacket?.id;
 		if (packetId === undefined) {
 			packetId = Number(this.database
 				.prepare("insert into approval_packets(workflow_id, digest, content_json, created_at) values (?, ?, ?, ?)")
@@ -1923,6 +2307,56 @@ export class WorkflowStore {
 			.get(workflow.current_approval_packet_id) as { id: number; workflow_id: number; digest: string; content_json: string; created_at: string } | undefined;
 		if (!row) return undefined;
 		return { id: row.id, workflowId: row.workflow_id, digest: row.digest, content: parseJson<Record<string, unknown>>(row.content_json), createdAt: row.created_at };
+	}
+
+	getHumanGates(workflowId: number): readonly HumanGateRecord[] {
+		const rows = this.database
+			.prepare("select id, workflow_id, gate_type, subject_type, subject_id, status, resolution_json, opened_at, resolved_at from human_gates where workflow_id = ? order by id")
+			.all(workflowId) as Array<{ id: number; workflow_id: number; gate_type: string; subject_type: string; subject_id: number; status: string; resolution_json: string | null; opened_at: string; resolved_at: string | null }>;
+		return rows.map((row) => ({
+			id: row.id,
+			workflowId: row.workflow_id,
+			gateType: row.gate_type as HumanGateRecord["gateType"],
+			subjectType: row.subject_type,
+			subjectId: row.subject_id,
+			status: row.status as HumanGateRecord["status"],
+			resolution: row.resolution_json === null ? null : parseJson<unknown>(row.resolution_json),
+			openedAt: row.opened_at,
+			resolvedAt: row.resolved_at,
+		}));
+	}
+
+	getApprovalRecords(workflowId: number): readonly ApprovalRecordEntry[] {
+		const rows = this.database
+			.prepare("select id, workflow_id, record_type, subject_type, subject_id, subject_digest, reason, targets_json, actor_snapshot_document_id, command_id, created_at from approval_records where workflow_id = ? order by id")
+			.all(workflowId) as Array<{ id: number; workflow_id: number; record_type: string; subject_type: string; subject_id: number; subject_digest: string | null; reason: string | null; targets_json: string | null; actor_snapshot_document_id: number; command_id: string; created_at: string }>;
+		return rows.map((row) => ({
+			id: row.id,
+			workflowId: row.workflow_id,
+			recordType: row.record_type as ApprovalRecordEntry["recordType"],
+			subjectType: row.subject_type,
+			subjectId: row.subject_id,
+			subjectDigest: row.subject_digest,
+			reason: row.reason,
+			targets: row.targets_json === null ? null : parseJson<unknown>(row.targets_json),
+			actorSnapshotDocumentId: row.actor_snapshot_document_id,
+			commandId: row.command_id,
+			createdAt: row.created_at,
+		}));
+	}
+
+	getHumanDirectives(workflowId: number): readonly HumanDirectiveRecord[] {
+		const rows = this.database
+			.prepare("select id, workflow_id, directive_text, actor_snapshot_document_id, command_id, created_at from human_directives where workflow_id = ? order by id")
+			.all(workflowId) as Array<{ id: number; workflow_id: number; directive_text: string; actor_snapshot_document_id: number; command_id: string; created_at: string }>;
+		return rows.map((row) => ({ id: row.id, workflowId: row.workflow_id, directiveText: row.directive_text, actorSnapshotDocumentId: row.actor_snapshot_document_id, commandId: row.command_id, createdAt: row.created_at }));
+	}
+
+	getDiagnosticRuns(workflowId: number): readonly DiagnosticRunRecord[] {
+		const rows = this.database
+			.prepare("select id, workflow_id, purpose, status, actor_snapshot_document_id, command_id, created_at from diagnostic_runs where workflow_id = ? order by id")
+			.all(workflowId) as Array<{ id: number; workflow_id: number; purpose: string; status: string; actor_snapshot_document_id: number; command_id: string; created_at: string }>;
+		return rows.map((row) => ({ id: row.id, workflowId: row.workflow_id, purpose: row.purpose, status: row.status, actorSnapshotDocumentId: row.actor_snapshot_document_id, commandId: row.command_id, createdAt: row.created_at }));
 	}
 }
 
@@ -2025,5 +2459,50 @@ export interface ApprovalPacketRecord {
 	workflowId: number;
 	digest: string;
 	content: Record<string, unknown>;
+	createdAt: string;
+}
+
+export interface HumanGateRecord {
+	id: number;
+	workflowId: number;
+	gateType: "human_input" | "finding_disposition";
+	subjectType: string;
+	subjectId: number;
+	status: "open" | "resolved";
+	resolution: unknown;
+	openedAt: string;
+	resolvedAt: string | null;
+}
+
+export interface ApprovalRecordEntry {
+	id: number;
+	workflowId: number;
+	recordType: "artifact_approval" | "artifact_rejection" | "finding_risk_acceptance" | "packet_approval" | "packet_rejection" | "approval_revocation";
+	subjectType: string;
+	subjectId: number;
+	subjectDigest: string | null;
+	reason: string | null;
+	targets: unknown;
+	actorSnapshotDocumentId: number;
+	commandId: string;
+	createdAt: string;
+}
+
+export interface HumanDirectiveRecord {
+	id: number;
+	workflowId: number;
+	directiveText: string;
+	actorSnapshotDocumentId: number;
+	commandId: string;
+	createdAt: string;
+}
+
+export interface DiagnosticRunRecord {
+	id: number;
+	workflowId: number;
+	purpose: string;
+	status: string;
+	actorSnapshotDocumentId: number;
+	commandId: string;
 	createdAt: string;
 }

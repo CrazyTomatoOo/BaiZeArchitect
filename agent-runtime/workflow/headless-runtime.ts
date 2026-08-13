@@ -1,5 +1,5 @@
 import type { CrashInjector, FixtureClock, FixtureOperator, FixtureOutboxTransport, HashProvider } from "../testing/deterministic-fixtures.js";
-import { WorkflowStore, type BeginPlanningResult, type CommandReceipt, type CompletePlanningResult, type ExecuteCommandInput, type ReconciliationReport, type WorkflowCommandType, type WorkflowProjection, type EvidenceSnapshotResult, type RequiredArtifactSetResult, type TraceLinkResult, type FindingRecord, type FindingThreadRecord, type DecisionRecord, type ReadinessReport, type BuildApprovalPacketResult, type ApprovalPacketRecord } from "../persistence/workflow-store.js";
+import { WorkflowStore, type BeginPlanningResult, type CommandReceipt, type CompletePlanningResult, type ExecuteCommandInput, type ReconciliationReport, type WorkflowCommandType, type WorkflowProjection, type EvidenceSnapshotResult, type RequiredArtifactSetResult, type TraceLinkResult, type FindingRecord, type FindingThreadRecord, type DecisionRecord, type ReadinessReport, type BuildApprovalPacketResult, type ApprovalPacketRecord, type HumanGateRecord, type ApprovalRecordEntry, type HumanDirectiveRecord, type DiagnosticRunRecord } from "../persistence/workflow-store.js";
 import type { BeginAttemptResult, CompleteAttemptResult, ExecuteTaskResult, RoleResult, TraceLinkProposal, CriticReport } from "./role-result.js";
 import { loadWorkflowContracts } from "./contracts/loader.js";
 import { compileWorkflowSchema, type WorkflowSchemaValidator } from "./contracts/schema.js";
@@ -80,6 +80,10 @@ export interface HeadlessWorkflowRuntime {
 	checkReadiness(workflowId: number): ReadinessReport;
 	buildApprovalPacket(workflowId: number): BuildApprovalPacketResult;
 	getApprovalPacket(workflowId: number): ApprovalPacketRecord | undefined;
+	getHumanGates(workflowId: number): readonly HumanGateRecord[];
+	getApprovalRecords(workflowId: number): readonly ApprovalRecordEntry[];
+	getHumanDirectives(workflowId: number): readonly HumanDirectiveRecord[];
+	getDiagnosticRuns(workflowId: number): readonly DiagnosticRunRecord[];
 	close(): void;
 }
 
@@ -99,7 +103,7 @@ export async function openHeadlessWorkflowRuntime(
 			}))
 			.sort((left, right) => left.identity.localeCompare(right.identity)),
 	};
-	const store = new WorkflowStore({ ...options, policyBundle, artifactValidator });
+	const store = new WorkflowStore({ ...options, policyBundle, artifactValidator, planValidator });
 
 	function completePlanningInternal(workflowId: number, attemptId: number, structuredResult: unknown): CompletePlanningResult {
 		if (store.isPlanningContextStale(workflowId, attemptId)) {
@@ -147,7 +151,7 @@ export async function openHeadlessWorkflowRuntime(
 			if (input.schemaVersion !== undefined && input.schemaVersion !== "workflow-command/v1") {
 				throw new Error("Command envelope schema is invalid");
 			}
-			const validTypes: readonly WorkflowCommandType[] = ["start", "pause", "resume", "retry-recovery", "cancel-run", "dispose-decision"];
+			const validTypes: readonly WorkflowCommandType[] = ["start", "pause", "resume", "retry-recovery", "cancel-run", "dispose-decision", "steer", "retry-task", "retry-planning", "replace-plan", "diagnostic-run", "provide-human-input", "revise-requirement", "approve-artifact", "reject-artifact", "accept-finding-risk", "revoke-approval", "approve-packet", "reject-packet"];
 			if (!validTypes.includes(input.type)) {
 				throw new Error("Command envelope schema is invalid");
 			}
@@ -266,6 +270,18 @@ export async function openHeadlessWorkflowRuntime(
 	},
 	getApprovalPacket(workflowId) {
 		return store.getApprovalPacket(workflowId);
+	},
+	getHumanGates(workflowId) {
+		return store.getHumanGates(workflowId);
+	},
+	getApprovalRecords(workflowId) {
+		return store.getApprovalRecords(workflowId);
+	},
+	getHumanDirectives(workflowId) {
+		return store.getHumanDirectives(workflowId);
+	},
+	getDiagnosticRuns(workflowId) {
+		return store.getDiagnosticRuns(workflowId);
 	},
 		close() {
 			store.close();
