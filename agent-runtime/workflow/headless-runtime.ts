@@ -44,6 +44,7 @@ export interface PlanWorkflowResult {
 
 export interface HeadlessWorkflowRuntime {
 	createWorkspace(input: { repoPath: string; name: string }): number;
+	workspaceExists(workspaceId: number): boolean;
 	createRequirement(input: { workspaceId: number; baseline: RequirementBaseline }): {
 		requirementId: number;
 		workflowId: number;
@@ -126,6 +127,9 @@ export async function openHeadlessWorkflowRuntime(
 	return {
 		createWorkspace(input) {
 			return store.createWorkspace(input);
+		},
+		workspaceExists(workspaceId) {
+			return store.workspaceExists(workspaceId);
 		},
 		createRequirement(input) {
 			if (!artifactValidator.check(input.baseline)) {

@@ -282,6 +282,12 @@ export class WorkflowStore {
 		);
 	}
 
+	workspaceExists(workspaceId: number): boolean {
+		return this.database
+			.prepare("select 1 from workspaces where id = ?")
+			.get(workspaceId) !== undefined;
+	}
+
 	createRequirement(input: CreateRequirementInput): CreationResult {
 		return this.createRequirementTransaction(input);
 	}

@@ -8,11 +8,11 @@
 
 **Status:** ready-for-agent
 
-- [ ] Bearer bootstrap 在配置凭据时完成认证，并建立 HttpOnly、SameSite=Strict、TLS 下 Secure 的同源 Operator Session cookie；EventSource 可使用该 cookie。
-- [ ] ActorRef 与 `workflow:operate` / `workflow:approve` capabilities 只来自服务端配置和 Session，request body 中 actor 被拒绝。
-- [ ] 公开 Requirement creation 通过 HTTP 原子产生完整 pending Workflow，并返回 requirementId、workflowId、state、version 和 lastEventSeq。
-- [ ] 所有治理操作使用 `PUT /api/workflows/:workflowId/commands/:commandId` 的封闭 envelope；不存在通用 status patch。
-- [ ] Command transport 区分 malformed/unauthenticated/unknown resource 与应持久化 Receipt 的 accepted/denied/conflict/rejected 结果。
-- [ ] 同 commandId 重放、不同 digest 冲突、expected Workflow/subject version 与 digest 冲突均保持既定 HTTP 与 Receipt 语义。
-- [ ] 非 loopback 绑定必须配置 Bearer token；客户端不能通过生产接口选择 Scripted Model Driver。
-- [ ] 新 server assembly 仅用于测试，生产 Gateway main 在 S7 前仍不注册这些 Route。
+- [x] Bearer bootstrap 在配置凭据时完成认证，并建立 HttpOnly、SameSite=Strict、TLS 下 Secure 的同源 Operator Session cookie；EventSource 可使用该 cookie。
+- [x] ActorRef 与 `workflow:operate` / `workflow:approve` capabilities 只来自服务端配置和 Session，request body 中 actor 被拒绝。
+- [x] 公开 Requirement creation 通过 HTTP 原子产生完整 pending Workflow，并返回 requirementId、workflowId、state、version 和 lastEventSeq。
+- [x] 所有治理操作使用 `PUT /api/workflows/:workflowId/commands/:commandId` 的封闭 envelope；不存在通用 status patch。
+- [x] Command transport 区分 malformed/unauthenticated/unknown resource 与应持久化 Receipt 的 accepted/denied/conflict/rejected 结果。
+- [x] 同 commandId 重放、不同 digest 冲突、expected Workflow/subject version 与 digest 冲突均保持既定 HTTP 与 Receipt 语义。
+- [x] 非 loopback 绑定必须配置 Bearer token；客户端不能通过生产接口选择 Scripted Model Driver。
+- [x] 新 server assembly 仅用于测试，生产 Gateway main 在 S7 前仍不注册这些 Route。
