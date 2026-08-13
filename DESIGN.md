@@ -114,6 +114,8 @@ Workbench family 内的分栏与 archetype knobs；tab/chip 形态；空态文�
   --ok: oklch(77.3% 0.153 163.2);
   --warn: oklch(83.7% 0.164 84.4);
   --danger: oklch(71.9% 0.169 13.4);
+  --accent-line: oklch(68.1% 0.169 275.0 / 0.55);
+  --nav-card: oklch(20.0% 0.010 264.0 / 0.72);
   --font-display: "Space Grotesk Variable", -apple-system, system-ui, sans-serif;
   --font-body: -apple-system, "SF Pro Text", system-ui, sans-serif;
   --font-mono: "SF Mono", ui-monospace, "JetBrains Mono", monospace;

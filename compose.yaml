@@ -32,7 +32,8 @@ services:
     image: baizearchitect-demo
     working_dir: /app
     # 体验环境:不挂载任何宿主目录/卷,所有运行数据写容器 tmpfs,容器删除即全清。
-    # 首次启动把镜像内 fixtures/test-repo 种子化为带 commit 的 git 仓库,再拉起 Gateway。
+    # 首次启动把镜像内 fixtures/test-repo 种子化为带 commit 的 git 仓库,
+    # 再用 governance DB 初始化 workspace 1,然后拉起生产 main。
     entrypoint:
       - sh
       - -c
@@ -48,16 +49,19 @@ services:
             commit --quiet -m fixture
         fi
         cd /app/agent-runtime
+        npx tsx seed-demo-workspace.ts
         exec npx tsx main.ts
     environment:
       BAIZE_PROJECT_ROOT: /app
       BAIZE_PORT: "18789"
+      BAIZE_HOST: "0.0.0.0"
       BAIZE_REPOS_ROOT: /tmp/baize/repos
       BAIZE_EVIDENCE_DIR: /tmp/baize/evidence
       BAIZE_DB_PATH: /tmp/baize/baize.db
       BAIZE_SESSION_DIR: /tmp/baize/sessions
       BAIZE_MODEL_CONFIG_PATH: /tmp/baize/model-config.json
       BAIZE_EVOLVER: "0"
+      BAIZE_OPERATORS: "demo-token=operator:workflow:operate,workflow:approve"
       EVOLVER_HOME: /tmp/baize/evolver-home
       HOME: /tmp/home
       NPM_CONFIG_CACHE: /tmp/npm-cache
@@ -67,7 +71,7 @@ services:
     user: node
     read_only: true
     healthcheck:
-      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:18789/api/requirements?workspaceId=1').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:18789/').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
       interval: 5s
       timeout: 3s
       retries: 24

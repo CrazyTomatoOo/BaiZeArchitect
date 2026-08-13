@@ -107,6 +107,78 @@ export interface CommandResult {
 	receipt: CommandReceipt;
 }
 
+export interface OperatorSession {
+	actorRef: string;
+	capabilities: string[];
+}
+
+export interface RequirementSummary {
+	requirementId: number;
+	title: string;
+	requirementVersion: number;
+	workflow: { id: number; state: string; version: number; lastEventSeq: number };
+}
+
+export interface CreatedRequirement {
+	requirementId: number;
+	workflowId: number;
+	state: string;
+	version: number;
+	lastEventSeq: number;
+}
+
+export async function checkSession(apiBase: string): Promise<OperatorSession> {
+	const response = await fetch(`${apiBase}/api/session`, { credentials: "same-origin" });
+	if (!response.ok) throw new Error(`session check failed: ${response.status}`);
+	return (await response.json()) as OperatorSession;
+}
+
+export async function bootstrapSession(apiBase: string, token: string): Promise<OperatorSession> {
+	const response = await fetch(`${apiBase}/api/session`, {
+		method: "POST",
+		headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+		credentials: "same-origin",
+	});
+	if (!response.ok) throw new Error(`login failed: ${response.status}`);
+	return (await response.json()) as OperatorSession;
+}
+
+export async function listRequirements(apiBase: string, workspaceId: number): Promise<readonly RequirementSummary[]> {
+	const response = await fetch(`${apiBase}/api/requirements?workspaceId=${workspaceId}`, { credentials: "same-origin" });
+	if (!response.ok) throw new Error(`list failed: ${response.status}`);
+	const body = (await response.json()) as { requirements: RequirementSummary[] };
+	return body.requirements;
+}
+
+export async function createRequirement(
+	apiBase: string,
+	workspaceId: number,
+	input: { title: string; summary: string; description: string; goals?: string[]; nonGoals?: string[]; constraints?: string[] },
+): Promise<CreatedRequirement> {
+	const baseline = {
+		schemaVersion: "artifact/requirement/v1",
+		artifactKind: "requirement",
+		title: input.title,
+		summary: input.summary,
+		description: input.description,
+		sourceRefs: [] as unknown[],
+		...(input.goals ? { goals: input.goals } : {}),
+		...(input.nonGoals ? { nonGoals: input.nonGoals } : {}),
+		...(input.constraints ? { constraints: input.constraints } : {}),
+	};
+	const response = await fetch(`${apiBase}/api/workspaces/${workspaceId}/requirements`, {
+		method: "POST",
+		headers: { "Content-Type": "application/json" },
+		body: JSON.stringify(baseline),
+		credentials: "same-origin",
+	});
+	if (!response.ok) {
+		const body = await response.json().catch(() => null);
+		throw new Error(`create failed: ${response.status} ${body?.error ?? ""}`.trim());
+	}
+	return (await response.json()) as CreatedRequirement;
+}
+
 async function fetchJson<T>(apiBase: string, path: string): Promise<T> {
 	const response = await fetch(`${apiBase}${path}`, { credentials: "same-origin" });
 	if (!response.ok) throw new Error(`request failed: ${response.status} ${path}`);
@@ -187,17 +259,17 @@ export function stateHero(state: WorkflowState): HeroModel {
 		case "pending":
 			return { title: "待开始", description: "需求已就绪。开始后系统将自动规划、分析、设计并评审。", action: { label: "开始", kind: "command", commandType: "start" } };
 		case "running":
-			return { title: "进行中", description: "Workflow 正在自动执行。你可以查看后台进度。", action: { label: "查看进度", kind: "expand" } };
+			return { title: "进行中", description: "工作流正在自动执行:规划、分析、设计、评审。你可以随时查看进度。", action: { label: "查看进度", kind: "expand" } };
 		case "waiting_for_human":
-			return { title: "等待人工处理", description: "有需要你判断的门禁事项。处理后才能继续。", action: { label: "处理门禁", kind: "expand" } };
+			return { title: "等待人工处理", description: "有需要你判断的事项,处理后才能继续。", action: { label: "处理待办", kind: "expand" } };
 		case "paused":
-			return { title: "已暂停", description: "Workflow 已暂停,新的调度已停止。", action: { label: "继续", kind: "command", commandType: "resume" } };
+			return { title: "已暂停", description: "工作流已暂停,新的调度已停止。", action: { label: "继续", kind: "command", commandType: "resume" } };
 		case "failed":
-			return { title: "失败", description: "Workflow 遇到失败。查看诊断并选择恢复方式。", action: { label: "查看诊断", kind: "expand" } };
+			return { title: "失败", description: "工作流遇到失败。查看诊断并选择恢复方式。", action: { label: "查看诊断", kind: "expand" } };
 		case "ready_to_archive":
 			return { title: "待批准", description: "设计包已就绪,等待你的最终批准。", action: { label: "查看批准包", kind: "expand" } };
 		case "archived":
-			return { title: "已归档", description: "设计已完成并归档为不可变的 Design Package。", action: { label: "查看设计包", kind: "package" } };
+			return { title: "已归档", description: "设计已完成并归档为不可变的设计包。", action: { label: "查看设计包", kind: "package" } };
 	}
 }
 
@@ -316,7 +388,7 @@ export function gateQueue(projection: WorkflowProjection): readonly GateQueueIte
 				position: 0,
 				subjectType: gate.subjectType,
 				subjectId: gate.subjectId,
-				title: `人工输入(${gate.subjectType} #${gate.subjectId})`,
+				title: `需要人工输入(${gate.subjectType} #${gate.subjectId})`,
 				commandType: "provide-human-input",
 				gateId: gate.id,
 				sortId: gate.id,
@@ -331,7 +403,7 @@ export function gateQueue(projection: WorkflowProjection): readonly GateQueueIte
 				position: 0,
 				subjectType: gate.subjectType,
 				subjectId: gate.subjectId,
-				title: finding?.summary ?? `Finding thread #${gate.subjectId}`,
+				title: finding?.summary ?? `评审发现线索 #${gate.subjectId}`,
 				commandType: "accept-finding-risk",
 				gateId: gate.id,
 				findingId: finding?.id,
@@ -373,7 +445,7 @@ export function recoveryActions(projection: WorkflowProjection): readonly Recove
 	if (incident && incident.status === "open") {
 		return [
 			{ commandType: "retry-recovery", label: "重试恢复", payload: { incidentId: incident.id } },
-			{ commandType: "diagnostic-run", label: "诊断 Run" },
+			{ commandType: "diagnostic-run", label: "诊断运行" },
 		];
 	}
 	if (projection.workflow.state !== "failed") return [];
@@ -383,17 +455,17 @@ export function recoveryActions(projection: WorkflowProjection): readonly Recove
 		return [
 			...(failedTask ? [{ commandType: "retry-task" as const, label: "重试失败任务", payload: { taskId: failedTask.id } }] : []),
 			{ commandType: "replace-plan" as const, label: "替换计划" },
-			{ commandType: "diagnostic-run" as const, label: "诊断 Run" },
+			{ commandType: "diagnostic-run" as const, label: "诊断运行" },
 		];
 	}
 	if (failureCode === "planning_exhausted" || failureCode === "plan_budget_exhausted") {
 		return [
 			{ commandType: "retry-planning", label: "重试规划" },
 			{ commandType: "replace-plan", label: "替换计划" },
-			{ commandType: "diagnostic-run", label: "诊断 Run" },
+			{ commandType: "diagnostic-run", label: "诊断运行" },
 		];
 	}
-	return failureCode ? [{ commandType: "diagnostic-run", label: "诊断 Run" }] : [];
+	return failureCode ? [{ commandType: "diagnostic-run", label: "诊断运行" }] : [];
 }
 
 /** 订阅 Run SSE;语义与 Workflow 流一致。 */
@@ -579,4 +651,181 @@ export function packetReviewDrift(projection: WorkflowProjection, context: Packe
 		expectedWorkflowVersion: context.workflowVersion,
 		actualWorkflowVersion: projection.workflow.version,
 	};
+}
+
+// ---------------------------------------------------------------------------
+// 中文标签与旅程视图模型(全站唯一文案真源)
+// ---------------------------------------------------------------------------
+
+/** 工作流状态中文标签。 */
+export function stateLabel(state: WorkflowState): string {
+	switch (state) {
+		case "pending": return "待开始";
+		case "running": return "运行中";
+		case "waiting_for_human": return "待人工处理";
+		case "paused": return "已暂停";
+		case "failed": return "失败";
+		case "ready_to_archive": return "待批准";
+		case "archived": return "已归档";
+	}
+}
+
+/** 任务/运行/Attempt 状态中文标签;未知值原样返回(数据位诚实显示)。 */
+export function statusLabel(status: string): string {
+	const map: Record<string, string> = {
+		pending: "等待中",
+		queued: "排队中",
+		in_progress: "进行中",
+		running: "运行中",
+		completed: "已完成",
+		succeeded: "成功",
+		failed: "失败",
+		skipped_satisfied: "已跳过",
+		superseded: "已取代",
+		open: "待处理",
+		closed: "已关闭",
+		resolved: "已解决",
+		approved: "已通过",
+		accepted: "已接受",
+		rejected: "已拒绝",
+		current: "当前",
+		withdrawn: "已撤回",
+		active: "生效中",
+		archived: "已归档",
+	};
+	return map[status] ?? status;
+}
+
+/** 命令类型中文标签;未知值原样返回。 */
+export function commandLabel(type: string): string {
+	const map: Record<string, string> = {
+		start: "启动",
+		resume: "继续",
+		pause: "暂停",
+		"cancel-run": "取消运行",
+		steer: "人工指令",
+		"diagnostic-run": "诊断运行",
+		"replace-plan": "替换计划",
+		"dispose-decision": "处置决策",
+		"provide-human-input": "提供人工输入",
+		"accept-finding-risk": "接受风险",
+		"retry-task": "重试任务",
+		"retry-planning": "重试规划",
+		"retry-recovery": "重试恢复",
+		"approve-packet": "批准归档",
+		"reject-packet": "打回返工",
+	};
+	return map[type] ?? type;
+}
+
+/** 严重度中文标签。 */
+export function severityLabel(severity: string): string {
+	const map: Record<string, string> = { critical: "严重", major: "重要", minor: "次要", info: "提示" };
+	return map[severity] ?? severity;
+}
+
+/** 待办类别中文标签。 */
+export function gateCategoryLabel(category: GateCategory): string {
+	switch (category) {
+		case "critical_decision": return "关键决策";
+		case "human_input": return "人工输入";
+		case "finding_disposition": return "发现处置";
+		case "recovery": return "事故恢复";
+	}
+}
+
+/** 资产类别中文标签。 */
+export function assetKindLabel(kind: string): string {
+	const map: Record<string, string> = { scenario: "场景", usecase: "用例", function: "功能" };
+	return map[kind] ?? kind;
+}
+
+export interface JourneyStep {
+	key: string;
+	label: string;
+	status: StageStatus;
+}
+
+/** 需求设计旅程六步:规划 → 分析 → 设计 → 评审 → 批准 → 归档。 */
+export function journeySteps(projection: WorkflowProjection): readonly JourneyStep[] {
+	const stages = designStages(projection);
+	return [
+		...stages.map((stage) => ({ key: stage.key, label: stage.label === "计划" ? "规划" : stage.label, status: stage.status })),
+		{ key: "archive", label: "归档", status: projection.workflow.state === "archived" ? "done" as const : "pending" as const },
+	];
+}
+
+// ---------------------------------------------------------------------------
+// 资产库 API(场景/用例/功能复用池)
+// ---------------------------------------------------------------------------
+
+export interface AssetSummary {
+	id: number;
+	workspaceId: number;
+	kind: "scenario" | "usecase" | "function";
+	title: string;
+	currentRevision: { id: number; revisionNo: number; digest: string } | null;
+	legacyOriginRequirementId: number | null;
+	createdAt: string;
+}
+
+export interface AssetDetail {
+	id: number;
+	workspaceId: number;
+	kind: "scenario" | "usecase" | "function";
+	title: string;
+	currentRevisionId: number | null;
+	legacyOriginRequirementId: number | null;
+	createdAt: string;
+	revisions: readonly {
+		id: number;
+		revisionNo: number;
+		contentDocumentId: number;
+		digest: string;
+		source: "manual" | "import" | "migration";
+		content: unknown;
+		createdAt: string;
+	}[];
+}
+
+export async function listAssets(apiBase: string, workspaceId: number): Promise<readonly AssetSummary[]> {
+	const body = await fetchJson<{ assets: AssetSummary[] }>(apiBase, `/api/assets?workspaceId=${workspaceId}`);
+	return body.assets;
+}
+
+export function getAsset(apiBase: string, assetId: number): Promise<AssetDetail> {
+	return fetchJson(apiBase, `/api/assets/${assetId}`);
+}
+
+export async function createAsset(apiBase: string, workspaceId: number, input: { kind: "scenario" | "usecase" | "function"; title: string; content: unknown }): Promise<{ id: number }> {
+	const response = await fetch(`${apiBase}/api/assets`, {
+		method: "POST",
+		headers: { "Content-Type": "application/json" },
+		credentials: "same-origin",
+		body: JSON.stringify({ workspaceId, kind: input.kind, title: input.title, content: input.content }),
+	});
+	if (!response.ok) throw new Error(`create asset failed: ${response.status}`);
+	return (await response.json()) as { id: number };
+}
+
+export async function deleteAsset(apiBase: string, assetId: number): Promise<void> {
+	const response = await fetch(`${apiBase}/api/assets/${assetId}`, { method: "DELETE", credentials: "same-origin" });
+	if (!response.ok) throw new Error(`delete asset failed: ${response.status}`);
+}
+
+export async function exportAssets(apiBase: string, workspaceId: number): Promise<readonly AssetDetail[]> {
+	const body = await fetchJson<{ assets: AssetDetail[] }>(apiBase, `/api/assets/export?workspaceId=${workspaceId}`);
+	return body.assets;
+}
+
+export async function importAssets(apiBase: string, workspaceId: number, assets: readonly { kind: "scenario" | "usecase" | "function"; title: string; content: unknown }[]): Promise<readonly number[]> {
+	const response = await fetch(`${apiBase}/api/assets/import`, {
+		method: "POST",
+		headers: { "Content-Type": "application/json" },
+		credentials: "same-origin",
+		body: JSON.stringify({ workspaceId, assets }),
+	});
+	if (!response.ok) throw new Error(`import assets failed: ${response.status}`);
+	const body = (await response.json()) as { assetIds: number[] };
+	return body.assetIds;
 }

@@ -17,3 +17,5 @@ web/dist/
 web/test-results/
 web/playwright-report/
 .codegraph/
+
+.pi/subagents/

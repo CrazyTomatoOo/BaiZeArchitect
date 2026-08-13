@@ -1,52 +1,48 @@
 {
-  "version": "1.0.0",
-  "generatedAt": "2026-08-09T03:08:00.000Z",
-  "scope": "web design-system refresh",
-  "summary": "Apply DESIGN.md 2026-08 spec: OKLCH tokens, unified button/elevation/focus language, mobile shell, and component alignment.",
-  "tokens": {
-    "palette": "OKLCH",
-    "added": [
-      "--accent-hi",
-      "--accent-glow",
-      "--ok-soft",
-      "--warn-soft",
-      "--warn-line",
-      "--scrim",
-      "--scrim-strong",
-      "--shadow-1",
-      "--shadow-2"
+  "version": "2.0.0",
+  "generatedAt": "2026-08-13T10:30:00.000Z",
+  "scope": "web IA rebuild — journey-first, full Chinese, multi-page workbench",
+  "summary": "Addressed 5 UX complaints: (1) full Chinese copy; (2) logical IA via shell nav 总览/需求/审核中心/资产库; (3) workflow made visible via 6-step journey stepper + state card + promoted 待处理/问题; (4) restored 资产库 (real API) — 架构图/系统页 deferred (backend deleted, user chose to defer); (5) guided journey with empty-state guides and cross-links. Stamp: Hallmark · genre: atmospheric · macrostructure: Workbench · design-system: DESIGN.md · designed-as-app.",
+  "ia": {
+    "pages": [
+      "总览 (dashboard + journey guide empty state)",
+      "需求 (list + create + journey detail)",
+      "审核中心 (aggregated gates/approvals/recovery)",
+      "资产库 (scenario/usecase/function + import/export)"
     ],
-    "removed": ["--accent-2", "--info", "--destructive", "--muted"]
+    "detail": "baize-workflow = journey detail: stepper 规划→分析→设计→评审→批准→归档, state card + primary action, 待处理(gates), 问题(recovery), 待处理与审计, collapsed details, approval review, audit view, design package"
   },
   "filesChanged": [
-    "DESIGN.md",
-    "web/index.html",
-    "web/package.json",
+    "web/src/baize-styles.ts (new shared styles)",
+    "web/src/baize-data.ts (new view-model aggregator)",
+    "web/src/baize-shell.ts (rewritten app shell)",
+    "web/src/baize-overview.ts (new)",
+    "web/src/baize-requirements.ts (new)",
+    "web/src/baize-review-center.ts (new)",
+    "web/src/baize-asset-library.ts (new)",
+    "web/src/baize-workflow.ts (detail-only journey page, Chinese)",
+    "web/src/workflow-client.ts (Chinese labels + journeySteps + asset API + RequirementSummary shape fix)",
     "web/src/main.ts",
-    "web/src/baize-shell.ts",
-    "web/src/baize-overview.ts",
-    "web/src/baize-workspaces.ts",
-    "web/src/baize-system.ts",
-    "web/src/baize-run-rail.ts",
-    "web/src/baize-decisions.ts",
-    "web/src/baize-requirement.ts",
-    "web/src/baize-architecture-browser.ts",
-    "web/src/baize-command-palette.ts",
-    "web/src/baize-chat-intake.ts",
-    "web/src/baize-asset-library.ts"
+    "web/index.html",
+    "web/e2e/*.spec.ts (session mock + Chinese assertions)"
+  ],
+  "deferred": [
+    "架构图 (/api/architecture/* deleted)",
+    "系统/配置 (/api/config,/api/system/* deleted)"
   ],
   "verification": {
     "typecheck": "pass",
+    "unit": "27 passed",
+    "e2e": "36 passed",
     "build": "pass",
     "containerHealth": "healthy",
-    "fontLoaded": "Space Grotesk Variable",
     "mobileOverflow": 0,
-    "screenshots": [
-      "redesign-01-overview.png",
-      "redesign-02-mobile-closed.png",
-      "redesign-03-mobile-drawer.png",
-      "redesign-04-mobile-topbar.png",
-      "redesign-05-requirement.png"
+    "widths": [
+      1440,
+      768,
+      414,
+      375,
+      320
     ]
   }
 }

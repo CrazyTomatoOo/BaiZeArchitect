@@ -276,7 +276,20 @@ export async function startOperatorServer(
 				JSON.stringify({ actorRef: operator.actorRef, capabilities: operator.capabilities }),
 			);
 			return;
-		}
+		return;
+	}
+
+	// Static SPA assets are public — no sensitive data, needed for the login
+	// page to load before an Operator Session exists. API routes (/api/*)
+	// still require authentication below.
+	if (
+		options.staticRoot !== undefined &&
+		request.method === "GET" &&
+		!url.pathname.startsWith("/api/")
+	) {
+		await serveStatic(response, url.pathname, options.staticRoot);
+		return;
+	}
 
 		// Every route below requires an authenticated Operator Session.
 		const sessionId = sessionFromCookie(request);
@@ -753,11 +766,6 @@ export async function startOperatorServer(
 				}),
 				heartbeatMs: options.sseHeartbeatMs ?? 15_000,
 			});
-			return;
-		}
-
-		if (options.staticRoot !== undefined && request.method === "GET") {
-			await serveStatic(response, url.pathname, options.staticRoot);
 			return;
 		}
 

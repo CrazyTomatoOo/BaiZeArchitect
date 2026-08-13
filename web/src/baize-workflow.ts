@@ -1,7 +1,11 @@
 import { LitElement, html, css, nothing } from "lit";
+import { sharedStyles } from "./baize-styles.js";
 
 import {
 	artifactSummary,
+	bootstrapSession,
+	checkSession,
+	createRequirement,
 	designStages,
 	gateQueue,
 	getApprovalPacket,
@@ -9,6 +13,7 @@ import {
 	getRequirement,
 	getWorkflowProjection,
 	listCommandReceipts,
+	listRequirements,
 	listRunEvents,
 	listWorkflowEvents,
 	listWorkflowIncidents,
@@ -17,6 +22,12 @@ import {
 	recoveryActions,
 	sendWorkflowCommand,
 	stateHero,
+	journeySteps,
+	stateLabel,
+	commandLabel,
+	statusLabel,
+	severityLabel,
+	gateCategoryLabel,
 	subscribeRunEvents,
 	subscribeWorkflowEvents,
 	type ApprovalPacketDetail,
@@ -24,8 +35,10 @@ import {
 	type CommandReceiptListItem,
 	type DesignPackageDetail,
 	type GateQueueItem,
+	type OperatorSession,
 	type PacketReviewContext,
 	type RequirementDetail,
+	type RequirementSummary,
 	type RunEventEnvelope,
 	type WorkflowEventEnvelope,
 	type WorkflowIncidentRecord,
@@ -43,7 +56,16 @@ import {
 class BaizeWorkflow extends LitElement {
 	static properties = {
 		requirementId: { type: Number, attribute: "requirement-id" },
+		workspaceId: { type: Number, attribute: "workspace-id" },
 		apiBase: { type: String, attribute: "api-base" },
+		session: { state: true },
+		loginToken: { state: true },
+		loginError: { state: true },
+		requirements: { state: true },
+		createTitle: { state: true },
+		createSummary: { state: true },
+		createDescription: { state: true },
+		creating: { state: true },
 		requirement: { state: true },
 		projection: { state: true },
 		receipt: { state: true },
@@ -70,10 +92,22 @@ class BaizeWorkflow extends LitElement {
 		auditRunEvents: { state: true },
 		auditRunId: { state: true },
 		auditLive: { state: true },
+		navOpen: { state: true },
+		pendingGate: { type: String, attribute: "pending-gate" },
+		pendingApproval: { type: Boolean, attribute: "pending-approval" },
 	};
 
 	declare requirementId: number;
+	declare workspaceId: number;
 	declare apiBase: string;
+	declare session: OperatorSession | null;
+	declare loginToken: string;
+	declare loginError: string | null;
+	declare requirements: readonly RequirementSummary[];
+	declare createTitle: string;
+	declare createSummary: string;
+	declare createDescription: string;
+	declare creating: boolean;
 	declare requirement: RequirementDetail | null;
 	declare projection: WorkflowProjection | null;
 	declare receipt: CommandReceipt | null;
@@ -100,6 +134,9 @@ class BaizeWorkflow extends LitElement {
 	declare auditRunEvents: readonly RunEventEnvelope[];
 	declare auditRunId: number | null;
 	declare auditLive: boolean;
+	declare navOpen: boolean;
+	declare pendingGate: string | null;
+	declare pendingApproval: boolean;
 
 	/** 打开的 gate 表单上下文:commandId 在表单生命周期内固定(重复提交幂等),reload 才换新。 */
 	private formContext: { key: string; commandId: string; workflowVersion: number } | null = null;
@@ -112,7 +149,16 @@ class BaizeWorkflow extends LitElement {
 	constructor() {
 		super();
 		this.requirementId = 0;
+		this.workspaceId = 1;
 		this.apiBase = "";
+		this.session = null;
+		this.loginToken = "";
+		this.loginError = null;
+		this.requirements = [];
+		this.createTitle = "";
+		this.createSummary = "";
+		this.createDescription = "";
+		this.creating = false;
 		this.requirement = null;
 		this.projection = null;
 		this.receipt = null;
@@ -139,83 +185,136 @@ class BaizeWorkflow extends LitElement {
 		this.auditRunEvents = [];
 		this.auditRunId = null;
 		this.auditLive = false;
+		this.navOpen = false;
+		this.pendingGate = null;
+		this.pendingApproval = false;
 	}
 
-	static styles = css`
-		:host { display: block; font-family: system-ui, sans-serif; color: #17203a; }
-		.hero { border: 1px solid #d4dcee; border-radius: 10px; padding: 20px; background: #f7f9ff; }
-		.hero h2 { margin: 0 0 4px; font-size: 20px; }
-		.hero .state { display: inline-block; font-size: 12px; letter-spacing: 0.08em; text-transform: uppercase; color: #4d5f8f; margin-bottom: 6px; }
-		.hero p { margin: 4px 0 12px; color: #4a5672; }
-		button { font: inherit; border-radius: 8px; border: 1px solid #b9c6e4; background: #fff; padding: 8px 14px; cursor: pointer; }
-		button.primary { background: #2f4fdd; border-color: #2f4fdd; color: #fff; font-weight: 600; }
-		button:disabled { opacity: 0.5; cursor: default; }
-		.receipt { margin-top: 12px; border: 1px solid #d9e2c8; background: #f6fbec; border-radius: 8px; padding: 10px 14px; font-size: 13px; }
-		.receipt[data-outcome="accepted"] { border-color: #b7d9a8; }
-		.receipt:not([data-outcome="accepted"]) { border-color: #e5b8b8; background: #fdf1f1; }
-		.overview { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 12px; margin-top: 16px; }
-		.card { border: 1px solid #e0e6f2; border-radius: 10px; padding: 12px 14px; background: #fff; }
-		.card h3 { margin: 0 0 8px; font-size: 13px; color: #4d5f8f; text-transform: uppercase; letter-spacing: 0.06em; }
-		.stages { display: flex; gap: 6px; }
-		.stage { flex: 1; text-align: center; font-size: 12px; padding: 6px 4px; border-radius: 6px; background: #eef1f9; color: #6b7794; }
-		.stage[data-status="done"] { background: #dff0d8; color: #2f6b2f; }
-		.stage[data-status="active"] { background: #dbe4ff; color: #2f4fdd; font-weight: 600; }
-		.counts { display: flex; gap: 14px; font-size: 14px; }
-		.counts strong { font-size: 18px; display: block; }
-		.audit { font-size: 12px; color: #66738f; line-height: 1.7; word-break: break-all; }
-		.details { margin-top: 16px; border: 1px solid #e0e6f2; border-radius: 10px; padding: 14px 16px; background: #fff; }
-		.details h3 { margin: 12px 0 6px; font-size: 13px; color: #4d5f8f; text-transform: uppercase; letter-spacing: 0.06em; }
-		table { border-collapse: collapse; width: 100%; font-size: 13px; }
-		th, td { text-align: left; padding: 5px 8px; border-bottom: 1px solid #edf0f7; }
-		th { color: #66738f; font-weight: 600; }
-		.badge { display: inline-block; font-size: 11px; padding: 1px 7px; border-radius: 999px; background: #eef1f9; color: #44507a; }
-		.badge[data-tone="warn"] { background: #fdf1d7; color: #8a6116; }
-		.badge[data-tone="bad"] { background: #fbdddd; color: #9c2b2b; }
-		.badge[data-tone="ok"] { background: #dff0d8; color: #2f6b2f; }
-		.takeover { margin-top: 12px; border-top: 1px dashed #d4dcee; padding-top: 10px; }
-		.takeover form { display: flex; gap: 8px; margin: 8px 0; align-items: center; flex-wrap: wrap; }
-		.takeover input, .takeover textarea { font: inherit; padding: 6px 8px; border: 1px solid #c9d3e8; border-radius: 6px; min-width: 220px; }
-		.error { margin-top: 12px; color: #9c2b2b; }
-		.package { margin-top: 16px; border: 1px solid #cfe3c8; background: #f4faef; border-radius: 10px; padding: 14px 16px; }
-		details.disclosure { margin-top: 10px; }
-		details.disclosure summary { cursor: pointer; color: #2f4fdd; font-size: 13px; }
-		.command-row { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 8px; }
-		.banner { margin-top: 12px; border-radius: 8px; padding: 10px 14px; font-size: 13px; }
-		.banner[data-tone="warn"] { border: 1px solid #ecd9a8; background: #fdf7e7; color: #8a6116; }
-		.banner[data-tone="bad"] { border: 1px solid #e5b8b8; background: #fdf1f1; color: #9c2b2b; }
-		.gates { margin-top: 16px; border: 1px solid #e7dfc8; border-radius: 10px; padding: 14px 16px; background: #fffdf4; }
-		.gates h3 { margin: 0 0 8px; font-size: 13px; color: #8a6116; text-transform: uppercase; letter-spacing: 0.06em; }
+	static styles = [sharedStyles, css`
+		/* Hallmark · genre: atmospheric · macrostructure: Workbench · design-system: DESIGN.md · designed-as-app */
+		:host { display: block; min-height: 100vh; background: var(--bg); color: var(--text); font-family: var(--font-ui); font-size: var(--text-base); line-height: 1.55; }
+		.page { max-width: var(--content-max); margin: 0 auto; padding: var(--pad) calc(var(--pad) * 1.4) 3rem; }
+
+		/* — 返回链接 — */
+		.back {
+			display: inline-flex; align-items: center; gap: 6px;
+			background: none; border: none; padding: 4px 0;
+			color: var(--text-muted); font-size: var(--text-sm); cursor: pointer;
+			margin-bottom: var(--gap);
+		}
+		.back:hover { color: var(--accent); background: none; }
+
+		/* — 状态卡 — */
+		.hero {
+			border: 1px solid var(--border);
+			border-left: 3px solid var(--accent);
+			border-radius: var(--radius);
+			padding: calc(var(--pad) + 6px);
+			background: var(--surface);
+			margin-top: var(--gap);
+		}
+		.hero .state {
+			display: inline-block;
+			font-size: var(--text-xs);
+			letter-spacing: 0.08em;
+			color: var(--accent);
+			margin-bottom: 6px;
+			font-family: var(--font-mono);
+		}
+		.hero h2 { margin: 0 0 4px; font-size: var(--text-xl); font-family: var(--font-display); font-weight: 600; overflow-wrap: anywhere; min-width: 0; }
+		.hero p { margin: 4px 0 12px; color: var(--text-muted); }
+		.hero .journey { margin-bottom: 14px; }
+
+		/* — 回执 — */
+		.receipt {
+			margin-top: 12px;
+			border: 1px solid var(--ok);
+			background: var(--ok-soft);
+			border-radius: var(--radius);
+			padding: 10px 14px;
+			font-size: var(--text-sm);
+		}
+		.receipt:not([data-outcome="accepted"]) { border-color: var(--danger); background: var(--warn-soft); color: var(--danger); }
+
+		/* — 待处理区 — */
+		.gates {
+			margin-top: 16px;
+			border: 1px solid var(--warn-line);
+			border-radius: var(--radius);
+			padding: var(--pad);
+			background: var(--surface);
+		}
+		.gates h3 { margin: 0 0 8px; font-size: var(--text-sm); color: var(--warn); letter-spacing: 0.06em; }
 		.gates ol { margin: 0; padding-left: 0; list-style: none; }
-		.gates li { display: flex; gap: 8px; align-items: center; padding: 6px 0; border-bottom: 1px solid #f2ecd8; font-size: 13px; flex-wrap: wrap; }
-		.gates .pos { color: #8a6116; font-variant-numeric: tabular-nums; min-width: 34px; }
-		.gate-form { margin-top: 10px; border: 1px solid #d4dcee; border-radius: 8px; padding: 12px 14px; background: #fff; }
-		.gate-form h4 { margin: 0 0 8px; font-size: 13px; }
+		.gates li { display: flex; gap: 8px; align-items: center; padding: 6px 0; border-bottom: 1px solid var(--warn-line); font-size: var(--text-sm); flex-wrap: wrap; }
+		.gates .pos { color: var(--warn); font-variant-numeric: tabular-nums; min-width: 34px; }
+
+		/* — 门禁表单 — */
+		.gate-form { margin-top: 10px; border: 1px solid var(--border); border-radius: var(--radius); padding: 12px 14px; background: var(--surface-2); }
+		.gate-form h4 { margin: 0 0 8px; font-size: var(--text-sm); }
 		.gate-form form { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
-		.gate-form input, .gate-form textarea, .gate-form select { font: inherit; padding: 6px 8px; border: 1px solid #c9d3e8; border-radius: 6px; min-width: 200px; }
-		.stale-box { margin: 8px 0; border: 1px solid #e5b8b8; background: #fdf1f1; border-radius: 6px; padding: 8px 10px; font-size: 13px; color: #9c2b2b; }
-		.context-receipt { margin-top: 8px; font-size: 13px; border-radius: 6px; padding: 8px 10px; }
-		.context-receipt[data-outcome="accepted"] { border: 1px solid #b7d9a8; background: #f6fbec; }
-		.context-receipt:not([data-outcome="accepted"]) { border: 1px solid #e5b8b8; background: #fdf1f1; color: #9c2b2b; }
-		.approval { margin-top: 16px; border: 2px solid #2f4fdd; border-radius: 10px; background: #fff; }
-		.approval .approval-body { padding: 14px 16px; max-height: 60vh; overflow-y: auto; }
-		.approval h3 { margin: 12px 0 6px; font-size: 13px; color: #4d5f8f; text-transform: uppercase; letter-spacing: 0.06em; }
+		.gate-form input, .gate-form textarea, .gate-form select { min-width: 200px; }
+
+		.stale-box { margin: 8px 0; border: 1px solid var(--danger); background: var(--warn-soft); border-radius: var(--radius-sm); padding: 8px 10px; font-size: var(--text-sm); color: var(--danger); }
+		.context-receipt { margin-top: 8px; font-size: var(--text-sm); border-radius: var(--radius-sm); padding: 8px 10px; }
+		.context-receipt[data-outcome="accepted"] { border: 1px solid var(--ok); background: var(--ok-soft); }
+		.context-receipt:not([data-outcome="accepted"]) { border: 1px solid var(--danger); background: var(--warn-soft); color: var(--danger); }
+
+		/* — 详情折叠 — */
+		.details { margin-top: 16px; border: 1px solid var(--border); border-radius: var(--radius); padding: var(--pad); background: var(--surface); }
+		.details h3 { margin: 12px 0 6px; font-size: var(--text-sm); color: var(--text-muted); letter-spacing: 0.06em; }
+		.details h3:first-child { margin-top: 0; }
+		.audit { font-size: var(--text-xs); color: var(--text-muted); line-height: 1.7; word-break: break-all; }
+
+		/* — 接管 — */
+		.takeover { margin-top: 12px; border-top: 1px dashed var(--border); padding-top: 10px; }
+		.takeover form { display: flex; gap: 8px; margin: 8px 0; align-items: center; flex-wrap: wrap; }
+		.takeover input, .takeover textarea { min-width: 220px; }
+		details.disclosure { margin-top: 10px; }
+		details.disclosure summary { cursor: pointer; color: var(--accent); font-size: var(--text-sm); }
+		.command-row { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 8px; }
+
+		/* — 横幅 — */
+		.banner { margin-top: 12px; border-radius: var(--radius); padding: 10px 14px; font-size: var(--text-sm); }
+		.banner[data-tone="warn"] { border: 1px solid var(--warn-line); background: var(--warn-soft); color: var(--warn); }
+		.banner[data-tone="bad"] { border: 1px solid var(--danger); background: var(--warn-soft); color: var(--danger); }
+		.error { margin-top: 12px; color: var(--danger); }
+
+		/* — 批准 — */
+		.approval { margin-top: 16px; border: 2px solid var(--accent); border-radius: var(--radius); background: var(--surface); }
+		.approval .approval-body { padding: var(--pad); max-height: 60vh; overflow-y: auto; }
+		.approval h3 { margin: 12px 0 6px; font-size: var(--text-sm); color: var(--text-muted); letter-spacing: 0.06em; }
 		.approval h3:first-child { margin-top: 0; }
-		.approval-bar { position: sticky; bottom: 0; display: flex; gap: 10px; align-items: center; padding: 12px 16px; background: #f7f9ff; border-top: 1px solid #d4dcee; border-radius: 0 0 8px 8px; }
+		.approval-bar { position: sticky; bottom: 0; display: flex; gap: 10px; align-items: center; padding: 12px 16px; background: var(--surface-2); border-top: 1px solid var(--border); border-radius: 0 0 var(--radius-sm) var(--radius-sm); }
 		.approval-bar .spacer { flex: 1; }
-		.approval .digest-line { font-family: ui-monospace, monospace; font-size: 12px; word-break: break-all; }
-		.reject-form { margin-top: 10px; border: 1px solid #e5b8b8; border-radius: 8px; padding: 10px 12px; background: #fffafa; }
-		.reject-form label { display: inline-flex; gap: 4px; align-items: center; margin-right: 10px; font-size: 13px; }
-		.audit-view { margin-top: 16px; border: 1px solid #d4dcee; border-radius: 10px; padding: 14px 16px; background: #fff; }
-		.audit-view h3 { margin: 12px 0 6px; font-size: 13px; color: #4d5f8f; text-transform: uppercase; letter-spacing: 0.06em; }
+		.approval .digest-line { font-family: var(--font-mono); font-size: var(--text-xs); word-break: break-all; }
+		.reject-form { margin-top: 10px; border: 1px solid var(--danger); border-radius: var(--radius); padding: 10px 12px; background: var(--warn-soft); }
+		.reject-form label { display: inline-flex; gap: 4px; align-items: center; margin-right: 10px; font-size: var(--text-sm); }
+
+		/* — 审计 — */
+		.audit-view { margin-top: 16px; border: 1px solid var(--border); border-radius: var(--radius); padding: var(--pad); background: var(--surface); }
+		.audit-view h3 { margin: 12px 0 6px; font-size: var(--text-sm); color: var(--text-muted); letter-spacing: 0.06em; }
 		.audit-view h3:first-child { margin-top: 0; }
-		.audit-view .mono { font-family: ui-monospace, monospace; font-size: 12px; word-break: break-all; }
-		.audit-view table td:first-child { font-variant-numeric: tabular-nums; color: #66738f; }
+		.audit-view table td:first-child { font-variant-numeric: tabular-nums; color: var(--text-muted); }
+
+		/* — 设计包 — */
+		.package { margin-top: 16px; border: 1px solid var(--ok); background: var(--ok-soft); border-radius: var(--radius); padding: var(--pad); }
+
+		/* — 登录 — */
+		.login-wrap { min-height: 100vh; display: grid; place-items: center; padding: var(--pad); box-sizing: border-box; }
+		.login-form { width: min(420px, 100%); box-sizing: border-box; }
+		.login-brand { font-size: var(--text-xl); margin-bottom: 6px; font-family: var(--font-display); font-weight: 600; }
+		.login-brand .dot { color: var(--accent); }
+		.login-form p { margin: 4px 0 14px; color: var(--text-muted); }
+		.login-form input { width: 100%; }
+		.login-form button { margin-top: 10px; width: 100%; }
+
 		.sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
-	`;
+	`];
 
 	connectedCallback(): void {
 		super.connectedCallback();
-		void this.load();
+		void this.checkAndLoad();
 	}
 
 	disconnectedCallback(): void {
@@ -238,6 +337,67 @@ class BaizeWorkflow extends LitElement {
 		this.liveMessage = message;
 	}
 
+	private async checkAndLoad(): Promise<void> {
+		try {
+			this.session = await checkSession(this.apiBase);
+		} catch {
+			this.session = null;
+			return;
+		}
+		if (this.requirementId > 0) {
+			void this.load();
+		} else {
+			void this.loadRequirements();
+		}
+	}
+
+	private async handleLogin(event: Event): Promise<void> {
+		event.preventDefault();
+		try {
+			this.session = await bootstrapSession(this.apiBase, this.loginToken);
+			this.loginError = null;
+			void this.loadRequirements();
+		} catch (error) {
+			this.loginError = error instanceof Error ? error.message : String(error);
+		}
+	}
+
+	private async loadRequirements(): Promise<void> {
+		try {
+			this.requirements = await listRequirements(this.apiBase, this.workspaceId);
+		} catch (error) {
+			this.loadError = error instanceof Error ? error.message : String(error);
+		}
+	}
+
+	private async handleCreateRequirement(event: Event): Promise<void> {
+		event.preventDefault();
+		this.creating = true;
+		try {
+			const created = await createRequirement(this.apiBase, this.workspaceId, {
+				title: this.createTitle,
+				summary: this.createSummary,
+				description: this.createDescription,
+			});
+			this.requirementId = created.requirementId;
+			void this.loadRequirements();
+			this.createTitle = "";
+			this.createSummary = "";
+			this.createDescription = "";
+			void this.load();
+		} catch (error) {
+			this.loadError = error instanceof Error ? error.message : String(error);
+		} finally {
+			this.creating = false;
+		}
+	}
+
+	private selectRequirement(id: number): void {
+		this.requirementId = id;
+		this.navOpen = false;
+		void this.load();
+	}
+
 	private async load(): Promise<void> {
 		try {
 			this.requirement = await getRequirement(this.apiBase, this.requirementId);
@@ -254,6 +414,7 @@ class BaizeWorkflow extends LitElement {
 		this.connectRunStream();
 		this.detectStaleForm();
 		this.detectApprovalStale();
+		this.consumeIntent();
 	}
 	/** SSE 使 Projection 前进后,打开的表单冻结:保留 draft、提示 expected/actual、要求显式 reload。 */
 	private detectStaleForm(): void {
@@ -358,10 +519,20 @@ class BaizeWorkflow extends LitElement {
 		const projection = this.projection;
 		if (!projection) return nothing;
 		const hero = stateHero(projection.workflow.state);
+		const steps = journeySteps(projection);
 		return html`
 			<section class="hero" data-testid="hero" data-state=${projection.workflow.state}>
-				<span class="state">${projection.workflow.state}</span>
+				<span class="state">${stateLabel(projection.workflow.state)}</span>
 				<h2>${this.requirement?.title ?? ""}</h2>
+				<div class="journey" data-testid="stages" aria-label="设计旅程">
+					${steps.map(
+						(step, i) => html`${i > 0 ? html`<span class="step-link ${steps[i - 1]!.status === "done" ? "done" : ""}"></span>` : nothing}
+						<span class="step" data-testid="stage-${step.key}" data-status=${step.status}>
+							<span class="dot">${step.status === "done" ? "✓" : i + 1}</span>
+							<span class="name">${step.label}</span>
+						</span>`,
+					)}
+				</div>
 				<p>${hero.description}</p>
 				<button class="primary" data-testid="primary-action" ?disabled=${this.busy || !this.connected} @click=${() => void this.onPrimaryAction()}>
 					${hero.action.label}
@@ -374,59 +545,40 @@ class BaizeWorkflow extends LitElement {
 		if (!this.receipt) return nothing;
 		return html`
 			<aside class="receipt" data-testid="command-receipt" data-outcome=${this.receipt.outcome}>
-				命令回执:<strong>${this.receipt.commandType}</strong> → ${this.receipt.outcome}
+				命令回执:<strong>${commandLabel(this.receipt.commandType)}</strong> → ${statusLabel(this.receipt.outcome)}
 				(HTTP ${this.receipt.httpStatus}, 版本 ${this.receipt.workflowVersion}, 事件 ${this.receipt.lastEventSeq})
 			</aside>
 		`;
 	}
 
-	private renderOverview() {
+
+	private renderAuditSummary() {
 		const projection = this.projection;
 		if (!projection) return nothing;
 		const counts = pendingCounts(projection);
 		return html`
-			<section class="overview" data-testid="overview">
-				<div class="card">
-					<h3>设计进程</h3>
-					<div class="stages" data-testid="stages">
-						${designStages(projection).map(
-							(stage) => html`<span class="stage" data-testid="stage-${stage.key}" data-status=${stage.status}>${stage.label}</span>`,
-						)}
-					</div>
+			<div class="details" style="margin-top:16px">
+				<h3>待处理与审计</h3>
+				<div class="audit" data-testid="audit-summary">
+					待处理:<span data-testid="pending-counts">门禁 ${counts.gates} · 决策 ${counts.decisions} · 发现 ${counts.findings}</span><br />
+					版本 ${projection.workflow.version} · 事件 ${projection.workflow.lastEventSeq} ·
+					计划 ${projection.currentPlan ? `r${projection.currentPlan.revisionNo}` : "—"} ·
+					策略 ${projection.workflow.policyBundle.digest.slice(0, 19)}…<br />
+					<button data-testid="open-audit" @click=${() => void this.openAuditView()}>打开审计视图</button>
 				</div>
-				<div class="card">
-					<h3>Artifact 完成</h3>
-					<div data-testid="artifact-summary">${artifactSummary(projection)}</div>
-				</div>
-				<div class="card">
-					<h3>待处理</h3>
-					<div class="counts" data-testid="pending-counts">
-						<span><strong>${counts.gates}</strong>门禁</span>
-						<span><strong>${counts.decisions}</strong>Decision</span>
-						<span><strong>${counts.findings}</strong>Finding</span>
-					</div>
-				</div>
-				<div class="card">
-					<h3>审计摘要</h3>
-					<div class="audit" data-testid="audit-summary">
-						版本 ${projection.workflow.version} · 事件 ${projection.workflow.lastEventSeq}<br />
-						Plan ${projection.currentPlan ? `r${projection.currentPlan.revisionNo}` : "—"} ·
-						Policy ${projection.workflow.policyBundle.digest.slice(0, 19)}…<br />
-						<button data-testid="open-audit" @click=${() => void this.openAuditView()}>打开审计视图</button>
-					</div>
-				</div>
-			</section>
+			</div>
 		`;
 	}
 
 	private renderDetails() {
 		const projection = this.projection;
 		if (!projection || !this.detailsOpen) return nothing;
+		const counts = pendingCounts(projection);
 		return html`
 			<section class="details" data-testid="details">
-				<h3>Task 顺序</h3>
+				<h3>任务顺序</h3>
 				<table data-testid="task-table">
-					<thead><tr><th>#</th><th>Key</th><th>Kind</th><th>Role</th><th>状态</th><th>最近 Attempt</th></tr></thead>
+					<thead><tr><th>#</th><th>键</th><th>类型</th><th>角色</th><th>状态</th><th>最近尝试</th></tr></thead>
 					<tbody>
 						${projection.tasks.map(
 							(task, index) => html`<tr data-task-key=${task.key}>
@@ -434,38 +586,39 @@ class BaizeWorkflow extends LitElement {
 								<td>${task.key}</td>
 								<td>${task.kind}</td>
 								<td>${task.role}</td>
-								<td><span class="badge" data-tone=${task.status === "completed" ? "ok" : task.status === "failed" ? "bad" : task.status === "in_progress" ? "warn" : ""}>${task.status}</span></td>
-								<td>${task.latestAttempt ? `#${task.latestAttempt.id} ${task.latestAttempt.status}` : "—"}</td>
+								<td><span class="badge" data-tone=${task.status === "completed" ? "ok" : task.status === "failed" ? "bad" : task.status === "in_progress" ? "warn" : ""}>${statusLabel(task.status)}</span></td>
+								<td>${task.latestAttempt ? `#${task.latestAttempt.id} ${statusLabel(task.latestAttempt.status)}` : "—"}</td>
 							</tr>`,
 						)}
 					</tbody>
 				</table>
 
-				<h3>当前 Attempt / Run</h3>
+				<h3>当前运行</h3>
 				<div data-testid="active-work">
 					${projection.activeRun
-						? html`Run #${projection.activeRun.id}(${projection.activeRun.role ?? "—"}, ${projection.activeRun.status})
-							${projection.activeClaim ? html` · Attempt #${projection.activeClaim.attemptId}` : nothing}`
-						: html`当前没有活动 Attempt / Run`}
+						? html`运行 #${projection.activeRun.id}(${projection.activeRun.role ?? "—"}, ${statusLabel(projection.activeRun.status)})
+							${projection.activeClaim ? html` · 尝试 #${projection.activeClaim.attemptId}` : nothing}`
+						: html`当前没有活动的运行`}
 				</div>
 
-				<h3>Artifact 与证据</h3>
+				<h3>产物与证据</h3>
 				<div class="audit" data-testid="revision-facts">
-					Requirement r${projection.requirement.currentRevision.revisionNo}
-					(${projection.requirement.currentRevision.status}, ${projection.requirement.currentRevision.digest.slice(0, 19)}…)<br />
+					需求 r${projection.requirement.currentRevision.revisionNo}
+					(${statusLabel(projection.requirement.currentRevision.status)}, ${projection.requirement.currentRevision.digest.slice(0, 19)}…)<br />
+					产物完成:<span data-testid="artifact-summary">${artifactSummary(projection)}</span><br />
 					${projection.readiness.checks.map(
 						(check) => html`<div>${check.passed ? "✓" : "✗"} ${check.name} — ${check.detail}</div>`,
 					)}
 				</div>
 
-				<h3>Decision / Finding</h3>
+				<h3>决策与发现</h3>
 				<div data-testid="governance-facts">
-					${projection.decisions.length === 0 && projection.findings.length === 0 ? html`暂无 Decision / Finding` : nothing}
+					${projection.decisions.length === 0 && projection.findings.length === 0 ? html`暂无决策与发现` : nothing}
 					${projection.decisions.map(
-						(decision) => html`<div><span class="badge">${decision.severity}</span> ${decision.summary} — ${decision.status}</div>`,
+						(decision) => html`<div><span class="badge">${severityLabel(decision.severity)}</span> ${decision.summary} — ${statusLabel(decision.status)}</div>`,
 					)}
 					${projection.findings.map(
-						(finding) => html`<div><span class="badge" data-tone=${finding.severity === "critical" ? "bad" : finding.severity === "major" ? "warn" : ""}>${finding.severity}</span> ${finding.summary} — ${finding.status}</div>`,
+						(finding) => html`<div><span class="badge" data-tone=${finding.severity === "critical" ? "bad" : finding.severity === "major" ? "warn" : ""}>${severityLabel(finding.severity)}</span> ${finding.summary} — ${statusLabel(finding.status)}</div>`,
 					)}
 				</div>
 
@@ -478,12 +631,12 @@ class BaizeWorkflow extends LitElement {
 
 				${projection.currentIncident
 					? html`<h3>事故</h3>
-						<div data-testid="incident">${projection.currentIncident.incidentType} / ${projection.currentIncident.failureCode} — ${projection.currentIncident.status}</div>`
+						<div data-testid="incident">${projection.currentIncident.incidentType} / ${projection.currentIncident.failureCode} — ${statusLabel(projection.currentIncident.status)}</div>`
 					: nothing}
 
 				${projection.currentPacket
 					? html`<h3>批准包</h3>
-						<div data-testid="packet">digest ${projection.currentPacket.digest.slice(0, 27)}… — ${projection.currentPacket.status}</div>
+						<div data-testid="packet">摘要 ${projection.currentPacket.digest.slice(0, 27)}… — ${statusLabel(projection.currentPacket.status)}</div>
 						${projection.workflow.state === "ready_to_archive"
 							? html`<div class="command-row">
 								<button data-testid="open-approval" ?disabled=${this.busy || !this.connected} @click=${() => void this.openApprovalReview()}>打开批准审阅</button>
@@ -491,13 +644,14 @@ class BaizeWorkflow extends LitElement {
 							: nothing}`
 					: nothing}
 
+
 				<h3>操作</h3>
 				<div class="command-row" data-testid="detail-commands">
 					${["running", "waiting_for_human", "ready_to_archive"].includes(projection.workflow.state)
 						? html`<button data-testid="pause-command" ?disabled=${this.busy || !this.connected} @click=${() => void this.runCommand("pause")}>暂停</button>`
 						: nothing}
 					${projection.activeRun && projection.workflow.state === "running"
-						? html`<button data-testid="cancel-command" ?disabled=${this.busy || !this.connected} @click=${() => void this.runCommand("cancel-run", { runId: projection.activeRun!.id })}>取消当前 Run</button>`
+						? html`<button class="danger" data-testid="cancel-command" ?disabled=${this.busy || !this.connected} @click=${() => void this.runCommand("cancel-run", { runId: projection.activeRun!.id })}>取消当前运行</button>`
 						: nothing}
 				</div>
 
@@ -511,19 +665,19 @@ class BaizeWorkflow extends LitElement {
 		if (!projection) return nothing;
 		return html`
 			<details class="disclosure" data-testid="takeover" @toggle=${(event: Event) => { this.takeoverOpen = (event.target as HTMLDetailsElement).open; }}>
-				<summary>高级接管(steer / replace-plan / diagnostic-run)</summary>
+				<summary>高级接管(人工指令 / 替换计划 / 诊断运行)</summary>
 				${this.takeoverOpen
 					? html`
 						<form data-testid="steer-form" @submit=${(event: SubmitEvent) => { event.preventDefault; void this.submitTakeover("steer"); }}>
-							<input name="text" placeholder="Human Directive 内容" required />
-							<button type="submit" ?disabled=${this.busy || !this.connected}>Steer</button>
+							<input name="text" placeholder="人工指令内容" required />
+							<button type="submit" ?disabled=${this.busy || !this.connected}>人工指令</button>
 						</form>
 						<form data-testid="diagnostic-form" @submit=${(event: SubmitEvent) => { event.preventDefault(); void this.submitTakeover("diagnostic-run"); }}>
 							<input name="purpose" placeholder="诊断目的" required />
-							<button type="submit" ?disabled=${this.busy || !this.connected}>诊断 Run</button>
+							<button type="submit" ?disabled=${this.busy || !this.connected}>诊断运行</button>
 						</form>
 						<form data-testid="replace-plan-form" @submit=${(event: SubmitEvent) => { event.preventDefault(); void this.submitTakeover("replace-plan"); }}>
-							<textarea name="proposal" placeholder="完整 PlanProposal JSON(plan-proposal/v1)" required rows="3"></textarea>
+							<textarea name="proposal" placeholder="完整计划提案 JSON(plan-proposal/v1)" required rows="3"></textarea>
 							<input name="reason" placeholder="替换原因" required />
 							<button type="submit" ?disabled=${this.busy || !this.connected}>替换计划</button>
 						</form>`
@@ -781,6 +935,25 @@ class BaizeWorkflow extends LitElement {
 	// ------------------------------------------------------------------
 	// 票16:Gate Queue 表单(一次一个 exact subject,stale 冻结)
 	// ------------------------------------------------------------------
+	/** 消费来自 shell 的跳转意图(去处理门禁 / 去批准),一次性。 */
+	private consumeIntent(): void {
+		const projection = this.projection;
+		if (!projection) return;
+		if (this.pendingApproval) {
+			this.pendingApproval = false;
+			this.dispatchEvent(new CustomEvent("baize-intent-consumed", { bubbles: true, composed: true }));
+			if (projection.workflow.state === "ready_to_archive") void this.openApprovalReview();
+			return;
+		}
+		if (this.pendingGate) {
+			const key = this.pendingGate;
+			this.pendingGate = null;
+			this.dispatchEvent(new CustomEvent("baize-intent-consumed", { bubbles: true, composed: true }));
+			const item = gateQueue(projection).find((entry) => entry.key === key);
+			if (item) this.openGateForm(item);
+		}
+	}
+
 	private openGateForm(item: GateQueueItem): void {
 		if (!this.projection) return;
 		this.gateFormKey = item.key;
@@ -854,7 +1027,12 @@ class BaizeWorkflow extends LitElement {
 			this.formReceipt = result.receipt;
 			this.announce(`门禁处置回执:${result.receipt.outcome}`);
 			await this.refreshProjection();
-			if (result.receipt.outcome === "accepted") this.closeGateForm();
+			if (result.receipt.outcome === "accepted") {
+				// 回执原地呈现(队列区):只关表单,保留 formReceipt;下次打开表单时清除。
+				this.gateFormKey = null;
+				this.formContext = null;
+				this.formStale = false;
+			}
 		} catch (error) {
 			this.loadError = error instanceof Error ? error.message : String(error);
 		} finally {
@@ -869,9 +1047,9 @@ class BaizeWorkflow extends LitElement {
 
 	private gateCategoryLabel(category: GateQueueItem["category"]): string {
 		switch (category) {
-			case "critical_decision": return "关键 Decision";
+			case "critical_decision": return "关键决策";
 			case "human_input": return "人工输入";
-			case "finding_disposition": return "Finding 处置";
+			case "finding_disposition": return "发现处置";
 			case "recovery": return "事故恢复";
 		}
 	}
@@ -884,7 +1062,7 @@ class BaizeWorkflow extends LitElement {
 		const openItem = queue.find((item) => item.key === this.gateFormKey) ?? null;
 		return html`
 			<section class="gates" data-testid="gate-queue" aria-label="门禁队列">
-				<h3>门禁队列(${queue.length})— 一次处理一项</h3>
+				<h3>待处理队列(${queue.length})— 一次处理一项</h3>
 				<ol>
 					${queue.map(
 						(item) => html`
@@ -901,6 +1079,11 @@ class BaizeWorkflow extends LitElement {
 					)}
 				</ol>
 				${openItem ? this.renderGateForm(openItem) : nothing}
+				${!openItem && this.formReceipt
+					? html`<div class="context-receipt" data-testid="gate-receipt" data-outcome=${this.formReceipt.outcome}>
+						回执:${commandLabel(this.formReceipt.commandType)} → ${statusLabel(this.formReceipt.outcome)}(HTTP ${this.formReceipt.httpStatus})
+					</div>`
+					: nothing}
 			</section>
 		`;
 	}
@@ -939,7 +1122,7 @@ class BaizeWorkflow extends LitElement {
 				</form>
 				${this.formReceipt
 					? html`<div class="context-receipt" data-testid="gate-receipt" data-outcome=${this.formReceipt.outcome}>
-						回执:${this.formReceipt.commandType} → ${this.formReceipt.outcome}(HTTP ${this.formReceipt.httpStatus})
+						回执:${commandLabel(this.formReceipt.commandType)} → ${statusLabel(this.formReceipt.outcome)}(HTTP ${this.formReceipt.httpStatus})
 					</div>`
 					: nothing}
 			</div>
@@ -962,7 +1145,7 @@ class BaizeWorkflow extends LitElement {
 						}
 						if (action.commandType === "diagnostic-run") {
 							return html`<button data-testid="recovery-diagnostic" ?disabled=${this.busy || !this.connected}
-								@click=${() => void this.runCommand("diagnostic-run", { purpose: `恢复诊断:${projection.workflow.currentFailureCode ?? projection.currentIncident?.incidentType ?? ""}` })}>诊断 Run</button>`;
+								@click=${() => void this.runCommand("diagnostic-run", { purpose: `恢复诊断:${projection.workflow.currentFailureCode ?? projection.currentIncident?.incidentType ?? ""}` })}>诊断运行</button>`;
 						}
 						return html`<button data-testid="recovery-${action.commandType}" ?disabled=${this.busy || !this.connected}
 							@click=${() => void this.runCommand(action.commandType, action.payload)}>${action.label}</button>`;
@@ -1005,7 +1188,7 @@ class BaizeWorkflow extends LitElement {
 						</div>`
 						: nothing}
 
-					<h3>必需 Artifact Revisions</h3>
+					<h3>必需产物修订</h3>
 					<table data-testid="packet-artifacts">
 						<thead><tr><th>Kind</th><th>Revision</th><th>状态</th><th>Content Digest</th></tr></thead>
 						<tbody>
@@ -1020,7 +1203,7 @@ class BaizeWorkflow extends LitElement {
 						</tbody>
 					</table>
 
-					<h3>Decision 处置</h3>
+					<h3>决策处置</h3>
 					<div data-testid="packet-decisions">
 						${content.decisions.length === 0 ? html`无 Decision` : nothing}
 						${content.decisions.map(
@@ -1028,7 +1211,7 @@ class BaizeWorkflow extends LitElement {
 						)}
 					</div>
 
-					<h3>Finding / 风险</h3>
+					<h3>发现 / 风险</h3>
 					<div data-testid="packet-findings">
 						${content.findings.length === 0 ? html`无 Finding(零 Finding 报告含完整 coverage 声明)` : nothing}
 						${content.findings.map(
@@ -1041,29 +1224,29 @@ class BaizeWorkflow extends LitElement {
 						${content.disclosedFindingIds.length > 0 ? html`<div>披露 Finding ids:${content.disclosedFindingIds.join(", ")}</div>` : nothing}
 					</div>
 
-					<h3>Critic Coverage</h3>
+					<h3>评审覆盖</h3>
 					<div data-testid="packet-coverage">覆盖 revisions:${content.criticCoverage.coveredRevisionIds.join(", ") || "—"}</div>
 
-					<h3>Consistency 警告</h3>
+					<h3>一致性警告</h3>
 					<div data-testid="packet-warnings">
 						${content.warnings.length === 0 ? html`无警告` : content.warnings.map((warning) => html`<div class="banner" data-tone="warn">${warning}</div>`)}
 					</div>
 
-					<h3>Readiness 检查</h3>
+					<h3>就绪检查</h3>
 					<div data-testid="packet-readiness">
 						${this.projection.readiness.checks.map(
 							(check) => html`<div>${check.passed ? "✓" : "✗"} ${check.name} — ${check.detail}</div>`,
 						)}
 					</div>
 
-					<h3>Provenance</h3>
+					<h3>来源与溯源</h3>
 					<div data-testid="packet-provenance">
-						事件溯源与 transcript 见<button data-testid="approval-open-audit" @click=${() => void this.openAuditView()}>审计视图</button>
+						事件溯源与记录见<button data-testid="approval-open-audit" @click=${() => void this.openAuditView()}>审计视图</button>
 					</div>
 
 					${this.approvalReceipt
 						? html`<div class="context-receipt" data-testid="approval-receipt" data-outcome=${this.approvalReceipt.outcome}>
-							回执:${this.approvalReceipt.commandType} → ${this.approvalReceipt.outcome}(HTTP ${this.approvalReceipt.httpStatus})
+							回执:${commandLabel(this.approvalReceipt.commandType)} → ${statusLabel(this.approvalReceipt.outcome)}(HTTP ${this.approvalReceipt.httpStatus})
 							${this.approvalReceipt.outcome === "accepted" && !approvedProjection ? html`— 已接受,等待归档 Projection 确认…` : nothing}
 						</div>`
 						: nothing}
@@ -1086,7 +1269,7 @@ class BaizeWorkflow extends LitElement {
 				<div class="approval-bar" data-testid="approval-bar">
 					<button class="primary" data-testid="approve-submit" ?disabled=${this.busy || !this.connected || stale || !packet.valid}
 						@click=${() => void this.submitApproval()}>批准归档</button>
-					<button data-testid="reject-toggle" ?disabled=${this.busy || !this.connected || stale}
+					<button class="danger" data-testid="reject-toggle" ?disabled=${this.busy || !this.connected || stale}
 						@click=${() => { this.rejectOpen = !this.rejectOpen; }}>打回…</button>
 					<span class="spacer"></span>
 					<button data-testid="approval-close" @click=${() => this.closeApprovalReview()}>关闭(Esc)</button>
@@ -1108,7 +1291,7 @@ class BaizeWorkflow extends LitElement {
 						@change=${(event: Event) => this.toggleAuditLive((event.target as HTMLInputElement).checked)} /> 实时跟随</label>
 				</div>
 
-				<h3>Workflow 事件(不含 Run token/工具事件)</h3>
+				<h3>工作流事件(不含运行 token/工具事件)</h3>
 				<table data-testid="audit-workflow-events">
 					<thead><tr><th>seq</th><th>type</th><th>workflow 版本</th><th>entity</th><th>command</th></tr></thead>
 					<tbody>
@@ -1124,7 +1307,7 @@ class BaizeWorkflow extends LitElement {
 					</tbody>
 				</table>
 
-				<h3>Run 事件(独立时间线)</h3>
+				<h3>运行事件(独立时间线)</h3>
 				<div class="command-row" data-testid="audit-run-picker">
 					${this.auditRunIds().map(
 						(runId) => html`<button data-testid="audit-run-${runId}" ?disabled=${runId === this.auditRunId}
@@ -1145,7 +1328,7 @@ class BaizeWorkflow extends LitElement {
 					</tbody>
 				</table>
 
-				<h3>Command Receipts</h3>
+				<h3>命令回执</h3>
 				<table data-testid="audit-receipts">
 					<thead><tr><th>commandId</th><th>type</th><th>outcome</th><th>HTTP</th><th>版本</th><th>actor</th><th>request digest</th></tr></thead>
 					<tbody>
@@ -1163,7 +1346,7 @@ class BaizeWorkflow extends LitElement {
 					</tbody>
 				</table>
 
-				<h3>Incidents / 恢复</h3>
+				<h3>事故 / 恢复</h3>
 				<div data-testid="audit-incidents">
 					${this.auditIncidents.length === 0 ? html`无 Incident` : nothing}
 					${this.auditIncidents.map(
@@ -1174,7 +1357,7 @@ class BaizeWorkflow extends LitElement {
 					)}
 				</div>
 
-				<h3>版本与 Digest</h3>
+				<h3>版本与摘要</h3>
 				<div class="mono" data-testid="audit-versions">
 					workflow version ${this.projection.workflow.version} · last event seq ${this.projection.workflow.lastEventSeq}<br />
 					policy bundle ${this.projection.workflow.policyBundle.digest}<br />
@@ -1190,27 +1373,55 @@ class BaizeWorkflow extends LitElement {
 		if (!this.packageDetail) return nothing;
 		return html`
 			<section class="package" data-testid="design-package">
-				<h3>Design Package #${this.packageDetail.id}</h3>
+				<h3>设计包 #${this.packageDetail.id}</h3>
 				<div class="audit">
-					archive class: ${this.packageDetail.archiveClass}<br />
-					digest: ${this.packageDetail.digest}<br />
-					approval packet: ${this.packageDetail.approvalPacketId ?? "—"} · approval: ${this.packageDetail.approvalId ?? "—"}<br />
-					archived at: ${this.packageDetail.archivedAt}
+					归档类别:${this.packageDetail.archiveClass}<br />
+					摘要:${this.packageDetail.digest}<br />
+					批准包:${this.packageDetail.approvalPacketId ?? "—"} · 批准记录:${this.packageDetail.approvalId ?? "—"}<br />
+					归档时间:${this.packageDetail.archivedAt}
 				</div>
 			</section>
 		`;
 	}
 
 	render() {
-		if (this.loadError) return html`<div class="error" data-testid="load-error">${this.loadError}</div>`;
+		if (!this.session) {
+			return html`<div class="login-wrap">
+				<form class="hero login-form" @submit=${(e: Event) => this.handleLogin(e)}>
+					<div class="brand login-brand"><span class="dot">◇</span> BaiZe Architect</div>
+					<p>输入 Operator Token 建立会话。</p>
+					<input
+						type="password"
+						placeholder="Operator Token"
+						aria-label="Operator Token"
+						.value=${this.loginToken}
+						@input=${(e: Event) => (this.loginToken = (e.target as HTMLInputElement).value)}
+						autocomplete="off"
+					/>
+					<button class="primary" type="submit">登录</button>
+					${this.loginError ? html`<div class="error">${this.loginError}</div>` : nothing}
+				</form>
+			</div>`;
+		}
+		// — 已登录:详情页(由 shell 提供导航) —
+		return html`
+		<div class="page">
+			<button class="back" @click=${() => this.dispatchEvent(new CustomEvent("baize-goto", { detail: { tab: "requirements" }, bubbles: true, composed: true }))}>← 返回需求列表</button>
+			${this.loadError ? html`<div class="error" data-testid="load-error">${this.loadError}</div>` : nothing}
+			${this.renderWorkflowView()}
+		</div>`;
+	}
+
+
+	private renderWorkflowView() {
 		if (!this.projection) return html`<div data-testid="loading">加载中…</div>`;
 		return html`
 			${this.renderConnectionBanner()}
 			${this.renderHero()}
 			${this.renderReceipt()}
-			${this.renderOverview()}
 			${this.renderGateQueue()}
 			${this.renderRecovery()}
+			${this.renderAuditSummary()}
 			${this.renderDetails()}
 			${this.renderApprovalReview()}
 			${this.renderAuditView()}

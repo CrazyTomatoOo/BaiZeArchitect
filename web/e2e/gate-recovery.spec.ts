@@ -130,6 +130,7 @@ function parseBody(raw: string | null): Record<string, unknown> {
 
 async function mockApi(page: Page, state: ProjectionState): Promise<{ commands: Record<string, unknown>[]; bump: () => void }> {
 	await installMockEventSource(page);
+	await page.route("**/api/session", (route) => fulfillJson(route, { actorRef: "operator", capabilities: ["workflow:operate", "workflow:approve"] }));
 	const commands: Record<string, unknown>[] = [];
 	const bump = (): void => {
 		state.version += 1;
@@ -190,7 +191,7 @@ test.describe("gate queue 与恢复体验", () => {
 		// 提交 dispose-decision → 回执在表单上下文呈现,队列推进
 		await page.getByTestId("gate-form-fields").locator("input[name='reason']").fill("采用 PostgreSQL");
 		await page.getByTestId("gate-submit").click();
-		await expect(page.getByTestId("gate-receipt")).toContainText("accepted");
+		await expect(page.getByTestId("gate-receipt")).toContainText("已接受");
 		expect(commands).toHaveLength(1);
 		expect(commands[0]).toMatchObject({ type: "dispose-decision", expectedWorkflowVersion: 3 });
 		expect((commands[0].payload as Record<string, unknown>).decisionId).toBe(2);

@@ -89,6 +89,7 @@ function parseBody(raw: string | null): Record<string, unknown> {
 
 async function mockApi(page: Page, options: MockOptions): Promise<{ commands: Record<string, unknown>[] }> {
 	await installMockEventSource(page);
+	await page.route("**/api/session", (route) => fulfillJson(route, { actorRef: "operator", capabilities: ["workflow:operate", "workflow:approve"] }));
 	let state = options.initialState;
 	let version = 0;
 	let lastEventSeq = 1;
@@ -153,7 +154,7 @@ test.describe("guided workflow page", () => {
 		await page.getByTestId("primary-action").click();
 		await expect(page.getByTestId("details")).toBeVisible();
 		await expect(page.getByTestId("task-table")).toContainText("analyze-1");
-		await expect(page.getByTestId("active-work")).toContainText("Run #12");
+		await expect(page.getByTestId("active-work")).toContainText("运行 #12");
 		expect(commands).toEqual([]);
 	});
 
@@ -165,8 +166,8 @@ test.describe("guided workflow page", () => {
 		await page.getByTestId("primary-action").click();
 
 		await expect(page.getByTestId("command-receipt")).toBeVisible();
-		await expect(page.getByTestId("command-receipt")).toContainText("start");
-		await expect(page.getByTestId("command-receipt")).toContainText("accepted");
+		await expect(page.getByTestId("command-receipt")).toContainText("启动");
+		await expect(page.getByTestId("command-receipt")).toContainText("已接受");
 		expect(commands).toHaveLength(1);
 		expect(commands[0]).toMatchObject({ schemaVersion: "workflow-command/v1", type: "start", expectedWorkflowVersion: 0 });
 		await expect(page.getByTestId("hero")).toHaveAttribute("data-state", "running");
@@ -181,7 +182,7 @@ test.describe("guided workflow page", () => {
 		await page.getByTestId("primary-action").click();
 
 		await expect(page.getByTestId("design-package")).toBeVisible();
-		await expect(page.getByTestId("design-package")).toContainText("Design Package #9");
+		await expect(page.getByTestId("design-package")).toContainText("设计包 #9");
 		await expect(page.getByTestId("design-package")).toContainText(digest("d"));
 		await expect(page.getByTestId("design-package")).toContainText("governed");
 	});
@@ -192,7 +193,7 @@ test.describe("guided workflow page", () => {
 
 		await expect(page.getByTestId("primary-action")).toHaveText("继续");
 		await page.getByTestId("primary-action").click();
-		await expect(page.getByTestId("command-receipt")).toContainText("resume");
+		await expect(page.getByTestId("command-receipt")).toContainText("继续");
 		expect(commands[0]).toMatchObject({ type: "resume" });
 	});
 });

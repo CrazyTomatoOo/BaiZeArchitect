@@ -31,8 +31,19 @@ Reviewer 角色已移除，不是重命名或包装。
 ```bash
 docker compose up -d demo    # 首次会自动构建镜像
 docker compose ps            # 等待 STATUS 变为 healthy
-open http://127.0.0.1:18789  # 打开引导式 Workflow 页面
+open http://127.0.0.1:18789  # 登录 Token 为 demo-token(demo 服务预置)
 ```
+
+登录后进入四页工作台(全中文界面):
+
+| 页面 | 用途 |
+| --- | --- |
+| 总览 | 跨需求进展一览 + 「待我处理」聚合;空态给出完整设计旅程引导 |
+| 需求 | 需求列表与新建;详情页为旅程式视图:规划 → 分析 → 设计 → 评审 → 批准 → 归档 |
+| 审核中心 | 聚合所有需要人工判断的事项:关键决策 / 人工输入 / 评审发现处置 / 待批准归档 / 失败恢复 |
+| 资产库 | 场景 / 用例 / 功能复用池,支持新建、删除、导入、导出 |
+
+需求创建即建立独立的 `pending` 工作流。你在详情页点击「开始」后,系统自动规划、分析、设计并评审,在需要人工判断的环节(关键决策、人工输入、发现处置、失败恢复)和最终批准包处停下等待——集中入口是「审核中心」。
 
 ## Docker 测试环境
 
@@ -109,6 +120,7 @@ npx tsx main.ts
 | GET | `/api/design-packages/:id` | Design Package 记录 |
 | GET/POST/DELETE | `/api/assets` | Reusable Asset CRUD |
 | GET | `/api/assets/export` | 导出 Reusable Assets |
+| POST | `/api/assets/import` | 批量导入 Reusable Assets |
 
 旧的手动 Run 创建、steer/cancel、direct archive、global Run stream、evidence/design-package Route、client-supplied actor endpoint 和 C4 architecture Route 均不存在。
 
@@ -146,9 +158,16 @@ agent-runtime/
     scripted-model-driver.ts  测试专用模型驱动
 web/
   src/
-    baize-workflow.ts    引导式 Workflow 页面 + 审计视图
-    workflow-client.ts   类型化 API 客户端
-    main.ts              唯一 Web 入口
+    baize-shell.ts          应用外壳:登录 + 侧栏导航(总览/需求/审核中心/资产库)
+    baize-overview.ts       总览页(进展 + 待办聚合)
+    baize-requirements.ts   需求列表 + 新建
+    baize-review-center.ts  审核中心(聚合人工待办)
+    baize-asset-library.ts  资产库(场景/用例/功能)
+    baize-workflow.ts       旅程式需求详情 + 批准/审计视图
+    baize-data.ts           需求聚合视图模型
+    baize-styles.ts         共享样式(仅引用 token)
+    workflow-client.ts      类型化 API 客户端
+    main.ts                 唯一 Web 入口
 docs/
   cutover-runbook.md    生产 Cutover Runbook
 fixtures/               容器测试种子仓库

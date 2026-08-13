@@ -150,6 +150,7 @@ function parseBody(raw: string | null): Record<string, unknown> {
 
 async function mockApi(page: Page): Promise<{ commands: Record<string, unknown>[]; state: MockState; replacePacket: (id: number, letter: string) => void; appendEvent: (type: string) => void }> {
 	await installMockEventSource(page);
+	await page.route("**/api/session", (route) => fulfillJson(route, { actorRef: "operator", capabilities: ["workflow:operate", "workflow:approve"] }));
 	const state: MockState = { state: "ready_to_archive", version: 8, lastEventSeq: 4, packet: { id: 9, digest: digest("p") }, designPackageId: null };
 	const commands: Record<string, unknown>[] = [];
 	const extraEvents: ReturnType<typeof workflowEvents> = [];
@@ -282,8 +283,8 @@ test.describe("focused approval 与审计视图", () => {
 		await page.keyboard.press("Enter");
 
 		await expect(page.getByTestId("approval-review")).toHaveCount(0);
-		await expect(page.getByTestId("command-receipt")).toContainText("approve-packet");
-		await expect(page.getByTestId("command-receipt")).toContainText("accepted");
+		await expect(page.getByTestId("command-receipt")).toContainText("批准归档");
+		await expect(page.getByTestId("command-receipt")).toContainText("已接受");
 
 		const approve = commands.find((command) => command.type === "approve-packet");
 		expect(approve).toBeDefined();
@@ -308,7 +309,7 @@ test.describe("focused approval 与审计视图", () => {
 		await page.getByTestId("reject-submit").click();
 
 		await expect(page.getByTestId("approval-review")).toHaveCount(0);
-		await expect(page.getByTestId("command-receipt")).toContainText("reject-packet");
+		await expect(page.getByTestId("command-receipt")).toContainText("打回返工");
 		await expect(page.getByTestId("hero")).toHaveAttribute("data-state", "running");
 
 		const reject = commands.find((command) => command.type === "reject-packet");

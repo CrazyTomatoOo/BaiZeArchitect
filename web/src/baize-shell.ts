@@ -1,520 +1,221 @@
-import { LitElement, html, css } from "lit";
+import { LitElement, html, css, nothing } from "lit";
+import { sharedStyles } from "./baize-styles.js";
+import { bootstrapSession, checkSession, type OperatorSession } from "./workflow-client.js";
+import "./baize-overview.js";
+import "./baize-requirements.js";
+import "./baize-review-center.js";
+import "./baize-asset-library.js";
+import "./baize-workflow.js";
 
-/**
- * baize-shell — app shell:sidebar 工作台(T03 IA)。
- * sidebar:顶部 workspace 切换器(跳工作区页)+ 三区 nav + 底部状态区。
- * 落地页:localStorage `baize.ui.v1.lastPage` 记忆;首次有 workspace→需求,无→工作区。
- * ⌘B 折叠 sidebar(persist)。子视图 ?hidden 挂载保活;子视图可派发 baize-goto 切页。
- * 注:资产库/待决策/系统页、ws run rail、⌘K 面板均已挂载接入(原「待落地后接入」已兑现);workspace 单作用域(1 repo = 1 ws)。
- */
+type Tab = "overview" | "requirements" | "review" | "assets" | "detail";
+
+const NAV: Array<{ id: Tab; icon: string; label: string }> = [
+	{ id: "overview", icon: "⌂", label: "总览" },
+	{ id: "requirements", icon: "✎", label: "需求" },
+	{ id: "review", icon: "◇", label: "审核中心" },
+	{ id: "assets", icon: "▤", label: "资产库" },
+];
+
+const TITLES: Record<Tab, string> = {
+	overview: "总览",
+	requirements: "需求",
+	review: "审核中心",
+	assets: "资产库",
+	detail: "需求详情",
+};
+
+/** baize-shell — 应用外壳:登录 + 顶栏 + 侧栏导航(总览/需求/审核中心/资产库)+ 移动端抽屉。 */
 class BaizeShell extends LitElement {
 	static properties = {
+		session: { state: true },
+		loginToken: { state: true },
+		loginError: { state: true },
 		tab: { state: true },
-		ws: { state: true },
-		wsName: { state: true },
-		workspaces: { state: true },
-		folded: { state: true },
 		navOpen: { state: true },
-		decCount: { state: true },
-		wsConnected: { state: true },
+		selectedId: { state: true },
+		pendingGate: { state: true },
+		pendingApproval: { state: true },
+		createOpen: { state: true },
 	};
 
-	declare tab: string;
-	declare ws: number;
-	declare wsName: string;
-	declare workspaces: Array<{ id: number; name: string }>;
-	declare folded: boolean;
+	declare session: OperatorSession | null;
+	declare loginToken: string;
+	declare loginError: string | null;
+	declare tab: Tab;
 	declare navOpen: boolean;
-	declare decCount: number;
-	declare wsConnected: boolean;
+	declare selectedId: number;
+	declare pendingGate: string | null;
+	declare pendingApproval: boolean;
+	declare createOpen: boolean;
 
-	private es: EventSource | null = null;
-
-	static styles = css`
-		:host {
-			display: block;
-			min-height: 100vh;
-			background: var(--bg);
-			color: var(--text);
-			font-family: var(--font-ui);
-		}
-		.app {
-			display: grid;
-			grid-template-columns: var(--sidebar-w) 1fr;
-			flex: 1;
-			min-height: 0;
-		}
-		.app.folded {
-			grid-template-columns: 56px 1fr;
-		}
-		.sidebar {
-			background: var(--surface);
-			border-right: 1px solid var(--border);
-			display: flex;
-			flex-direction: column;
-			overflow: hidden;
-		}
-		.ws-switch {
-			display: flex;
-			align-items: center;
-			gap: 0.5rem;
-			padding: 0.9rem var(--pad);
-			border-bottom: 1px solid var(--border);
-			font-weight: 600;
-			cursor: pointer;
-		}
-		.ws-switch:hover {
-			background: var(--surface-hover);
-		}
-		.ws-switch .dot {
-			color: var(--accent);
-		}
-		.ws-switch .name {
-			overflow: hidden;
-			text-overflow: ellipsis;
-			white-space: nowrap;
-		}
-		.ws-switch .caret {
-			margin-left: auto;
-			color: var(--text-muted);
-		}
-		.app.folded .ws-switch .name,
-		.app.folded .ws-switch .caret,
-		.app.folded .nav,
-		.app.folded .status-foot {
-			display: none;
-		}
-		.nav {
-			padding: var(--gap) 0;
-			flex: 1;
-			overflow: auto;
-		}
-		.nav-group {
-			padding: 0 var(--pad) var(--gap);
-		}
-		.nav-group + .nav-group {
-			border-top: 1px solid var(--border);
-			padding-top: var(--gap);
-		}
-		.nav-group .label {
-			font-size: 11px;
-			letter-spacing: 0.06em;
-			color: var(--text-subtle);
-			margin-bottom: 6px;
-		}
-		.nav-item {
-			display: flex;
-			align-items: center;
-			gap: 8px;
-			padding: 7px 8px;
-			border-radius: var(--radius-sm);
-			color: var(--text-muted);
-			background: transparent;
-			border: none;
-			cursor: pointer;
-			font: inherit;
-			font-size: 0.85rem;
-			width: 100%;
-			text-align: left;
-			white-space: nowrap;
-		}
-		.nav-item:hover {
-			background: var(--surface-hover);
-			color: var(--text);
-		}
-		.nav-item:focus-visible {
-			outline: var(--focus-ring);
-			outline-offset: 2px;
-		}
-		.nav-item.active {
-			background: var(--surface-2);
-			color: var(--text);
-		}
-		.status-foot {
-			padding: var(--pad);
-			border-top: 1px solid var(--border);
-			font-size: 0.75rem;
-			color: var(--text-muted);
-		}
-		.status-foot .live {
-			color: var(--text-subtle);
-		}
-		.status-foot .live.on {
-			color: var(--ok);
-		}
-		main {
-			overflow: auto;
-			padding: var(--pad) calc(var(--pad) * 1.4) 3rem;
-		}
-		[hidden] {
-			display: none;
-		}
-		/* step6: workspace scope */
-		.ws-select {
-			background: transparent;
-			border: none;
-			color: var(--text);
-			font: inherit;
-			font-weight: 600;
-			font-size: 0.9rem;
-			max-width: 170px;
-		}
-		.ws-select.non-default {
-			color: var(--warn);
-		}
-		.ws-select option {
-			background: var(--surface);
-			color: var(--text);
-		}
-		.ws-switch .dot.active {
-			color: var(--accent);
-		}
-		.scope-banner {
-			background: var(--warn-soft);
-			color: var(--warn);
-			border: 1px solid var(--warn-line);
-			border-radius: var(--radius-sm);
-			padding: 6px 12px;
-			font-size: 0.8rem;
-			margin-bottom: var(--gap);
-			display: inline-flex;
-			align-items: center;
-			gap: 6px;
-		}
-		.shell {
-			display: flex;
-			flex-direction: column;
-			min-height: 100vh;
-		}
-		.topbar {
-			display: flex;
-			align-items: center;
-			gap: 12px;
-			padding: 10px 20px;
-			border-bottom: 1px solid var(--border);
-			background: var(--surface);
-		}
-		.logo {
-			display: flex;
-			align-items: center;
-			gap: 8px;
-			font-family: var(--font-display);
-			font-weight: 600;
-			font-size: 1rem;
-			letter-spacing: 0.01em;
-			white-space: nowrap;
-		}
-		.logo .dot {
-			color: var(--accent);
-		}
-		.topbar-right {
-			margin-left: auto;
-			display: flex;
-			align-items: center;
-			gap: 10px;
-		}
-		.manage {
-			background: transparent;
-			border: 1px solid var(--border-strong);
-			color: var(--text);
-			border-radius: var(--radius-sm);
-			padding: 6px 12px;
-			font: inherit;
-			font-size: 0.82rem;
-			cursor: pointer;
-			transition: color 0.2s, border-color 0.2s;
-		}
-		.manage:hover {
-			color: var(--text);
-			border-color: var(--accent);
-		}
-		.entry-main {
-			flex: 1;
-			overflow: auto;
-			width: 100%;
-			padding: var(--pad) calc(var(--pad) * 1.4) 3rem;
-		}
-		.menu-btn {
-			display: none;
-			align-items: center;
-			justify-content: center;
-			width: 34px;
-			height: 34px;
-			background: transparent;
-			border: 1px solid var(--border-strong);
-			border-radius: var(--radius-sm);
-			color: var(--text);
-			font: inherit;
-			cursor: pointer;
-		}
-		.backdrop {
-			position: fixed;
-			inset: 0;
-			background: var(--scrim);
-			z-index: 40;
-		}
+	static styles = [sharedStyles, css`
+		:host { display: block; min-height: 100vh; background: var(--bg); color: var(--text); font-family: var(--font-ui); font-size: var(--text-base); line-height: 1.55; }
+		.shell { min-height: 100vh; display: grid; grid-template-rows: 52px minmax(0, 1fr); }
+		.topbar { display: flex; align-items: center; gap: 12px; padding: 0 20px; border-bottom: 1px solid var(--border); background: var(--surface); }
+		.brand { display: flex; align-items: center; gap: 8px; font-family: var(--font-display); font-weight: 600; font-size: var(--text-lg); letter-spacing: 0.01em; white-space: nowrap; }
+		.brand .dot { color: var(--accent); }
+		.crumb { color: var(--text-muted); font-size: var(--text-sm); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+		.top-actions { margin-left: auto; display: flex; align-items: center; gap: 10px; }
+		.operator-badge { color: var(--text-muted); font-size: var(--text-xs); white-space: nowrap; border: 1px solid var(--border); border-radius: 999px; padding: 3px 10px; }
+		.menu-btn { display: none; align-items: center; justify-content: center; width: 34px; height: 34px; padding: 0; background: transparent; border: 1px solid var(--border-strong); border-radius: var(--radius-sm); color: var(--text); font: inherit; cursor: pointer; }
+		.shell-body { display: grid; grid-template-columns: var(--sidebar-w) minmax(0, 1fr); min-height: 0; }
+		.backdrop { position: fixed; inset: 0; background: var(--scrim); z-index: 40; }
+		.sidebar { border-right: 1px solid var(--border); background: linear-gradient(180deg, var(--surface) 0%, var(--bg) 120%); display: flex; flex-direction: column; overflow: hidden; box-shadow: 12px 0 32px var(--shadow-1); }
+		.nav { padding: 14px 10px; flex: 1; overflow-y: auto; display: flex; flex-direction: column; gap: 14px; }
+		.nav-group { border: 1px solid var(--border); border-radius: calc(var(--radius) + 4px); background: var(--nav-card); padding: 8px; }
+		.nav-label { display: flex; align-items: center; padding: 4px 6px 8px; font-size: 10px; letter-spacing: 0.12em; text-transform: uppercase; color: var(--text-subtle); }
+		.nav-label::before { content: ""; width: 18px; height: 2px; margin-right: 7px; border-radius: 99px; background: var(--accent); opacity: 0.75; }
+		.nav-stack { display: grid; gap: 4px; }
+		.nav-item { position: relative; display: flex; align-items: center; gap: 10px; min-height: 38px; padding: 8px 10px; border-radius: var(--radius); color: var(--text-muted); background: transparent; border: 1px solid transparent; cursor: pointer; font: inherit; font-size: var(--text-sm); width: 100%; text-align: left; white-space: nowrap; transition: background var(--dur-1) var(--ease-out), border-color var(--dur-1) var(--ease-out), color var(--dur-1) var(--ease-out); }
+		.nav-item:hover { background: var(--surface-hover); color: var(--text); }
+		.nav-item:focus-visible { outline: var(--focus-ring); outline-offset: 2px; }
+		.nav-item.active { background: var(--accent-glow); border-color: var(--accent-line); color: var(--text); box-shadow: inset 3px 0 0 var(--accent); }
+		.nav-ico { width: 22px; flex: 0 0 22px; text-align: center; color: var(--text-subtle); }
+		.nav-item.active .nav-ico { color: var(--accent-hi); }
+		.status-foot { margin: 0 10px 10px; padding: 10px 12px; border: 1px solid var(--border); border-radius: calc(var(--radius) + 4px); background: var(--nav-card); font-size: var(--text-xs); color: var(--text-muted); display: grid; gap: 4px; }
+		.main { overflow-y: auto; min-width: 0; }
+		.content { max-width: var(--content-max); margin: 0 auto; padding: var(--pad) calc(var(--pad) * 1.4) 3rem; }
+		/* — 登录 — */
+		.login-wrap { min-height: 100vh; display: grid; place-items: center; padding: var(--pad); box-sizing: border-box; }
+		.login-form { width: min(420px, 100%); box-sizing: border-box; }
+		.login-brand { font-size: var(--text-xl); margin-bottom: 6px; font-family: var(--font-display); font-weight: 600; }
+		.login-brand .dot { color: var(--accent); }
+		.login-form p { margin: 4px 0 14px; color: var(--text-muted); }
+		.login-form input { width: 100%; }
+		.login-form button { margin-top: 10px; width: 100%; }
 		@media (max-width: 900px) {
 			.menu-btn { display: inline-flex; }
-			.app, .app.folded { grid-template-columns: 1fr; }
-			.app.folded .nav, .app.folded .status-foot,
-			.app.folded .ws-switch .name, .app.folded .ws-switch .caret { display: flex; }
-			.sidebar {
-				position: fixed;
-				top: 0;
-				bottom: 0;
-				left: 0;
-				width: min(80vw, 280px);
-				transform: translateX(-100%);
-				transition: transform var(--dur-2) var(--ease-out);
-				z-index: 50;
-			}
-			.app.nav-open .sidebar { transform: none; }
+			.shell-body { grid-template-columns: minmax(0, 1fr); }
+			.sidebar { position: fixed; top: 0; bottom: 0; left: 0; width: min(80vw, 280px); transform: translateX(-100%); transition: transform var(--dur-2) var(--ease-out); z-index: 50; }
+			.shell-body.nav-open .sidebar { transform: none; }
 			.topbar { position: sticky; top: 0; z-index: 30; }
-			.ws-select { max-width: 34vw; }
-			.manage { white-space: nowrap; }
+			.content { padding: var(--pad) var(--pad) 3rem; }
 		}
-		@media (max-width: 480px) {
-			.logo .word { display: none; }
-			.manage { padding: 6px 8px; font-size: 0.72rem; white-space: nowrap; }
-			.ws-select { max-width: 30vw; }
-		}
-		@media (prefers-reduced-motion: reduce) {
-			.sidebar { transition: none; }
-		}
-	`;
+		@media (min-width: 901px) { .backdrop { display: none; } }
+		@media (max-width: 480px) { .brand .word { display: none; } .crumb { display: none; } }
+		@media (prefers-reduced-motion: reduce) { .sidebar { transition: none; } }
+	`];
 
 	constructor() {
 		super();
-		const lastPage = localStorage.getItem("baize.ui.v1.lastPage");
-		const wsParam = new URLSearchParams(location.search).get("workspace");
-		const wsId = wsParam ? Number(wsParam) : Number(localStorage.getItem("baize.ui.v1.workspace") ?? "0");
-		this.tab = lastPage && lastPage !== "workspaces" ? lastPage : "requirement";
-		this.ws = Number.isFinite(wsId) ? wsId : 0;
-		// URL ?workspace= 优先并同步 localStorage:子组件 baize-requirement 构造时从 localStorage 读 workspaceId,
-		// 不同步则 reload 时拿到 stale 的上个 workspace → 列表空(§11.5)。wsName 留空由 loadWorkspaces 回填真值。
-		if (wsParam && Number.isFinite(wsId)) {
-			localStorage.setItem("baize.ui.v1.workspace", String(wsId));
-			this.wsName = "";
-		} else {
-			this.wsName = localStorage.getItem("baize.ui.v1.workspaceName") ?? "";
-		}
-		this.workspaces = [];
-		this.folded = localStorage.getItem("baize.ui.v1.sidebarFolded") === "1";
+		this.session = null;
+		this.loginToken = "";
+		this.loginError = null;
+		this.tab = (localStorage.getItem("baize.ui.v2.tab") as Tab) || "overview";
 		this.navOpen = false;
-		this.decCount = 0;
-		this.wsConnected = false;
+		this.selectedId = 0;
+		this.pendingGate = null;
+		this.pendingApproval = false;
+		this.createOpen = false;
 	}
 
-	async connectedCallback(): Promise<void> {
+	connectedCallback(): void {
 		super.connectedCallback();
 		this.addEventListener("baize-goto", this.onGoto as EventListener);
-		this.addEventListener("baize-fold-toggle", this.onFoldToggle as EventListener);
-		this.addEventListener("baize-new-requirement", this.onNewRequirement as EventListener);
-		this.addEventListener("baize-workspaces-changed", this.onWorkspacesChanged as EventListener);
-		this.addEventListener("baize-decisions-count", this.onDecisionsCount as EventListener);
-		this.addEventListener("baize-select-workspace", this.onSelectWorkspace as EventListener);
-		addEventListener("keydown", this.onKey);
-		try {
-			this.es = new EventSource("/api/runs/stream");
-			this.es.onopen = () => {
-				this.wsConnected = true;
-			};
-			this.es.onerror = () => {
-				this.wsConnected = false;
-			};
-		} catch {
-			this.es = null;
-			this.wsConnected = false;
-		}
-		await this.loadWorkspaces();
+		this.addEventListener("baize-open-requirement", this.onOpenRequirement as EventListener);
+		this.addEventListener("baize-intent-consumed", this.onIntentConsumed as EventListener);
+		void this.checkSession();
 	}
 
 	disconnectedCallback(): void {
-		super.disconnectedCallback();
 		this.removeEventListener("baize-goto", this.onGoto as EventListener);
-		this.removeEventListener(
-			"baize-fold-toggle",
-			this.onFoldToggle as EventListener,
-		);
-		this.removeEventListener(
-			"baize-new-requirement",
-			this.onNewRequirement as EventListener,
-		);
-		this.removeEventListener("baize-workspaces-changed", this.onWorkspacesChanged as EventListener);
-		this.removeEventListener("baize-decisions-count", this.onDecisionsCount as EventListener);
-		this.removeEventListener("baize-select-workspace", this.onSelectWorkspace as EventListener);
-		removeEventListener("keydown", this.onKey);
-		this.es?.close();
+		this.removeEventListener("baize-open-requirement", this.onOpenRequirement as EventListener);
+		this.removeEventListener("baize-intent-consumed", this.onIntentConsumed as EventListener);
+		super.disconnectedCallback();
 	}
 
-	private onGoto = (e: CustomEvent<{ tab: string }>) => {
-		this.goto(e.detail.tab);
-	};
-
-	private onSelectWorkspace = (e: CustomEvent<{ id: number }>) => {
-		this.setWs(e.detail.id);
-	};
-	private onFoldToggle = () => {
-		this.folded = !this.folded;
-		localStorage.setItem("baize.ui.v1.sidebarFolded", this.folded ? "1" : "0");
-	};
-
-	private onNewRequirement = () => {
-		// chat-intake(step3)接入前:先跳到需求页
-		this.goto("requirement");
-	};
-
-	private onKey = (e: KeyboardEvent) => {
-		const t = e.target as HTMLElement | null;
-		if (
-			t &&
-			(t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.isContentEditable)
-		) {
-			return;
+	private async checkSession(): Promise<void> {
+		try {
+			this.session = await checkSession("");
+		} catch {
+			this.session = null;
 		}
-		if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "b") {
-			e.preventDefault();
-			this.folded = !this.folded;
-			localStorage.setItem(
-				"baize.ui.v1.sidebarFolded",
-				this.folded ? "1" : "0",
-			);
+	}
+
+	private async handleLogin(e: Event): Promise<void> {
+		e.preventDefault();
+		try {
+			this.session = await bootstrapSession("", this.loginToken);
+			this.loginError = null;
+		} catch (err) {
+			this.loginError = err instanceof Error ? err.message : String(err);
 		}
+	}
+
+	private onGoto = (e: CustomEvent<{ tab: string; create?: boolean }>) => {
+		this.goto(e.detail.tab as Tab);
+		if (e.detail.create) this.createOpen = true;
 	};
 
-	private goto(tab: string) {
+	private onOpenRequirement = (e: CustomEvent<{ id: number; gate?: string; approval?: boolean }>) => {
+		this.selectedId = e.detail.id;
+		this.pendingGate = e.detail.gate ?? null;
+		this.pendingApproval = e.detail.approval ?? false;
+		this.goto("detail");
+	};
+
+	private onIntentConsumed = () => {
+		this.pendingGate = null;
+		this.pendingApproval = false;
+	};
+
+	private goto(tab: Tab): void {
 		this.tab = tab;
 		this.navOpen = false;
-		localStorage.setItem("baize.ui.v1.lastPage", tab);
+		if (tab !== "requirements") this.createOpen = false;
+		localStorage.setItem("baize.ui.v2.tab", tab);
 	}
-
-	private async loadWorkspaces() {
-		try {
-			this.workspaces = (await (
-				await fetch("/api/workspaces")
-			).json()) as Array<{ id: number; name: string }>;
-			// 始终用 workspaces 真值回填 wsName(纠 stale,非仅空时补;§11.5)
-			this.wsName = this.workspaces.find((w) => w.id === this.ws)?.name ?? "";
-			// 持久化真值,避免 localStorage.wsName 滞留上个 ws(§11.5)
-			if (this.ws) localStorage.setItem("baize.ui.v1.workspaceName", this.wsName);
-		} catch {
-			this.workspaces = [];
-		}
-	}
-
-	private setWs(id: number) {
-		this.ws = id;
-		if (id && this.tab === "workspaces") this.tab = "requirement";
-		this.wsName = this.workspaces.find((w) => w.id === id)?.name ?? "";
-		if (id) {
-			localStorage.setItem("baize.ui.v1.workspace", String(id));
-			localStorage.setItem("baize.ui.v1.workspaceName", this.wsName);
-		} else {
-			localStorage.removeItem("baize.ui.v1.workspace");
-			localStorage.removeItem("baize.ui.v1.workspaceName");
-		}
-		try {
-			const u = new URL(location.href);
-			if (id) u.searchParams.set("workspace", String(id));
-			else u.searchParams.delete("workspace");
-			history.replaceState(null, "", u);
-		} catch {
-			// file:// 无 history 时静默
-		}
-		this.dispatchEvent(
-			new CustomEvent("baize-workspace-change", {
-				detail: { id, name: this.wsName },
-				bubbles: true,
-				composed: true,
-			}),
-		);
-	}
-
-	private onWorkspacesChanged = () => {
-		this.loadWorkspaces();
-	};
-
-	private onDecisionsCount = (e: CustomEvent<{ count: number }>) => {
-		this.decCount = e.detail.count;
-	};
 
 	render() {
+		if (!this.session) {
+			return html`<div class="login-wrap">
+				<form class="card login-form" @submit=${(e: Event) => void this.handleLogin(e)}>
+					<div class="login-brand"><span class="dot">◇</span> BaiZe Architect</div>
+					<p>输入 Operator Token 建立会话。</p>
+					<input type="password" placeholder="Operator Token" aria-label="Operator Token" .value=${this.loginToken} @input=${(e: Event) => (this.loginToken = (e.target as HTMLInputElement).value)} autocomplete="off" />
+					<button class="primary" type="submit">登录</button>
+					${this.loginError ? html`<div class="error">${this.loginError}</div>` : nothing}
+				</form>
+			</div>`;
+		}
+
+		const activeNav = this.tab === "detail" ? "requirements" : this.tab;
 		return html`
-			<div class="shell">
-				<header class="topbar">
-					<button class="menu-btn" aria-label="切换导航" @click=${() => (this.navOpen = !this.navOpen)}>☰</button>
-					<span class="logo"><span class="dot">◇</span><span class="word"> BaiZe Architect</span></span>
-					<div class="topbar-right">
-						<select
-							class="ws-select ${this.ws && this.workspaces.length && this.ws !== this.workspaces[0].id ? "non-default" : ""}"
-							.value=${String(this.ws)}
-							@change=${(e: Event) =>
-								this.setWs(Number((e.target as HTMLSelectElement).value))}
-						>
-							${this.workspaces.map(
-								(w) =>
-									html`<option value=${w.id} ?selected=${w.id === this.ws}>${w.name}</option>`,
-							)}
-						</select>
-						${this.ws
-							? html`<button class="manage" @click=${() => this.setWs(0)}>管理工作区</button>`
-							: null}
+		<div class="shell">
+			<header class="topbar">
+				<button class="menu-btn" aria-label="切换导航" aria-expanded=${this.navOpen ? "true" : "false"} @click=${() => (this.navOpen = !this.navOpen)}>☰</button>
+				<span class="brand"><span class="dot">◇</span><span class="word"> BaiZe Architect</span></span>
+				<div class="crumb">${TITLES[this.tab]}</div>
+				<div class="top-actions"><span class="operator-badge">${this.session.actorRef}</span></div>
+			</header>
+			<div class="shell-body ${this.navOpen ? "nav-open" : ""}">
+				${this.navOpen ? html`<div class="backdrop" @click=${() => (this.navOpen = false)}></div>` : nothing}
+				<nav class="sidebar" aria-label="主导航">
+					<div class="nav">
+						<section class="nav-group" aria-label="导航">
+							<div class="nav-label">导航</div>
+							<div class="nav-stack">
+								${NAV.map((item) => html`
+									<button class="nav-item ${activeNav === item.id ? "active" : ""}" @click=${() => this.goto(item.id)}>
+										<span class="nav-ico">${item.icon}</span><span class="nav-text">${item.label}</span>
+									</button>`)}
+							</div>
+						</section>
 					</div>
-				</header>
-				${this.ws && this.workspaces.length && this.ws !== this.workspaces[0].id
-					? html`<div class="scope-banner">⚠ 当前工作区:${this.wsName}(非默认)—— 页面数据仅属此工作区</div>`
-					: null}
-				${this.ws
-					? html`<div class="app ${this.folded ? "folded" : ""} ${this.navOpen ? "nav-open" : ""}">
-							${this.navOpen ? html`<div class="backdrop" @click=${() => (this.navOpen = false)}></div>` : null}
-							<aside class="sidebar">
-								<nav class="nav">
-							<button class="nav-item ${this.tab === "overview" ? "active" : ""}" @click=${() => this.goto("overview")}>总览</button>
-							<div class="nav-group">
-								<div class="label">工作</div>
-								<button class="nav-item ${this.tab === "requirement" ? "active" : ""}" @click=${() => this.goto("requirement")}>需求</button>
-								<button class="nav-item ${this.tab === "decisions" ? "active" : ""}" @click=${() => this.goto("decisions")}>
-									待决策${this.decCount ? html` <span class="chip">${this.decCount}</span>` : null}
-								</button>
-							</div>
-							<div class="nav-group">
-								<div class="label">资产库</div>
-								<button class="nav-item ${this.tab === "assets-req" ? "active" : ""}" @click=${() => this.goto("assets-req")}>需求管理</button>
-								<button class="nav-item ${this.tab === "assets-scenario" ? "active" : ""}" @click=${() => this.goto("assets-scenario")}>场景库</button>
-								<button class="nav-item ${this.tab === "assets-usecase" ? "active" : ""}" @click=${() => this.goto("assets-usecase")}>用例库</button>
-								<button class="nav-item ${this.tab === "assets-function" ? "active" : ""}" @click=${() => this.goto("assets-function")}>功能库</button>
-								<button class="nav-item ${this.tab === "assets-sediment" ? "active" : ""}" @click=${() => this.goto("assets-sediment")}>沉淀</button>
-							</div>
-							<div class="nav-group">
-								<div class="label">管理</div>
-							<button class="nav-item ${this.tab === "system" ? "active" : ""}" @click=${() => this.goto("system")}>系统</button>
-							<button class="nav-item ${this.tab === "evidence" ? "active" : ""}" @click=${() => this.goto("evidence")}>架构</button>
-						</div>
-								<div class="status-foot">
-									<div><span class="live ${this.wsConnected ? "on" : ""}">●</span> ws ${this.wsConnected ? "已连接" : "未连接"}</div>
-									<div>工作区:${this.wsName || "—"}</div>
-								</div>
-							</aside>
-							<main>
-								<baize-overview ?hidden=${this.tab !== "overview"}></baize-overview>
-								<baize-requirement ?hidden=${this.tab !== "requirement"}></baize-requirement>
-								<baize-decisions ?hidden=${this.tab !== "decisions"}></baize-decisions>
-								<baize-asset-library
-									.view=${this.tab.startsWith("assets-") ? this.tab.slice(7) : "req"}
-									?hidden=${!this.tab.startsWith("assets-")}
-								></baize-asset-library>
-							<baize-system ?hidden=${this.tab !== "system"}></baize-system>
-							${this.tab === "evidence" ? html`<baize-architecture-browser .repo=${this.wsName}></baize-architecture-browser>` : null}
-					</main>
-						</div>`
-					: html`<main class="entry-main">
-							<baize-workspaces></baize-workspaces>
-						</main>`}
-				<baize-command-palette></baize-command-palette>
-			<baize-run-rail .suppress=${this.tab === "requirement"}></baize-run-rail>
-				<baize-chat-intake></baize-chat-intake>
+					<div class="status-foot">
+						<div>自动优先的需求设计编排</div>
+						<div>描述 → 设计 → 决策 → 批准 → 归档</div>
+					</div>
+				</nav>
+				<main class="main">
+					${this.tab === "overview" ? html`<div class="content"><baize-overview api-base="" workspace-id="1"></baize-overview></div>` : nothing}
+					${this.tab === "requirements" ? html`<div class="content"><baize-requirements api-base="" workspace-id="1" ?create-open=${this.createOpen}></baize-requirements></div>` : nothing}
+					${this.tab === "review" ? html`<div class="content"><baize-review-center api-base="" workspace-id="1"></baize-review-center></div>` : nothing}
+					${this.tab === "assets" ? html`<div class="content"><baize-asset-library api-base="" workspace-id="1"></baize-asset-library></div>` : nothing}
+					${this.tab === "detail" ? html`<baize-workflow api-base="" workspace-id="1" requirement-id=${this.selectedId} pending-gate=${this.pendingGate ?? ""} ?pending-approval=${this.pendingApproval}></baize-workflow>` : nothing}
+				</main>
 			</div>
-		`;
+		</div>`;
 	}
 }
 
