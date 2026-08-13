@@ -4,19 +4,31 @@ import {
 	artifactSummary,
 	designStages,
 	gateQueue,
+	getApprovalPacket,
 	getDesignPackage,
 	getRequirement,
 	getWorkflowProjection,
+	listCommandReceipts,
+	listRunEvents,
+	listWorkflowEvents,
+	listWorkflowIncidents,
+	packetReviewDrift,
 	pendingCounts,
 	recoveryActions,
 	sendWorkflowCommand,
 	stateHero,
 	subscribeRunEvents,
 	subscribeWorkflowEvents,
+	type ApprovalPacketDetail,
 	type CommandReceipt,
+	type CommandReceiptListItem,
 	type DesignPackageDetail,
 	type GateQueueItem,
+	type PacketReviewContext,
 	type RequirementDetail,
+	type RunEventEnvelope,
+	type WorkflowEventEnvelope,
+	type WorkflowIncidentRecord,
 	type WorkflowProjection,
 } from "./workflow-client.js";
 
@@ -46,6 +58,18 @@ class BaizeWorkflow extends LitElement {
 		liveMessage: { state: true },
 		workflowConnected: { state: true },
 		runConnected: { state: true },
+		approvalOpen: { state: true },
+		approvalPacket: { state: true },
+		approvalStale: { state: true },
+		approvalReceipt: { state: true },
+		rejectOpen: { state: true },
+		auditOpen: { state: true },
+		auditEvents: { state: true },
+		auditReceipts: { state: true },
+		auditIncidents: { state: true },
+		auditRunEvents: { state: true },
+		auditRunId: { state: true },
+		auditLive: { state: true },
 	};
 
 	declare requirementId: number;
@@ -64,13 +88,27 @@ class BaizeWorkflow extends LitElement {
 	declare liveMessage: string;
 	declare workflowConnected: boolean;
 	declare runConnected: boolean | null;
+	declare approvalOpen: boolean;
+	declare approvalPacket: ApprovalPacketDetail | null;
+	declare approvalStale: boolean;
+	declare approvalReceipt: CommandReceipt | null;
+	declare rejectOpen: boolean;
+	declare auditOpen: boolean;
+	declare auditEvents: readonly WorkflowEventEnvelope[];
+	declare auditReceipts: readonly CommandReceiptListItem[];
+	declare auditIncidents: readonly WorkflowIncidentRecord[];
+	declare auditRunEvents: readonly RunEventEnvelope[];
+	declare auditRunId: number | null;
+	declare auditLive: boolean;
 
 	/** 打开的 gate 表单上下文:commandId 在表单生命周期内固定(重复提交幂等),reload 才换新。 */
 	private formContext: { key: string; commandId: string; workflowVersion: number } | null = null;
 	private unsubscribeEvents: (() => void) | null = null;
 	private unsubscribeRunEvents: (() => void) | null = null;
 	private runStreamId: number | null = null;
-
+	/** 专注审阅绑定上下文 + 每个意图一个固定 commandId(approve/reject 各自幂等)。 */
+	private approvalContext: (PacketReviewContext & { approveCommandId: string; rejectCommandId: string }) | null = null;
+	private unsubscribeAudit: (() => void) | null = null;
 	constructor() {
 		super();
 		this.requirementId = 0;
@@ -89,6 +127,18 @@ class BaizeWorkflow extends LitElement {
 		this.liveMessage = "";
 		this.workflowConnected = true;
 		this.runConnected = null;
+		this.approvalOpen = false;
+		this.approvalPacket = null;
+		this.approvalStale = false;
+		this.approvalReceipt = null;
+		this.rejectOpen = false;
+		this.auditOpen = false;
+		this.auditEvents = [];
+		this.auditReceipts = [];
+		this.auditIncidents = [];
+		this.auditRunEvents = [];
+		this.auditRunId = null;
+		this.auditLive = false;
 	}
 
 	static styles = css`
@@ -146,6 +196,20 @@ class BaizeWorkflow extends LitElement {
 		.context-receipt { margin-top: 8px; font-size: 13px; border-radius: 6px; padding: 8px 10px; }
 		.context-receipt[data-outcome="accepted"] { border: 1px solid #b7d9a8; background: #f6fbec; }
 		.context-receipt:not([data-outcome="accepted"]) { border: 1px solid #e5b8b8; background: #fdf1f1; color: #9c2b2b; }
+		.approval { margin-top: 16px; border: 2px solid #2f4fdd; border-radius: 10px; background: #fff; }
+		.approval .approval-body { padding: 14px 16px; max-height: 60vh; overflow-y: auto; }
+		.approval h3 { margin: 12px 0 6px; font-size: 13px; color: #4d5f8f; text-transform: uppercase; letter-spacing: 0.06em; }
+		.approval h3:first-child { margin-top: 0; }
+		.approval-bar { position: sticky; bottom: 0; display: flex; gap: 10px; align-items: center; padding: 12px 16px; background: #f7f9ff; border-top: 1px solid #d4dcee; border-radius: 0 0 8px 8px; }
+		.approval-bar .spacer { flex: 1; }
+		.approval .digest-line { font-family: ui-monospace, monospace; font-size: 12px; word-break: break-all; }
+		.reject-form { margin-top: 10px; border: 1px solid #e5b8b8; border-radius: 8px; padding: 10px 12px; background: #fffafa; }
+		.reject-form label { display: inline-flex; gap: 4px; align-items: center; margin-right: 10px; font-size: 13px; }
+		.audit-view { margin-top: 16px; border: 1px solid #d4dcee; border-radius: 10px; padding: 14px 16px; background: #fff; }
+		.audit-view h3 { margin: 12px 0 6px; font-size: 13px; color: #4d5f8f; text-transform: uppercase; letter-spacing: 0.06em; }
+		.audit-view h3:first-child { margin-top: 0; }
+		.audit-view .mono { font-family: ui-monospace, monospace; font-size: 12px; word-break: break-all; }
+		.audit-view table td:first-child { font-variant-numeric: tabular-nums; color: #66738f; }
 		.sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
 	`;
 
@@ -160,6 +224,8 @@ class BaizeWorkflow extends LitElement {
 		this.unsubscribeRunEvents?.();
 		this.unsubscribeRunEvents = null;
 		this.runStreamId = null;
+		this.unsubscribeAudit?.();
+		this.unsubscribeAudit = null;
 		super.disconnectedCallback();
 	}
 
@@ -187,8 +253,8 @@ class BaizeWorkflow extends LitElement {
 		this.projection = await getWorkflowProjection(this.apiBase, this.requirement.workflowId);
 		this.connectRunStream();
 		this.detectStaleForm();
+		this.detectApprovalStale();
 	}
-
 	/** SSE 使 Projection 前进后,打开的表单冻结:保留 draft、提示 expected/actual、要求显式 reload。 */
 	private detectStaleForm(): void {
 		if (!this.formContext || !this.projection) return;
@@ -277,9 +343,12 @@ class BaizeWorkflow extends LitElement {
 			await this.openDesignPackage();
 			return;
 		}
+		if (this.projection.workflow.state === "ready_to_archive") {
+			await this.openApprovalReview();
+			return;
+		}
 		this.detailsOpen = true;
 	}
-
 	private async openDesignPackage(): Promise<void> {
 		if (!this.requirement || this.requirement.designPackageId === null) return;
 		this.packageDetail = await getDesignPackage(this.apiBase, this.requirement.designPackageId);
@@ -342,7 +411,8 @@ class BaizeWorkflow extends LitElement {
 					<div class="audit" data-testid="audit-summary">
 						版本 ${projection.workflow.version} · 事件 ${projection.workflow.lastEventSeq}<br />
 						Plan ${projection.currentPlan ? `r${projection.currentPlan.revisionNo}` : "—"} ·
-						Policy ${projection.workflow.policyBundle.digest.slice(0, 19)}…
+						Policy ${projection.workflow.policyBundle.digest.slice(0, 19)}…<br />
+						<button data-testid="open-audit" @click=${() => void this.openAuditView()}>打开审计视图</button>
 					</div>
 				</div>
 			</section>
@@ -416,8 +486,7 @@ class BaizeWorkflow extends LitElement {
 						<div data-testid="packet">digest ${projection.currentPacket.digest.slice(0, 27)}… — ${projection.currentPacket.status}</div>
 						${projection.workflow.state === "ready_to_archive"
 							? html`<div class="command-row">
-								<button data-testid="approve-packet" ?disabled=${this.busy || !this.connected} @click=${() => void this.runCommand("approve-packet", { packetId: projection.currentPacket!.id })}>批准归档</button>
-								<button data-testid="reject-packet" ?disabled=${this.busy || !this.connected} @click=${() => void this.runCommand("reject-packet", { packetId: projection.currentPacket!.id, reason: "不满足要求", targets: ["design"] }, "从详情驳回")}>驳回</button>
+								<button data-testid="open-approval" ?disabled=${this.busy || !this.connected} @click=${() => void this.openApprovalReview()}>打开批准审阅</button>
 							</div>`
 							: nothing}`
 					: nothing}
@@ -489,11 +558,229 @@ class BaizeWorkflow extends LitElement {
 		}
 	}
 
+	// ------------------------------------------------------------------
+	// 票17:专注 Approval 审阅(精确绑定 current Packet,stale 锁定)
+	// ------------------------------------------------------------------
+
+	private async openApprovalReview(): Promise<void> {
+		const projection = this.projection;
+		if (!projection || projection.workflow.state !== "ready_to_archive" || !projection.currentPacket) return;
+		const packet = await getApprovalPacket(this.apiBase, projection.currentPacket.id);
+		this.approvalPacket = packet;
+		this.approvalContext = {
+			packetId: packet.id,
+			digest: packet.digest,
+			workflowVersion: projection.workflow.version,
+			approveCommandId: crypto.randomUUID(),
+			rejectCommandId: crypto.randomUUID(),
+		};
+		this.approvalStale = false;
+		this.approvalReceipt = null;
+		this.rejectOpen = false;
+		this.approvalOpen = true;
+		this.announce(`批准包审阅已打开,digest ${packet.digest.slice(0, 27)}…`);
+		void this.updateComplete.then(() => {
+			this.shadowRoot?.querySelector<HTMLElement>("[data-testid='approval-heading']")?.focus();
+		});
+	}
+
+	private closeApprovalReview(): void {
+		if (!this.approvalOpen) return;
+		this.approvalOpen = false;
+		this.approvalPacket = null;
+		this.approvalContext = null;
+		this.approvalStale = false;
+		this.approvalReceipt = null;
+		this.rejectOpen = false;
+		void this.updateComplete.then(() => {
+			this.shadowRoot?.querySelector<HTMLElement>("[data-testid='primary-action']")?.focus();
+		});
+	}
+
+	/** SSE 推进后:Packet 身份/digest 或 Workflow 版本变化 → 锁定审阅,禁用批准,保留阅读位置。 */
+	private detectApprovalStale(): void {
+		if (!this.approvalOpen || !this.approvalContext || !this.projection) return;
+		const drift = packetReviewDrift(this.projection, this.approvalContext);
+		if (!drift) return;
+		if (!this.approvalStale) {
+			this.approvalStale = true;
+			this.announce(
+				`批准包已变化:期望 digest ${drift.expectedDigest.slice(0, 19)}… / 当前 ${drift.actualDigest ? `${drift.actualDigest.slice(0, 19)}…` : "已撤回"}。批准已禁用,请重新加载。`,
+			);
+		}
+	}
+
+	/** 显式 reload:重新获取 Packet 并重置绑定上下文与两个 commandId;旧意图绝不复用。 */
+	private async reloadApprovalReview(): Promise<void> {
+		if (!this.projection || !this.approvalContext) return;
+		const current = this.projection.currentPacket;
+		if (!current || this.projection.workflow.state !== "ready_to_archive") {
+			this.closeApprovalReview();
+			return;
+		}
+		const packet = await getApprovalPacket(this.apiBase, current.id);
+		this.approvalPacket = packet;
+		this.approvalContext = {
+			packetId: packet.id,
+			digest: packet.digest,
+			workflowVersion: this.projection.workflow.version,
+			approveCommandId: crypto.randomUUID(),
+			rejectCommandId: crypto.randomUUID(),
+		};
+		this.approvalStale = false;
+		this.approvalReceipt = null;
+		this.announce("批准包已重新加载到当前 digest,请重新审阅后再决定");
+	}
+
+	private async submitApproval(): Promise<void> {
+		const context = this.approvalContext;
+		if (!this.projection || !context || this.busy || !this.connected || this.approvalStale) return;
+		this.busy = true;
+		try {
+			const result = await sendWorkflowCommand(this.apiBase, this.projection.workflow.id, context.approveCommandId, {
+				schemaVersion: "workflow-command/v1",
+				type: "approve-packet",
+				expectedWorkflowVersion: context.workflowVersion,
+				payload: { packetDigest: context.digest },
+			});
+			this.approvalReceipt = result.receipt;
+			this.announce(`批准回执:${result.receipt.outcome}`);
+			await this.refreshProjection();
+			if (result.receipt.outcome === "accepted") {
+				this.receipt = result.receipt;
+				this.closeApprovalReview();
+			}
+		} catch (error) {
+			this.loadError = error instanceof Error ? error.message : String(error);
+		} finally {
+			this.busy = false;
+		}
+	}
+
+	private async submitRejection(event: SubmitEvent): Promise<void> {
+		event.preventDefault();
+		const context = this.approvalContext;
+		if (!this.projection || !context || this.busy || !this.connected || this.approvalStale) return;
+		const data = new FormData(event.target as HTMLFormElement);
+		const reason = String(data.get("reason") ?? "");
+		const targets = data.getAll("targets").map((value) => String(value));
+		if (!reason || targets.length === 0) return;
+		this.busy = true;
+		try {
+			const result = await sendWorkflowCommand(this.apiBase, this.projection.workflow.id, context.rejectCommandId, {
+				schemaVersion: "workflow-command/v1",
+				type: "reject-packet",
+				expectedWorkflowVersion: context.workflowVersion,
+				payload: { reason, targets },
+			});
+			this.approvalReceipt = result.receipt;
+			this.announce(`打回回执:${result.receipt.outcome}`);
+			await this.refreshProjection();
+			if (result.receipt.outcome === "accepted") {
+				this.receipt = result.receipt;
+				this.announce("批准包已打回,Workflow 返回运行中,系统将按实际状态重新规划或等待恢复");
+				this.closeApprovalReview();
+			}
+		} catch (error) {
+			this.loadError = error instanceof Error ? error.message : String(error);
+		} finally {
+			this.busy = false;
+		}
+	}
+
+	// ------------------------------------------------------------------
+	// 票17:独立审计视图(Workflow/Run 双流分离,SSE replay/重连)
+	// ------------------------------------------------------------------
+
+	private async openAuditView(): Promise<void> {
+		const projection = this.projection;
+		if (!projection) return;
+		const workflowId = projection.workflow.id;
+		const [eventsPage, receipts, incidents] = await Promise.all([
+			listWorkflowEvents(this.apiBase, workflowId, 0),
+			listCommandReceipts(this.apiBase, workflowId),
+			listWorkflowIncidents(this.apiBase, workflowId),
+		]);
+		this.auditEvents = eventsPage.events;
+		this.auditReceipts = receipts;
+		this.auditIncidents = incidents;
+		this.auditRunEvents = [];
+		this.auditRunId = projection.activeRun?.id ?? null;
+		if (this.auditRunId !== null) {
+			const runPage = await listRunEvents(this.apiBase, this.auditRunId, 0);
+			this.auditRunEvents = runPage.events;
+		}
+		this.auditOpen = true;
+		this.announce("审计视图已打开");
+		void this.updateComplete.then(() => {
+			this.shadowRoot?.querySelector<HTMLElement>("[data-testid='audit-heading']")?.focus();
+		});
+	}
+
+	private closeAuditView(): void {
+		this.auditOpen = false;
+		this.auditLive = false;
+		this.unsubscribeAudit?.();
+		this.unsubscribeAudit = null;
+		void this.updateComplete.then(() => {
+			this.shadowRoot?.querySelector<HTMLElement>("[data-testid='open-audit']")?.focus();
+		});
+	}
+
+	private async selectAuditRun(runId: number): Promise<void> {
+		this.auditRunId = runId;
+		const page = await listRunEvents(this.apiBase, runId, 0);
+		this.auditRunEvents = page.events;
+	}
+
+	private async loadMoreAuditEvents(): Promise<void> {
+		if (!this.projection || this.auditEvents.length === 0) return;
+		const last = this.auditEvents[this.auditEvents.length - 1]!.seq;
+		const page = await listWorkflowEvents(this.apiBase, this.projection.workflow.id, last);
+		const known = new Set(this.auditEvents.map((event) => event.seq));
+		this.auditEvents = [...this.auditEvents, ...page.events.filter((event) => !known.has(event.seq))];
+	}
+
+	/** 实时跟随:从已加载 watermark 之后 replay,新事件按 seq 去重追加;断线自动重连(EventSource)。 */
+	private toggleAuditLive(checked: boolean): void {
+		this.auditLive = checked;
+		this.unsubscribeAudit?.();
+		this.unsubscribeAudit = null;
+		if (!checked || !this.projection) return;
+		const workflowId = this.projection.workflow.id;
+		this.unsubscribeAudit = subscribeWorkflowEvents(
+			this.apiBase,
+			workflowId,
+			this.auditEvents[this.auditEvents.length - 1]?.seq ?? 0,
+			() => void this.tailAuditEvents(workflowId),
+		);
+	}
+
+	private async tailAuditEvents(workflowId: number): Promise<void> {
+		if (!this.auditLive) return;
+		const last = this.auditEvents[this.auditEvents.length - 1]?.seq ?? 0;
+		const page = await listWorkflowEvents(this.apiBase, workflowId, last);
+		const known = new Set(this.auditEvents.map((event) => event.seq));
+		const fresh = page.events.filter((event) => !known.has(event.seq));
+		if (fresh.length > 0) {
+			this.auditEvents = [...this.auditEvents, ...fresh];
+			this.announce(`审计事件流追加 ${fresh.length} 条新事件`);
+		}
+	}
+
+	/** 审计视图中的 Run id 选项:来自 Workflow 事件中的 run entity(保持两条时间线分离)。 */
+	private auditRunIds(): readonly number[] {
+		const ids = new Set<number>();
+		for (const event of this.auditEvents) {
+			if (event.entity?.type === "run") ids.add(event.entity.id);
+		}
+		if (this.auditRunId !== null) ids.add(this.auditRunId);
+		return [...ids].sort((a, b) => a - b);
+	}
 
 	// ------------------------------------------------------------------
 	// 票16:Gate Queue 表单(一次一个 exact subject,stale 冻结)
 	// ------------------------------------------------------------------
-
 	private openGateForm(item: GateQueueItem): void {
 		if (!this.projection) return;
 		this.gateFormKey = item.key;
@@ -690,6 +977,215 @@ class BaizeWorkflow extends LitElement {
 		return html`<div class="banner" data-tone="bad" data-testid="reconnecting" role="status">连接断开,正在重连…治理命令已暂时禁用。</div>`;
 	}
 
+	// ------------------------------------------------------------------
+	// 票17 渲染:专注 Approval 审阅 / 独立审计视图
+	// ------------------------------------------------------------------
+
+	private renderApprovalReview() {
+		if (!this.approvalOpen || !this.approvalPacket || !this.approvalContext || !this.projection) return nothing;
+		const packet = this.approvalPacket;
+		const content = packet.content;
+		const stale = this.approvalStale;
+		const drift = stale ? packetReviewDrift(this.projection, this.approvalContext) : null;
+		const approvedProjection = this.projection.workflow.state === "archived";
+		return html`
+			<section class="approval" data-testid="approval-review" role="dialog" aria-label="批准包审阅"
+				@keydown=${(event: KeyboardEvent) => { if (event.key === "Escape") this.closeApprovalReview(); }}>
+				<div class="approval-body">
+					<h3 data-testid="approval-heading" tabindex="-1">批准包审阅 — Packet #${packet.id}</h3>
+					<div class="digest-line" data-testid="packet-digest">digest: ${packet.digest}</div>
+					<div class="digest-line">schema: ${content.schemaVersion} · policy: ${content.policyBundleDigest.slice(0, 27)}… · requirement revision: #${content.requirementRevisionId}</div>
+
+					${stale && drift
+						? html`<div class="stale-box" data-testid="approval-stale" role="alert">
+							批准包已更新:期望 digest ${drift.expectedDigest.slice(0, 27)}… / 当前 ${drift.actualDigest ? `${drift.actualDigest.slice(0, 27)}…` : "已撤回"}
+							(版本 ${drift.expectedWorkflowVersion} → ${drift.actualWorkflowVersion})。
+							审阅已锁定,批准与打回已禁用;阅读位置已保留,请检查差异后显式重新加载。
+							<button data-testid="approval-reload" @click=${() => void this.reloadApprovalReview()}>重新加载</button>
+						</div>`
+						: nothing}
+
+					<h3>必需 Artifact Revisions</h3>
+					<table data-testid="packet-artifacts">
+						<thead><tr><th>Kind</th><th>Revision</th><th>状态</th><th>Content Digest</th></tr></thead>
+						<tbody>
+							${content.artifacts.map(
+								(artifact) => html`<tr data-kind=${artifact.kind}>
+									<td>${artifact.kind}</td>
+									<td>r${artifact.revisionNo} (#${artifact.revisionId})</td>
+									<td><span class="badge" data-tone=${artifact.status === "approved" ? "ok" : "warn"}>${artifact.status}</span></td>
+									<td class="digest-line">${artifact.contentDigest.slice(0, 27)}…</td>
+								</tr>`,
+							)}
+						</tbody>
+					</table>
+
+					<h3>Decision 处置</h3>
+					<div data-testid="packet-decisions">
+						${content.decisions.length === 0 ? html`无 Decision` : nothing}
+						${content.decisions.map(
+							(decision) => html`<div><span class="badge">${decision.severity}</span> ${decision.summary} — ${decision.status}${decision.reason ? html`(${decision.reason})` : nothing}</div>`,
+						)}
+					</div>
+
+					<h3>Finding / 风险</h3>
+					<div data-testid="packet-findings">
+						${content.findings.length === 0 ? html`无 Finding(零 Finding 报告含完整 coverage 声明)` : nothing}
+						${content.findings.map(
+							(finding) => html`<div>
+								<span class="badge" data-tone=${finding.severity === "critical" ? "bad" : finding.severity === "major" ? "warn" : ""}>${finding.severity}</span>
+								${finding.summary} — ${finding.status}
+								${finding.riskAcceptedBy ? html`(风险接受:${finding.riskAcceptedBy} — ${finding.riskAcceptanceReason})` : nothing}
+							</div>`,
+						)}
+						${content.disclosedFindingIds.length > 0 ? html`<div>披露 Finding ids:${content.disclosedFindingIds.join(", ")}</div>` : nothing}
+					</div>
+
+					<h3>Critic Coverage</h3>
+					<div data-testid="packet-coverage">覆盖 revisions:${content.criticCoverage.coveredRevisionIds.join(", ") || "—"}</div>
+
+					<h3>Consistency 警告</h3>
+					<div data-testid="packet-warnings">
+						${content.warnings.length === 0 ? html`无警告` : content.warnings.map((warning) => html`<div class="banner" data-tone="warn">${warning}</div>`)}
+					</div>
+
+					<h3>Readiness 检查</h3>
+					<div data-testid="packet-readiness">
+						${this.projection.readiness.checks.map(
+							(check) => html`<div>${check.passed ? "✓" : "✗"} ${check.name} — ${check.detail}</div>`,
+						)}
+					</div>
+
+					<h3>Provenance</h3>
+					<div data-testid="packet-provenance">
+						事件溯源与 transcript 见<button data-testid="approval-open-audit" @click=${() => void this.openAuditView()}>审计视图</button>
+					</div>
+
+					${this.approvalReceipt
+						? html`<div class="context-receipt" data-testid="approval-receipt" data-outcome=${this.approvalReceipt.outcome}>
+							回执:${this.approvalReceipt.commandType} → ${this.approvalReceipt.outcome}(HTTP ${this.approvalReceipt.httpStatus})
+							${this.approvalReceipt.outcome === "accepted" && !approvedProjection ? html`— 已接受,等待归档 Projection 确认…` : nothing}
+						</div>`
+						: nothing}
+
+					${this.rejectOpen
+						? html`<form class="reject-form" data-testid="reject-form" @submit=${(event: SubmitEvent) => void this.submitRejection(event)}>
+							<h3>打回(需要理由与结构化目标)</h3>
+							<input name="reason" placeholder="打回理由" required aria-label="打回理由" />
+							<fieldset>
+								<legend>返工目标</legend>
+								${content.requiredArtifactKinds.map(
+									(kind) => html`<label><input type="checkbox" name="targets" value=${kind} /> ${kind}</label>`,
+								)}
+								<label><input type="checkbox" name="targets" value="plan" /> plan</label>
+							</fieldset>
+							<button type="submit" class="primary" data-testid="reject-submit" ?disabled=${this.busy || !this.connected || stale}>确认打回</button>
+						</form>`
+						: nothing}
+				</div>
+				<div class="approval-bar" data-testid="approval-bar">
+					<button class="primary" data-testid="approve-submit" ?disabled=${this.busy || !this.connected || stale || !packet.valid}
+						@click=${() => void this.submitApproval()}>批准归档</button>
+					<button data-testid="reject-toggle" ?disabled=${this.busy || !this.connected || stale}
+						@click=${() => { this.rejectOpen = !this.rejectOpen; }}>打回…</button>
+					<span class="spacer"></span>
+					<button data-testid="approval-close" @click=${() => this.closeApprovalReview()}>关闭(Esc)</button>
+				</div>
+			</section>
+		`;
+	}
+
+	private renderAuditView() {
+		if (!this.auditOpen || !this.projection) return nothing;
+		return html`
+			<section class="audit-view" data-testid="audit-view" aria-label="审计视图"
+				@keydown=${(event: KeyboardEvent) => { if (event.key === "Escape") this.closeAuditView(); }}>
+				<h3 data-testid="audit-heading" tabindex="-1">审计视图 — Workflow #${this.projection.workflow.id}</h3>
+				<div class="command-row">
+					<button data-testid="audit-close" @click=${() => this.closeAuditView()}>关闭(Esc)</button>
+					<button data-testid="audit-more" @click=${() => void this.loadMoreAuditEvents()}>加载更多事件</button>
+					<label><input type="checkbox" data-testid="audit-live" .checked=${this.auditLive}
+						@change=${(event: Event) => this.toggleAuditLive((event.target as HTMLInputElement).checked)} /> 实时跟随</label>
+				</div>
+
+				<h3>Workflow 事件(不含 Run token/工具事件)</h3>
+				<table data-testid="audit-workflow-events">
+					<thead><tr><th>seq</th><th>type</th><th>workflow 版本</th><th>entity</th><th>command</th></tr></thead>
+					<tbody>
+						${this.auditEvents.map(
+							(event) => html`<tr data-seq=${event.seq} data-type=${event.type}>
+								<td>${event.seq}</td>
+								<td>${event.type}</td>
+								<td>${event.workflowVersion}</td>
+								<td>${event.entity ? `${event.entity.type}#${event.entity.id}` : "—"}</td>
+								<td class="mono">${event.commandId ?? "—"}</td>
+							</tr>`,
+						)}
+					</tbody>
+				</table>
+
+				<h3>Run 事件(独立时间线)</h3>
+				<div class="command-row" data-testid="audit-run-picker">
+					${this.auditRunIds().map(
+						(runId) => html`<button data-testid="audit-run-${runId}" ?disabled=${runId === this.auditRunId}
+							@click=${() => void this.selectAuditRun(runId)}>Run #${runId}</button>`,
+					)}
+					${this.auditRunIds().length === 0 ? html`尚无 Run` : nothing}
+				</div>
+				<table data-testid="audit-run-events">
+					<thead><tr><th>seq</th><th>type</th><th>payload</th></tr></thead>
+					<tbody>
+						${this.auditRunEvents.map(
+							(event) => html`<tr data-seq=${event.seq} data-type=${event.type}>
+								<td>${event.seq}</td>
+								<td>${event.type}</td>
+								<td class="mono">${JSON.stringify(event.payload)}</td>
+							</tr>`,
+						)}
+					</tbody>
+				</table>
+
+				<h3>Command Receipts</h3>
+				<table data-testid="audit-receipts">
+					<thead><tr><th>commandId</th><th>type</th><th>outcome</th><th>HTTP</th><th>版本</th><th>actor</th><th>request digest</th></tr></thead>
+					<tbody>
+						${this.auditReceipts.map(
+							(receipt) => html`<tr data-command-id=${receipt.commandId}>
+								<td class="mono">${receipt.commandId}</td>
+								<td>${receipt.commandType}</td>
+								<td>${receipt.outcome}</td>
+								<td>${receipt.httpStatus}</td>
+								<td>${receipt.workflowVersion}</td>
+								<td>${receipt.actorRef ?? "—"}</td>
+								<td class="mono">${receipt.requestDigest.slice(0, 27)}…</td>
+							</tr>`,
+						)}
+					</tbody>
+				</table>
+
+				<h3>Incidents / 恢复</h3>
+				<div data-testid="audit-incidents">
+					${this.auditIncidents.length === 0 ? html`无 Incident` : nothing}
+					${this.auditIncidents.map(
+						(incident) => html`<div>
+							<span class="badge" data-tone=${incident.status === "open" ? "bad" : "ok"}>${incident.status}</span>
+							${incident.incidentType} / ${incident.failureCode} — ${incident.subjectType} #${incident.subjectId ?? "—"} · ${incident.createdAt}
+						</div>`,
+					)}
+				</div>
+
+				<h3>版本与 Digest</h3>
+				<div class="mono" data-testid="audit-versions">
+					workflow version ${this.projection.workflow.version} · last event seq ${this.projection.workflow.lastEventSeq}<br />
+					policy bundle ${this.projection.workflow.policyBundle.digest}<br />
+					requirement revision digest ${this.projection.requirement.currentRevision.digest}<br />
+					${this.projection.currentPacket ? html`packet ${this.projection.currentPacket.digest}(${this.projection.currentPacket.status})` : "尚无批准包"}
+				</div>
+			</section>
+		`;
+	}
+
+
 	private renderPackage() {
 		if (!this.packageDetail) return nothing;
 		return html`
@@ -716,6 +1212,8 @@ class BaizeWorkflow extends LitElement {
 			${this.renderGateQueue()}
 			${this.renderRecovery()}
 			${this.renderDetails()}
+			${this.renderApprovalReview()}
+			${this.renderAuditView()}
 			${this.renderPackage()}
 			<div class="sr-only" aria-live="polite" data-testid="live-region">${this.liveMessage}</div>
 		`;

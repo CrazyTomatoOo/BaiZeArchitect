@@ -411,3 +411,172 @@ export function subscribeRunEvents(
 	source.addEventListener("run-event", () => onEvent());
 	return () => source.close();
 }
+
+// ---------------------------------------------------------------------------
+// 票17:专注 Approval 审阅 + 独立审计视图
+// ---------------------------------------------------------------------------
+
+export interface ApprovalPacketArtifact {
+	artifactId: number;
+	revisionId: number;
+	kind: string;
+	revisionNo: number;
+	status: string;
+	contentDigest: string;
+}
+
+export interface ApprovalPacketDecision {
+	id: number;
+	severity: string;
+	status: string;
+	summary: string;
+	reason: string | null;
+	owner: string | null;
+	followUpTarget: string | null;
+}
+
+export interface ApprovalPacketFinding {
+	id: number;
+	fingerprint: string;
+	severity: string;
+	status: string;
+	summary: string;
+	targetRevisionId: number;
+	riskAcceptedBy: string | null;
+	riskAcceptanceReason: string | null;
+}
+
+export interface ApprovalPacketContent {
+	schemaVersion: "approval-packet/v1";
+	workflowId: number;
+	requirementRevisionId: number;
+	artifacts: readonly ApprovalPacketArtifact[];
+	decisions: readonly ApprovalPacketDecision[];
+	findings: readonly ApprovalPacketFinding[];
+	disclosedFindingIds: readonly number[];
+	criticCoverage: { coveredRevisionIds: readonly number[] };
+	warnings: readonly string[];
+	policyBundleDigest: string;
+	requiredArtifactKinds: readonly string[];
+}
+
+export interface ApprovalPacketDetail {
+	id: number;
+	workflowId: number;
+	digest: string;
+	status: string;
+	valid: boolean;
+	content: ApprovalPacketContent;
+	createdAt: string;
+}
+
+export interface WorkflowEventEnvelope {
+	schemaVersion: "workflow-event/v1";
+	workflowId: number;
+	seq: number;
+	type: string;
+	typeVersion: number;
+	workflowVersion: number;
+	entity?: { type: string; id: number; version: number };
+	commandId?: string;
+	payload: Record<string, unknown>;
+	createdAt: string;
+}
+
+export interface RunEventEnvelope {
+	schemaVersion: "run-event/v1";
+	runId: number;
+	seq: number;
+	type: string;
+	payload: Record<string, unknown>;
+	createdAt: string;
+}
+
+export interface CommandReceiptListItem {
+	commandId: string;
+	workflowId: number;
+	commandType: string;
+	requestDigest: string;
+	outcome: string;
+	httpStatus: number;
+	workflowVersion: number;
+	lastEventSeq: number;
+	createdAt: string;
+	actorRef: string | null;
+}
+
+export interface WorkflowIncidentRecord {
+	id: number;
+	workflowId: number;
+	incidentType: string;
+	failureCode: string;
+	subjectType: string;
+	subjectId: number | null;
+	status: string;
+	createdAt: string;
+	resolvedAt: string | null;
+}
+
+export function getApprovalPacket(apiBase: string, packetId: number): Promise<ApprovalPacketDetail> {
+	return fetchJson(apiBase, `/api/approval-packets/${packetId}`);
+}
+
+export async function listWorkflowEvents(apiBase: string, workflowId: number, after: number, limit = 200): Promise<{ events: WorkflowEventEnvelope[]; watermark: number }> {
+	return fetchJson(apiBase, `/api/workflows/${workflowId}/events?after=${after}&limit=${limit}`);
+}
+
+export async function listRunEvents(apiBase: string, runId: number, after: number, limit = 200): Promise<{ events: RunEventEnvelope[]; watermark: number }> {
+	return fetchJson(apiBase, `/api/runs/${runId}/events?after=${after}&limit=${limit}`);
+}
+
+export async function listCommandReceipts(apiBase: string, workflowId: number): Promise<CommandReceiptListItem[]> {
+	const body = await fetchJson<{ receipts: CommandReceiptListItem[] }>(apiBase, `/api/workflows/${workflowId}/receipts`);
+	return body.receipts;
+}
+
+export async function listWorkflowIncidents(apiBase: string, workflowId: number): Promise<WorkflowIncidentRecord[]> {
+	const body = await fetchJson<{ incidents: WorkflowIncidentRecord[] }>(apiBase, `/api/workflows/${workflowId}/incidents`);
+	return body.incidents;
+}
+
+/** 专注审阅打开时固定的 Packet 绑定上下文。 */
+export interface PacketReviewContext {
+	packetId: number;
+	digest: string;
+	workflowVersion: number;
+}
+
+export interface PacketDrift {
+	expectedPacketId: number;
+	actualPacketId: number | null;
+	expectedDigest: string;
+	actualDigest: string | null;
+	expectedWorkflowVersion: number;
+	actualWorkflowVersion: number;
+}
+
+/**
+ * Packet stale 判定:currentPacket 身份/digest 改变,或 Workflow version 前进
+ * (approve 同时绑定 expectedWorkflowVersion 与 packetDigest)。
+ * 任何 drift 都必须锁定审阅并要求显式 reload —— 绝不把旧批准意图应用到新 digest。
+ */
+export function packetReviewDrift(projection: WorkflowProjection, context: PacketReviewContext): PacketDrift | null {
+	const current = projection.currentPacket;
+	if (
+		projection.workflow.state === "ready_to_archive"
+		&& current !== null
+		&& current.id === context.packetId
+		&& current.digest === context.digest
+		&& projection.workflow.version === context.workflowVersion
+	) {
+		return null;
+	}
+	return {
+		expectedPacketId: context.packetId,
+		actualPacketId: current?.id ?? null,
+		expectedDigest: context.digest,
+		actualDigest: current?.digest ?? null,
+		expectedWorkflowVersion: context.workflowVersion,
+		actualWorkflowVersion: projection.workflow.version,
+	};
+}

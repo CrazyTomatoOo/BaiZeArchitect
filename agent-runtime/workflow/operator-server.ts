@@ -391,6 +391,30 @@ export async function startOperatorServer(
 			return;
 		}
 
+		if (request.method === "GET" && segments.length === 4 && segments[0] === "api" && segments[1] === "workflows" && segments[3] === "receipts") {
+			if (!options.runtime.getBoundedProjection(Number(segments[2]))) {
+				sendJson(response, 404, { error: "unknown_workflow" });
+				return;
+			}
+			const limitParam = url.searchParams.get("limit");
+			const limit = limitParam === null ? 200 : Number(limitParam);
+			if (!Number.isInteger(limit) || limit < 1 || limit > 500) {
+				sendJson(response, 400, { error: "invalid_limit" });
+				return;
+			}
+			sendJson(response, 200, { receipts: options.runtime.listCommandReceipts(Number(segments[2]), limit) });
+			return;
+		}
+
+		if (request.method === "GET" && segments.length === 4 && segments[0] === "api" && segments[1] === "workflows" && segments[3] === "incidents") {
+			if (!options.runtime.getBoundedProjection(Number(segments[2]))) {
+				sendJson(response, 404, { error: "unknown_workflow" });
+				return;
+			}
+			sendJson(response, 200, { incidents: options.runtime.listWorkflowIncidents(Number(segments[2])) });
+			return;
+		}
+
 		if (request.method === "GET" && segments.length === 5 && segments[0] === "api" && segments[1] === "workflows" && segments[3] === "commands") {
 			const receipt = options.runtime.getCommandReceiptDetail(Number(segments[2]), segments[4]);
 			if (!receipt) {

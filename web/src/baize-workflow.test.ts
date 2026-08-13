@@ -1,9 +1,12 @@
 import { describe, expect, it } from "vitest";
 
+import workflowComponentSource from "./baize-workflow.ts?raw";
+import workflowClientSource from "./workflow-client.ts?raw";
 import {
 	artifactSummary,
 	designStages,
 	gateQueue,
+	packetReviewDrift,
 	pendingCounts,
 	recoveryActions,
 	stateHero,
@@ -238,5 +241,70 @@ describe("recoveryActions — 每类失败只给出合法恢复组合", () => {
 
 	it("running 状态无恢复动作", () => {
 		expect(recoveryActions(projection())).toEqual([]);
+	});
+});
+
+describe("packetReviewDrift — Packet 绑定与 stale 判定", () => {
+	const context = { packetId: 9, digest: "sha256:" + "d".repeat(64), workflowVersion: 5 };
+
+	it("Packet 身份、digest、版本一致时不 stale", () => {
+		const view = projection({
+			workflow: { state: "ready_to_archive", version: 5 },
+			currentPacket: { id: 9, digest: context.digest, status: "current", createdAt: "t" },
+		});
+		expect(packetReviewDrift(view, context)).toBeNull();
+	});
+
+	it("digest 改变 → stale 并给出 expected/actual diff", () => {
+		const view = projection({
+			workflow: { state: "ready_to_archive", version: 5 },
+			currentPacket: { id: 10, digest: "sha256:" + "e".repeat(64), status: "current", createdAt: "t" },
+		});
+		const drift = packetReviewDrift(view, context);
+		expect(drift).not.toBeNull();
+		expect(drift!.expectedDigest).toBe(context.digest);
+		expect(drift!.actualDigest).toBe("sha256:" + "e".repeat(64));
+		expect(drift!.actualPacketId).toBe(10);
+	});
+
+	it("Workflow 版本前进(pause 保留 Packet)也判定 stale,因为 approve 绑定 expectedWorkflowVersion", () => {
+		const view = projection({
+			workflow: { state: "ready_to_archive", version: 6 },
+			currentPacket: { id: 9, digest: context.digest, status: "current", createdAt: "t" },
+		});
+		const drift = packetReviewDrift(view, context);
+		expect(drift).not.toBeNull();
+		expect(drift!.actualWorkflowVersion).toBe(6);
+	});
+
+	it("Packet 被撤回(currentPacket 为 null)→ stale", () => {
+		const view = projection({ workflow: { state: "running", version: 6 }, currentPacket: null });
+		const drift = packetReviewDrift(view, context);
+		expect(drift).not.toBeNull();
+		expect(drift!.actualPacketId).toBeNull();
+		expect(drift!.actualDigest).toBeNull();
+	});
+});
+
+describe("禁止的遗留控件 — Web 不包含 Reviewer/角色选择/自由 Prompt/direct archive/force 控件", () => {
+	const sources = [workflowComponentSource, workflowClientSource];
+	const combined = sources.join("\n");
+
+	it("无 Reviewer Agent、角色选择、自由 Prompt Run 控件", () => {
+		expect(combined).not.toMatch(/Reviewer/);
+		expect(combined).not.toMatch(/角色选择/);
+		expect(combined).not.toMatch(/自由\s*Prompt/i);
+	});
+
+	it("无 direct archive、force-ready、force-skip 命令或端点", () => {
+		expect(combined).not.toMatch(/force-ready|force-skip|force_skip|force_ready/);
+		expect(combined).not.toMatch(/"direct-archive"|directArchive/);
+		expect(combined).not.toMatch(/\/api\/requirements\/\$\{[^}]*\}\/archive/);
+	});
+
+	it("只使用统一命令端点,不使用已移除的旧 Run 端点", () => {
+		expect(combined).not.toMatch(/\/api\/requirements\/[^`]*\/runs/);
+		expect(combined).not.toMatch(/\/api\/runs\/[^`]*\/(steer|cancel)/);
+		expect(combined).toContain("/commands/");
 	});
 });
