@@ -19,9 +19,15 @@ function typeScriptFiles(directory: string): string[] {
 
 test("production sources cannot import or select ScriptedModelDriver", () => {
 	const offenders = typeScriptFiles(process.cwd())
-		.filter((file) =>
-			/ScriptedModelDriver|testing\/scripted-model-driver/.test(readFileSync(file, "utf8")),
-		)
+		.filter((file) => {
+			const source = readFileSync(file, "utf8");
+			// Match actual imports or runtime references, not comments that
+			// merely state the driver is absent from production.
+			const importMatch = /^import\b[^\n]*\bScriptedModelDriver\b/m.test(source);
+			const fromMatch = /from\s+["'][^"']*scripted-model-driver/m.test(source);
+			const newMatch = /\bnew\s+ScriptedModelDriver\b/.test(source);
+			return importMatch || fromMatch || newMatch;
+		})
 		.map((file) => path.relative(process.cwd(), file));
 	assert.deepEqual(offenders, []);
 });

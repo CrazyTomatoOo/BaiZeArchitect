@@ -44,10 +44,12 @@ jobs:
           cache: npm
           cache-dependency-path: agent-runtime/package-lock.json
       - run: npm ci
-        working-directory: agent-runtime
       - run: npm test
         working-directory: agent-runtime
       - run: npm run typecheck
+        working-directory: agent-runtime
+      - run: npm run test:contracts
+        name: contract tests
         working-directory: agent-runtime
 
   web:
@@ -64,9 +66,14 @@ jobs:
         working-directory: web
       - run: npm run typecheck
         working-directory: web
+      - run: npm test
+        name: vitest unit tests
+        working-directory: web
       - run: npm run build
         working-directory: web
-
+      - run: npx playwright test --reporter=line
+        name: three-viewport e2e
+        working-directory: web
   compose:
     runs-on: ubuntu-latest
     timeout-minutes: 15

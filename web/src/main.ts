@@ -1,12 +1,2 @@
 import "@fontsource-variable/space-grotesk";
-import "./baize-shell.ts";
-import "./baize-architecture-browser.ts";
-import "./baize-overview.ts";
-import "./baize-requirement.ts";
-import "./baize-workspaces.ts";
-import "./baize-command-palette.ts";
-import "./baize-asset-library.ts";
-import "./baize-decisions.ts";
-import "./baize-run-rail.ts";
-import "./baize-system.ts";
-import "./baize-chat-intake.ts";
+import "./baize-workflow.ts";

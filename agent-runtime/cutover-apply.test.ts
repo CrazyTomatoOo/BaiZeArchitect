@@ -40,7 +40,7 @@ async function setupApplyContext(
 		report,
 		governanceDbPath,
 		cleanup: () => {
-			fixture.store.close();
+			fixture.legacy.close();
 		},
 	};
 }

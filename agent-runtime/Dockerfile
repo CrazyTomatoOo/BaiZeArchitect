@@ -36,5 +36,6 @@ COPY web ./web
 RUN cd web && npm run build && chown -R node:node /app/web
 WORKDIR /app/agent-runtime
 USER node
-# Gateway is the sole runtime entrypoint; build output is dist/gateway.js.
-ENTRYPOINT ["npx", "tsx", "gateway.ts"]
+# main.ts is the sole production entry point; assembles the Operator Server
+# with PiModelDriver, production fixtures, and static Web SPA serving.
+ENTRYPOINT ["npx", "tsx", "main.ts"]

@@ -1,14 +1,18 @@
 /**
- * operator-server.ts — test-only HTTP transport assembly for the Workflow
+ * operator-server.ts — the sole production HTTP transport for the Workflow
  * governance kernel.
  *
  * Exposes the final public transport boundary: bearer bootstrap issuing a
- * hardened Operator Session cookie, atomic Requirement creation, and the
- * unified idempotent Workflow Command resource. The production Gateway main
- * does not register these routes until the S7 cutover.
+ * hardened Operator Session cookie, atomic Requirement creation, the unified
+ * idempotent Workflow Command resource, bounded Projection/detail reads,
+ * dual SSE streams, Reusable Asset CRUD, legacy import reads, and Design
+ * Package reads. An optional staticRoot serves the built Web SPA for non-API
+ * GET requests (SPA fallback).
  */
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import { randomUUID } from "node:crypto";
+import { resolve } from "node:path";
+import { readFile } from "node:fs/promises";
 import type { AddressInfo } from "node:net";
 import type { HeadlessWorkflowRuntime } from "./headless-runtime.js";
 import type { WorkflowCommandType } from "../persistence/workflow-store.js";
@@ -31,6 +35,8 @@ export interface OperatorServerOptions {
 	secureCookies?: boolean;
 	/** SSE heartbeat interval in milliseconds; defaults to 15000. Heartbeats never consume event sequence numbers. */
 	sseHeartbeatMs?: number;
+	/** absolute or cwd-relative directory for the built Web SPA; non-API GET requests serve from here with index.html fallback. */
+	staticRoot?: string;
 }
 
 export interface OperatorServer {
@@ -180,6 +186,50 @@ function streamEvents<T extends { seq: number }>(response: ServerResponse, strea
 	});
 }
 
+const STATIC_MIME: Record<string, string> = {
+	".html": "text/html; charset=utf-8",
+	".js": "text/javascript; charset=utf-8",
+	".css": "text/css; charset=utf-8",
+	".svg": "image/svg+xml",
+	".png": "image/png",
+	".jpg": "image/jpeg",
+	".gif": "image/gif",
+	".woff": "font/woff",
+	".woff2": "font/woff2",
+	".ico": "image/x-icon",
+	".map": "application/json",
+	".json": "application/json",
+};
+
+async function serveStatic(response: ServerResponse, pathname: string, staticRoot: string): Promise<void> {
+	const root = resolve(staticRoot);
+	const rel = pathname === "/" ? "index.html" : pathname.replace(/^\//, "");
+	const fp = resolve(root, rel);
+	if (!fp.startsWith(root)) {
+		sendJson(response, 403, { error: "forbidden" });
+		return;
+	}
+	try {
+		const body = await readFile(fp);
+		const ext = fp.slice(fp.lastIndexOf("."));
+		response.writeHead(200, { "content-type": STATIC_MIME[ext] ?? "application/octet-stream" });
+		response.end(body);
+	} catch {
+		if (/\.[a-z0-9]+$/i.test(rel)) {
+			response.writeHead(404, { "content-type": "text/plain; charset=utf-8" });
+			response.end("not found");
+			return;
+		}
+		try {
+			const body = await readFile(resolve(root, "index.html"));
+			response.writeHead(200, { "content-type": STATIC_MIME[".html"] });
+			response.end(body);
+		} catch {
+			response.writeHead(404, { "content-type": "text/plain; charset=utf-8" });
+			response.end("web/dist not built — run: cd web && npm run build");
+		}
+	}
+}
 export async function startOperatorServer(
 	options: OperatorServerOptions,
 ): Promise<OperatorServer> {
@@ -703,6 +753,11 @@ export async function startOperatorServer(
 				}),
 				heartbeatMs: options.sseHeartbeatMs ?? 15_000,
 			});
+			return;
+		}
+
+		if (options.staticRoot !== undefined && request.method === "GET") {
+			await serveStatic(response, url.pathname, options.staticRoot);
 			return;
 		}
 

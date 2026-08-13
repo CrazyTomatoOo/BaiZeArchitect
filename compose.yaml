@@ -48,7 +48,7 @@ services:
             commit --quiet -m fixture
         fi
         cd /app/agent-runtime
-        exec npx tsx gateway.ts
+        exec npx tsx main.ts
     environment:
       BAIZE_PROJECT_ROOT: /app
       BAIZE_PORT: "18789"
@@ -67,7 +67,7 @@ services:
     user: node
     read_only: true
     healthcheck:
-      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:18789/api/overview').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:18789/api/requirements?workspaceId=1').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
       interval: 5s
       timeout: 3s
       retries: 24

@@ -1,4 +1,4 @@
-import type { ArtifactKind } from "../store.js";
+import type { LegacyArtifactKind as ArtifactKind } from "./legacy-schema.js";
 
 /**
  * Cutover preflight types — declarative fixture manifests, read-only check

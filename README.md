@@ -1,136 +1,160 @@
 # BaiZe Architect
 
 <p align="center">
-  <img src="redesign-01-overview.png" alt="BaiZe Architect 总览界面" width="920" />
-</p>
-
-<p align="center">
-  <strong>证据驱动的需求设计 Agent</strong><br />
-  从代码仓库中提取真实架构证据，辅助完成需求分析、场景建模、用例设计、功能拆解与方案归档。
-</p>
-
-<p align="center">
-  <a href="#快速体验">快速体验</a> ·
-  <a href="#核心能力">核心能力</a> ·
-  <a href="#界面预览">界面预览</a> ·
-  <a href="#本地开发">本地开发</a>
+  <strong>自动优先的需求设计编排系统</strong><br />
+  描述需求、明确开始、在真正需要判断时介入、最后批准。
 </p>
 
 ---
 
-## 为什么是 BaiZe Architect
+## 概述
 
-BaiZe Architect 面向“辅助需求设计”的领域 Agent，而不是通用聊天机器人。它围绕一个代码仓库建立证据上下文，帮助团队把已有系统能力转化为可复用的设计资产，并在每次需求设计中沉淀：
+BaiZe Architect 是一个自动优先的需求设计编排系统。每个 Requirement 创建时同时建立唯一的、处于 `pending` 的 Workflow。用户首次明确开始后，确定性的 Workflow Engine 创建 Planning Task，由零工具 Orchestrator 提出完整、有限、不可变的 Task DAG；Engine 校验并采用 PlanRevision，再依次执行 Analyst、Architect 和 Critic Task。
 
-- **需求分析结论**：将业务目标拆解为可执行的设计任务。
-- **场景库 / 用例库 / 功能库**：跨需求复用的设计资产，支持手动新增、删除、导入和导出。
-- **代码证据**：方案中的判断必须回到仓库事实、架构快照和符号证据。
-- **独立评审**：通过 critic/reviewer 对设计方案进行复核，降低幻觉和遗漏。
-- **设计归档**：输出 Design Package、ADR 和可复用经验，反哺后续需求。
+所有角色都在隔离 Attempt Session 中运行，只通过版本化 Context Manifest、Artifact revision、Decision、Finding 和证据交接。Engine 独占 Workflow 状态转换、计划采用、Task 调度、副作用发布、质量判断和归档控制。
 
-## 核心能力
+### 四个固定角色
 
-| 能力 | 说明 |
+| 角色 | 职责 |
 | --- | --- |
-| 需求工作台 | 创建需求、发起 Run、查看长任务事件流与阶段性产物。 |
-| 证据驱动设计 | 基于 GitNexus / 架构快照读取仓库事实，避免脱离代码现状的设计。 |
-| 资产库 | 管理需求、场景、用例、功能与沉淀资产；支持既有资产 JSON 导入和导出。 |
-| 架构浏览 | 以 C4 视角浏览 Context / Container / Component / Code 层级关系。 |
-| 持久运行 | Gateway 单进程承载 Web、SQLite、SSE 事件流与持久 Agent 会话。 |
-| 容器体验 | 提供自包含 demo/test 环境，不挂载宿主目录，运行数据随容器销毁。 |
+| Orchestrator | 零工具纯规划，提出完整 PlanProposal DAG |
+| Analyst | 分析、场景、用例、功能 Artifact 的唯一写入者 |
+| Architect | 设计、架构、数据、API Artifact 的唯一写入者 |
+| Critic | 读取冻结 Review Bundle，只写 Finding |
 
-## 界面预览
-
-### 需求设计工作台
-
-<p align="center">
-  <img src="redesign-05-requirement.png" alt="需求设计工作台" width="860" />
-</p>
-
-### 架构证据浏览
-
-<p align="center">
-  <img src="docs/acceptance-evidence-redesign/02-architecture-browser.png" alt="架构证据浏览" width="860" />
-</p>
-
-### C4 交互式架构图
-
-<p align="center">
-  <img src="docs/acceptance-evidence-redesign/05-c4-context.png" alt="C4 Context 架构图" width="860" />
-</p>
-
-### 资产库
-
-<p align="center">
-  <img src="docs/acceptance-2026-08-06/acc-04-asset-scenarios.png" alt="场景资产库" width="860" />
-</p>
+Reviewer 角色已移除，不是重命名或包装。
 
 ## 快速体验
 
-`demo` 服务提供一个可交互的本机体验环境：只发布到 `127.0.0.1:18789`，不挂载宿主目录或 Docker Volume；SQLite、证据索引、会话和设计归档全部写入容器内 tmpfs，容器删除后数据全部清除。
+`demo` 服务提供一个可交互的本机体验环境：只发布到 `127.0.0.1:18789`，不挂载宿主目录或 Docker Volume；SQLite、会话和设计归档全部写入容器内 tmpfs，容器删除后数据全部清除。
 
 ```bash
-docker compose up -d demo    # 首次会自动构建镜像并种子化 fixtures/test-repo
+docker compose up -d demo    # 首次会自动构建镜像
 docker compose ps            # 等待 STATUS 变为 healthy
-open http://127.0.0.1:18789  # 打开 Web 控制台
-```
-
-体验步骤：
-
-1. 打开控制台后，在「系统 → 设置」配置模型 provider / modelId / apiKey。
-2. 在「工作区」页基于种子仓库 `/tmp/baize/repos/test-repo` 创建工作区。
-3. 新建需求并触发通用 Run，在 Run Rail 中观察事件流与归档结果。
-4. 在「资产库」中查看或导入已有场景、用例、功能资产。
-
-停止并清除体验环境：
-
-```bash
-docker compose down
+open http://127.0.0.1:18789  # 打开引导式 Workflow 页面
 ```
 
 ## Docker 测试环境
-
-Docker 测试镜像用于一次性集成测试，不承担开发数据持久化或产物交付。测试镜像包含应用、Web SPA、技能、Schema、GitNexus 和固定测试仓库；运行时数据全部写入容器内 `/tmp`。
 
 ```bash
 docker compose build test
 docker compose run --rm test
 ```
 
-测试完成后容器立即删除。Compose 配置具有以下约束：
-
-- 不挂载任何宿主目录或 Docker Volume。
-- 不向宿主暴露端口。
-- 运行阶段禁用外部网络。
-- 根文件系统只读，唯一可写位置是容器内 tmpfs `/tmp`。
-- 使用非 root 的 `node` 用户运行。
-- SQLite、证据、GitNexus 索引、设计归档和临时仓库都随容器删除。
-- 不需要模型 API Key；冒烟测试只验证 Run 控制面终态，不依赖模型产出。
+Compose 配置约束：
+- 不挂载宿主目录或 Docker Volume
+- 不向宿主暴露端口
+- 运行阶段禁用外部网络 (`network_mode: none`)
+- 根文件系统只读，唯一可写位置是容器内 tmpfs `/tmp`
+- 使用非 root 的 `node` 用户运行
+- 不需要模型 API Key；冒烟测试验证 Workflow 控制面
 
 ## 本地开发
 
 ```bash
+# Runtime tests + typecheck
 cd agent-runtime
 npm ci
 npm test
 npm run typecheck
+npm run test:contracts
 
+# Web unit + build + e2e
 cd ../web
 npm ci
+npm test
 npm run typecheck
 npm run build
+npx playwright test --reporter=line
 ```
+
+## 生产部署
+
+```bash
+cd agent-runtime
+BAIZE_DB_PATH=<db> \
+BAIZE_SESSION_DIR=<sessions> \
+BAIZE_PORT=18789 \
+BAIZE_OPERATORS="<token>=<actorRef>:workflow:operate,workflow:approve" \
+npx tsx main.ts
+```
+
+`main.ts` 是唯一生产入口。它组装 Operator Server（HTTP 传输层）、PiModelDriver（真实模型驱动）、Workflow Governance Kernel（SQLite 治理内核）和 Web SPA 静态服务。ScriptedModelDriver 和确定性测试夹具仅存在于测试装配中，生产配置不可选择。
+
+### 生产 HTTP 契约
+
+| 方法 | 路径 | 说明 |
+| --- | --- | --- |
+| POST | `/api/session` | Bearer bootstrap → Operator Session cookie |
+| GET | `/api/session` | Session 自省 |
+| POST | `/api/workspaces/:id/requirements` | 原子创建 Requirement + baseline + Workflow |
+| GET | `/api/requirements?workspaceId=` | 需求摘要列表 |
+| GET | `/api/requirements/:id` | 需求详情 |
+| GET | `/api/workflows/:id` | 有界 Workflow Projection |
+| PUT | `/api/workflows/:id/commands/:commandId` | 统一幂等命令资源 |
+| GET | `/api/workflows/:id/commands/:commandId` | 命令 Receipt 详情 |
+| GET | `/api/workflows/:id/receipts` | 命令 Receipt 列表 |
+| GET | `/api/workflows/:id/incidents` | Workflow Incident 列表 |
+| GET | `/api/workflows/:id/events` | Workflow 事件 JSON |
+| GET | `/api/workflows/:id/events/stream` | Workflow 事件 SSE |
+| GET | `/api/runs/:id/events` | Run 事件 JSON |
+| GET | `/api/runs/:id/events/stream` | Run 事件 SSE |
+| GET | `/api/plan-revisions/:id` | Plan Revision 详情 |
+| GET | `/api/tasks/:id` | Task 详情 |
+| GET | `/api/tasks/:id/attempts` | Task Attempt 列表 |
+| GET | `/api/attempts/:id` | Attempt 详情 |
+| GET | `/api/runs/:id` | Run 详情 |
+| GET | `/api/approval-packets/:id` | Approval Packet 详情 |
+| GET | `/api/legacy-imports/:id` | Legacy Import 记录 |
+| GET | `/api/design-packages/:id` | Design Package 记录 |
+| GET/POST/DELETE | `/api/assets` | Reusable Asset CRUD |
+| GET | `/api/assets/export` | 导出 Reusable Assets |
+
+旧的手动 Run 创建、steer/cancel、direct archive、global Run stream、evidence/design-package Route、client-supplied actor endpoint 和 C4 architecture Route 均不存在。
+
+## Cutover
+
+历史迁移使用写暂停式 `check → apply` 操作，绑定数据库和 Session 树指纹。详见 [Cutover Runbook](docs/cutover-runbook.md)。
 
 ## 目录结构
 
 ```text
-agent-runtime/   单进程 Gateway、Agent Runtime、SQLite Store、领域工具
-web/             Lit + Vite Web 控制台
-docs/            设计文档、验收截图与架构记录
-fixtures/        容器体验与测试使用的种子仓库
-scripts/         冒烟测试与辅助脚本
+agent-runtime/
+  main.ts                唯一生产入口
+  model-config.ts        Pi 模型 provider 配置
+  workflow/              Workflow 治理内核
+    headless-runtime.ts  无头运行时公共 API
+    operator-server.ts   唯一生产 HTTP 传输层
+    pi-model-driver.ts   生产模型驱动
+    model-driver.ts      ModelDriver 接口
+    plan-types.ts        Plan 类型
+    plan-validator.ts    Plan 静态校验
+    role-result.ts       Role Result 类型
+    impact-profile.ts    Impact Profile 派生
+    workflow-doctor.ts   只读不变量检查
+    contracts/           可执行契约加载与 Schema 编译
+  persistence/
+    workflow-store.ts    SQLite 治理内核
+    migrations/          编号化前向迁移
+  cutover/
+    cutover-checker.ts   只读预检
+    cutover-applier.ts   原子应用
+    legacy-schema.ts    旧 Store schema (测试夹具)
+    legacy-fixture-builder.ts  旧数据夹具构造
+  testing/
+    deterministic-fixtures.ts  确定性测试夹具
+    scripted-model-driver.ts  测试专用模型驱动
+web/
+  src/
+    baize-workflow.ts    引导式 Workflow 页面 + 审计视图
+    workflow-client.ts   类型化 API 客户端
+    main.ts              唯一 Web 入口
+docs/
+  cutover-runbook.md    生产 Cutover Runbook
+fixtures/               容器测试种子仓库
+scripts/                冒烟测试
 ```
 
 ## 状态说明
 
-BaiZe Architect 仍在快速演进中。历史多服务、PostgreSQL 和宿主目录挂载方案均已废弃，不应再作为部署依据。
+BaiZe Architect 的自动优先 Workflow 编排系统已通过七个依赖实施切面 (S1-S7) 完成生产切换。旧的手动角色选择、共享 Session、Reviewer、直接归档、旧 API/UI/数据库路径已硬删除。系统不保留双写、兼容适配器或运行时功能开关。
