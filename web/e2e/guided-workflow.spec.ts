@@ -1,5 +1,7 @@
 import { expect, test, type Page, type Route } from "@playwright/test";
 
+import { installMockEventSource } from "./mock-event-source";
+
 /**
  * 票15 guided workflow e2e — 只 mock 新契约路由(projection/detail/command/SSE),
  * 验证 running summary→details、pending start、archived package navigation。
@@ -77,7 +79,16 @@ interface MockOptions {
 	onCommand?: (envelope: Record<string, unknown>) => void;
 }
 
+function parseBody(raw: string | null): Record<string, unknown> {
+	try {
+		return JSON.parse(raw ?? "{}") as Record<string, unknown>;
+	} catch {
+		return {};
+	}
+}
+
 async function mockApi(page: Page, options: MockOptions): Promise<{ commands: Record<string, unknown>[] }> {
+	await installMockEventSource(page);
 	let state = options.initialState;
 	let version = 0;
 	let lastEventSeq = 1;
@@ -88,7 +99,7 @@ async function mockApi(page: Page, options: MockOptions): Promise<{ commands: Re
 		route.fulfill({ status: 200, contentType: "text/event-stream", body: "" }),
 	);
 	await page.route("**/api/workflows/7/commands/*", async (route) => {
-		const envelope = JSON.parse(route.request().postData() ?? "{}") as Record<string, unknown>;
+		const envelope = parseBody(route.request().postData());
 		commands.push(envelope);
 		options.onCommand?.(envelope);
 		version += 1;

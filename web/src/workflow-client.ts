@@ -148,14 +148,18 @@ export async function sendWorkflowCommand(
 }
 
 /** 订阅 Workflow SSE;返回取消函数。EventSource 不可用(测试环境)时返回 no-op。 */
+/** 订阅 Workflow SSE;返回取消函数。EventSource 不可用(测试环境)时返回 no-op。onState 报告连接/断线。 */
 export function subscribeWorkflowEvents(
 	apiBase: string,
 	workflowId: number,
 	after: number,
 	onEvent: () => void,
+	onState?: (connected: boolean) => void,
 ): () => void {
 	if (typeof EventSource === "undefined") return () => undefined;
 	const source = new EventSource(`${apiBase}/api/workflows/${workflowId}/events/stream?after=${after}`);
+	source.onopen = () => { onState?.(true); onEvent(); };
+	source.onerror = () => onState?.(false);
 	source.onmessage = () => onEvent();
 	source.addEventListener("workflow-event", () => onEvent());
 	return () => source.close();
@@ -250,4 +254,160 @@ export function pendingCounts(projection: WorkflowProjection): PendingCounts {
 export function artifactSummary(projection: WorkflowProjection): string {
 	const check = projection.readiness.checks.find((entry) => entry.name === "complete_required_artifacts");
 	return check ? check.detail : "尚无 Impact Profile";
+}
+
+// ---------------------------------------------------------------------------
+// 票16:Gate Queue / 恢复动作 / 连接状态视图模型
+// ---------------------------------------------------------------------------
+
+export type GateCategory = "critical_decision" | "human_input" | "finding_disposition" | "recovery";
+
+export interface GateQueueItem {
+	/** 稳定队列键:`decision:<id>` / `gate:<id>` / `incident:<id>`。 */
+	key: string;
+	category: GateCategory;
+	/** 1-based 队列位置。 */
+	position: number;
+	subjectType: string;
+	subjectId: number;
+	title: string;
+	/** 处置该 subject 的唯一命令类型。 */
+	commandType: "dispose-decision" | "provide-human-input" | "accept-finding-risk" | "retry-recovery";
+	/** provide-human-input 预填:gate 行 id。 */
+	gateId?: number;
+	/** accept-finding-risk 预填:同 thread 当前 open Finding。 */
+	findingId?: number;
+	targetRevisionId?: number;
+	/** retry-recovery 预填。 */
+	incidentId?: number;
+}
+
+const GATE_CATEGORY_ORDER: Record<GateCategory, number> = {
+	critical_decision: 0,
+	human_input: 1,
+	finding_disposition: 2,
+	recovery: 3,
+};
+
+/**
+ * Gate Queue:critical Decision → required Human Input → major Finding 处置 → Incident 恢复。
+ * 同级按 subject 行 id 升序(插入序与 openedEventSeq 单调一致)。
+ */
+export function gateQueue(projection: WorkflowProjection): readonly GateQueueItem[] {
+	const items: (GateQueueItem & { sortId: number })[] = [];
+	for (const decision of projection.decisions) {
+		if (decision.status !== "open" || decision.severity !== "critical") continue;
+		items.push({
+			key: `decision:${decision.id}`,
+			category: "critical_decision",
+			position: 0,
+			subjectType: "decision",
+			subjectId: decision.id,
+			title: decision.summary,
+			commandType: "dispose-decision",
+			sortId: decision.id,
+		});
+	}
+	for (const gate of projection.openGates) {
+		if (gate.gateType === "human_input") {
+			items.push({
+				key: `gate:${gate.id}`,
+				category: "human_input",
+				position: 0,
+				subjectType: gate.subjectType,
+				subjectId: gate.subjectId,
+				title: `人工输入(${gate.subjectType} #${gate.subjectId})`,
+				commandType: "provide-human-input",
+				gateId: gate.id,
+				sortId: gate.id,
+			});
+			continue;
+		}
+		if (gate.gateType === "finding_disposition") {
+			const finding = projection.findings.find((entry) => entry.threadId === gate.subjectId && entry.status === "open");
+			items.push({
+				key: `gate:${gate.id}`,
+				category: "finding_disposition",
+				position: 0,
+				subjectType: gate.subjectType,
+				subjectId: gate.subjectId,
+				title: finding?.summary ?? `Finding thread #${gate.subjectId}`,
+				commandType: "accept-finding-risk",
+				gateId: gate.id,
+				findingId: finding?.id,
+				targetRevisionId: finding?.targetRevisionId,
+				sortId: gate.id,
+			});
+		}
+	}
+	const incident = projection.currentIncident;
+	if (incident && incident.status === "open") {
+		items.push({
+			key: `incident:${incident.id}`,
+			category: "recovery",
+			position: 0,
+			subjectType: "workflow_incident",
+			subjectId: incident.id,
+			title: `${incident.incidentType} / ${incident.failureCode}`,
+			commandType: "retry-recovery",
+			incidentId: incident.id,
+			sortId: incident.id,
+		});
+	}
+	items.sort((a, b) => GATE_CATEGORY_ORDER[a.category] - GATE_CATEGORY_ORDER[b.category] || a.sortId - b.sortId);
+	return items.map(({ sortId: _sortId, ...item }, index) => ({ ...item, position: index + 1 }));
+}
+
+export interface RecoveryAction {
+	commandType: "retry-task" | "retry-planning" | "retry-recovery" | "replace-plan" | "diagnostic-run";
+	label: string;
+	payload?: Record<string, unknown>;
+}
+
+/**
+ * 失败恢复组合:execution(retry-task)、planning(retry-planning)、Engine/Outbox(retry-recovery)
+ * 各自只显示合法动作;replace-plan 仅对 Task/Planning 类失败可用。
+ */
+export function recoveryActions(projection: WorkflowProjection): readonly RecoveryAction[] {
+	const incident = projection.currentIncident;
+	if (incident && incident.status === "open") {
+		return [
+			{ commandType: "retry-recovery", label: "重试恢复", payload: { incidentId: incident.id } },
+			{ commandType: "diagnostic-run", label: "诊断 Run" },
+		];
+	}
+	if (projection.workflow.state !== "failed") return [];
+	const failureCode = projection.workflow.currentFailureCode;
+	if (failureCode === "task_budget_exhausted") {
+		const failedTask = projection.tasks.find((task) => task.status === "failed");
+		return [
+			...(failedTask ? [{ commandType: "retry-task" as const, label: "重试失败任务", payload: { taskId: failedTask.id } }] : []),
+			{ commandType: "replace-plan" as const, label: "替换计划" },
+			{ commandType: "diagnostic-run" as const, label: "诊断 Run" },
+		];
+	}
+	if (failureCode === "planning_exhausted" || failureCode === "plan_budget_exhausted") {
+		return [
+			{ commandType: "retry-planning", label: "重试规划" },
+			{ commandType: "replace-plan", label: "替换计划" },
+			{ commandType: "diagnostic-run", label: "诊断 Run" },
+		];
+	}
+	return failureCode ? [{ commandType: "diagnostic-run", label: "诊断 Run" }] : [];
+}
+
+/** 订阅 Run SSE;语义与 Workflow 流一致。 */
+export function subscribeRunEvents(
+	apiBase: string,
+	runId: number,
+	after: number,
+	onEvent: () => void,
+	onState?: (connected: boolean) => void,
+): () => void {
+	if (typeof EventSource === "undefined") return () => undefined;
+	const source = new EventSource(`${apiBase}/api/runs/${runId}/events/stream?after=${after}`);
+	source.onopen = () => { onState?.(true); onEvent(); };
+	source.onerror = () => onState?.(false);
+	source.addEventListener("run-event", () => onEvent());
+	return () => source.close();
 }

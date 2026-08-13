@@ -3,22 +3,28 @@ import { LitElement, html, css, nothing } from "lit";
 import {
 	artifactSummary,
 	designStages,
+	gateQueue,
 	getDesignPackage,
 	getRequirement,
 	getWorkflowProjection,
 	pendingCounts,
+	recoveryActions,
 	sendWorkflowCommand,
 	stateHero,
+	subscribeRunEvents,
 	subscribeWorkflowEvents,
 	type CommandReceipt,
 	type DesignPackageDetail,
+	type GateQueueItem,
 	type RequirementDetail,
 	type WorkflowProjection,
 } from "./workflow-client.js";
 
 /**
- * baize-workflow — 自动优先的引导式 Requirement 页面(票15)。
+ * baize-workflow — 自动优先的引导式 Requirement 页面(票15+票16)。
  * 状态 hero(每态一个主动作)+ 概览 + 同页详情 + 高级接管。
+ * 票16:确定性 Gate Queue(一次一个 exact subject)、按 Incident 类型的恢复组合、
+ * stale 表单冻结(保留 draft、显示 expected/actual、显式 reload)、双流断线禁用命令。
  * 只调用新 Projection / detail / Command / SSE 契约;不做乐观状态变更。
  * 仅在测试装配中挂载,生产 shell 在 S7 前不引用本组件。
  */
@@ -34,6 +40,12 @@ class BaizeWorkflow extends LitElement {
 		packageDetail: { state: true },
 		loadError: { state: true },
 		busy: { state: true },
+		gateFormKey: { state: true },
+		formReceipt: { state: true },
+		formStale: { state: true },
+		liveMessage: { state: true },
+		workflowConnected: { state: true },
+		runConnected: { state: true },
 	};
 
 	declare requirementId: number;
@@ -46,8 +58,18 @@ class BaizeWorkflow extends LitElement {
 	declare packageDetail: DesignPackageDetail | null;
 	declare loadError: string | null;
 	declare busy: boolean;
+	declare gateFormKey: string | null;
+	declare formReceipt: CommandReceipt | null;
+	declare formStale: boolean;
+	declare liveMessage: string;
+	declare workflowConnected: boolean;
+	declare runConnected: boolean | null;
 
+	/** 打开的 gate 表单上下文:commandId 在表单生命周期内固定(重复提交幂等),reload 才换新。 */
+	private formContext: { key: string; commandId: string; workflowVersion: number } | null = null;
 	private unsubscribeEvents: (() => void) | null = null;
+	private unsubscribeRunEvents: (() => void) | null = null;
+	private runStreamId: number | null = null;
 
 	constructor() {
 		super();
@@ -61,6 +83,12 @@ class BaizeWorkflow extends LitElement {
 		this.packageDetail = null;
 		this.loadError = null;
 		this.busy = false;
+		this.gateFormKey = null;
+		this.formReceipt = null;
+		this.formStale = false;
+		this.liveMessage = "";
+		this.workflowConnected = true;
+		this.runConnected = null;
 	}
 
 	static styles = css`
@@ -102,6 +130,23 @@ class BaizeWorkflow extends LitElement {
 		details.disclosure { margin-top: 10px; }
 		details.disclosure summary { cursor: pointer; color: #2f4fdd; font-size: 13px; }
 		.command-row { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 8px; }
+		.banner { margin-top: 12px; border-radius: 8px; padding: 10px 14px; font-size: 13px; }
+		.banner[data-tone="warn"] { border: 1px solid #ecd9a8; background: #fdf7e7; color: #8a6116; }
+		.banner[data-tone="bad"] { border: 1px solid #e5b8b8; background: #fdf1f1; color: #9c2b2b; }
+		.gates { margin-top: 16px; border: 1px solid #e7dfc8; border-radius: 10px; padding: 14px 16px; background: #fffdf4; }
+		.gates h3 { margin: 0 0 8px; font-size: 13px; color: #8a6116; text-transform: uppercase; letter-spacing: 0.06em; }
+		.gates ol { margin: 0; padding-left: 0; list-style: none; }
+		.gates li { display: flex; gap: 8px; align-items: center; padding: 6px 0; border-bottom: 1px solid #f2ecd8; font-size: 13px; flex-wrap: wrap; }
+		.gates .pos { color: #8a6116; font-variant-numeric: tabular-nums; min-width: 34px; }
+		.gate-form { margin-top: 10px; border: 1px solid #d4dcee; border-radius: 8px; padding: 12px 14px; background: #fff; }
+		.gate-form h4 { margin: 0 0 8px; font-size: 13px; }
+		.gate-form form { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+		.gate-form input, .gate-form textarea, .gate-form select { font: inherit; padding: 6px 8px; border: 1px solid #c9d3e8; border-radius: 6px; min-width: 200px; }
+		.stale-box { margin: 8px 0; border: 1px solid #e5b8b8; background: #fdf1f1; border-radius: 6px; padding: 8px 10px; font-size: 13px; color: #9c2b2b; }
+		.context-receipt { margin-top: 8px; font-size: 13px; border-radius: 6px; padding: 8px 10px; }
+		.context-receipt[data-outcome="accepted"] { border: 1px solid #b7d9a8; background: #f6fbec; }
+		.context-receipt:not([data-outcome="accepted"]) { border: 1px solid #e5b8b8; background: #fdf1f1; color: #9c2b2b; }
+		.sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
 	`;
 
 	connectedCallback(): void {
@@ -112,7 +157,19 @@ class BaizeWorkflow extends LitElement {
 	disconnectedCallback(): void {
 		this.unsubscribeEvents?.();
 		this.unsubscribeEvents = null;
+		this.unsubscribeRunEvents?.();
+		this.unsubscribeRunEvents = null;
+		this.runStreamId = null;
 		super.disconnectedCallback();
+	}
+
+	/** 双流任一断开即视为断线:禁用治理命令。 */
+	private get connected(): boolean {
+		return this.workflowConnected && this.runConnected !== false;
+	}
+
+	private announce(message: string): void {
+		this.liveMessage = message;
 	}
 
 	private async load(): Promise<void> {
@@ -128,6 +185,17 @@ class BaizeWorkflow extends LitElement {
 	private async refreshProjection(): Promise<void> {
 		if (!this.requirement) return;
 		this.projection = await getWorkflowProjection(this.apiBase, this.requirement.workflowId);
+		this.connectRunStream();
+		this.detectStaleForm();
+	}
+
+	/** SSE 使 Projection 前进后,打开的表单冻结:保留 draft、提示 expected/actual、要求显式 reload。 */
+	private detectStaleForm(): void {
+		if (!this.formContext || !this.projection) return;
+		if (!this.formStale && this.projection.workflow.version !== this.formContext.workflowVersion) {
+			this.formStale = true;
+			this.announce(`表单已过期:期望版本 ${this.formContext.workflowVersion},当前版本 ${this.projection.workflow.version}`);
+		}
 	}
 
 	private connectEvents(): void {
@@ -138,12 +206,46 @@ class BaizeWorkflow extends LitElement {
 			this.requirement.workflowId,
 			this.projection.workflow.lastEventSeq,
 			() => void this.refreshProjection(),
+			(connected) => {
+				this.workflowConnected = connected;
+				if (connected) {
+					this.announce("Workflow 事件流已连接");
+					void this.refreshProjection();
+				} else {
+					this.announce("连接断开,正在重连;治理命令已禁用");
+				}
+			},
+		);
+		this.connectRunStream();
+	}
+
+	/** 活动 Run 存在时订阅第二条(Run)SSE;任一断线都禁用命令。 */
+	private connectRunStream(): void {
+		const runId = this.projection?.activeRun?.id ?? null;
+		if (runId === this.runStreamId) return;
+		this.unsubscribeRunEvents?.();
+		this.unsubscribeRunEvents = null;
+		this.runStreamId = runId;
+		if (runId === null) {
+			this.runConnected = null;
+			return;
+		}
+		this.runConnected = false;
+		this.unsubscribeRunEvents = subscribeRunEvents(
+			this.apiBase,
+			runId,
+			0,
+			() => void this.refreshProjection(),
+			(connected) => {
+				this.runConnected = connected;
+				this.announce(connected ? "Run 事件流已连接" : "连接断开,正在重连;治理命令已禁用");
+			},
 		);
 	}
 
 	/** 统一命令入口:持久化 receipt 单独呈现,再刷新最终 Projection — 不做乐观变更。 */
 	private async runCommand(type: string, payload?: Record<string, unknown>, reason?: string): Promise<void> {
-		if (!this.projection || this.busy) return;
+		if (!this.projection || this.busy || !this.connected) return;
 		this.busy = true;
 		try {
 			const commandId = crypto.randomUUID();
@@ -155,6 +257,7 @@ class BaizeWorkflow extends LitElement {
 				...(reason ? { reason } : {}),
 			});
 			this.receipt = result.receipt;
+			this.announce(`命令 ${type} 回执:${result.receipt.outcome}`);
 			await this.refreshProjection();
 		} catch (error) {
 			this.loadError = error instanceof Error ? error.message : String(error);
@@ -191,7 +294,7 @@ class BaizeWorkflow extends LitElement {
 				<span class="state">${projection.workflow.state}</span>
 				<h2>${this.requirement?.title ?? ""}</h2>
 				<p>${hero.description}</p>
-				<button class="primary" data-testid="primary-action" ?disabled=${this.busy} @click=${() => void this.onPrimaryAction()}>
+				<button class="primary" data-testid="primary-action" ?disabled=${this.busy || !this.connected} @click=${() => void this.onPrimaryAction()}>
 					${hero.action.label}
 				</button>
 			</section>
@@ -313,8 +416,8 @@ class BaizeWorkflow extends LitElement {
 						<div data-testid="packet">digest ${projection.currentPacket.digest.slice(0, 27)}… — ${projection.currentPacket.status}</div>
 						${projection.workflow.state === "ready_to_archive"
 							? html`<div class="command-row">
-								<button data-testid="approve-packet" ?disabled=${this.busy} @click=${() => void this.runCommand("approve-packet", { packetId: projection.currentPacket!.id })}>批准归档</button>
-								<button data-testid="reject-packet" ?disabled=${this.busy} @click=${() => void this.runCommand("reject-packet", { packetId: projection.currentPacket!.id, reason: "不满足要求", targets: ["design"] }, "从详情驳回")}>驳回</button>
+								<button data-testid="approve-packet" ?disabled=${this.busy || !this.connected} @click=${() => void this.runCommand("approve-packet", { packetId: projection.currentPacket!.id })}>批准归档</button>
+								<button data-testid="reject-packet" ?disabled=${this.busy || !this.connected} @click=${() => void this.runCommand("reject-packet", { packetId: projection.currentPacket!.id, reason: "不满足要求", targets: ["design"] }, "从详情驳回")}>驳回</button>
 							</div>`
 							: nothing}`
 					: nothing}
@@ -322,10 +425,10 @@ class BaizeWorkflow extends LitElement {
 				<h3>操作</h3>
 				<div class="command-row" data-testid="detail-commands">
 					${["running", "waiting_for_human", "ready_to_archive"].includes(projection.workflow.state)
-						? html`<button data-testid="pause-command" ?disabled=${this.busy} @click=${() => void this.runCommand("pause")}>暂停</button>`
+						? html`<button data-testid="pause-command" ?disabled=${this.busy || !this.connected} @click=${() => void this.runCommand("pause")}>暂停</button>`
 						: nothing}
 					${projection.activeRun && projection.workflow.state === "running"
-						? html`<button data-testid="cancel-command" ?disabled=${this.busy} @click=${() => void this.runCommand("cancel-run", { runId: projection.activeRun!.id })}>取消当前 Run</button>`
+						? html`<button data-testid="cancel-command" ?disabled=${this.busy || !this.connected} @click=${() => void this.runCommand("cancel-run", { runId: projection.activeRun!.id })}>取消当前 Run</button>`
 						: nothing}
 				</div>
 
@@ -344,16 +447,16 @@ class BaizeWorkflow extends LitElement {
 					? html`
 						<form data-testid="steer-form" @submit=${(event: SubmitEvent) => { event.preventDefault; void this.submitTakeover("steer"); }}>
 							<input name="text" placeholder="Human Directive 内容" required />
-							<button type="submit" ?disabled=${this.busy}>Steer</button>
+							<button type="submit" ?disabled=${this.busy || !this.connected}>Steer</button>
 						</form>
 						<form data-testid="diagnostic-form" @submit=${(event: SubmitEvent) => { event.preventDefault(); void this.submitTakeover("diagnostic-run"); }}>
 							<input name="purpose" placeholder="诊断目的" required />
-							<button type="submit" ?disabled=${this.busy}>诊断 Run</button>
+							<button type="submit" ?disabled=${this.busy || !this.connected}>诊断 Run</button>
 						</form>
 						<form data-testid="replace-plan-form" @submit=${(event: SubmitEvent) => { event.preventDefault(); void this.submitTakeover("replace-plan"); }}>
 							<textarea name="proposal" placeholder="完整 PlanProposal JSON(plan-proposal/v1)" required rows="3"></textarea>
 							<input name="reason" placeholder="替换原因" required />
-							<button type="submit" ?disabled=${this.busy}>替换计划</button>
+							<button type="submit" ?disabled=${this.busy || !this.connected}>替换计划</button>
 						</form>`
 					: nothing}
 			</details>
@@ -386,6 +489,207 @@ class BaizeWorkflow extends LitElement {
 		}
 	}
 
+
+	// ------------------------------------------------------------------
+	// 票16:Gate Queue 表单(一次一个 exact subject,stale 冻结)
+	// ------------------------------------------------------------------
+
+	private openGateForm(item: GateQueueItem): void {
+		if (!this.projection) return;
+		this.gateFormKey = item.key;
+		this.formReceipt = null;
+		this.formStale = false;
+		this.formContext = { key: item.key, commandId: crypto.randomUUID(), workflowVersion: this.projection.workflow.version };
+		void this.updateComplete.then(() => {
+			this.shadowRoot?.querySelector<HTMLElement>("[data-testid='gate-form'] input, [data-testid='gate-form'] textarea, [data-testid='gate-form'] select")?.focus();
+		});
+	}
+
+	private closeGateForm(): void {
+		const key = this.gateFormKey;
+		this.gateFormKey = null;
+		this.formContext = null;
+		this.formReceipt = null;
+		this.formStale = false;
+		if (key) {
+			void this.updateComplete.then(() => {
+				this.shadowRoot?.querySelector<HTMLElement>(`[data-testid='gate-open-${key}']`)?.focus();
+			});
+		}
+	}
+
+	/** 显式 reload:用户重读当前 subject 后,新意图使用新 commandId 与当前版本。 */
+	private reloadGateForm(): void {
+		if (!this.projection || !this.formContext) return;
+		this.formContext = { key: this.formContext.key, commandId: crypto.randomUUID(), workflowVersion: this.projection.workflow.version };
+		this.formStale = false;
+		this.formReceipt = null;
+		this.announce("表单已重新加载到当前版本,请确认后重新提交");
+	}
+
+	private gateFormPayload(item: GateQueueItem, data: FormData): Record<string, unknown> | null {
+		if (item.commandType === "dispose-decision") {
+			const status = String(data.get("status") ?? "");
+			const reason = String(data.get("reason") ?? "");
+			if (!status || !reason) return null;
+			return { decisionId: item.subjectId, status, reason };
+		}
+		if (item.commandType === "provide-human-input") {
+			const input = String(data.get("input") ?? "");
+			if (!input || item.gateId === undefined) return null;
+			return { gateId: item.gateId, input };
+		}
+		if (item.commandType === "accept-finding-risk") {
+			const impact = String(data.get("impact") ?? "");
+			const reason = String(data.get("reason") ?? "");
+			if (!impact || !reason || item.findingId === undefined || item.targetRevisionId === undefined) return null;
+			return { findingId: item.findingId, targetRevisionId: item.targetRevisionId, impact, reason };
+		}
+		return null;
+	}
+
+	private async submitGateForm(item: GateQueueItem, event: SubmitEvent): Promise<void> {
+		event.preventDefault();
+		if (!this.projection || !this.formContext || this.busy || !this.connected || this.formStale) return;
+		const data = new FormData(event.target as HTMLFormElement);
+		const payload = this.gateFormPayload(item, data);
+		if (!payload) return;
+		this.busy = true;
+		try {
+			// 重复提交沿用表单打开时的 commandId(request digest 相同→幂等);
+			// expectedWorkflowVersion 绑定表单打开时的版本——过期即 409,绝不自动 rebase。
+			const result = await sendWorkflowCommand(this.apiBase, this.projection.workflow.id, this.formContext.commandId, {
+				schemaVersion: "workflow-command/v1",
+				type: item.commandType,
+				expectedWorkflowVersion: this.formContext.workflowVersion,
+				payload,
+			});
+			this.formReceipt = result.receipt;
+			this.announce(`门禁处置回执:${result.receipt.outcome}`);
+			await this.refreshProjection();
+			if (result.receipt.outcome === "accepted") this.closeGateForm();
+		} catch (error) {
+			this.loadError = error instanceof Error ? error.message : String(error);
+		} finally {
+			this.busy = false;
+		}
+	}
+
+
+	// ------------------------------------------------------------------
+	// 票16 渲染:Gate Queue / 恢复组合 / stale / 断线
+	// ------------------------------------------------------------------
+
+	private gateCategoryLabel(category: GateQueueItem["category"]): string {
+		switch (category) {
+			case "critical_decision": return "关键 Decision";
+			case "human_input": return "人工输入";
+			case "finding_disposition": return "Finding 处置";
+			case "recovery": return "事故恢复";
+		}
+	}
+
+	private renderGateQueue() {
+		const projection = this.projection;
+		if (!projection) return nothing;
+		const queue = gateQueue(projection);
+		if (queue.length === 0) return nothing;
+		const openItem = queue.find((item) => item.key === this.gateFormKey) ?? null;
+		return html`
+			<section class="gates" data-testid="gate-queue" aria-label="门禁队列">
+				<h3>门禁队列(${queue.length})— 一次处理一项</h3>
+				<ol>
+					${queue.map(
+						(item) => html`
+							<li data-testid="gate-item" data-key=${item.key} data-category=${item.category}>
+								<span class="pos">${item.position}/${queue.length}</span>
+								<span class="badge" data-tone=${item.category === "critical_decision" ? "bad" : "warn"}>${this.gateCategoryLabel(item.category)}</span>
+								<span>${item.title}</span>
+								<button
+									data-testid="gate-open-${item.key}"
+									?disabled=${this.busy || !this.connected || (this.gateFormKey !== null && this.gateFormKey !== item.key)}
+									@click=${() => this.openGateForm(item)}
+								>处理</button>
+							</li>`,
+					)}
+				</ol>
+				${openItem ? this.renderGateForm(openItem) : nothing}
+			</section>
+		`;
+	}
+
+	private renderGateForm(item: GateQueueItem) {
+		const stale = this.formStale;
+		return html`
+			<div class="gate-form" data-testid="gate-form" role="dialog" aria-label=${`处置 ${this.gateCategoryLabel(item.category)}`}>
+				<h4>${this.gateCategoryLabel(item.category)}:${item.title}(队列第 ${item.position} 位)</h4>
+				${stale && this.formContext && this.projection
+					? html`<div class="stale-box" data-testid="stale-notice">
+						Workflow 已更新:期望版本 ${this.formContext.workflowVersion} / 当前版本 ${this.projection.workflow.version}。
+						你的草稿已保留;请检查后显式重新加载。
+						<button data-testid="stale-reload" @click=${() => this.reloadGateForm()}>重新加载</button>
+					</div>`
+					: nothing}
+				<form data-testid="gate-form-fields" @submit=${(event: SubmitEvent) => void this.submitGateForm(item, event)}>
+					${item.commandType === "dispose-decision"
+						? html`
+							<select name="status" required aria-label="处置结果">
+								<option value="accepted">接受</option>
+								<option value="rejected">拒绝</option>
+							</select>
+							<input name="reason" placeholder="处置理由" required />`
+						: nothing}
+					${item.commandType === "provide-human-input"
+						? html`<textarea name="input" placeholder="人工输入内容" required rows="2"></textarea>`
+						: nothing}
+					${item.commandType === "accept-finding-risk"
+						? html`
+							<input name="impact" placeholder="影响说明" required />
+							<input name="reason" placeholder="风险接受理由" required />`
+						: nothing}
+					<button type="submit" class="primary" data-testid="gate-submit" ?disabled=${this.busy || !this.connected || stale}>提交</button>
+					<button type="button" data-testid="gate-close" @click=${() => this.closeGateForm()}>关闭</button>
+				</form>
+				${this.formReceipt
+					? html`<div class="context-receipt" data-testid="gate-receipt" data-outcome=${this.formReceipt.outcome}>
+						回执:${this.formReceipt.commandType} → ${this.formReceipt.outcome}(HTTP ${this.formReceipt.httpStatus})
+					</div>`
+					: nothing}
+			</div>
+		`;
+	}
+
+	private renderRecovery() {
+		const projection = this.projection;
+		if (!projection) return nothing;
+		const actions = recoveryActions(projection);
+		if (actions.length === 0) return nothing;
+		return html`
+			<section class="details" data-testid="recovery-panel" aria-label="恢复选项">
+				<h3>恢复选项(${projection.currentIncident ? projection.currentIncident.incidentType : projection.workflow.currentFailureCode})</h3>
+				<div class="command-row">
+					${actions.map((action) => {
+						if (action.commandType === "replace-plan") {
+							return html`<button data-testid="recovery-replace-plan" ?disabled=${this.busy || !this.connected}
+								@click=${() => { this.takeoverOpen = true; }}>替换计划(在高级接管中提交)</button>`;
+						}
+						if (action.commandType === "diagnostic-run") {
+							return html`<button data-testid="recovery-diagnostic" ?disabled=${this.busy || !this.connected}
+								@click=${() => void this.runCommand("diagnostic-run", { purpose: `恢复诊断:${projection.workflow.currentFailureCode ?? projection.currentIncident?.incidentType ?? ""}` })}>诊断 Run</button>`;
+						}
+						return html`<button data-testid="recovery-${action.commandType}" ?disabled=${this.busy || !this.connected}
+							@click=${() => void this.runCommand(action.commandType, action.payload)}>${action.label}</button>`;
+					})}
+				</div>
+			</section>
+		`;
+	}
+
+	private renderConnectionBanner() {
+		if (this.connected) return nothing;
+		return html`<div class="banner" data-tone="bad" data-testid="reconnecting" role="status">连接断开,正在重连…治理命令已暂时禁用。</div>`;
+	}
+
 	private renderPackage() {
 		if (!this.packageDetail) return nothing;
 		return html`
@@ -405,11 +709,15 @@ class BaizeWorkflow extends LitElement {
 		if (this.loadError) return html`<div class="error" data-testid="load-error">${this.loadError}</div>`;
 		if (!this.projection) return html`<div data-testid="loading">加载中…</div>`;
 		return html`
+			${this.renderConnectionBanner()}
 			${this.renderHero()}
 			${this.renderReceipt()}
 			${this.renderOverview()}
+			${this.renderGateQueue()}
+			${this.renderRecovery()}
 			${this.renderDetails()}
 			${this.renderPackage()}
+			<div class="sr-only" aria-live="polite" data-testid="live-region">${this.liveMessage}</div>
 		`;
 	}
 }

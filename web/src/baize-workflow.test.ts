@@ -3,7 +3,9 @@ import { describe, expect, it } from "vitest";
 import {
 	artifactSummary,
 	designStages,
+	gateQueue,
 	pendingCounts,
+	recoveryActions,
 	stateHero,
 	type WorkflowProjection,
 	type WorkflowState,
@@ -153,5 +155,88 @@ describe("pendingCounts 与 artifactSummary", () => {
 	it("Artifact 摘要来自 complete_required_artifacts 检查详情", () => {
 		expect(artifactSummary(projection())).toBe("3/5 kinds 已有当前 revision");
 		expect(artifactSummary({ ...projection(), readiness: { workflowId: 7, ready: false, checks: [], warnings: [] } })).toBe("尚无 Impact Profile");
+	});
+});
+
+describe("gateQueue — 确定性门禁队列", () => {
+	it("按 critical Decision → Human Input → Finding 处置 → Incident 恢复排序,同级按 id 升序", () => {
+		const queue = gateQueue(
+			projection({
+				workflow: { state: "waiting_for_human" },
+				decisions: [
+					{ id: 5, severity: "critical", status: "open", summary: "关键选型 B" },
+					{ id: 2, severity: "critical", status: "open", summary: "关键选型 A" },
+					{ id: 1, severity: "major", status: "open", summary: "非 critical 不入队" },
+				],
+				openGates: [
+					{ id: 9, gateType: "finding_disposition", subjectType: "finding_thread", subjectId: 3, openedAt: "t" },
+					{ id: 4, gateType: "human_input", subjectType: "task_attempt", subjectId: 8, openedAt: "t" },
+				],
+				findings: [{ id: 21, threadId: 3, severity: "major", status: "open", summary: "重大缺陷", targetRevisionId: 55 }],
+				currentIncident: { id: 6, incidentType: "outbox_exhausted", failureCode: "outbox_exhausted", status: "open", createdAt: "t" },
+			}),
+		);
+		expect(queue.map((item) => item.key)).toEqual(["decision:2", "decision:5", "gate:4", "gate:9", "incident:6"]);
+		expect(queue.map((item) => item.position)).toEqual([1, 2, 3, 4, 5]);
+		expect(queue.map((item) => item.commandType)).toEqual([
+			"dispose-decision",
+			"dispose-decision",
+			"provide-human-input",
+			"accept-finding-risk",
+			"retry-recovery",
+		]);
+	});
+
+	it("finding 处置项从同 thread 的 open Finding 预填 findingId/targetRevisionId", () => {
+		const queue = gateQueue(
+			projection({
+				openGates: [{ id: 9, gateType: "finding_disposition", subjectType: "finding_thread", subjectId: 3, openedAt: "t" }],
+				findings: [
+					{ id: 20, threadId: 3, severity: "major", status: "resolved", summary: "旧", targetRevisionId: 50 },
+					{ id: 21, threadId: 3, severity: "major", status: "open", summary: "重大缺陷", targetRevisionId: 55 },
+				],
+			}),
+		);
+		expect(queue).toHaveLength(1);
+		expect(queue[0]).toMatchObject({ category: "finding_disposition", findingId: 21, targetRevisionId: 55, title: "重大缺陷" });
+	});
+
+	it("无门禁/Decision/Incident 时队列为空", () => {
+		expect(gateQueue(projection())).toEqual([]);
+	});
+});
+
+describe("recoveryActions — 每类失败只给出合法恢复组合", () => {
+	it("task_budget_exhausted → retry-task + replace-plan + diagnostic-run", () => {
+		const actions = recoveryActions(
+			projection({
+				workflow: { state: "failed", currentFailureCode: "task_budget_exhausted" },
+				tasks: [
+					{ id: 31, key: "analyze-1", kind: "analyze", role: "analyst", status: "failed", maxAttempts: 3, latestAttempt: null },
+				],
+			}),
+		);
+		expect(actions.map((action) => action.commandType)).toEqual(["retry-task", "replace-plan", "diagnostic-run"]);
+		expect(actions[0].payload).toEqual({ taskId: 31 });
+	});
+
+	it("planning_exhausted → retry-planning + replace-plan + diagnostic-run", () => {
+		const actions = recoveryActions(projection({ workflow: { state: "failed", currentFailureCode: "planning_exhausted" } }));
+		expect(actions.map((action) => action.commandType)).toEqual(["retry-planning", "replace-plan", "diagnostic-run"]);
+	});
+
+	it("outbox Incident → retry-recovery + diagnostic-run(不含 retry-task/replace-plan)", () => {
+		const actions = recoveryActions(
+			projection({
+				workflow: { state: "failed", currentFailureCode: "outbox_exhausted" },
+				currentIncident: { id: 6, incidentType: "outbox_exhausted", failureCode: "outbox_exhausted", status: "open", createdAt: "t" },
+			}),
+		);
+		expect(actions.map((action) => action.commandType)).toEqual(["retry-recovery", "diagnostic-run"]);
+		expect(actions[0].payload).toEqual({ incidentId: 6 });
+	});
+
+	it("running 状态无恢复动作", () => {
+		expect(recoveryActions(projection())).toEqual([]);
 	});
 });
