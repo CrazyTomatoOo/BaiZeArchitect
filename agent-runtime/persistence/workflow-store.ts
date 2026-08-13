@@ -18,11 +18,12 @@ import { CRITIC_GOVERNANCE_MIGRATION } from "./migrations/0008-critic-governance
 import { DECISIONS_AND_READINESS_MIGRATION } from "./migrations/0009-decisions-and-readiness.js";
 import { HUMAN_GOVERNANCE_MIGRATION } from "./migrations/0010-human-governance.js";
 import { READ_MODEL_GOVERNANCE_MIGRATION } from "./migrations/0011-read-model-governance.js";
+import { RUN_EVENT_STREAM_MIGRATION } from "./migrations/0012-run-event-stream.js";
 import { ARTIFACT_OWNERSHIP, type InputBinding, type TaskOutputInput } from "../workflow/plan-types.js";
 import type { RoleResult, ContextManifest, RoleContract, BeginAttemptResult, CompleteAttemptResult, TraceLinkProposal, CriticReport, FindingProposal, FindingSeverity } from "../workflow/role-result.js";
 import { deriveRequiredArtifactSet, type ImpactProfile, type RequiredArtifactSet } from "../workflow/impact-profile.js";
 
-const MIGRATIONS = [WORKFLOW_GOVERNANCE_MIGRATION, COMMAND_GOVERNANCE_MIGRATION, RECOVERY_GOVERNANCE_MIGRATION, PLANNING_GOVERNANCE_MIGRATION, ATTEMPT_EXECUTION_MIGRATION, DEPENDENT_TASK_SAFETY_MIGRATION, REQUIRED_ARTIFACTS_AND_EVIDENCE_MIGRATION, CRITIC_GOVERNANCE_MIGRATION, DECISIONS_AND_READINESS_MIGRATION, HUMAN_GOVERNANCE_MIGRATION, READ_MODEL_GOVERNANCE_MIGRATION] as const;
+const MIGRATIONS = [WORKFLOW_GOVERNANCE_MIGRATION, COMMAND_GOVERNANCE_MIGRATION, RECOVERY_GOVERNANCE_MIGRATION, PLANNING_GOVERNANCE_MIGRATION, ATTEMPT_EXECUTION_MIGRATION, DEPENDENT_TASK_SAFETY_MIGRATION, REQUIRED_ARTIFACTS_AND_EVIDENCE_MIGRATION, CRITIC_GOVERNANCE_MIGRATION, DECISIONS_AND_READINESS_MIGRATION, HUMAN_GOVERNANCE_MIGRATION, READ_MODEL_GOVERNANCE_MIGRATION, RUN_EVENT_STREAM_MIGRATION] as const;
 export type WorkflowCommandType =
 	| "start"
 	| "pause"
@@ -1087,6 +1088,7 @@ export class WorkflowStore {
 		this.database
 			.prepare("insert into workflow_events(workflow_id, seq, type, type_version, schema_version, workflow_version, entity_type, entity_id, entity_version, command_id, actor_snapshot_document_id, payload, created_at) values (?, ?, ?, 1, 'workflow-event/v1', ?, ?, ?, ?, ?, ?, ?, ?)")
 			.run(workflowId, seq, type, workflowVersion, entityType, entityId, entityVersion, commandId ?? null, actorSnapshotId ?? null, JSON.stringify(payload), createdAt);
+		this.notifyWorkflowEventAppended(workflowId, seq);
 		return seq;
 	}
 
@@ -2758,6 +2760,129 @@ export class WorkflowStore {
 		transaction();
 		return ids;
 	}
+
+	appendRunEvent(runId: number, type: string, payload: Record<string, unknown>): number {
+		const timestamp = this.options.clock.now().toISOString();
+		const transaction = this.database.transaction(() => {
+			const seq = Number(
+				(this.database
+					.prepare("select coalesce(max(seq), 0) + 1 as next_seq from run_events where run_id = ?")
+					.get(runId) as { next_seq: number }).next_seq,
+			);
+			this.database
+				.prepare("insert into run_events(run_id, seq, type, schema_version, payload, created_at) values (?, ?, ?, 'run-event/v1', ?, ?)")
+				.run(runId, seq, type, JSON.stringify(payload), timestamp);
+			return seq;
+		}).immediate;
+		const seq = transaction();
+		this.pendingRunEventKeys.push(`${runId}:${seq}`);
+		this.scheduleEventNotification();
+		return seq;
+	}
+
+	runExists(runId: number): boolean {
+		return this.database.prepare("select 1 from runs where id = ?").get(runId) !== undefined;
+	}
+
+	getRunEventWatermark(runId: number): number {
+		return Number(
+			(this.database
+				.prepare("select coalesce(max(seq), 0) as watermark from run_events where run_id = ?")
+				.get(runId) as { watermark: number }).watermark,
+		);
+	}
+
+	getRunEvents(runId: number, after: number, limit: number): readonly RunEventEnvelope[] {
+		const rows = this.database
+			.prepare("select run_id, seq, type, schema_version, payload, created_at from run_events where run_id = ? and seq > ? order by seq limit ?")
+			.all(runId, after, limit) as Array<{ run_id: number; seq: number; type: string; schema_version: string; payload: string; created_at: string }>;
+		return rows.map((row) => ({
+			schemaVersion: row.schema_version,
+			runId: row.run_id,
+			seq: row.seq,
+			type: row.type,
+			payload: parseJson<Record<string, unknown>>(row.payload),
+			createdAt: row.created_at,
+		}));
+	}
+
+	getWorkflowEventWatermark(workflowId: number): number {
+		return Number(
+			(this.database
+				.prepare("select coalesce(max(seq), 0) as watermark from workflow_events where workflow_id = ?")
+				.get(workflowId) as { watermark: number }).watermark,
+		);
+	}
+
+	getWorkflowEvents(workflowId: number, after: number, limit: number): readonly WorkflowEventEnvelope[] {
+		const rows = this.database
+			.prepare("select workflow_id, seq, type, type_version, schema_version, workflow_version, entity_type, entity_id, entity_version, command_id, payload, created_at from workflow_events where workflow_id = ? and seq > ? order by seq limit ?")
+			.all(workflowId, after, limit) as Array<{ workflow_id: number; seq: number; type: string; type_version: number; schema_version: string; workflow_version: number; entity_type: string; entity_id: number; entity_version: number; command_id: string | null; payload: string; created_at: string }>;
+		return rows.map((row) => ({
+			schemaVersion: row.schema_version,
+			workflowId: row.workflow_id,
+			seq: row.seq,
+			type: row.type,
+			typeVersion: row.type_version,
+			workflowVersion: row.workflow_version,
+			entity: { type: row.entity_type, id: row.entity_id, version: row.entity_version },
+			...(row.command_id !== null ? { commandId: row.command_id } : {}),
+			payload: parseJson<Record<string, unknown>>(row.payload),
+			createdAt: row.created_at,
+		}));
+	}
+
+	subscribeWorkflowEvents(listener: (event: WorkflowEventEnvelope) => void): () => void {
+		this.workflowEventListeners.add(listener);
+		return () => {
+			this.workflowEventListeners.delete(listener);
+		};
+	}
+
+	subscribeRunEvents(listener: (event: RunEventEnvelope) => void): () => void {
+		this.runEventListeners.add(listener);
+		return () => {
+			this.runEventListeners.delete(listener);
+		};
+	}
+
+	private readonly workflowEventListeners = new Set<(event: WorkflowEventEnvelope) => void>();
+	private readonly runEventListeners = new Set<(event: RunEventEnvelope) => void>();
+	private pendingWorkflowEventKeys: string[] = [];
+	private pendingRunEventKeys: string[] = [];
+	private eventNotificationScheduled = false;
+
+	private scheduleEventNotification(): void {
+		if (this.eventNotificationScheduled) return;
+		this.eventNotificationScheduled = true;
+		setImmediate(() => {
+			this.eventNotificationScheduled = false;
+			if (!this.database.open) return;
+			const workflowKeys = this.pendingWorkflowEventKeys.splice(0);
+			for (const key of workflowKeys) {
+				const separator = key.lastIndexOf(":");
+				const workflowId = Number(key.slice(0, separator));
+				const seq = Number(key.slice(separator + 1));
+				const events = this.getWorkflowEvents(workflowId, seq - 1, 1);
+				if (events.length === 0) continue; // rolled back; never notify phantom events
+				for (const listener of this.workflowEventListeners) listener(events[0]);
+			}
+			const runKeys = this.pendingRunEventKeys.splice(0);
+			for (const key of runKeys) {
+				const separator = key.lastIndexOf(":");
+				const runId = Number(key.slice(0, separator));
+				const seq = Number(key.slice(separator + 1));
+				const events = this.getRunEvents(runId, seq - 1, 1);
+				if (events.length === 0) continue;
+				for (const listener of this.runEventListeners) listener(events[0]);
+			}
+		});
+	}
+
+	private notifyWorkflowEventAppended(workflowId: number, seq: number): void {
+		this.pendingWorkflowEventKeys.push(`${workflowId}:${seq}`);
+		this.scheduleEventNotification();
+	}
 }
 
 export interface CommandReceiptDetail extends CommandReceipt {
@@ -3105,5 +3230,27 @@ export interface DiagnosticRunRecord {
 	status: string;
 	actorSnapshotDocumentId: number;
 	commandId: string;
+	createdAt: string;
+}
+
+export interface WorkflowEventEnvelope {
+	schemaVersion: string;
+	workflowId: number;
+	seq: number;
+	type: string;
+	typeVersion: number;
+	workflowVersion: number;
+	entity: { type: string; id: number; version: number };
+	commandId?: string;
+	payload: Record<string, unknown>;
+	createdAt: string;
+}
+
+export interface RunEventEnvelope {
+	schemaVersion: string;
+	runId: number;
+	seq: number;
+	type: string;
+	payload: Record<string, unknown>;
 	createdAt: string;
 }

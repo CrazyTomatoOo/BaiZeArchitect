@@ -29,6 +29,8 @@ export interface OperatorServerOptions {
 	port?: number;
 	/** mark the session cookie Secure; set when serving over TLS. */
 	secureCookies?: boolean;
+	/** SSE heartbeat interval in milliseconds; defaults to 15000. Heartbeats never consume event sequence numbers. */
+	sseHeartbeatMs?: number;
 }
 
 export interface OperatorServer {
@@ -89,6 +91,93 @@ function sessionFromCookie(request: IncomingMessage): string | null {
 		if (name === "baize_operator") return rest.join("=");
 	}
 	return null;
+}
+
+interface EventCursor {
+	after: number;
+	limit: number;
+}
+
+function parseEventCursor(url: URL, response: ServerResponse, lastEventId?: string): EventCursor | null {
+	let afterRaw: string | null = url.searchParams.get("after");
+	// Reconnect precedence: Last-Event-ID wins over the initial-connect after query.
+	if (lastEventId !== undefined) afterRaw = lastEventId;
+	let after = 0;
+	if (afterRaw !== null && afterRaw !== "") {
+		if (!/^\d+$/.test(afterRaw)) {
+			sendJson(response, 400, { error: "invalid_cursor" });
+			return null;
+		}
+		after = Number(afterRaw);
+	}
+	let limit = 200;
+	const limitRaw = url.searchParams.get("limit");
+	if (limitRaw !== null && limitRaw !== "") {
+		if (!/^\d+$/.test(limitRaw)) {
+			sendJson(response, 400, { error: "invalid_limit" });
+			return null;
+		}
+		limit = Number(limitRaw);
+		if (limit < 1 || limit > 500) {
+			sendJson(response, 400, { error: "invalid_limit" });
+			return null;
+		}
+	}
+	return { after, limit };
+}
+
+interface StreamEventsOptions<T extends { seq: number }> {
+	eventField: "workflow-event" | "run-event";
+	after: number;
+	watermark: number;
+	replay: (after: number, limit: number) => readonly T[];
+	subscribe: (listener: (event: T) => void) => () => void;
+	heartbeatMs: number;
+}
+
+function streamEvents<T extends { seq: number }>(response: ServerResponse, stream: StreamEventsOptions<T>): void {
+	response.writeHead(200, {
+		"content-type": "text/event-stream",
+		"cache-control": "no-cache",
+		connection: "keep-alive",
+	});
+	let lastSent = stream.after;
+	let closed = false;
+	const buffered: T[] = [];
+	let replaying = true;
+
+	const writeEvent = (event: T): void => {
+		if (closed || event.seq <= lastSent) return; // dedupe replay/live overlap
+		lastSent = event.seq;
+		response.write(`id: ${event.seq}\nevent: ${stream.eventField}\ndata: ${JSON.stringify(event)}\n\n`);
+	};
+
+	const unsubscribe = stream.subscribe((event) => {
+		if (replaying) {
+			buffered.push(event);
+			return;
+		}
+		writeEvent(event);
+	});
+
+	// Catch-up: the watermark was captured at connect time; replay (after, watermark]
+	// from the database, then flush buffered live events in seq order with dedupe.
+	const backlog = stream.replay(stream.after, stream.watermark - stream.after);
+	for (const event of backlog) writeEvent(event);
+	buffered.sort((left, right) => left.seq - right.seq);
+	for (const event of buffered) writeEvent(event);
+	buffered.length = 0;
+	replaying = false;
+
+	const heartbeat = setInterval(() => {
+		if (!closed) response.write(": hb\n\n");
+	}, stream.heartbeatMs);
+
+	response.on("close", () => {
+		closed = true;
+		clearInterval(heartbeat);
+		unsubscribe();
+	});
 }
 
 export async function startOperatorServer(
@@ -476,6 +565,120 @@ export async function startOperatorServer(
 				return;
 			}
 			sendJson(response, 200, { deleted: true });
+			return;
+		}
+
+		if (
+			request.method === "GET"
+			&& segments.length === 4
+			&& segments[0] === "api"
+			&& segments[1] === "workflows"
+			&& segments[3] === "events"
+		) {
+			const workflowId = Number(segments[2]);
+			if (!Number.isInteger(workflowId) || !options.runtime.getWorkflowProjection(workflowId)) {
+				sendJson(response, 404, { error: "unknown_workflow" });
+				return;
+			}
+			const cursor = parseEventCursor(url, response);
+			if (cursor === null) return;
+			const watermark = options.runtime.getWorkflowEventWatermark(workflowId);
+			if (cursor.after > watermark) {
+				sendJson(response, 416, { error: "cursor_out_of_range", watermark });
+				return;
+			}
+			sendJson(response, 200, { events: options.runtime.getWorkflowEvents(workflowId, cursor.after, cursor.limit), watermark });
+			return;
+		}
+
+		if (
+			request.method === "GET"
+			&& segments.length === 5
+			&& segments[0] === "api"
+			&& segments[1] === "workflows"
+			&& segments[3] === "events"
+			&& segments[4] === "stream"
+		) {
+			const workflowId = Number(segments[2]);
+			if (!Number.isInteger(workflowId) || !options.runtime.getWorkflowProjection(workflowId)) {
+				sendJson(response, 404, { error: "unknown_workflow" });
+				return;
+			}
+			const lastEventId = request.headers["last-event-id"];
+			const cursor = parseEventCursor(url, response, typeof lastEventId === "string" ? lastEventId : undefined);
+			if (cursor === null) return;
+			const watermark = options.runtime.getWorkflowEventWatermark(workflowId);
+			if (cursor.after > watermark) {
+				sendJson(response, 416, { error: "cursor_out_of_range", watermark });
+				return;
+			}
+			streamEvents(response, {
+				eventField: "workflow-event",
+				after: cursor.after,
+				watermark,
+				replay: (after, limit) => options.runtime.getWorkflowEvents(workflowId, after, limit),
+				subscribe: (listener) => options.runtime.subscribeWorkflowEvents((event) => {
+					if (event.workflowId === workflowId) listener(event);
+				}),
+				heartbeatMs: options.sseHeartbeatMs ?? 15_000,
+			});
+			return;
+		}
+
+		if (
+			request.method === "GET"
+			&& segments.length === 4
+			&& segments[0] === "api"
+			&& segments[1] === "runs"
+			&& segments[3] === "events"
+		) {
+			const runId = Number(segments[2]);
+			if (!Number.isInteger(runId) || !options.runtime.runExists(runId)) {
+				sendJson(response, 404, { error: "unknown_run" });
+				return;
+			}
+			const cursor = parseEventCursor(url, response);
+			if (cursor === null) return;
+			const watermark = options.runtime.getRunEventWatermark(runId);
+			if (cursor.after > watermark) {
+				sendJson(response, 416, { error: "cursor_out_of_range", watermark });
+				return;
+			}
+			sendJson(response, 200, { events: options.runtime.getRunEvents(runId, cursor.after, cursor.limit), watermark });
+			return;
+		}
+
+		if (
+			request.method === "GET"
+			&& segments.length === 5
+			&& segments[0] === "api"
+			&& segments[1] === "runs"
+			&& segments[3] === "events"
+			&& segments[4] === "stream"
+		) {
+			const runId = Number(segments[2]);
+			if (!Number.isInteger(runId) || !options.runtime.runExists(runId)) {
+				sendJson(response, 404, { error: "unknown_run" });
+				return;
+			}
+			const lastEventId = request.headers["last-event-id"];
+			const cursor = parseEventCursor(url, response, typeof lastEventId === "string" ? lastEventId : undefined);
+			if (cursor === null) return;
+			const watermark = options.runtime.getRunEventWatermark(runId);
+			if (cursor.after > watermark) {
+				sendJson(response, 416, { error: "cursor_out_of_range", watermark });
+				return;
+			}
+			streamEvents(response, {
+				eventField: "run-event",
+				after: cursor.after,
+				watermark,
+				replay: (after, limit) => options.runtime.getRunEvents(runId, after, limit),
+				subscribe: (listener) => options.runtime.subscribeRunEvents((event) => {
+					if (event.runId === runId) listener(event);
+				}),
+				heartbeatMs: options.sseHeartbeatMs ?? 15_000,
+			});
 			return;
 		}
 

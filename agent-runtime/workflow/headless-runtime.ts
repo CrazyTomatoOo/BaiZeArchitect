@@ -1,5 +1,5 @@
 import type { CrashInjector, FixtureClock, FixtureOperator, FixtureOutboxTransport, HashProvider } from "../testing/deterministic-fixtures.js";
-import { WorkflowStore, type BeginPlanningResult, type CommandReceipt, type CompletePlanningResult, type ExecuteCommandInput, type ReconciliationReport, type WorkflowCommandType, type WorkflowProjection, type EvidenceSnapshotResult, type RequiredArtifactSetResult, type TraceLinkResult, type FindingRecord, type FindingThreadRecord, type DecisionRecord, type ReadinessReport, type BuildApprovalPacketResult, type ApprovalPacketRecord, type HumanGateRecord, type ApprovalRecordEntry, type HumanDirectiveRecord, type DiagnosticRunRecord, type CommandReceiptDetail, type RequirementSummaryRecord, type RequirementDetailRecord, type BoundedWorkflowProjection, type PlanRevisionDetail, type TaskDetailRecord, type AttemptSummaryRecord, type AttemptDetailRecord, type RunDetailRecord, type ApprovalPacketDetailRecord, type DesignPackageRecord, type LegacyImportRecord, type ReusableAssetSummary, type ReusableAssetDetail } from "../persistence/workflow-store.js";
+import { WorkflowStore, type BeginPlanningResult, type CommandReceipt, type CompletePlanningResult, type ExecuteCommandInput, type ReconciliationReport, type WorkflowCommandType, type WorkflowProjection, type EvidenceSnapshotResult, type RequiredArtifactSetResult, type TraceLinkResult, type FindingRecord, type FindingThreadRecord, type DecisionRecord, type ReadinessReport, type BuildApprovalPacketResult, type ApprovalPacketRecord, type HumanGateRecord, type ApprovalRecordEntry, type HumanDirectiveRecord, type DiagnosticRunRecord, type CommandReceiptDetail, type RequirementSummaryRecord, type RequirementDetailRecord, type BoundedWorkflowProjection, type PlanRevisionDetail, type TaskDetailRecord, type AttemptSummaryRecord, type AttemptDetailRecord, type RunDetailRecord, type ApprovalPacketDetailRecord, type DesignPackageRecord, type LegacyImportRecord, type ReusableAssetSummary, type ReusableAssetDetail, type WorkflowEventEnvelope, type RunEventEnvelope } from "../persistence/workflow-store.js";
 import type { BeginAttemptResult, CompleteAttemptResult, ExecuteTaskResult, RoleResult, TraceLinkProposal, CriticReport } from "./role-result.js";
 import { loadWorkflowContracts } from "./contracts/loader.js";
 import { compileWorkflowSchema, type WorkflowSchemaValidator } from "./contracts/schema.js";
@@ -102,6 +102,14 @@ export interface HeadlessWorkflowRuntime {
 	deleteReusableAsset(assetId: number): boolean;
 	exportReusableAssets(workspaceId: number): readonly ReusableAssetDetail[];
 	importReusableAssets(workspaceId: number, assets: readonly { kind: "scenario" | "usecase" | "function"; title: string; content: unknown }[]): readonly number[];
+	appendRunEvent(runId: number, type: string, payload: Record<string, unknown>): number;
+	runExists(runId: number): boolean;
+	getRunEventWatermark(runId: number): number;
+	getRunEvents(runId: number, after: number, limit: number): readonly RunEventEnvelope[];
+	getWorkflowEventWatermark(workflowId: number): number;
+	getWorkflowEvents(workflowId: number, after: number, limit: number): readonly WorkflowEventEnvelope[];
+	subscribeWorkflowEvents(listener: (event: WorkflowEventEnvelope) => void): () => void;
+	subscribeRunEvents(listener: (event: RunEventEnvelope) => void): () => void;
 	close(): void;
 }
 
@@ -198,11 +206,20 @@ export async function openHeadlessWorkflowRuntime(
 				if (begin.taskId === 0) {
 					return { outcome: "plan_budget_exhausted", planRevisionId: null, workflowVersion: begin.workflowVersion, lastEventSeq: begin.lastEventSeq };
 				}
-				const result = await modelDriver.execute(
+			store.appendRunEvent(begin.runId, "model_call_started", { role: "orchestrator", contextDigest: begin.planningContextDigest });
+			let result;
+			try {
+				result = await modelDriver.execute(
 					{ role: "orchestrator", contextDigest: begin.planningContextDigest, instruction: "Produce a complete PlanProposal DAG for the requirement." },
 					[],
 				);
-				const complete = completePlanningInternal(workflowId, begin.attemptId, result.structuredResult);
+			} catch (error) {
+				store.appendRunEvent(begin.runId, "model_call_failed", { role: "orchestrator", error: error instanceof Error ? error.message : String(error) });
+				throw error;
+			}
+			store.appendRunEvent(begin.runId, "model_tokens", { role: "orchestrator", inputTokens: result.modelUsage.inputTokens, outputTokens: result.modelUsage.outputTokens });
+			store.appendRunEvent(begin.runId, "model_result", { role: "orchestrator", produced: "plan-proposal/v1" });
+			const complete = completePlanningInternal(workflowId, begin.attemptId, result.structuredResult);
 				if (complete.outcome === "adopted") {
 					return { outcome: "adopted", planRevisionId: complete.planRevisionId, workflowVersion: complete.workflowVersion, lastEventSeq: complete.lastEventSeq };
 				}
@@ -227,11 +244,20 @@ export async function openHeadlessWorkflowRuntime(
 				if (begin.taskId === 0) {
 					return { outcome: "no_ready_task", workflowVersion: begin.workflowVersion, lastEventSeq: begin.lastEventSeq };
 				}
-			const result = await modelDriver.execute(
-				{ role: begin.taskRole as TaskRole, contextDigest: begin.contextDigest, instruction: "Produce the required output." },
-				[],
-			);
-				const complete = completeAttemptInternal(workflowId, begin.attemptId, result.structuredResult);
+			store.appendRunEvent(begin.runId, "model_call_started", { role: begin.taskRole, contextDigest: begin.contextDigest });
+			let result;
+			try {
+				result = await modelDriver.execute(
+					{ role: begin.taskRole as TaskRole, contextDigest: begin.contextDigest, instruction: "Produce the required output." },
+					[],
+				);
+			} catch (error) {
+				store.appendRunEvent(begin.runId, "model_call_failed", { role: begin.taskRole, error: error instanceof Error ? error.message : String(error) });
+				throw error;
+			}
+			store.appendRunEvent(begin.runId, "model_tokens", { role: begin.taskRole, inputTokens: result.modelUsage.inputTokens, outputTokens: result.modelUsage.outputTokens });
+			store.appendRunEvent(begin.runId, "model_result", { role: begin.taskRole, produced: "role-result/v1" });
+			const complete = completeAttemptInternal(workflowId, begin.attemptId, result.structuredResult);
 				if (complete.outcome === "published") {
 					return { outcome: "published", workflowVersion: complete.workflowVersion, lastEventSeq: complete.lastEventSeq };
 				}
@@ -355,6 +381,30 @@ export async function openHeadlessWorkflowRuntime(
 	importReusableAssets(workspaceId, assets) {
 		return store.importReusableAssets(workspaceId, assets);
 	},
+		appendRunEvent(runId, type, payload) {
+			return store.appendRunEvent(runId, type, payload);
+		},
+		runExists(runId) {
+			return store.runExists(runId);
+		},
+		getRunEventWatermark(runId) {
+			return store.getRunEventWatermark(runId);
+		},
+		getRunEvents(runId, after, limit) {
+			return store.getRunEvents(runId, after, limit);
+		},
+		getWorkflowEventWatermark(workflowId) {
+			return store.getWorkflowEventWatermark(workflowId);
+		},
+		getWorkflowEvents(workflowId, after, limit) {
+			return store.getWorkflowEvents(workflowId, after, limit);
+		},
+		subscribeWorkflowEvents(listener) {
+			return store.subscribeWorkflowEvents(listener);
+		},
+		subscribeRunEvents(listener) {
+			return store.subscribeRunEvents(listener);
+		},
 		close() {
 			store.close();
 		},
