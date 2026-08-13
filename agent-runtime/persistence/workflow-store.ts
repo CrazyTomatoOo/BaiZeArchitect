@@ -2400,8 +2400,8 @@ export class WorkflowStore {
 
 	getRequirementDetail(requirementId: number): RequirementDetailRecord | undefined {
 		const row = this.database
-			.prepare("select r.id, r.workspace_id, r.title, r.version, w.id as workflow_id from requirements r join workflows w on w.requirement_id = r.id where r.id = ?")
-			.get(requirementId) as { id: number; workspace_id: number; title: string; version: number; workflow_id: number } | undefined;
+			.prepare("select r.id, r.workspace_id, r.title, r.version, w.id as workflow_id, (select dp.id from design_packages dp where dp.requirement_id = r.id) as design_package_id from requirements r join workflows w on w.requirement_id = r.id where r.id = ?")
+			.get(requirementId) as { id: number; workspace_id: number; title: string; version: number; workflow_id: number; design_package_id: number | null } | undefined;
 		if (!row) return undefined;
 		const revision = this.database
 			.prepare("select ar.id, ar.artifact_id, ar.revision_no, ar.status, ar.schema_ref, ar.content_document_id, ar.content_digest, d.content from artifact_revisions ar join artifacts a on a.id = ar.artifact_id join snapshot_documents d on d.id = ar.content_document_id where a.requirement_id = ? and a.kind = 'requirement' order by ar.id desc limit 1")
@@ -2413,6 +2413,7 @@ export class WorkflowStore {
 			title: row.title,
 			version: row.version,
 			workflowId: row.workflow_id,
+			designPackageId: row.design_package_id,
 			currentRevision: {
 				id: revision.id,
 				artifactId: revision.artifact_id,
@@ -2903,6 +2904,7 @@ export interface RequirementDetailRecord {
 	title: string;
 	version: number;
 	workflowId: number;
+	designPackageId: number | null;
 	currentRevision: {
 		id: number;
 		artifactId: number;

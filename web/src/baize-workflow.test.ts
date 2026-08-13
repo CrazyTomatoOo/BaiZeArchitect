@@ -1,0 +1,157 @@
+import { describe, expect, it } from "vitest";
+
+import {
+	artifactSummary,
+	designStages,
+	pendingCounts,
+	stateHero,
+	type WorkflowProjection,
+	type WorkflowState,
+} from "./workflow-client";
+
+function projection(overrides: Partial<Omit<WorkflowProjection, "workflow">> & { workflow?: Partial<WorkflowProjection["workflow"]> } = {}): WorkflowProjection {
+	const { workflow, ...rest } = overrides;
+	return {
+		workflow: {
+			id: 7,
+			state: "running",
+			version: 3,
+			lastEventSeq: 9,
+			currentFailureCode: null,
+			policyBundle: { documentId: 5, digest: "sha256:" + "a".repeat(64) },
+			...workflow,
+		},
+		requirement: {
+			id: 1,
+			workspaceId: 2,
+			title: "示例需求",
+			version: 1,
+			currentRevision: { id: 11, revisionNo: 1, status: "approved", digest: "sha256:" + "b".repeat(64), schemaRef: "artifact/requirement/v1" },
+		},
+		designSession: { id: 4, status: "active", sessionId: "design-session:1" },
+		currentPlan: { id: 3, revisionNo: 1, status: "active", proposalDigest: "sha256:" + "c".repeat(64), createdAt: "2026-08-12T10:00:00.000Z" },
+		tasks: [],
+		activeClaim: null,
+		activeRun: null,
+		openGates: [],
+		decisions: [],
+		findings: [],
+		findingThreads: [],
+		readiness: {
+			workflowId: 7,
+			ready: false,
+			checks: [
+				{ name: "complete_required_artifacts", passed: false, detail: "3/5 kinds 已有当前 revision" },
+				{ name: "terminal_current_work", passed: false, detail: "存在未终结 Task" },
+			],
+			warnings: [],
+		},
+		currentPacket: null,
+		currentIncident: null,
+		...rest,
+	};
+}
+
+describe("stateHero — 每个治理状态恰好一个主动作", () => {
+	const states: WorkflowState[] = ["pending", "running", "waiting_for_human", "paused", "failed", "ready_to_archive", "archived"];
+
+	it("七种状态均有标题、描述和恰好一个主动作", () => {
+		for (const state of states) {
+			const hero = stateHero(state);
+			expect(hero.title.length).toBeGreaterThan(0);
+			expect(hero.description.length).toBeGreaterThan(0);
+			expect(hero.action.label.length).toBeGreaterThan(0);
+		}
+	});
+
+	it("pending 主动作是 start 命令", () => {
+		expect(stateHero("pending").action).toEqual({ label: "开始", kind: "command", commandType: "start" });
+	});
+
+	it("paused 主动作是 resume 命令", () => {
+		expect(stateHero("paused").action).toEqual({ label: "继续", kind: "command", commandType: "resume" });
+	});
+
+	it("running 主动作只展开进度,不是治理命令", () => {
+		const action = stateHero("running").action;
+		expect(action.kind).toBe("expand");
+		expect(action.commandType).toBeUndefined();
+	});
+
+	it("waiting_for_human 与 failed 主动作展开详情而非命令", () => {
+		expect(stateHero("waiting_for_human").action.kind).toBe("expand");
+		expect(stateHero("failed").action.kind).toBe("expand");
+	});
+
+	it("ready_to_archive 主动作打开批准包视图", () => {
+		expect(stateHero("ready_to_archive").action.kind).toBe("expand");
+	});
+
+	it("archived 主动作导航到设计包", () => {
+		expect(stateHero("archived").action.kind).toBe("package");
+	});
+});
+
+describe("designStages — 五段设计进程", () => {
+	it("无 Task 时除计划外全部 pending,approve 依状态", () => {
+		const stages = designStages(projection({ currentPlan: null }));
+		expect(stages.map((stage) => stage.key)).toEqual(["plan", "analyze", "design", "review", "approve"]);
+		expect(stages.find((stage) => stage.key === "approve")?.status).toBe("pending");
+	});
+
+	it("analyze 任务进行中时该段 active,完成的段为 done", () => {
+		const stages = designStages(
+			projection({
+				tasks: [
+					{ id: 1, key: "plan-1", kind: "plan", role: "orchestrator", status: "completed", maxAttempts: 2, latestAttempt: null },
+					{ id: 2, key: "analyze-1", kind: "analyze", role: "analyst", status: "in_progress", maxAttempts: 3, latestAttempt: { id: 9, attemptNo: 1, status: "running" } },
+					{ id: 3, key: "design-1", kind: "design", role: "architect", status: "pending", maxAttempts: 3, latestAttempt: null },
+				],
+			}),
+		);
+		expect(stages.find((stage) => stage.key === "plan")?.status).toBe("done");
+		expect(stages.find((stage) => stage.key === "analyze")?.status).toBe("active");
+		expect(stages.find((stage) => stage.key === "design")?.status).toBe("pending");
+	});
+
+	it("archived 时批准段 done;ready_to_archive 时 active", () => {
+		expect(designStages(projection({ workflow: { state: "archived" } })).find((stage) => stage.key === "approve")?.status).toBe("done");
+		expect(designStages(projection({ workflow: { state: "ready_to_archive" } })).find((stage) => stage.key === "approve")?.status).toBe("active");
+	});
+
+	it("review 段聚合 review/rework/verify 三类 Task", () => {
+		const stages = designStages(
+			projection({
+				tasks: [
+					{ id: 4, key: "review-1", kind: "review", role: "critic", status: "completed", maxAttempts: 3, latestAttempt: null },
+					{ id: 5, key: "verify-1", kind: "verify", role: "critic", status: "in_progress", maxAttempts: 3, latestAttempt: null },
+				],
+			}),
+		);
+		expect(stages.find((stage) => stage.key === "review")?.status).toBe("active");
+	});
+});
+
+describe("pendingCounts 与 artifactSummary", () => {
+	it("统计打开的门禁、未处置 Decision 与未关闭 Finding", () => {
+		const counts = pendingCounts(
+			projection({
+				openGates: [{ id: 1, gateType: "human_input", subjectType: "task", subjectId: 2, openedAt: "2026-08-12T10:00:00.000Z" }],
+				decisions: [
+					{ id: 1, severity: "major", status: "open", summary: "选型" },
+					{ id: 2, severity: "minor", status: "accepted", summary: "已定" },
+				],
+				findings: [
+					{ id: 1, threadId: 1, severity: "critical", status: "open", summary: "缺陷", targetRevisionId: 5 },
+					{ id: 2, threadId: 2, severity: "info", status: "disclosed", summary: "提示", targetRevisionId: 5 },
+				],
+			}),
+		);
+		expect(counts).toEqual({ gates: 1, decisions: 1, findings: 1 });
+	});
+
+	it("Artifact 摘要来自 complete_required_artifacts 检查详情", () => {
+		expect(artifactSummary(projection())).toBe("3/5 kinds 已有当前 revision");
+		expect(artifactSummary({ ...projection(), readiness: { workflowId: 7, ready: false, checks: [], warnings: [] } })).toBe("尚无 Impact Profile");
+	});
+});
