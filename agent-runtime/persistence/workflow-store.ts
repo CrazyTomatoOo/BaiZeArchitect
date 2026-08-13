@@ -14,12 +14,13 @@ import { ATTEMPT_EXECUTION_MIGRATION } from "./migrations/0005-attempt-execution
 import { DEPENDENT_TASK_SAFETY_MIGRATION } from "./migrations/0006-dependent-task-safety.js";
 import { REQUIRED_ARTIFACTS_AND_EVIDENCE_MIGRATION } from "./migrations/0007-required-artifacts-and-evidence.js";
 import { CRITIC_GOVERNANCE_MIGRATION } from "./migrations/0008-critic-governance.js";
+import { DECISIONS_AND_READINESS_MIGRATION } from "./migrations/0009-decisions-and-readiness.js";
 import { ARTIFACT_OWNERSHIP, type InputBinding, type TaskOutputInput } from "../workflow/plan-types.js";
 import type { RoleResult, ContextManifest, RoleContract, BeginAttemptResult, CompleteAttemptResult, TraceLinkProposal, CriticReport, FindingProposal, FindingSeverity } from "../workflow/role-result.js";
 import { deriveRequiredArtifactSet, type ImpactProfile, type RequiredArtifactSet } from "../workflow/impact-profile.js";
 
-const MIGRATIONS = [WORKFLOW_GOVERNANCE_MIGRATION, COMMAND_GOVERNANCE_MIGRATION, RECOVERY_GOVERNANCE_MIGRATION, PLANNING_GOVERNANCE_MIGRATION, ATTEMPT_EXECUTION_MIGRATION, DEPENDENT_TASK_SAFETY_MIGRATION, REQUIRED_ARTIFACTS_AND_EVIDENCE_MIGRATION, CRITIC_GOVERNANCE_MIGRATION] as const;
-export type WorkflowCommandType = "start" | "pause" | "resume" | "retry-recovery" | "cancel-run";
+const MIGRATIONS = [WORKFLOW_GOVERNANCE_MIGRATION, COMMAND_GOVERNANCE_MIGRATION, RECOVERY_GOVERNANCE_MIGRATION, PLANNING_GOVERNANCE_MIGRATION, ATTEMPT_EXECUTION_MIGRATION, DEPENDENT_TASK_SAFETY_MIGRATION, REQUIRED_ARTIFACTS_AND_EVIDENCE_MIGRATION, CRITIC_GOVERNANCE_MIGRATION, DECISIONS_AND_READINESS_MIGRATION] as const;
+export type WorkflowCommandType = "start" | "pause" | "resume" | "retry-recovery" | "cancel-run" | "dispose-decision";
 
 export type CommandOutcome =
 	| "accepted"
@@ -109,6 +110,10 @@ const COMMAND_TRANSITIONS: Record<WorkflowCommandType, readonly CommandTransitio
 	resume: [{ from: "paused", to: "running", eventType: "workflow_resumed" }],
 	"retry-recovery": [{ from: "failed", to: "running", eventType: "recovery_retried" }],
 	"cancel-run": [{ from: "running", to: "paused", eventType: "workflow_cancel_run" }],
+	"dispose-decision": [
+		{ from: "running", to: "running", eventType: "decision_disposed" },
+		{ from: "waiting_for_human", to: "running", eventType: "decision_disposed" },
+	],
 };
 export interface PolicyBundleDocument {
 	schemaVersion: "policy-bundle/v1";
@@ -592,6 +597,41 @@ export class WorkflowStore {
 				this.database.prepare("update governance_claims set status = 'released', released_at = ? where attempt_id = ? and status = 'active'").run(timestamp, activeClaim.attempt_id);
 				this.appendEvent(input.workflowId, "attempt_cancelled", workflow.version, "task_attempt", activeClaim.attempt_id, 0, { attemptId: activeClaim.attempt_id }, timestamp, actorSnapshot.id, input.commandId);
 				this.appendEvent(input.workflowId, "run_cancelled", workflow.version, "run", runId, 0, { attemptId: activeClaim.attempt_id }, timestamp, actorSnapshot.id, input.commandId);
+			}
+		}
+		if (input.type === "dispose-decision") {
+			const decisionId = input.payload?.decisionId;
+			const disposition = input.payload?.status;
+			if (typeof decisionId !== "number" || typeof disposition !== "string") {
+				return this.persistRejection(input, timestamp, requestDigest, workflow, actorSnapshot.id, "business_rule_rejected", 422);
+			}
+			const decision = this.database
+				.prepare("select id, severity, status, summary from decisions where id = ? and workflow_id = ?")
+				.get(decisionId, input.workflowId) as { id: number; severity: string; status: string; summary: string } | undefined;
+			if (!decision || decision.status !== "open") {
+				return this.persistRejection(input, timestamp, requestDigest, workflow, actorSnapshot.id, "business_rule_rejected", 422);
+			}
+			const validDispositions = ["accepted", "rejected", "deferred"];
+			if (!validDispositions.includes(disposition)) {
+				return this.persistRejection(input, timestamp, requestDigest, workflow, actorSnapshot.id, "business_rule_rejected", 422);
+			}
+			if ((decision.severity === "critical" || decision.severity === "major") && disposition === "deferred") {
+				return this.persistRejection(input, timestamp, requestDigest, workflow, actorSnapshot.id, "business_rule_rejected", 422);
+			}
+			if (disposition === "deferred") {
+				const reason = input.payload?.reason;
+				const owner = input.payload?.owner;
+				const followUpTarget = input.payload?.followUpTarget;
+				if (typeof reason !== "string" || typeof owner !== "string" || typeof followUpTarget !== "string") {
+					return this.persistRejection(input, timestamp, requestDigest, workflow, actorSnapshot.id, "business_rule_rejected", 422);
+				}
+				this.database
+					.prepare("update decisions set status = 'deferred', reason = ?, owner = ?, follow_up_target = ?, disposed_at = ? where id = ?")
+					.run(reason, owner, followUpTarget, timestamp, decisionId);
+			} else {
+				this.database
+					.prepare("update decisions set status = ?, disposed_at = ? where id = ?")
+					.run(disposition, timestamp, decisionId);
 			}
 		}
 		const newVersion = workflow.version + 1;
@@ -1196,10 +1236,17 @@ export class WorkflowStore {
 			return this.failAttemptRows(workflowId, attemptId, "role_result_mismatch", "RoleResult workflow or attempt mismatch");
 		}
 
+		if (result.decisionProposals) {
+			for (const proposal of result.decisionProposals) {
+				if (!["critical", "major", "minor"].includes(proposal.severity) || typeof proposal.summary !== "string" || proposal.summary.length === 0) {
+					return this.failAttemptRows(workflowId, attemptId, "invalid_decision_proposal", "DecisionProposal schema validation failed");
+				}
+			}
+		}
+
 	if (task.role === "critic") {
 		return this.publishCriticReportRows(workflowId, attemptId, result, task, workflow, timestamp);
 	}
-
 		const expectedEffects = parseJson<TaskProposal["expectedArtifactEffects"]>(task.expected_artifact_effects_json);
 		const allowedKinds = ARTIFACT_OWNERSHIP[task.role as keyof typeof ARTIFACT_OWNERSHIP] ?? [];
 		for (const effect of result.effects) {
@@ -1273,6 +1320,14 @@ export class WorkflowStore {
 			}
 		}
 
+		if (result.decisionProposals) {
+			for (const proposal of result.decisionProposals) {
+				const decisionId = Number(this.database
+					.prepare("insert into decisions(workflow_id, task_attempt_id, severity, summary, status, created_at) values (?, ?, ?, ?, 'open', ?)")
+					.run(workflowId, attemptId, proposal.severity, proposal.summary, timestamp).lastInsertRowid);
+				this.appendEvent(workflowId, "decision_raised", newVersion, "decision", decisionId, 0, { severity: proposal.severity, summary: proposal.summary }, timestamp);
+			}
+		}
 		this.database.prepare("update task_attempts set status = 'succeeded', completed_at = ? where id = ?").run(timestamp, attemptId);
 		this.database.prepare("update runs set status = 'completed', completed_at = ? where id = ?").run(timestamp, runId);
 		this.database.prepare("update tasks set status = 'completed' where id = ?").run(attempt.task_id);
@@ -1542,7 +1597,13 @@ export class WorkflowStore {
 		}
 		const newVersion = workflow.version + 1;
 		const runId = (this.database.prepare("select id from runs where attempt_id = ? order by id desc limit 1").get(attemptId) as { id: number }).id;
-	const isVerify = task.kind === "verify";
+		const isVerify = task.kind === "verify";
+
+		for (const target of report.coverageAttestation.reviewTargets) {
+			this.database
+				.prepare("insert into critic_coverage_targets(workflow_id, task_attempt_id, revision_id, artifact_kind, created_at) values (?, ?, ?, ?, ?)")
+				.run(workflowId, attemptId, target.revisionId, target.artifactKind, timestamp);
+		}
 
 		if (isVerify) {
 			const taskRow = this.database.prepare("select inputs_json from tasks where id = ?").get(task.id) as { inputs_json: string };
@@ -1618,6 +1679,245 @@ export class WorkflowStore {
 		this.options.crashInjector.reach("publish_attempt.before_commit");
 		return { outcome: "published", failureCode: null, workflowVersion: newVersion, lastEventSeq: this.currentLastEventSeq(workflowId) };
 	}
+
+	getDecisions(workflowId: number): readonly DecisionRecord[] {
+		const rows = this.database
+			.prepare("select id, workflow_id, task_attempt_id, severity, summary, status, reason, owner, follow_up_target, created_at, disposed_at from decisions where workflow_id = ? order by id")
+			.all(workflowId) as Array<{ id: number; workflow_id: number; task_attempt_id: number; severity: string; summary: string; status: string; reason: string | null; owner: string | null; follow_up_target: string | null; created_at: string; disposed_at: string | null }>;
+		return rows.map((row) => ({
+			id: row.id,
+			workflowId: row.workflow_id,
+			attemptId: row.task_attempt_id,
+			severity: row.severity as DecisionRecord["severity"],
+			summary: row.summary,
+			status: row.status as DecisionRecord["status"],
+			reason: row.reason,
+			owner: row.owner,
+			followUpTarget: row.follow_up_target,
+			createdAt: row.created_at,
+			disposedAt: row.disposed_at,
+		}));
+	}
+
+	private currentRevisionForKind(requirementId: number, kind: string): { id: number; status: string; content_digest: string; revision_no: number; artifact_id: number } | undefined {
+		return this.database
+			.prepare("select ar.id, ar.status, ar.content_digest, ar.revision_no, ar.artifact_id from artifact_revisions ar join artifacts a on a.id = ar.artifact_id where a.requirement_id = ? and a.kind = ? order by ar.id desc limit 1")
+			.get(requirementId, kind) as { id: number; status: string; content_digest: string; revision_no: number; artifact_id: number } | undefined;
+	}
+
+	checkReadiness(workflowId: number): ReadinessReport {
+		const projection = this.getWorkflowProjection(workflowId);
+		if (!projection) throw new Error("Workflow not found");
+		const requirementId = projection.requirement.id;
+		const checks: ReadinessCheckResult[] = [];
+		const warnings: string[] = [];
+		const push = (name: string, passed: boolean, detail: string) => checks.push({ name, passed, detail });
+
+		// 1. Terminal current work: no active claim/attempt/run, no non-terminal task in the active plan
+		const activeClaims = (this.database.prepare("select count(*) as count from governance_claims where workflow_id = ? and status = 'active'").get(workflowId) as { count: number }).count;
+		const activeAttempts = (this.database.prepare("select count(*) as count from task_attempts where workflow_id = ? and status in ('pending','running')").get(workflowId) as { count: number }).count;
+		const activeRuns = (this.database.prepare("select count(*) as count from runs where workflow_id = ? and status in ('queued','running')").get(workflowId) as { count: number }).count;
+		const nonTerminalTasks = (this.database
+			.prepare("select count(*) as count from tasks where workflow_id = ? and status in ('pending','in_progress','blocked','replan_requested') and plan_revision_id = (select current_plan_revision_id from workflows where id = ?)")
+			.get(workflowId, workflowId) as { count: number }).count;
+		push("terminal_current_work", activeClaims === 0 && activeAttempts === 0 && activeRuns === 0 && nonTerminalTasks === 0, `activeClaims=${activeClaims} activeAttempts=${activeAttempts} activeRuns=${activeRuns} nonTerminalTasks=${nonTerminalTasks}`);
+
+		// 2. No gate: no Finding Thread escalated to a human gate
+		const humanGateThreads = (this.database.prepare("select count(*) as count from finding_threads where workflow_id = ? and status = 'human_gate'").get(workflowId) as { count: number }).count;
+		push("no_gate", humanGateThreads === 0, `humanGateThreads=${humanGateThreads}`);
+
+		// 3. Complete Impact Profile
+		const impactRow = this.database.prepare("select complete from impact_profiles where workflow_id = ? order by id desc limit 1").get(workflowId) as { complete: number } | undefined;
+		push("complete_impact_profile", impactRow !== undefined && impactRow.complete === 1, impactRow === undefined ? "no impact profile" : `complete=${impactRow.complete}`);
+
+		// 4. Complete required Artifacts
+		const requiredSet = this.getRequiredArtifactSet(workflowId);
+		const missingKinds = requiredSet ? requiredSet.kindStatuses.filter((s) => !s.hasCurrentRevision).map((s) => s.kind) : [];
+		push("complete_required_artifacts", requiredSet !== undefined && missingKinds.length === 0, requiredSet === undefined ? "no required artifact set" : `missing=${missingKinds.join(",")}`);
+
+		// 5. No unpublished effects
+		const stagedEffects = (this.database.prepare("select count(*) as count from attempt_effects where workflow_id = ? and state = 'staged'").get(workflowId) as { count: number }).count;
+		push("no_unpublished_effects", stagedEffects === 0, `stagedEffects=${stagedEffects}`);
+
+		// 6. Evidence coverage: every required code-related kind with a current revision has TraceLinks
+		const codeKinds = ["analysis", "design", "architecture", "data", "api"];
+		const uncoveredKinds = requiredSet
+			? requiredSet.kindStatuses.filter((s) => codeKinds.includes(s.kind) && s.hasCurrentRevision && !s.hasTraceLinks).map((s) => s.kind)
+			: [];
+		push("evidence_coverage", requiredSet !== undefined && uncoveredKinds.length === 0, `uncovered=${uncoveredKinds.join(",")}`);
+
+		// 7. Disposed Decisions: no open Decision of any severity
+		const openDecisions = (this.database.prepare("select count(*) as count from decisions where workflow_id = ? and status = 'open'").get(workflowId) as { count: number }).count;
+		push("disposed_decisions", openDecisions === 0, `openDecisions=${openDecisions}`);
+
+		// 8. Disposed Findings: critical resolved; major resolved or non-stale risk acceptance; minor/info disclosed
+		const openCritical = (this.database.prepare("select count(*) as count from findings where workflow_id = ? and severity = 'critical' and status != 'resolved'").get(workflowId) as { count: number }).count;
+		const majorRows = this.database
+			.prepare("select id, status from findings where workflow_id = ? and severity = 'major'")
+			.all(workflowId) as Array<{ id: number; status: string }>;
+		const undisposedMajor = majorRows.filter((row) => {
+			if (row.status === "resolved") return false;
+			if (row.status === "risk_accepted") return this.isFindingRiskAcceptanceStale(workflowId, row.id);
+			return true;
+		}).length;
+		push("disposed_findings", openCritical === 0 && undisposedMajor === 0, `openCritical=${openCritical} undisposedMajor=${undisposedMajor}`);
+
+		// 9. Current Critic coverage: every required kind's current revision has a coverage target
+		const uncoveredRevisions: string[] = [];
+		if (requiredSet) {
+			for (const status of requiredSet.kindStatuses) {
+				if (!status.hasCurrentRevision) continue;
+				const revision = this.currentRevisionForKind(requirementId, status.kind);
+				if (!revision) continue;
+				const covered = this.database
+					.prepare("select count(*) as count from critic_coverage_targets where workflow_id = ? and revision_id = ?")
+					.get(workflowId, revision.id) as { count: number };
+				if (covered.count === 0) uncoveredRevisions.push(`${status.kind}#${revision.id}`);
+			}
+		}
+		push("current_critic_coverage", requiredSet !== undefined && uncoveredRevisions.length === 0, `uncovered=${uncoveredRevisions.join(",")}`);
+
+		// 10. No consistency error (schema validation of current revisions); warnings are disclosed
+		const consistencyErrors: string[] = [];
+		if (this.options.artifactValidator && requiredSet) {
+			for (const status of requiredSet.kindStatuses) {
+				if (!status.hasCurrentRevision) continue;
+				const revision = this.currentRevisionForKind(requirementId, status.kind);
+				if (!revision) continue;
+				const document = this.database.prepare("select content from snapshot_documents where id = (select content_document_id from artifact_revisions where id = ?)").get(revision.id) as { content: string } | undefined;
+				if (!document || !this.options.artifactValidator.check(parseJson<unknown>(document.content))) {
+					consistencyErrors.push(`${status.kind}#${revision.id}`);
+				}
+			}
+		}
+		const duplicateKinds = this.database
+			.prepare("select a.kind as kind, count(*) as count from artifacts a join workflows w on w.requirement_id = a.requirement_id where w.id = ? group by a.kind having count(*) > 1")
+			.all(workflowId) as Array<{ kind: string; count: number }>;
+		for (const duplicate of duplicateKinds) {
+			consistencyErrors.push(`duplicate artifact for kind ${duplicate.kind}`);
+		}
+		const orphanEvidence = (this.database
+			.prepare("select count(*) as count from evidence_snapshots es where es.workflow_id = ? and not exists (select 1 from trace_links tl where tl.evidence_snapshot_id = es.id)")
+			.get(workflowId) as { count: number }).count;
+		if (orphanEvidence > 0) warnings.push(`${orphanEvidence} evidence snapshot(s) are not referenced by any TraceLink`);
+		push("no_consistency_error", consistencyErrors.length === 0, `errors=${consistencyErrors.join(",")}`);
+
+		// 11. Buildable ApprovalPacket: governed content can be assembled and digested
+		let buildable = false;
+		try {
+			const content = this.assembleApprovalPacketContent(workflowId);
+			this.options.hashProvider.digest(content);
+			buildable = true;
+		} catch {
+			buildable = false;
+		}
+		push("buildable_approval_packet", buildable, buildable ? "ok" : "packet assembly failed");
+
+		return { workflowId, ready: checks.every((check) => check.passed), checks, warnings };
+	}
+
+	private assembleApprovalPacketContent(workflowId: number): Record<string, unknown> {
+		const projection = this.getWorkflowProjection(workflowId);
+		if (!projection) throw new Error("Workflow not found");
+		const requirementId = projection.requirement.id;
+		const requiredSet = this.getRequiredArtifactSet(workflowId);
+		const artifactRows = requiredSet
+			? requiredSet.kindStatuses
+					.filter((status) => status.hasCurrentRevision)
+					.map((status) => {
+						const revision = this.currentRevisionForKind(requirementId, status.kind)!;
+						return { artifactId: revision.artifact_id, revisionId: revision.id, kind: status.kind, revisionNo: revision.revision_no, status: revision.status, contentDigest: revision.content_digest };
+					})
+					.sort((left, right) => left.kind.localeCompare(right.kind))
+			: [];
+		const decisions = this.getDecisions(workflowId).map((decision) => ({
+			id: decision.id,
+			severity: decision.severity,
+			status: decision.status,
+			summary: decision.summary,
+			reason: decision.reason,
+			owner: decision.owner,
+			followUpTarget: decision.followUpTarget,
+		}));
+		const findings = this.getFindings(workflowId).map((finding) => ({
+			id: finding.id,
+			fingerprint: finding.fingerprint,
+			severity: finding.severity,
+			status: finding.status,
+			summary: finding.summary,
+			targetRevisionId: finding.targetRevisionId,
+			riskAcceptedBy: finding.riskAcceptedBy,
+			riskAcceptanceReason: finding.riskAcceptanceReason,
+		}));
+		const disclosedFindingIds = findings.filter((finding) => (finding.severity === "minor" || finding.severity === "info") && finding.status === "open").map((finding) => finding.id).sort((a, b) => a - b);
+		const coveredRevisionIds = (this.database
+			.prepare("select distinct revision_id from critic_coverage_targets where workflow_id = ? order by revision_id")
+			.all(workflowId) as Array<{ revision_id: number }>).map((row) => row.revision_id);
+		const orphanEvidence = (this.database
+			.prepare("select count(*) as count from evidence_snapshots es where es.workflow_id = ? and not exists (select 1 from trace_links tl where tl.evidence_snapshot_id = es.id)")
+			.get(workflowId) as { count: number }).count;
+		const packetWarnings: string[] = [];
+		if (orphanEvidence > 0) packetWarnings.push(`${orphanEvidence} evidence snapshot(s) are not referenced by any TraceLink`);
+		return {
+			schemaVersion: "approval-packet/v1",
+			workflowId,
+			requirementRevisionId: projection.requirement.currentRevision.id,
+			artifacts: artifactRows,
+			decisions,
+			findings,
+			disclosedFindingIds,
+			criticCoverage: { coveredRevisionIds },
+			warnings: packetWarnings,
+			policyBundleDigest: projection.workflow.policyBundle.digest,
+			requiredArtifactKinds: requiredSet ? [...requiredSet.requiredKinds].sort() : [],
+		};
+	}
+
+	buildApprovalPacket(workflowId: number): BuildApprovalPacketResult {
+		const tx = this.database.transaction(() => this.buildApprovalPacketRows(workflowId)).immediate;
+		return tx();
+	}
+
+	private buildApprovalPacketRows(workflowId: number): BuildApprovalPacketResult {
+		const timestamp = this.options.clock.now().toISOString();
+		const report = this.checkReadiness(workflowId);
+		const workflow = this.database.prepare("select state, version from workflows where id = ?").get(workflowId) as { state: string; version: number };
+		if (!report.ready) {
+			if (workflow.state === "ready_to_archive") {
+				const newVersion = workflow.version + 1;
+				this.database.prepare("update workflows set state = 'running', version = ?, current_approval_packet_id = null, updated_at = ? where id = ?").run(newVersion, timestamp, workflowId);
+				this.appendEvent(workflowId, "readiness_withdrawn", newVersion, "workflow", workflowId, newVersion, { failedChecks: report.checks.filter((check) => !check.passed).map((check) => check.name) }, timestamp);
+				return { ready: false, packetId: null, digest: null, checks: report.checks, warnings: report.warnings, workflowVersion: newVersion, lastEventSeq: this.currentLastEventSeq(workflowId) };
+			}
+			return { ready: false, packetId: null, digest: null, checks: report.checks, warnings: report.warnings, workflowVersion: workflow.version, lastEventSeq: this.currentLastEventSeq(workflowId) };
+		}
+		const content = this.assembleApprovalPacketContent(workflowId);
+		const digest = this.options.hashProvider.digest(content);
+		let packetId = (this.database.prepare("select id from approval_packets where workflow_id = ? and digest = ?").get(workflowId, digest) as { id: number } | undefined)?.id;
+		if (packetId === undefined) {
+			packetId = Number(this.database
+				.prepare("insert into approval_packets(workflow_id, digest, content_json, created_at) values (?, ?, ?, ?)")
+				.run(workflowId, digest, this.options.hashProvider.canonicalize(content), timestamp).lastInsertRowid);
+		}
+		if (workflow.state === "ready_to_archive") {
+			this.database.prepare("update workflows set current_approval_packet_id = ?, updated_at = ? where id = ?").run(packetId, timestamp, workflowId);
+			return { ready: true, packetId, digest, checks: report.checks, warnings: report.warnings, workflowVersion: workflow.version, lastEventSeq: this.currentLastEventSeq(workflowId) };
+		}
+		const newVersion = workflow.version + 1;
+		this.database.prepare("update workflows set state = 'ready_to_archive', version = ?, current_approval_packet_id = ?, updated_at = ? where id = ?").run(newVersion, packetId, timestamp, workflowId);
+		this.appendEvent(workflowId, "workflow_ready_to_archive", newVersion, "workflow", workflowId, newVersion, { approvalPacketId: packetId, digest }, timestamp);
+		return { ready: true, packetId, digest, checks: report.checks, warnings: report.warnings, workflowVersion: newVersion, lastEventSeq: this.currentLastEventSeq(workflowId) };
+	}
+
+	getApprovalPacket(workflowId: number): ApprovalPacketRecord | undefined {
+		const workflow = this.database.prepare("select current_approval_packet_id from workflows where id = ?").get(workflowId) as { current_approval_packet_id: number | null } | undefined;
+		if (!workflow || workflow.current_approval_packet_id === null) return undefined;
+		const row = this.database
+			.prepare("select id, workflow_id, digest, content_json, created_at from approval_packets where id = ?")
+			.get(workflow.current_approval_packet_id) as { id: number; workflow_id: number; digest: string; content_json: string; created_at: string } | undefined;
+		if (!row) return undefined;
+		return { id: row.id, workflowId: row.workflow_id, digest: row.digest, content: parseJson<Record<string, unknown>>(row.content_json), createdAt: row.created_at };
+	}
 }
 
 export interface EvidenceSnapshotResult {
@@ -1675,4 +1975,49 @@ export interface FindingThreadRecord {
 	status: string;
 	createdAt: string;
 	updatedAt: string;
+}
+
+export interface DecisionRecord {
+	id: number;
+	workflowId: number;
+	attemptId: number;
+	severity: "critical" | "major" | "minor";
+	summary: string;
+	status: "open" | "accepted" | "rejected" | "deferred";
+	reason: string | null;
+	owner: string | null;
+	followUpTarget: string | null;
+	createdAt: string;
+	disposedAt: string | null;
+}
+
+export interface ReadinessCheckResult {
+	name: string;
+	passed: boolean;
+	detail: string;
+}
+
+export interface ReadinessReport {
+	workflowId: number;
+	ready: boolean;
+	checks: readonly ReadinessCheckResult[];
+	warnings: readonly string[];
+}
+
+export interface BuildApprovalPacketResult {
+	ready: boolean;
+	packetId: number | null;
+	digest: string | null;
+	checks: readonly ReadinessCheckResult[];
+	warnings: readonly string[];
+	workflowVersion: number;
+	lastEventSeq: number;
+}
+
+export interface ApprovalPacketRecord {
+	id: number;
+	workflowId: number;
+	digest: string;
+	content: Record<string, unknown>;
+	createdAt: string;
 }

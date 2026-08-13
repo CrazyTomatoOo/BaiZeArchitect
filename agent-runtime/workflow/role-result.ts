@@ -14,12 +14,20 @@ export interface ArtifactEffectProposal {
 	traceLinks?: readonly TraceLinkProposal[];
 }
 
+export type DecisionSeverity = "critical" | "major" | "minor";
+
+export interface DecisionProposal {
+	severity: DecisionSeverity;
+	summary: string;
+}
+
 export interface RoleResult {
 	schemaVersion: "role-result/v1";
 	workflowId: number;
 	attemptId: number;
 	effects: readonly ArtifactEffectProposal[];
 	criticReport?: CriticReport;
+	decisionProposals?: readonly DecisionProposal[];
 }
 
 export interface ContextManifest {
