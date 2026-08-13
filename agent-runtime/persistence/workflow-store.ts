@@ -6,6 +6,8 @@ import { WorkflowDoctor, type DoctorReport } from "../workflow/workflow-doctor.j
 import { PLAN_TASK_LIMITS, type PlanProposal, type TaskProposal } from "../workflow/plan-types.js";
 import { validatePlanProposal } from "../workflow/plan-validator.js";
 import type { RequirementBaseline } from "../workflow/requirement.js";
+import type { CutoverReport, RequirementClassification } from "../cutover/cutover-types.js";
+import type { CutoverApplyResult } from "../cutover/cutover-applier.js";
 
 import { WORKFLOW_GOVERNANCE_MIGRATION } from "./migrations/0001-workflow-governance.js";
 import { COMMAND_GOVERNANCE_MIGRATION } from "./migrations/0002-command-governance.js";
@@ -2882,6 +2884,436 @@ export class WorkflowStore {
 		return () => {
 			this.runEventListeners.delete(listener);
 		};
+	}
+
+
+	getMigrationAttestation(): { attestationDocumentId: number; reportDigest: string } | null {
+		const row = this.database
+			.prepare(
+				`select d.id as document_id, d.content as content
+				 from snapshot_documents d
+				 where d.kind = 'migration_attestation'
+				 order by d.id desc limit 1`,
+			)
+			.get() as { document_id: number; content: string } | undefined;
+		if (!row) return null;
+		const parsed = parseJson<{ reportDigest: string }>(row.content);
+		return { attestationDocumentId: row.document_id, reportDigest: parsed.reportDigest };
+	}
+
+	applyCutover(
+		legacyDb: Database.Database,
+		report: CutoverReport,
+		crashInjector: { reach(point: string): void },
+	): CutoverApplyResult {
+		const timestamp = this.options.clock.now().toISOString();
+		const tx = this.database.transaction(() => {
+			return this.applyCutoverRows(legacyDb, report, timestamp, crashInjector);
+		}).immediate;
+		return tx();
+	}
+
+	private applyCutoverRows(
+		legacyDb: Database.Database,
+		report: CutoverReport,
+		timestamp: string,
+		crashInjector: { reach(point: string): void },
+	): CutoverApplyResult {
+		const reportDoc = this.insertSnapshot("cutover_report", "cutover-report/v1", report, timestamp);
+		const attestationContent = {
+			schemaVersion: "migration-attestation/v1",
+			reportDigest: report.reportDigest,
+			inputFingerprints: report.inputFingerprints,
+			policyVersion: report.policyVersion,
+			classificationCount: report.classifications.length,
+			anomalyCount: report.anomalies.length,
+			appliedAt: timestamp,
+		};
+		const attestationDoc = this.insertSnapshot(
+			"migration_attestation",
+			"migration-attestation/v1",
+			attestationContent,
+			timestamp,
+		);
+
+		const workspaceId = this.ensureWorkspace(legacyDb);
+
+		let archivedWorkflows = 0;
+		let pendingWorkflows = 0;
+		let reusableAssetsImported = 0;
+
+		for (const classification of report.classifications) {
+			const legacyReq = this.readLegacyRequirement(legacyDb, classification.requirementId);
+			if (!legacyReq) continue;
+
+			if (classification.classification === "manual_asset_source") {
+				reusableAssetsImported += this.importManualAssets(
+					legacyDb,
+					classification,
+					workspaceId,
+					attestationDoc.id,
+					timestamp,
+				);
+				continue;
+			}
+
+		const baseline: RequirementBaseline = {
+				schemaVersion: "artifact/requirement/v1",
+				artifactKind: "requirement",
+				summary: legacyReq.title,
+				title: legacyReq.title,
+				description: legacyReq.description ?? "",
+				sourceRefs: [],
+			};
+			const bundleDoc = this.insertSnapshot(
+				"legacy_requirement_bundle",
+				"legacy-requirement-bundle/v1",
+				{
+					schemaVersion: "legacy-requirement-bundle/v1",
+					legacyRequirementId: legacyReq.id,
+					title: legacyReq.title,
+					description: legacyReq.description,
+					source: legacyReq.source,
+					archived: classification.classification === "legacy_archived",
+				},
+				timestamp,
+			);
+			const anomalyCount = report.anomalies.filter(
+				(a) => a.requirementId === legacyReq.id,
+			).length;
+
+			if (classification.classification === "legacy_archived") {
+				this.createLegacyArchivedWorkflowRows({
+					workspaceId,
+					baseline,
+					legacyOriginRequirementId: legacyReq.id,
+					attestationDocumentId: attestationDoc.id,
+					bundleDocumentId: bundleDoc.id,
+					anomalyCount,
+					timestamp,
+				});
+				archivedWorkflows += 1;
+			} else {
+				this.createLegacyPendingWorkflowRows({
+					workspaceId,
+					baseline,
+					legacyOriginRequirementId: legacyReq.id,
+					attestationDocumentId: attestationDoc.id,
+					bundleDocumentId: bundleDoc.id,
+					anomalyCount,
+					timestamp,
+				});
+				pendingWorkflows += 1;
+			}
+		}
+
+		crashInjector.reach("cutover_apply.before_commit");
+
+		return {
+			attestationDocumentId: attestationDoc.id,
+			reportDigest: report.reportDigest,
+			importedRequirements: archivedWorkflows + pendingWorkflows,
+			archivedWorkflows,
+			pendingWorkflows,
+			reusableAssetsImported,
+		};
+	}
+
+	private ensureWorkspace(legacyDb: Database.Database): number {
+		const row = legacyDb
+			.prepare("select id, repo_path, name from workspaces order by id limit 1")
+			.get() as { id: number; repo_path: string; name: string } | undefined;
+		if (row) {
+			const existing = this.database
+				.prepare("select id from workspaces where repo_path = ? and name = ?")
+				.get(row.repo_path, row.name) as { id: number } | undefined;
+			if (existing) return existing.id;
+			return this.createWorkspace({ repoPath: row.repo_path, name: row.name });
+		}
+		return this.createWorkspace({ repoPath: "/legacy", name: "legacy-cutover" });
+	}
+
+	private readLegacyRequirement(
+		legacyDb: Database.Database,
+		requirementId: number,
+): { id: number; title: string; description: string; source: string } | undefined {
+		return legacyDb
+			.prepare("select id, title, description, source from requirements where id = ?")
+			.get(requirementId) as { id: number; title: string; description: string; source: string } | undefined;
+	}
+
+	private importManualAssets(
+		legacyDb: Database.Database,
+		classification: RequirementClassification,
+		workspaceId: number,
+		attestationDocumentId: number,
+		timestamp: string,
+	): number {
+		const artifacts = legacyDb
+			.prepare(
+				`select a.id, a.kind, a.title, ar.content
+				 from artifacts a
+				 join artifact_revisions ar on ar.artifact_id = a.id
+				 where a.requirement_id = ?
+				 order by a.id, ar.id`,
+			)
+			.all(classification.requirementId) as Array<{
+				id: number;
+				kind: string;
+				title: string;
+				content: string;
+			}>;
+		let count = 0;
+		for (const artifact of artifacts) {
+			const kind = this.mapLegacyArtifactKind(artifact.kind);
+			if (!kind) continue;
+			let content: unknown;
+			try {
+				content = JSON.parse(artifact.content);
+			} catch {
+				content = { title: artifact.title, raw: artifact.content };
+			}
+			const created = this.createReusableAsset({
+				workspaceId,
+				kind,
+				title: artifact.title || `legacy-${artifact.kind}`,
+				content,
+				source: "migration",
+				legacyOriginRequirementId: classification.requirementId,
+				migrationAttestationDocumentId: attestationDocumentId,
+			});
+			count += 1;
+			void created;
+		}
+		return count;
+	}
+
+	private mapLegacyArtifactKind(
+		kind: string,
+	): "scenario" | "usecase" | "function" | null {
+		if (kind === "scenario") return "scenario";
+		if (kind === "usecase") return "usecase";
+		if (kind === "function") return "function";
+		return null;
+	}
+
+	private createLegacyArchivedWorkflowRows(input: {
+		workspaceId: number;
+		baseline: RequirementBaseline;
+		legacyOriginRequirementId: number;
+		attestationDocumentId: number;
+		bundleDocumentId: number;
+		anomalyCount: number;
+		timestamp: string;
+	}): { requirementId: number; workflowId: number } {
+		const baselineDoc = this.insertSnapshot(
+			"artifact_content",
+			"artifact/requirement/v1",
+			input.baseline,
+			input.timestamp,
+		);
+		const policyDoc = this.insertSnapshot(
+			"policy_bundle",
+			"policy-bundle/v1",
+			this.options.policyBundle,
+			input.timestamp,
+		);
+		const requirementId = Number(
+			this.database
+				.prepare(
+					"insert into requirements(workspace_id, title, version, created_at, updated_at) values (?, ?, 1, ?, ?)",
+				)
+				.run(input.workspaceId, input.baseline.title, input.timestamp, input.timestamp)
+				.lastInsertRowid,
+		);
+		const artifactId = Number(
+			this.database
+				.prepare(
+					"insert into artifacts(requirement_id, kind, title, created_at) values (?, 'requirement', ?, ?)",
+				)
+				.run(requirementId, input.baseline.title, input.timestamp).lastInsertRowid,
+		);
+		const revisionId = Number(
+			this.database
+				.prepare(
+					"insert into artifact_revisions(artifact_id, revision_no, content_document_id, content_digest, schema_ref, status, created_at) values (?, 1, ?, ?, 'artifact/requirement/v1', 'approved', ?)",
+				)
+				.run(artifactId, baselineDoc.id, baselineDoc.digest, input.timestamp)
+				.lastInsertRowid,
+		);
+		this.database
+			.prepare("update artifacts set current_revision_id = ? where id = ?")
+			.run(revisionId, artifactId);
+		this.database
+			.prepare("update requirements set current_revision_id = ? where id = ?")
+			.run(revisionId, requirementId);
+		const designSessionId = Number(
+			this.database
+				.prepare(
+					"insert into design_sessions(requirement_id, session_file, session_id, status, created_at, updated_at) values (?, ?, ?, 'archived', ?, ?)",
+				)
+				.run(
+					requirementId,
+					`workflow-sessions/requirement-${requirementId}.jsonl`,
+					`design-session:${requirementId}`,
+					input.timestamp,
+					input.timestamp,
+				).lastInsertRowid,
+		);
+		const workflowId = Number(
+			this.database
+				.prepare(
+					"insert into workflows(requirement_id, state, version, last_event_seq, policy_bundle_document_id, created_at, updated_at, archived_at) values (?, 'archived', 0, 0, ?, ?, ?, ?)",
+				)
+				.run(requirementId, policyDoc.id, input.timestamp, input.timestamp, input.timestamp)
+				.lastInsertRowid,
+		);
+		const createdPayload = {
+			requirementId,
+			requirementRevisionId: revisionId,
+			designSessionId,
+			policyBundleDocumentId: policyDoc.id,
+			policyBundleDigest: policyDoc.digest,
+		};
+		this.database
+			.prepare(
+				"insert into workflow_events(workflow_id, seq, type, type_version, schema_version, workflow_version, entity_type, entity_id, entity_version, payload, created_at) values (?, 1, 'workflow_created', 1, 'workflow-event/v1', 0, 'workflow', ?, 0, ?, ?)",
+			)
+			.run(workflowId, workflowId, JSON.stringify(createdPayload), input.timestamp);
+		const archivedPayload = {
+			archiveClass: "legacy_pre_policy",
+			attestationDocumentId: input.attestationDocumentId,
+			legacyRequirementId: input.legacyOriginRequirementId,
+		};
+		this.database
+			.prepare(
+				"insert into workflow_events(workflow_id, seq, type, type_version, schema_version, workflow_version, entity_type, entity_id, entity_version, payload, created_at) values (?, 2, 'legacy_data_imported', 1, 'workflow-event/v1', 0, 'legacy_import', ?, 0, ?, ?)",
+			)
+			.run(workflowId, requirementId, JSON.stringify(archivedPayload), input.timestamp);
+		this.database
+			.prepare(
+				"insert into design_packages(requirement_id, workspace_id, document_id, digest, approval_packet_id, approval_id, migration_attestation_document_id, archive_class, archived_at) values (?, ?, ?, ?, null, null, ?, 'legacy_pre_policy', ?)",
+			)
+			.run(
+				requirementId,
+				input.workspaceId,
+				baselineDoc.id,
+				baselineDoc.digest,
+				input.attestationDocumentId,
+				input.timestamp,
+			);
+		this.database
+			.prepare(
+				"insert into legacy_imports(requirement_id, workflow_id, import_class, bundle_document_id, attestation_document_id, anomaly_count, created_at) values (?, ?, 'legacy_archived', ?, ?, ?, ?)",
+			)
+			.run(
+				requirementId,
+				workflowId,
+				input.bundleDocumentId,
+				input.attestationDocumentId,
+				input.anomalyCount,
+				input.timestamp,
+			);
+		return { requirementId, workflowId };
+	}
+
+	private createLegacyPendingWorkflowRows(input: {
+		workspaceId: number;
+		baseline: RequirementBaseline;
+		legacyOriginRequirementId: number;
+		attestationDocumentId: number;
+		bundleDocumentId: number;
+		anomalyCount: number;
+		timestamp: string;
+	}): { requirementId: number; workflowId: number } {
+		const baselineDoc = this.insertSnapshot(
+			"artifact_content",
+			"artifact/requirement/v1",
+			input.baseline,
+			input.timestamp,
+		);
+		const policyDoc = this.insertSnapshot(
+			"policy_bundle",
+			"policy-bundle/v1",
+			this.options.policyBundle,
+			input.timestamp,
+		);
+		const requirementId = Number(
+			this.database
+				.prepare(
+					"insert into requirements(workspace_id, title, version, created_at, updated_at) values (?, ?, 1, ?, ?)",
+				)
+				.run(input.workspaceId, input.baseline.title, input.timestamp, input.timestamp)
+				.lastInsertRowid,
+		);
+		const artifactId = Number(
+			this.database
+				.prepare(
+					"insert into artifacts(requirement_id, kind, title, created_at) values (?, 'requirement', ?, ?)",
+				)
+				.run(requirementId, input.baseline.title, input.timestamp).lastInsertRowid,
+		);
+		const revisionId = Number(
+			this.database
+				.prepare(
+					"insert into artifact_revisions(artifact_id, revision_no, content_document_id, content_digest, schema_ref, status, created_at) values (?, 1, ?, ?, 'artifact/requirement/v1', 'pending', ?)",
+				)
+				.run(artifactId, baselineDoc.id, baselineDoc.digest, input.timestamp)
+				.lastInsertRowid,
+		);
+		this.database
+			.prepare("update artifacts set current_revision_id = ? where id = ?")
+			.run(revisionId, artifactId);
+		this.database
+			.prepare("update requirements set current_revision_id = ? where id = ?")
+			.run(revisionId, requirementId);
+		const designSessionId = Number(
+			this.database
+				.prepare(
+					"insert into design_sessions(requirement_id, session_file, session_id, status, created_at, updated_at) values (?, ?, ?, 'active', ?, ?)",
+				)
+				.run(
+					requirementId,
+					`workflow-sessions/requirement-${requirementId}.jsonl`,
+					`design-session:${requirementId}`,
+					input.timestamp,
+					input.timestamp,
+				).lastInsertRowid,
+		);
+		const workflowId = Number(
+			this.database
+				.prepare(
+					"insert into workflows(requirement_id, state, version, last_event_seq, policy_bundle_document_id, created_at, updated_at) values (?, 'pending', 0, 0, ?, ?, ?)",
+				)
+				.run(requirementId, policyDoc.id, input.timestamp, input.timestamp)
+				.lastInsertRowid,
+		);
+		const createdPayload = {
+			requirementId,
+			requirementRevisionId: revisionId,
+			designSessionId,
+			policyBundleDocumentId: policyDoc.id,
+			policyBundleDigest: policyDoc.digest,
+			legacyRequirementId: input.legacyOriginRequirementId,
+		};
+		this.database
+			.prepare(
+				"insert into workflow_events(workflow_id, seq, type, type_version, schema_version, workflow_version, entity_type, entity_id, entity_version, payload, created_at) values (?, 1, 'workflow_created', 1, 'workflow-event/v1', 0, 'workflow', ?, 0, ?, ?)",
+			)
+			.run(workflowId, workflowId, JSON.stringify(createdPayload), input.timestamp);
+		this.database
+			.prepare(
+				"insert into legacy_imports(requirement_id, workflow_id, import_class, bundle_document_id, attestation_document_id, anomaly_count, created_at) values (?, ?, 'pending_reentry', ?, ?, ?, ?)",
+			)
+			.run(
+				requirementId,
+				workflowId,
+				input.bundleDocumentId,
+				input.attestationDocumentId,
+				input.anomalyCount,
+				input.timestamp,
+			);
+		return { requirementId, workflowId };
 	}
 
 	private readonly workflowEventListeners = new Set<(event: WorkflowEventEnvelope) => void>();
