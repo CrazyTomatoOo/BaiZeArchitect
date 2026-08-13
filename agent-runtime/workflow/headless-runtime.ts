@@ -1,5 +1,5 @@
 import type { CrashInjector, FixtureClock, FixtureOperator, FixtureOutboxTransport, HashProvider } from "../testing/deterministic-fixtures.js";
-import { WorkflowStore, type BeginPlanningResult, type CommandReceipt, type CompletePlanningResult, type ExecuteCommandInput, type ReconciliationReport, type WorkflowCommandType, type WorkflowProjection, type EvidenceSnapshotResult, type RequiredArtifactSetResult, type TraceLinkResult, type FindingRecord, type FindingThreadRecord, type DecisionRecord, type ReadinessReport, type BuildApprovalPacketResult, type ApprovalPacketRecord, type HumanGateRecord, type ApprovalRecordEntry, type HumanDirectiveRecord, type DiagnosticRunRecord } from "../persistence/workflow-store.js";
+import { WorkflowStore, type BeginPlanningResult, type CommandReceipt, type CompletePlanningResult, type ExecuteCommandInput, type ReconciliationReport, type WorkflowCommandType, type WorkflowProjection, type EvidenceSnapshotResult, type RequiredArtifactSetResult, type TraceLinkResult, type FindingRecord, type FindingThreadRecord, type DecisionRecord, type ReadinessReport, type BuildApprovalPacketResult, type ApprovalPacketRecord, type HumanGateRecord, type ApprovalRecordEntry, type HumanDirectiveRecord, type DiagnosticRunRecord, type CommandReceiptDetail, type RequirementSummaryRecord, type RequirementDetailRecord, type BoundedWorkflowProjection, type PlanRevisionDetail, type TaskDetailRecord, type AttemptSummaryRecord, type AttemptDetailRecord, type RunDetailRecord, type ApprovalPacketDetailRecord, type DesignPackageRecord, type LegacyImportRecord, type ReusableAssetSummary, type ReusableAssetDetail } from "../persistence/workflow-store.js";
 import type { BeginAttemptResult, CompleteAttemptResult, ExecuteTaskResult, RoleResult, TraceLinkProposal, CriticReport } from "./role-result.js";
 import { loadWorkflowContracts } from "./contracts/loader.js";
 import { compileWorkflowSchema, type WorkflowSchemaValidator } from "./contracts/schema.js";
@@ -56,6 +56,7 @@ export interface HeadlessWorkflowRuntime {
 	getWorkflowProjection(workflowId: number): WorkflowProjection | undefined;
 	executeCommand(input: ExecuteCommandRequest): CommandReceipt;
 	getCommandReceipt(workflowId: number, commandId: string): CommandReceipt | undefined;
+	getCommandReceiptDetail(workflowId: number, commandId: string): CommandReceiptDetail | undefined;
 	beginPlanning(workflowId: number): BeginPlanningResult;
 	completePlanning(workflowId: number, attemptId: number, structuredResult: unknown): CompletePlanningResult;
 	planWorkflow(workflowId: number, modelDriver: ModelDriver): Promise<PlanWorkflowResult>;
@@ -84,6 +85,23 @@ export interface HeadlessWorkflowRuntime {
 	getApprovalRecords(workflowId: number): readonly ApprovalRecordEntry[];
 	getHumanDirectives(workflowId: number): readonly HumanDirectiveRecord[];
 	getDiagnosticRuns(workflowId: number): readonly DiagnosticRunRecord[];
+	listRequirementSummaries(workspaceId: number): readonly RequirementSummaryRecord[];
+	getRequirementDetail(requirementId: number): RequirementDetailRecord | undefined;
+	getBoundedProjection(workflowId: number): BoundedWorkflowProjection | undefined;
+	getPlanRevisionDetail(planRevisionId: number): PlanRevisionDetail | undefined;
+	getTaskDetail(taskId: number): TaskDetailRecord | undefined;
+	listTaskAttempts(taskId: number): readonly AttemptSummaryRecord[];
+	getAttemptDetail(attemptId: number): AttemptDetailRecord | undefined;
+	getRunDetail(runId: number): RunDetailRecord | undefined;
+	getApprovalPacketDetail(packetId: number): ApprovalPacketDetailRecord | undefined;
+	getDesignPackage(designPackageId: number): DesignPackageRecord | undefined;
+	getLegacyImport(requirementId: number): LegacyImportRecord | undefined;
+	createReusableAsset(input: { workspaceId: number; kind: "scenario" | "usecase" | "function"; title: string; content: unknown }): { assetId: number; revisionId: number };
+	listReusableAssets(workspaceId: number): readonly ReusableAssetSummary[];
+	getReusableAsset(assetId: number): ReusableAssetDetail | undefined;
+	deleteReusableAsset(assetId: number): boolean;
+	exportReusableAssets(workspaceId: number): readonly ReusableAssetDetail[];
+	importReusableAssets(workspaceId: number, assets: readonly { kind: "scenario" | "usecase" | "function"; title: string; content: unknown }[]): readonly number[];
 	close(): void;
 }
 
@@ -164,6 +182,9 @@ export async function openHeadlessWorkflowRuntime(
 		},
 		getCommandReceipt(workflowId, commandId) {
 			return store.getCommandReceipt(workflowId, commandId);
+		},
+		getCommandReceiptDetail(workflowId, commandId) {
+			return store.getCommandReceiptDetail(workflowId, commandId);
 		},
 		beginPlanning(workflowId) {
 			return store.beginPlanning(workflowId);
@@ -282,6 +303,57 @@ export async function openHeadlessWorkflowRuntime(
 	},
 	getDiagnosticRuns(workflowId) {
 		return store.getDiagnosticRuns(workflowId);
+	},
+	listRequirementSummaries(workspaceId) {
+		return store.listRequirementSummaries(workspaceId);
+	},
+	getRequirementDetail(requirementId) {
+		return store.getRequirementDetail(requirementId);
+	},
+	getBoundedProjection(workflowId) {
+		return store.getBoundedProjection(workflowId);
+	},
+	getPlanRevisionDetail(planRevisionId) {
+		return store.getPlanRevisionDetail(planRevisionId);
+	},
+	getTaskDetail(taskId) {
+		return store.getTaskDetail(taskId);
+	},
+	listTaskAttempts(taskId) {
+		return store.listTaskAttempts(taskId);
+	},
+	getAttemptDetail(attemptId) {
+		return store.getAttemptDetail(attemptId);
+	},
+	getRunDetail(runId) {
+		return store.getRunDetail(runId);
+	},
+	getApprovalPacketDetail(packetId) {
+		return store.getApprovalPacketDetail(packetId);
+	},
+	getDesignPackage(designPackageId) {
+		return store.getDesignPackage(designPackageId);
+	},
+	getLegacyImport(requirementId) {
+		return store.getLegacyImport(requirementId);
+	},
+	createReusableAsset(input) {
+		return store.createReusableAsset(input);
+	},
+	listReusableAssets(workspaceId) {
+		return store.listReusableAssets(workspaceId);
+	},
+	getReusableAsset(assetId) {
+		return store.getReusableAsset(assetId);
+	},
+	deleteReusableAsset(assetId) {
+		return store.deleteReusableAsset(assetId);
+	},
+	exportReusableAssets(workspaceId) {
+		return store.exportReusableAssets(workspaceId);
+	},
+	importReusableAssets(workspaceId, assets) {
+		return store.importReusableAssets(workspaceId, assets);
 	},
 		close() {
 			store.close();

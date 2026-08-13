@@ -44,6 +44,19 @@ const COMMAND_TYPES: readonly WorkflowCommandType[] = [
 	"retry-recovery",
 	"cancel-run",
 	"dispose-decision",
+	"steer",
+	"retry-task",
+	"retry-planning",
+	"replace-plan",
+	"diagnostic-run",
+	"provide-human-input",
+	"revise-requirement",
+	"approve-artifact",
+	"reject-artifact",
+	"accept-finding-risk",
+	"revoke-approval",
+	"approve-packet",
+	"reject-packet",
 ];
 
 const LOOPBACK_HOSTS = new Set(["127.0.0.1", "::1", "localhost"]);
@@ -231,6 +244,238 @@ export async function startOperatorServer(
 				operator,
 			});
 			sendJson(response, receipt.httpStatus, receipt);
+			return;
+		}
+
+		if (request.method === "GET" && url.pathname === "/api/session") {
+			sendJson(response, 200, { actorRef: operator.actorRef, capabilities: operator.capabilities });
+			return;
+		}
+
+		if (request.method === "GET" && url.pathname === "/api/requirements") {
+			const workspaceId = Number(url.searchParams.get("workspaceId"));
+			if (!Number.isInteger(workspaceId) || !options.runtime.workspaceExists(workspaceId)) {
+				sendJson(response, 404, { error: "unknown_workspace" });
+				return;
+			}
+			sendJson(response, 200, { requirements: options.runtime.listRequirementSummaries(workspaceId) });
+			return;
+		}
+
+		if (request.method === "GET" && segments.length === 3 && segments[0] === "api" && segments[1] === "requirements") {
+			const detail = options.runtime.getRequirementDetail(Number(segments[2]));
+			if (!detail) {
+				sendJson(response, 404, { error: "unknown_requirement" });
+				return;
+			}
+			sendJson(response, 200, detail);
+			return;
+		}
+
+		if (request.method === "GET" && segments.length === 3 && segments[0] === "api" && segments[1] === "legacy-imports") {
+			const legacyImport = options.runtime.getLegacyImport(Number(segments[2]));
+			if (!legacyImport) {
+				sendJson(response, 404, { error: "unknown_legacy_import" });
+				return;
+			}
+			sendJson(response, 200, legacyImport);
+			return;
+		}
+
+		if (request.method === "GET" && segments.length === 3 && segments[0] === "api" && segments[1] === "design-packages") {
+			const designPackage = options.runtime.getDesignPackage(Number(segments[2]));
+			if (!designPackage) {
+				sendJson(response, 404, { error: "unknown_design_package" });
+				return;
+			}
+			sendJson(response, 200, designPackage);
+			return;
+		}
+
+		if (request.method === "GET" && segments.length === 3 && segments[0] === "api" && segments[1] === "workflows") {
+			const projection = options.runtime.getBoundedProjection(Number(segments[2]));
+			if (!projection) {
+				sendJson(response, 404, { error: "unknown_workflow" });
+				return;
+			}
+			sendJson(response, 200, projection);
+			return;
+		}
+
+		if (request.method === "GET" && segments.length === 5 && segments[0] === "api" && segments[1] === "workflows" && segments[3] === "commands") {
+			const receipt = options.runtime.getCommandReceiptDetail(Number(segments[2]), segments[4]);
+			if (!receipt) {
+				sendJson(response, 404, { error: "unknown_command_receipt" });
+				return;
+			}
+			sendJson(response, 200, receipt);
+			return;
+		}
+
+		if (request.method === "GET" && segments.length === 3 && segments[0] === "api" && segments[1] === "plan-revisions") {
+			const detail = options.runtime.getPlanRevisionDetail(Number(segments[2]));
+			if (!detail) {
+				sendJson(response, 404, { error: "unknown_plan_revision" });
+				return;
+			}
+			sendJson(response, 200, detail);
+			return;
+		}
+
+		if (request.method === "GET" && segments.length === 4 && segments[0] === "api" && segments[1] === "tasks" && segments[3] === "attempts") {
+			if (!options.runtime.getTaskDetail(Number(segments[2]))) {
+				sendJson(response, 404, { error: "unknown_task" });
+				return;
+			}
+			sendJson(response, 200, { attempts: options.runtime.listTaskAttempts(Number(segments[2])) });
+			return;
+		}
+
+		if (request.method === "GET" && segments.length === 3 && segments[0] === "api" && segments[1] === "tasks") {
+			const detail = options.runtime.getTaskDetail(Number(segments[2]));
+			if (!detail) {
+				sendJson(response, 404, { error: "unknown_task" });
+				return;
+			}
+			sendJson(response, 200, detail);
+			return;
+		}
+
+		if (request.method === "GET" && segments.length === 3 && segments[0] === "api" && segments[1] === "attempts") {
+			const detail = options.runtime.getAttemptDetail(Number(segments[2]));
+			if (!detail) {
+				sendJson(response, 404, { error: "unknown_attempt" });
+				return;
+			}
+			sendJson(response, 200, detail);
+			return;
+		}
+
+		if (request.method === "GET" && segments.length === 3 && segments[0] === "api" && segments[1] === "runs") {
+			const detail = options.runtime.getRunDetail(Number(segments[2]));
+			if (!detail) {
+				sendJson(response, 404, { error: "unknown_run" });
+				return;
+			}
+			sendJson(response, 200, detail);
+			return;
+		}
+
+		if (request.method === "GET" && segments.length === 3 && segments[0] === "api" && segments[1] === "approval-packets") {
+			const detail = options.runtime.getApprovalPacketDetail(Number(segments[2]));
+			if (!detail) {
+				sendJson(response, 404, { error: "unknown_approval_packet" });
+				return;
+			}
+			sendJson(response, 200, detail);
+			return;
+		}
+
+		if (request.method === "GET" && url.pathname === "/api/assets/export") {
+			const workspaceId = Number(url.searchParams.get("workspaceId"));
+			if (!Number.isInteger(workspaceId) || !options.runtime.workspaceExists(workspaceId)) {
+				sendJson(response, 404, { error: "unknown_workspace" });
+				return;
+			}
+			sendJson(response, 200, { assets: options.runtime.exportReusableAssets(workspaceId) });
+			return;
+		}
+
+		if (request.method === "POST" && url.pathname === "/api/assets/import") {
+			let body: unknown;
+			try {
+				body = JSON.parse(await readBody(request));
+			} catch {
+				sendJson(response, 400, { error: "malformed_body" });
+				return;
+			}
+			if (typeof body !== "object" || body === null || Array.isArray(body)) {
+				sendJson(response, 400, { error: "malformed_body" });
+				return;
+			}
+			const importBody = body as { workspaceId?: unknown; assets?: unknown };
+			const workspaceId = Number(importBody.workspaceId);
+			if (!Number.isInteger(workspaceId) || !options.runtime.workspaceExists(workspaceId)) {
+				sendJson(response, 404, { error: "unknown_workspace" });
+				return;
+			}
+			if (!Array.isArray(importBody.assets) || importBody.assets.length === 0) {
+				sendJson(response, 400, { error: "malformed_body" });
+				return;
+			}
+			for (const asset of importBody.assets) {
+				if (typeof asset !== "object" || asset === null || !["scenario", "usecase", "function"].includes((asset as { kind?: unknown }).kind as string) || typeof (asset as { title?: unknown }).title !== "string" || !("content" in (asset as object))) {
+					sendJson(response, 400, { error: "malformed_body" });
+					return;
+				}
+			}
+			const ids = options.runtime.importReusableAssets(workspaceId, importBody.assets as { kind: "scenario" | "usecase" | "function"; title: string; content: unknown }[]);
+			sendJson(response, 201, { assetIds: ids });
+			return;
+		}
+
+		if (request.method === "GET" && url.pathname === "/api/assets") {
+			const workspaceId = Number(url.searchParams.get("workspaceId"));
+			if (!Number.isInteger(workspaceId) || !options.runtime.workspaceExists(workspaceId)) {
+				sendJson(response, 404, { error: "unknown_workspace" });
+				return;
+			}
+			sendJson(response, 200, { assets: options.runtime.listReusableAssets(workspaceId) });
+			return;
+		}
+
+		if (request.method === "POST" && url.pathname === "/api/assets") {
+			let body: unknown;
+			try {
+				body = JSON.parse(await readBody(request));
+			} catch {
+				sendJson(response, 400, { error: "malformed_body" });
+				return;
+			}
+			if (typeof body !== "object" || body === null || Array.isArray(body)) {
+				sendJson(response, 400, { error: "malformed_body" });
+				return;
+			}
+			if ("actor" in body || "operator" in body) {
+				sendJson(response, 400, { error: "actor_fields_are_not_accepted" });
+				return;
+			}
+			const createBody = body as { workspaceId?: unknown; kind?: unknown; title?: unknown; content?: unknown };
+			const workspaceId = Number(createBody.workspaceId);
+			if (!Number.isInteger(workspaceId) || !options.runtime.workspaceExists(workspaceId)) {
+				sendJson(response, 404, { error: "unknown_workspace" });
+				return;
+			}
+			if (!["scenario", "usecase", "function"].includes(createBody.kind as string) || typeof createBody.title !== "string" || !("content" in createBody)) {
+				sendJson(response, 400, { error: "malformed_body" });
+				return;
+			}
+			const created = options.runtime.createReusableAsset({
+				workspaceId,
+				kind: createBody.kind as "scenario" | "usecase" | "function",
+				title: createBody.title,
+				content: createBody.content,
+			});
+			sendJson(response, 201, created);
+			return;
+		}
+
+		if (request.method === "GET" && segments.length === 3 && segments[0] === "api" && segments[1] === "assets") {
+			const asset = options.runtime.getReusableAsset(Number(segments[2]));
+			if (!asset) {
+				sendJson(response, 404, { error: "unknown_asset" });
+				return;
+			}
+			sendJson(response, 200, asset);
+			return;
+		}
+
+		if (request.method === "DELETE" && segments.length === 3 && segments[0] === "api" && segments[1] === "assets") {
+			if (!options.runtime.deleteReusableAsset(Number(segments[2]))) {
+				sendJson(response, 404, { error: "unknown_asset" });
+				return;
+			}
+			sendJson(response, 200, { deleted: true });
 			return;
 		}
 

@@ -17,11 +17,12 @@ import { REQUIRED_ARTIFACTS_AND_EVIDENCE_MIGRATION } from "./migrations/0007-req
 import { CRITIC_GOVERNANCE_MIGRATION } from "./migrations/0008-critic-governance.js";
 import { DECISIONS_AND_READINESS_MIGRATION } from "./migrations/0009-decisions-and-readiness.js";
 import { HUMAN_GOVERNANCE_MIGRATION } from "./migrations/0010-human-governance.js";
+import { READ_MODEL_GOVERNANCE_MIGRATION } from "./migrations/0011-read-model-governance.js";
 import { ARTIFACT_OWNERSHIP, type InputBinding, type TaskOutputInput } from "../workflow/plan-types.js";
 import type { RoleResult, ContextManifest, RoleContract, BeginAttemptResult, CompleteAttemptResult, TraceLinkProposal, CriticReport, FindingProposal, FindingSeverity } from "../workflow/role-result.js";
 import { deriveRequiredArtifactSet, type ImpactProfile, type RequiredArtifactSet } from "../workflow/impact-profile.js";
 
-const MIGRATIONS = [WORKFLOW_GOVERNANCE_MIGRATION, COMMAND_GOVERNANCE_MIGRATION, RECOVERY_GOVERNANCE_MIGRATION, PLANNING_GOVERNANCE_MIGRATION, ATTEMPT_EXECUTION_MIGRATION, DEPENDENT_TASK_SAFETY_MIGRATION, REQUIRED_ARTIFACTS_AND_EVIDENCE_MIGRATION, CRITIC_GOVERNANCE_MIGRATION, DECISIONS_AND_READINESS_MIGRATION, HUMAN_GOVERNANCE_MIGRATION] as const;
+const MIGRATIONS = [WORKFLOW_GOVERNANCE_MIGRATION, COMMAND_GOVERNANCE_MIGRATION, RECOVERY_GOVERNANCE_MIGRATION, PLANNING_GOVERNANCE_MIGRATION, ATTEMPT_EXECUTION_MIGRATION, DEPENDENT_TASK_SAFETY_MIGRATION, REQUIRED_ARTIFACTS_AND_EVIDENCE_MIGRATION, CRITIC_GOVERNANCE_MIGRATION, DECISIONS_AND_READINESS_MIGRATION, HUMAN_GOVERNANCE_MIGRATION, READ_MODEL_GOVERNANCE_MIGRATION] as const;
 export type WorkflowCommandType =
 	| "start"
 	| "pause"
@@ -915,9 +916,13 @@ export class WorkflowStore {
 			this.database
 				.prepare("update design_sessions set status = 'archived', archived_at = ?, updated_at = ? where requirement_id = ?")
 				.run(timestamp, timestamp, workflow.requirement_id);
-			this.database
+			const packetSnapshot = this.insertSnapshot("approval_packet", "approval-packet/v1", parseJson<unknown>(packet.content_json), timestamp);
+			const approvalRecordId = Number(this.database
 				.prepare("insert into approval_records(workflow_id, record_type, subject_type, subject_id, subject_digest, reason, targets_json, actor_snapshot_document_id, command_id, created_at) values (?, 'packet_approval', 'approval_packet', ?, ?, null, null, ?, ?, ?)")
-				.run(input.workflowId, packet.id, packet.digest, actorSnapshot.id, input.commandId, timestamp);
+				.run(input.workflowId, packet.id, packet.digest, actorSnapshot.id, input.commandId, timestamp).lastInsertRowid);
+			this.database
+				.prepare("insert into design_packages(requirement_id, workspace_id, document_id, digest, approval_packet_id, approval_id, migration_attestation_document_id, archive_class, archived_at) values (?, ?, ?, ?, ?, ?, null, 'governed', ?)")
+				.run(workflow.requirement_id, (this.database.prepare("select workspace_id from requirements where id = ?").get(workflow.requirement_id) as { workspace_id: number }).workspace_id, packetSnapshot.id, packet.digest, packet.id, approvalRecordId, timestamp);
 			this.appendEvent(input.workflowId, "packet_approved", workflow.version + 1, "approval_packet", packet.id, 0, { digest: packet.digest }, timestamp, actorSnapshot.id, input.commandId);
 		}
 		if (input.type === "reject-packet") {
@@ -1103,6 +1108,26 @@ export class WorkflowStore {
 			workflowVersion: row.workflow_version as number,
 			lastEventSeq: row.last_event_seq as number,
 			createdAt: row.created_at as string,
+		};
+	}
+
+	getCommandReceiptDetail(workflowId: number, commandId: string): CommandReceiptDetail | undefined {
+		const row = this.database
+			.prepare("select r.command_id, r.workflow_id, r.command_type, r.outcome, r.http_status, r.workflow_version, r.last_event_seq, r.created_at, d.content as actor_content from command_receipts r join snapshot_documents d on d.id = r.actor_snapshot_document_id where r.command_id = ? and r.workflow_id = ?")
+			.get(commandId, workflowId) as Record<string, unknown> | undefined;
+		if (!row) return undefined;
+		const actor = parseJson<{ actorRef: string; capabilities: readonly string[] }>(row.actor_content as string);
+		return {
+			commandId: row.command_id as string,
+			workflowId: row.workflow_id as number,
+			commandType: row.command_type as WorkflowCommandType,
+			outcome: row.outcome as CommandOutcome,
+			httpStatus: row.http_status as number,
+			workflowVersion: row.workflow_version as number,
+			lastEventSeq: row.last_event_seq as number,
+			createdAt: row.created_at as string,
+			actorRef: actor.actorRef,
+			capabilities: actor.capabilities,
 		};
 	}
 
@@ -2358,6 +2383,582 @@ export class WorkflowStore {
 			.all(workflowId) as Array<{ id: number; workflow_id: number; purpose: string; status: string; actor_snapshot_document_id: number; command_id: string; created_at: string }>;
 		return rows.map((row) => ({ id: row.id, workflowId: row.workflow_id, purpose: row.purpose, status: row.status, actorSnapshotDocumentId: row.actor_snapshot_document_id, commandId: row.command_id, createdAt: row.created_at }));
 	}
+
+	listRequirementSummaries(workspaceId: number): readonly RequirementSummaryRecord[] {
+		const rows = this.database
+			.prepare("select r.id, r.title, r.version, w.id as workflow_id, w.state, w.version as workflow_version, w.last_event_seq from requirements r join workflows w on w.requirement_id = r.id where r.workspace_id = ? order by r.id")
+			.all(workspaceId) as Array<{ id: number; title: string; version: number; workflow_id: number; state: string; workflow_version: number; last_event_seq: number }>;
+		return rows.map((row) => ({
+			requirementId: row.id,
+			title: row.title,
+			requirementVersion: row.version,
+			workflow: { id: row.workflow_id, state: row.state, version: row.workflow_version, lastEventSeq: row.last_event_seq },
+		}));
+	}
+
+	getRequirementDetail(requirementId: number): RequirementDetailRecord | undefined {
+		const row = this.database
+			.prepare("select r.id, r.workspace_id, r.title, r.version, w.id as workflow_id from requirements r join workflows w on w.requirement_id = r.id where r.id = ?")
+			.get(requirementId) as { id: number; workspace_id: number; title: string; version: number; workflow_id: number } | undefined;
+		if (!row) return undefined;
+		const revision = this.database
+			.prepare("select ar.id, ar.artifact_id, ar.revision_no, ar.status, ar.schema_ref, ar.content_document_id, ar.content_digest, d.content from artifact_revisions ar join artifacts a on a.id = ar.artifact_id join snapshot_documents d on d.id = ar.content_document_id where a.requirement_id = ? and a.kind = 'requirement' order by ar.id desc limit 1")
+			.get(requirementId) as { id: number; artifact_id: number; revision_no: number; status: string; schema_ref: string; content_document_id: number; content_digest: string; content: string } | undefined;
+		if (!revision) return undefined;
+		return {
+			id: row.id,
+			workspaceId: row.workspace_id,
+			title: row.title,
+			version: row.version,
+			workflowId: row.workflow_id,
+			currentRevision: {
+				id: revision.id,
+				artifactId: revision.artifact_id,
+				revisionNo: revision.revision_no,
+				status: revision.status,
+				schemaRef: revision.schema_ref,
+				contentDocumentId: revision.content_document_id,
+				contentDigest: revision.content_digest,
+				content: parseJson<RequirementBaseline>(revision.content),
+			},
+		};
+	}
+
+	getBoundedProjection(workflowId: number): BoundedWorkflowProjection | undefined {
+		const workflow = this.database
+			.prepare("select w.id, w.state, w.version, w.last_event_seq, w.current_plan_revision_id, w.current_approval_packet_id, w.current_failure_code, w.policy_bundle_document_id, w.requirement_id from workflows w where w.id = ?")
+			.get(workflowId) as { id: number; state: string; version: number; last_event_seq: number; current_plan_revision_id: number | null; current_approval_packet_id: number | null; current_failure_code: string | null; policy_bundle_document_id: number; requirement_id: number } | undefined;
+		if (!workflow) return undefined;
+		const policyBundle = this.database.prepare("select id, digest from snapshot_documents where id = ?").get(workflow.policy_bundle_document_id) as { id: number; digest: string };
+		const requirement = this.database
+			.prepare("select r.id, r.workspace_id, r.title, r.version from requirements r where r.id = ?")
+			.get(workflow.requirement_id) as { id: number; workspace_id: number; title: string; version: number };
+		const requirementRevision = this.database
+			.prepare("select ar.id, ar.revision_no, ar.status, ar.content_digest, ar.schema_ref from artifact_revisions ar join artifacts a on a.id = ar.artifact_id where a.requirement_id = ? and a.kind = 'requirement' order by ar.id desc limit 1")
+			.get(workflow.requirement_id) as { id: number; revision_no: number; status: string; content_digest: string; schema_ref: string };
+		const designSession = this.database
+			.prepare("select id, status, session_id from design_sessions where requirement_id = ?")
+			.get(workflow.requirement_id) as { id: number; status: string; session_id: string };
+		let currentPlan: BoundedWorkflowProjection["currentPlan"] = null;
+		let tasks: BoundedWorkflowProjection["tasks"] = [];
+		if (workflow.current_plan_revision_id !== null) {
+			const plan = this.database
+				.prepare("select id, revision_no, status, proposal_digest, created_at from plan_revisions where id = ?")
+				.get(workflow.current_plan_revision_id) as { id: number; revision_no: number; status: string; proposal_digest: string; created_at: string };
+			currentPlan = { id: plan.id, revisionNo: plan.revision_no, status: plan.status, proposalDigest: plan.proposal_digest, createdAt: plan.created_at };
+			const taskRows = this.database
+				.prepare("select id, key, kind, role, status, max_attempts, created_at from tasks where plan_revision_id = ? order by id")
+				.all(plan.id) as Array<{ id: number; key: string; kind: string; role: string; status: string; max_attempts: number; created_at: string }>;
+			const latestAttempt = this.database.prepare("select id, attempt_no, status from task_attempts where task_id = ? order by attempt_no desc limit 1");
+			tasks = taskRows.map((task) => {
+				const attempt = latestAttempt.get(task.id) as { id: number; attempt_no: number; status: string } | undefined;
+				return {
+					id: task.id,
+					key: task.key,
+					kind: task.kind,
+					role: task.role,
+					status: task.status,
+					maxAttempts: task.max_attempts,
+					latestAttempt: attempt ? { id: attempt.id, attemptNo: attempt.attempt_no, status: attempt.status } : null,
+				};
+			});
+		}
+		const claim = this.database
+			.prepare("select id, attempt_id, created_at from governance_claims where workflow_id = ? and status = 'active' order by id desc limit 1")
+			.get(workflowId) as { id: number; attempt_id: number; created_at: string } | undefined;
+		const claimAttempt = claim
+			? this.database.prepare("select task_id from task_attempts where id = ?").get(claim.attempt_id) as { task_id: number }
+			: undefined;
+		const activeRun = claim
+			? this.database.prepare("select id, status, mode, role, created_at from runs where attempt_id = ? order by id desc limit 1").get(claim.attempt_id) as { id: number; status: string; mode: string; role: string | null; created_at: string } | undefined
+			: undefined;
+		const openGates = this.getHumanGates(workflowId).filter((gate) => gate.status === "open");
+		const decisions = this.getDecisions(workflowId);
+		const findings = this.getFindings(workflowId);
+		const threads = this.getFindingThreads(workflowId);
+		const packet = workflow.current_approval_packet_id === null
+			? null
+			: this.database.prepare("select id, digest, status, created_at from approval_packets where id = ?").get(workflow.current_approval_packet_id) as { id: number; digest: string; status: string; created_at: string } | undefined;
+		const incident = this.database
+			.prepare("select id, incident_type, failure_code, status, created_at from workflow_incidents where workflow_id = ? and status = 'open' order by id desc limit 1")
+			.get(workflowId) as { id: number; incident_type: string; failure_code: string; status: string; created_at: string } | undefined;
+		return {
+			workflow: {
+				id: workflow.id,
+				state: workflow.state,
+				version: workflow.version,
+				lastEventSeq: workflow.last_event_seq,
+				currentFailureCode: workflow.current_failure_code,
+				policyBundle: { documentId: policyBundle.id, digest: policyBundle.digest },
+			},
+			requirement: {
+				id: requirement.id,
+				workspaceId: requirement.workspace_id,
+				title: requirement.title,
+				version: requirement.version,
+				currentRevision: { id: requirementRevision.id, revisionNo: requirementRevision.revision_no, status: requirementRevision.status, digest: requirementRevision.content_digest, schemaRef: requirementRevision.schema_ref },
+			},
+			designSession: { id: designSession.id, status: designSession.status, sessionId: designSession.session_id },
+			currentPlan,
+			tasks,
+			activeClaim: claim && claimAttempt && activeRun ? { id: claim.id, taskId: claimAttempt.task_id, attemptId: claim.attempt_id, runId: activeRun.id, acquiredAt: claim.created_at } : null,
+			activeRun: activeRun ? { id: activeRun.id, status: activeRun.status, mode: activeRun.mode, role: activeRun.role, startedAt: activeRun.created_at } : null,
+			openGates: openGates.map((gate) => ({ id: gate.id, gateType: gate.gateType, subjectType: gate.subjectType, subjectId: gate.subjectId, openedAt: gate.openedAt })),
+			decisions: decisions.map((decision) => ({ id: decision.id, severity: decision.severity, status: decision.status, summary: decision.summary })),
+			findings: findings.map((finding) => ({ id: finding.id, threadId: finding.threadId, severity: finding.severity, status: finding.status, summary: finding.summary, targetRevisionId: finding.targetRevisionId })),
+			findingThreads: threads.map((thread) => ({ id: thread.id, fingerprint: thread.fingerprint, status: thread.status, reworkCount: thread.reworkCount })),
+			readiness: this.checkReadiness(workflowId),
+			currentPacket: packet ? { id: packet.id, digest: packet.digest, status: packet.status, createdAt: packet.created_at } : null,
+			currentIncident: incident ? { id: incident.id, incidentType: incident.incident_type, failureCode: incident.failure_code, status: incident.status, createdAt: incident.created_at } : null,
+		};
+	}
+
+	getPlanRevisionDetail(planRevisionId: number): PlanRevisionDetail | undefined {
+		const row = this.database
+			.prepare("select id, workflow_id, revision_no, proposal_document_id, proposal_digest, base_plan_revision_id, planning_context_digest, status, created_at from plan_revisions where id = ?")
+			.get(planRevisionId) as { id: number; workflow_id: number; revision_no: number; proposal_document_id: number; proposal_digest: string; base_plan_revision_id: number | null; planning_context_digest: string; status: string; created_at: string } | undefined;
+		if (!row) return undefined;
+		const proposal = this.database.prepare("select content from snapshot_documents where id = ?").get(row.proposal_document_id) as { content: string };
+		const planningAttempt = this.database
+			.prepare("select id from task_attempts where workflow_id = ? and planning_context_digest = ? order by id desc limit 1")
+			.get(row.workflow_id, row.planning_context_digest) as { id: number } | undefined;
+		return {
+			id: row.id,
+			workflowId: row.workflow_id,
+			revisionNo: row.revision_no,
+			status: row.status,
+			proposalDocumentId: row.proposal_document_id,
+			proposalDigest: row.proposal_digest,
+			basePlanRevisionId: row.base_plan_revision_id,
+			planningContextDigest: row.planning_context_digest,
+			planningAttemptId: planningAttempt?.id ?? null,
+			proposal: parseJson<PlanProposal>(proposal.content),
+			createdAt: row.created_at,
+		};
+	}
+
+	getTaskDetail(taskId: number): TaskDetailRecord | undefined {
+		const row = this.database
+			.prepare("select id, workflow_id, plan_revision_id, key, kind, role, objective, depends_on_json, inputs_json, expected_artifact_effects_json, completion_policy_ref, max_attempts, status, created_at from tasks where id = ?")
+			.get(taskId) as { id: number; workflow_id: number; plan_revision_id: number | null; key: string; kind: string; role: string; objective: string; depends_on_json: string; inputs_json: string; expected_artifact_effects_json: string; completion_policy_ref: string | null; max_attempts: number; status: string; created_at: string } | undefined;
+		if (!row) return undefined;
+		return {
+			id: row.id,
+			workflowId: row.workflow_id,
+			planRevisionId: row.plan_revision_id,
+			key: row.key,
+			kind: row.kind,
+			role: row.role,
+			objective: row.objective,
+			dependsOn: parseJson<readonly string[]>(row.depends_on_json),
+			inputs: parseJson<readonly unknown[]>(row.inputs_json),
+			expectedArtifactEffects: parseJson<readonly unknown[]>(row.expected_artifact_effects_json),
+			completionPolicyRef: row.completion_policy_ref,
+			maxAttempts: row.max_attempts,
+			status: row.status,
+			createdAt: row.created_at,
+		};
+	}
+
+	listTaskAttempts(taskId: number): readonly AttemptSummaryRecord[] {
+		const rows = this.database
+			.prepare("select id, attempt_no, status, result_outcome, created_at, completed_at from task_attempts where task_id = ? order by attempt_no")
+			.all(taskId) as Array<{ id: number; attempt_no: number; status: string; result_outcome: string | null; created_at: string; completed_at: string | null }>;
+		return rows.map((row) => ({ id: row.id, attemptNo: row.attempt_no, status: row.status, resultOutcome: row.result_outcome, createdAt: row.created_at, completedAt: row.completed_at }));
+	}
+
+	getAttemptDetail(attemptId: number): AttemptDetailRecord | undefined {
+		const row = this.database
+			.prepare("select id, task_id, workflow_id, attempt_no, status, planning_context_digest, base_workflow_version, context_manifest_document_id, role_contract_document_id, result_outcome, created_at, completed_at from task_attempts where id = ?")
+			.get(attemptId) as { id: number; task_id: number; workflow_id: number; attempt_no: number; status: string; planning_context_digest: string | null; base_workflow_version: number | null; context_manifest_document_id: number | null; role_contract_document_id: number | null; result_outcome: string | null; created_at: string; completed_at: string | null } | undefined;
+		if (!row) return undefined;
+		const manifest = row.context_manifest_document_id === null ? null : this.database.prepare("select digest from snapshot_documents where id = ?").get(row.context_manifest_document_id) as { digest: string };
+		const roleContract = row.role_contract_document_id === null ? null : this.database.prepare("select digest from snapshot_documents where id = ?").get(row.role_contract_document_id) as { digest: string };
+		const run = this.database
+			.prepare("select id, status, mode, role, result_document_id from runs where attempt_id = ? order by id desc limit 1")
+			.get(attemptId) as { id: number; status: string; mode: string; role: string | null; result_document_id: number | null } | undefined;
+		const effects = this.database
+			.prepare("select id, artifact_kind, effect_type, logical_key, state, published_artifact_revision_id from attempt_effects where attempt_id = ? order by id")
+			.all(attemptId) as Array<{ id: number; artifact_kind: string; effect_type: string; logical_key: string; state: string; published_artifact_revision_id: number | null }>;
+		return {
+			id: row.id,
+			taskId: row.task_id,
+			workflowId: row.workflow_id,
+			attemptNo: row.attempt_no,
+			status: row.status,
+			resultOutcome: row.result_outcome,
+			baseWorkflowVersion: row.base_workflow_version,
+			contextManifest: manifest === null ? null : { documentId: row.context_manifest_document_id as number, digest: manifest.digest },
+			roleContract: roleContract === null ? null : { documentId: row.role_contract_document_id as number, digest: roleContract.digest },
+			run: run ? { id: run.id, status: run.status, mode: run.mode, role: run.role, resultDocumentId: run.result_document_id } : null,
+			effects: effects.map((effect) => ({ id: effect.id, artifactKind: effect.artifact_kind, effectType: effect.effect_type, logicalKey: effect.logical_key, state: effect.state, publishedArtifactRevisionId: effect.published_artifact_revision_id })),
+			createdAt: row.created_at,
+			completedAt: row.completed_at,
+		};
+	}
+
+	getRunDetail(runId: number): RunDetailRecord | undefined {
+		const row = this.database
+			.prepare("select id, attempt_id, workflow_id, session_file, session_id, status, model_ref, result_document_id, mode, role, created_at, completed_at from runs where id = ?")
+			.get(runId) as { id: number; attempt_id: number; workflow_id: number; session_file: string; session_id: string; status: string; model_ref: string | null; result_document_id: number | null; mode: string; role: string | null; created_at: string; completed_at: string | null } | undefined;
+		if (!row) return undefined;
+		return {
+			id: row.id,
+			attemptId: row.attempt_id,
+			workflowId: row.workflow_id,
+			sessionFile: row.session_file,
+			sessionId: row.session_id,
+			status: row.status,
+			modelRef: row.model_ref,
+			resultDocumentId: row.result_document_id,
+			mode: row.mode,
+			role: row.role,
+			createdAt: row.created_at,
+			completedAt: row.completed_at,
+		};
+	}
+
+	getApprovalPacketDetail(packetId: number): ApprovalPacketDetailRecord | undefined {
+		const row = this.database
+			.prepare("select id, workflow_id, digest, content_json, status, created_at from approval_packets where id = ?")
+			.get(packetId) as { id: number; workflow_id: number; digest: string; content_json: string; status: string; created_at: string } | undefined;
+		if (!row) return undefined;
+		const workflow = this.database.prepare("select current_approval_packet_id from workflows where id = ?").get(row.workflow_id) as { current_approval_packet_id: number | null };
+		return {
+			id: row.id,
+			workflowId: row.workflow_id,
+			digest: row.digest,
+			status: row.status,
+			valid: row.status === "current" && workflow.current_approval_packet_id === row.id,
+			content: parseJson<Record<string, unknown>>(row.content_json),
+			createdAt: row.created_at,
+		};
+	}
+
+	getDesignPackage(designPackageId: number): DesignPackageRecord | undefined {
+		const row = this.database
+			.prepare("select id, requirement_id, workspace_id, document_id, digest, approval_packet_id, approval_id, migration_attestation_document_id, archive_class, archived_at from design_packages where id = ?")
+			.get(designPackageId) as { id: number; requirement_id: number; workspace_id: number; document_id: number; digest: string; approval_packet_id: number | null; approval_id: number | null; migration_attestation_document_id: number | null; archive_class: string; archived_at: string } | undefined;
+		if (!row) return undefined;
+		return {
+			id: row.id,
+			requirementId: row.requirement_id,
+			workspaceId: row.workspace_id,
+			documentId: row.document_id,
+			digest: row.digest,
+			approvalPacketId: row.approval_packet_id,
+			approvalId: row.approval_id,
+			migrationAttestationDocumentId: row.migration_attestation_document_id,
+			archiveClass: row.archive_class as DesignPackageRecord["archiveClass"],
+			archivedAt: row.archived_at,
+		};
+	}
+
+	getLegacyImport(requirementId: number): LegacyImportRecord | undefined {
+		const row = this.database
+			.prepare("select requirement_id, workflow_id, import_class, bundle_document_id, attestation_document_id, anomaly_count, created_at from legacy_imports where requirement_id = ?")
+			.get(requirementId) as { requirement_id: number; workflow_id: number; import_class: string; bundle_document_id: number; attestation_document_id: number; anomaly_count: number; created_at: string } | undefined;
+		if (!row) return undefined;
+		return {
+			requirementId: row.requirement_id,
+			workflowId: row.workflow_id,
+			importClass: row.import_class as LegacyImportRecord["importClass"],
+			bundleDocumentId: row.bundle_document_id,
+			attestationDocumentId: row.attestation_document_id,
+			anomalySummary: { count: row.anomaly_count },
+			createdAt: row.created_at,
+		};
+	}
+
+	createReusableAsset(input: { workspaceId: number; kind: "scenario" | "usecase" | "function"; title: string; content: unknown; source?: "manual" | "import" | "migration"; legacyOriginRequirementId?: number | null; actorSnapshotDocumentId?: number | null; migrationAttestationDocumentId?: number | null }): { assetId: number; revisionId: number } {
+		if (!this.workspaceExists(input.workspaceId)) throw new Error("Workspace not found");
+		const timestamp = this.options.clock.now().toISOString();
+		const transaction = this.database.transaction(() => {
+			const document = this.insertSnapshot("reusable_asset_content", `artifact/${input.kind}/v1`, input.content, timestamp);
+			const assetId = Number(this.database
+				.prepare("insert into reusable_assets(workspace_id, kind, title, current_revision_id, legacy_origin_requirement_id, created_at, updated_at) values (?, ?, ?, null, ?, ?, ?)")
+				.run(input.workspaceId, input.kind, input.title, input.legacyOriginRequirementId ?? null, timestamp, timestamp).lastInsertRowid);
+			const revisionId = Number(this.database
+				.prepare("insert into reusable_asset_revisions(reusable_asset_id, revision_no, content_document_id, content_digest, source, actor_snapshot_document_id, migration_attestation_document_id, created_at) values (?, 1, ?, ?, ?, ?, ?, ?)")
+				.run(assetId, document.id, document.digest, input.source ?? "manual", input.actorSnapshotDocumentId ?? null, input.migrationAttestationDocumentId ?? null, timestamp).lastInsertRowid);
+			this.database.prepare("update reusable_assets set current_revision_id = ? where id = ?").run(revisionId, assetId);
+			return { assetId, revisionId };
+		}).immediate;
+		return transaction();
+	}
+
+	listReusableAssets(workspaceId: number): readonly ReusableAssetSummary[] {
+		const rows = this.database
+			.prepare("select a.id, a.kind, a.title, a.current_revision_id, a.legacy_origin_requirement_id, a.created_at, r.revision_no, r.content_digest from reusable_assets a left join reusable_asset_revisions r on r.id = a.current_revision_id where a.workspace_id = ? order by a.id")
+			.all(workspaceId) as Array<{ id: number; kind: string; title: string; current_revision_id: number | null; legacy_origin_requirement_id: number | null; created_at: string; revision_no: number | null; content_digest: string | null }>;
+		return rows.map((row) => ({
+			id: row.id,
+			workspaceId,
+			kind: row.kind as ReusableAssetSummary["kind"],
+			title: row.title,
+			currentRevision: row.current_revision_id === null ? null : { id: row.current_revision_id, revisionNo: row.revision_no as number, digest: row.content_digest as string },
+			legacyOriginRequirementId: row.legacy_origin_requirement_id,
+			createdAt: row.created_at,
+		}));
+	}
+
+	getReusableAsset(assetId: number): ReusableAssetDetail | undefined {
+		const asset = this.database
+			.prepare("select id, workspace_id, kind, title, current_revision_id, legacy_origin_requirement_id, created_at from reusable_assets where id = ?")
+			.get(assetId) as { id: number; workspace_id: number; kind: string; title: string; current_revision_id: number | null; legacy_origin_requirement_id: number | null; created_at: string } | undefined;
+		if (!asset) return undefined;
+		const revisions = this.database
+			.prepare("select r.id, r.revision_no, r.content_document_id, r.content_digest, r.source, r.created_at, d.content from reusable_asset_revisions r join snapshot_documents d on d.id = r.content_document_id where r.reusable_asset_id = ? order by r.revision_no")
+			.all(assetId) as Array<{ id: number; revision_no: number; content_document_id: number; content_digest: string; source: string; created_at: string; content: string }>;
+		return {
+			id: asset.id,
+			workspaceId: asset.workspace_id,
+			kind: asset.kind as ReusableAssetDetail["kind"],
+			title: asset.title,
+			currentRevisionId: asset.current_revision_id,
+			legacyOriginRequirementId: asset.legacy_origin_requirement_id,
+			createdAt: asset.created_at,
+			revisions: revisions.map((revision) => ({
+				id: revision.id,
+				revisionNo: revision.revision_no,
+				contentDocumentId: revision.content_document_id,
+				digest: revision.content_digest,
+				source: revision.source as "manual" | "import" | "migration",
+				content: parseJson<unknown>(revision.content),
+				createdAt: revision.created_at,
+			})),
+		};
+	}
+
+	deleteReusableAsset(assetId: number): boolean {
+		const transaction = this.database.transaction(() => {
+			const asset = this.database.prepare("select id from reusable_assets where id = ?").get(assetId) as { id: number } | undefined;
+			if (!asset) return false;
+			this.database.prepare("delete from reusable_assets where id = ?").run(assetId);
+			return true;
+		}).immediate;
+		return transaction();
+	}
+
+	exportReusableAssets(workspaceId: number): readonly ReusableAssetDetail[] {
+		return this.listReusableAssets(workspaceId)
+			.map((summary) => this.getReusableAsset(summary.id))
+			.filter((detail): detail is ReusableAssetDetail => detail !== undefined);
+	}
+
+	importReusableAssets(workspaceId: number, assets: readonly { kind: "scenario" | "usecase" | "function"; title: string; content: unknown; provenanceDigest?: string }[]): readonly number[] {
+		if (!this.workspaceExists(workspaceId)) throw new Error("Workspace not found");
+		const ids: number[] = [];
+		const transaction = this.database.transaction(() => {
+			for (const asset of assets) {
+				const created = this.createReusableAsset({ workspaceId, kind: asset.kind, title: asset.title, content: asset.content, source: "import" });
+				ids.push(created.assetId);
+			}
+		}).immediate;
+		transaction();
+		return ids;
+	}
+}
+
+export interface CommandReceiptDetail extends CommandReceipt {
+	actorRef: string;
+	capabilities: readonly string[];
+}
+
+export interface RequirementSummaryRecord {
+	requirementId: number;
+	title: string;
+	requirementVersion: number;
+	workflow: { id: number; state: string; version: number; lastEventSeq: number };
+}
+
+export interface RequirementDetailRecord {
+	id: number;
+	workspaceId: number;
+	title: string;
+	version: number;
+	workflowId: number;
+	currentRevision: {
+		id: number;
+		artifactId: number;
+		revisionNo: number;
+		status: string;
+		schemaRef: string;
+		contentDocumentId: number;
+		contentDigest: string;
+		content: RequirementBaseline;
+	};
+}
+
+export interface BoundedWorkflowProjection {
+	workflow: {
+		id: number;
+		state: string;
+		version: number;
+		lastEventSeq: number;
+		currentFailureCode: string | null;
+		policyBundle: { documentId: number; digest: string };
+	};
+	requirement: {
+		id: number;
+		workspaceId: number;
+		title: string;
+		version: number;
+		currentRevision: { id: number; revisionNo: number; status: string; digest: string; schemaRef: string };
+	};
+	designSession: { id: number; status: string; sessionId: string };
+	currentPlan: { id: number; revisionNo: number; status: string; proposalDigest: string; createdAt: string } | null;
+	tasks: readonly {
+		id: number;
+		key: string;
+		kind: string;
+		role: string;
+		status: string;
+		maxAttempts: number;
+		latestAttempt: { id: number; attemptNo: number; status: string } | null;
+	}[];
+	activeClaim: { id: number; taskId: number; attemptId: number; runId: number; acquiredAt: string } | null;
+	activeRun: { id: number; status: string; mode: string; role: string | null; startedAt: string } | null;
+	openGates: readonly { id: number; gateType: string; subjectType: string; subjectId: number; openedAt: string }[];
+	decisions: readonly { id: number; severity: string; status: string; summary: string }[];
+	findings: readonly { id: number; threadId: number; severity: string; status: string; summary: string; targetRevisionId: number }[];
+	findingThreads: readonly { id: number; fingerprint: string; status: string; reworkCount: number }[];
+	readiness: ReadinessReport;
+	currentPacket: { id: number; digest: string; status: string; createdAt: string } | null;
+	currentIncident: { id: number; incidentType: string; failureCode: string; status: string; createdAt: string } | null;
+}
+
+export interface PlanRevisionDetail {
+	id: number;
+	workflowId: number;
+	revisionNo: number;
+	status: string;
+	proposalDocumentId: number;
+	proposalDigest: string;
+	basePlanRevisionId: number | null;
+	planningContextDigest: string;
+	planningAttemptId: number | null;
+	proposal: PlanProposal;
+	createdAt: string;
+}
+
+export interface TaskDetailRecord {
+	id: number;
+	workflowId: number;
+	planRevisionId: number | null;
+	key: string;
+	kind: string;
+	role: string;
+	objective: string;
+	dependsOn: readonly string[];
+	inputs: readonly unknown[];
+	expectedArtifactEffects: readonly unknown[];
+	completionPolicyRef: string | null;
+	maxAttempts: number;
+	status: string;
+	createdAt: string;
+}
+
+export interface AttemptSummaryRecord {
+	id: number;
+	attemptNo: number;
+	status: string;
+	resultOutcome: string | null;
+	createdAt: string;
+	completedAt: string | null;
+}
+
+export interface AttemptDetailRecord {
+	id: number;
+	taskId: number;
+	workflowId: number;
+	attemptNo: number;
+	status: string;
+	resultOutcome: string | null;
+	baseWorkflowVersion: number | null;
+	contextManifest: { documentId: number; digest: string } | null;
+	roleContract: { documentId: number; digest: string } | null;
+	run: { id: number; status: string; mode: string; role: string | null; resultDocumentId: number | null } | null;
+	effects: readonly { id: number; artifactKind: string; effectType: string; logicalKey: string; state: string; publishedArtifactRevisionId: number | null }[];
+	createdAt: string;
+	completedAt: string | null;
+}
+
+export interface RunDetailRecord {
+	id: number;
+	attemptId: number;
+	workflowId: number;
+	sessionFile: string;
+	sessionId: string;
+	status: string;
+	modelRef: string | null;
+	resultDocumentId: number | null;
+	mode: string;
+	role: string | null;
+	createdAt: string;
+	completedAt: string | null;
+}
+
+export interface ApprovalPacketDetailRecord {
+	id: number;
+	workflowId: number;
+	digest: string;
+	status: string;
+	valid: boolean;
+	content: Record<string, unknown>;
+	createdAt: string;
+}
+
+export interface DesignPackageRecord {
+	id: number;
+	requirementId: number;
+	workspaceId: number;
+	documentId: number;
+	digest: string;
+	approvalPacketId: number | null;
+	approvalId: number | null;
+	migrationAttestationDocumentId: number | null;
+	archiveClass: "governed" | "legacy_pre_policy";
+	archivedAt: string;
+}
+
+export interface LegacyImportRecord {
+	requirementId: number;
+	workflowId: number;
+	importClass: "legacy_archived" | "pending_reentry";
+	bundleDocumentId: number;
+	attestationDocumentId: number;
+	anomalySummary: { count: number };
+	createdAt: string;
+}
+
+export interface ReusableAssetSummary {
+	id: number;
+	workspaceId: number;
+	kind: "scenario" | "usecase" | "function";
+	title: string;
+	currentRevision: { id: number; revisionNo: number; digest: string } | null;
+	legacyOriginRequirementId: number | null;
+	createdAt: string;
+}
+
+export interface ReusableAssetDetail {
+	id: number;
+	workspaceId: number;
+	kind: "scenario" | "usecase" | "function";
+	title: string;
+	currentRevisionId: number | null;
+	legacyOriginRequirementId: number | null;
+	createdAt: string;
+	revisions: readonly {
+		id: number;
+		revisionNo: number;
+		contentDocumentId: number;
+		digest: string;
+		source: "manual" | "import" | "migration";
+		content: unknown;
+		createdAt: string;
+	}[];
 }
 
 export interface EvidenceSnapshotResult {
