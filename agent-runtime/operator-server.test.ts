@@ -113,6 +113,160 @@ async function createStartedWorkflow(
 	return body;
 }
 
+async function createAsset(
+	url: string,
+	cookie: string,
+	body: unknown,
+): Promise<Response> {
+	return fetch(`${url}/api/assets`, {
+		method: "POST",
+		headers: { "content-type": "application/json", cookie },
+		body: JSON.stringify(body),
+	});
+}
+
+async function patchAsset(
+	url: string,
+	cookie: string,
+	assetId: number,
+	body: unknown,
+): Promise<Response> {
+	return fetch(`${url}/api/assets/${assetId}`, {
+		method: "PATCH",
+		headers: { "content-type": "application/json", cookie },
+		body: JSON.stringify(body),
+	});
+}
+
+async function importAssets(
+	url: string,
+	cookie: string,
+	body: unknown,
+): Promise<Response> {
+	return fetch(`${url}/api/assets/import`, {
+		method: "POST",
+		headers: { "content-type": "application/json", cookie },
+		body: JSON.stringify(body),
+	});
+}
+
+test("actor asset import maps actor validation errors to public responses", async () => {
+	await withServer(async ({ server, workspaceId }) => {
+		const cookie = await bootstrap(server.url);
+		const malformed = await importAssets(server.url, cookie, {
+			workspaceId,
+			assets: [{ kind: "actor", title: "Ignored", content: { name: "   " } }],
+		});
+		assert.equal(malformed.status, 400);
+		assert.deepEqual(await malformed.json(), { error: "malformed_body" });
+
+		const seeded = await createAsset(server.url, cookie, {
+			workspaceId,
+			kind: "actor",
+			content: { name: "Admin" },
+		});
+		assert.equal(seeded.status, 201);
+		const conflict = await importAssets(server.url, cookie, {
+			workspaceId,
+			assets: [{ kind: "actor", title: "Ignored", content: { name: " admin " } }],
+		});
+		assert.equal(conflict.status, 409);
+		assert.deepEqual(await conflict.json(), { error: "name_conflict" });
+	});
+});
+test("actor assets create with normalized content, mirrored title, and name uniqueness", async () => {
+	await withServer(async ({ server, workspaceId }) => {
+		const cookie = await bootstrap(server.url);
+		const created = await createAsset(server.url, cookie, {
+			workspaceId,
+			kind: "actor",
+			content: { name: " Admin ", description: "Runs the system" },
+		});
+		assert.equal(created.status, 201);
+		const createdBody = (await created.json()) as { assetId: number; revisionId: number; revisionNo: number };
+		assert.ok(createdBody.assetId > 0);
+		assert.ok(createdBody.revisionId > 0);
+		assert.equal(createdBody.revisionNo, 1);
+
+		const detail = await fetch(`${server.url}/api/assets/${createdBody.assetId}`, { headers: { cookie } });
+		assert.equal(detail.status, 200);
+		const asset = (await detail.json()) as { title: string; revisions: Array<{ revisionNo: number; content: unknown }> };
+		assert.equal(asset.title, "Admin");
+		assert.deepEqual(asset.revisions.at(-1)?.content, { name: "Admin", description: "Runs the system" });
+
+		const duplicate = await createAsset(server.url, cookie, {
+			workspaceId,
+			kind: "actor",
+			content: { name: "admin" },
+		});
+		assert.equal(duplicate.status, 409);
+		assert.deepEqual(await duplicate.json(), { error: "name_conflict" });
+
+		for (const body of [
+			{ workspaceId, kind: "actor" },
+			{ workspaceId, kind: "actor", content: { name: "   " } },
+		]) {
+			const malformed = await createAsset(server.url, cookie, body);
+			assert.equal(malformed.status, 400, JSON.stringify(body));
+			assert.deepEqual(await malformed.json(), { error: "malformed_body" });
+		}
+	});
+});
+
+test("PATCH appends actor revisions and rejects malformed, conflicting, and non-actor assets", async () => {
+	await withServer(async ({ server, workspaceId }) => {
+		const cookie = await bootstrap(server.url);
+		const actor = await createAsset(server.url, cookie, {
+			workspaceId,
+			kind: "actor",
+			content: { name: "Operator", description: "Old" },
+		});
+		const actorBody = (await actor.json()) as { assetId: number; revisionId: number };
+		const other = await createAsset(server.url, cookie, {
+			workspaceId,
+			kind: "actor",
+			content: { name: "Reviewer" },
+		});
+		assert.equal(other.status, 201);
+		const scenario = await createAsset(server.url, cookie, {
+			workspaceId,
+			kind: "scenario",
+			title: "Scenario",
+			content: { actors: ["Operator"] },
+		});
+		const scenarioBody = (await scenario.json()) as { assetId: number };
+
+		const patched = await patchAsset(server.url, cookie, actorBody.assetId, { name: "Lead Operator" });
+		assert.equal(patched.status, 200);
+		const patchedBody = (await patched.json()) as { revisionId: number; revisionNo: number };
+		assert.equal(patchedBody.revisionNo, 2);
+		assert.ok(patchedBody.revisionId > actorBody.revisionId);
+		const detail = await fetch(`${server.url}/api/assets/${actorBody.assetId}`, { headers: { cookie } });
+		const asset = (await detail.json()) as { title: string; revisions: Array<{ revisionNo: number; content: unknown }> };
+		assert.equal(asset.title, "Lead Operator");
+		assert.deepEqual(asset.revisions.map((revision) => revision.revisionNo), [1, 2]);
+		assert.deepEqual(asset.revisions.at(-1)?.content, { name: "Lead Operator", description: "Old" });
+
+		const descriptionOnly = await patchAsset(server.url, cookie, actorBody.assetId, { description: "New" });
+		assert.equal(descriptionOnly.status, 200);
+		const descriptionOnlyBody = (await descriptionOnly.json()) as { revisionId: number; revisionNo: number };
+		assert.equal(descriptionOnlyBody.revisionNo, 3);
+		assert.ok(descriptionOnlyBody.revisionId > patchedBody.revisionId);
+
+		const empty = await patchAsset(server.url, cookie, actorBody.assetId, {});
+		assert.equal(empty.status, 400);
+		assert.deepEqual(await empty.json(), { error: "malformed_body" });
+		const conflict = await patchAsset(server.url, cookie, actorBody.assetId, { name: " reviewer " });
+		assert.equal(conflict.status, 409);
+		assert.deepEqual(await conflict.json(), { error: "name_conflict" });
+		const nonActor = await patchAsset(server.url, cookie, scenarioBody.assetId, { name: "Nope" });
+		assert.equal(nonActor.status, 404);
+		assert.deepEqual(await nonActor.json(), { error: "unknown_asset" });
+		const missing = await patchAsset(server.url, cookie, 999999, { name: "Missing" });
+		assert.equal(missing.status, 404);
+		assert.deepEqual(await missing.json(), { error: "unknown_asset" });
+	});
+});
 test("bootstrap authenticates with a bearer token and sets a hardened session cookie", async () => {
 	await withServer(async ({ server }) => {
 		const response = await fetch(`${server.url}/api/session`, {

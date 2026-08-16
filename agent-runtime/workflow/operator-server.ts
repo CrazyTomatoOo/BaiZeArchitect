@@ -15,7 +15,7 @@ import { resolve } from "node:path";
 import { readFile } from "node:fs/promises";
 import type { AddressInfo } from "node:net";
 import type { HeadlessWorkflowRuntime } from "./headless-runtime.js";
-import type { WorkflowCommandType } from "../persistence/workflow-store.js";
+import { ReusableAssetMalformedBodyError, ReusableAssetNameConflictError, type WorkflowCommandType } from "../persistence/workflow-store.js";
 import type { RequirementBaseline } from "./requirement.js";
 import { isReusableAssetKind, type ReusableAssetKind } from "../persistence/reusable-asset-kind.js";
 
@@ -586,8 +586,20 @@ export async function startOperatorServer(
 					return;
 				}
 			}
-			const ids = options.runtime.importReusableAssets(workspaceId, importBody.assets as { kind: ReusableAssetKind; title: string; content: unknown }[]);
-			sendJson(response, 201, { assetIds: ids });
+			try {
+				const ids = options.runtime.importReusableAssets(workspaceId, importBody.assets as { kind: ReusableAssetKind; title: string; content: unknown }[]);
+				sendJson(response, 201, { assetIds: ids });
+			} catch (error) {
+				if (error instanceof ReusableAssetMalformedBodyError) {
+					sendJson(response, 400, { error: "malformed_body" });
+					return;
+				}
+				if (error instanceof ReusableAssetNameConflictError) {
+					sendJson(response, 409, { error: "name_conflict" });
+					return;
+				}
+				throw error;
+			}
 			return;
 		}
 
@@ -623,17 +635,62 @@ export async function startOperatorServer(
 				sendJson(response, 404, { error: "unknown_workspace" });
 				return;
 			}
-			if (!isReusableAssetKind(createBody.kind) || typeof createBody.title !== "string" || !("content" in createBody)) {
+			if (!isReusableAssetKind(createBody.kind) || !("content" in createBody)) {
 				sendJson(response, 400, { error: "malformed_body" });
 				return;
 			}
-			const created = options.runtime.createReusableAsset({
-				workspaceId,
-				kind: createBody.kind as ReusableAssetKind,
-				title: createBody.title,
-				content: createBody.content,
-			});
-			sendJson(response, 201, created);
+			if (createBody.kind !== "actor" && typeof createBody.title !== "string") {
+				sendJson(response, 400, { error: "malformed_body" });
+				return;
+			}
+			try {
+				const created = options.runtime.createReusableAsset({
+					workspaceId,
+					kind: createBody.kind as ReusableAssetKind,
+					title: typeof createBody.title === "string" ? createBody.title : "",
+					content: createBody.content,
+				});
+				sendJson(response, 201, created);
+			} catch (error) {
+				if (error instanceof ReusableAssetMalformedBodyError) {
+					sendJson(response, 400, { error: "malformed_body" });
+					return;
+				}
+				if (error instanceof ReusableAssetNameConflictError) {
+					sendJson(response, 409, { error: "name_conflict" });
+					return;
+				}
+				throw error;
+			}
+			return;
+		}
+
+		if (request.method === "PATCH" && segments.length === 3 && segments[0] === "api" && segments[1] === "assets") {
+			let body: unknown;
+			try {
+				body = JSON.parse(await readBody(request));
+			} catch {
+				sendJson(response, 400, { error: "malformed_body" });
+				return;
+			}
+			try {
+				const updated = options.runtime.updateActorReusableAsset(Number(segments[2]), body);
+				if (!updated) {
+					sendJson(response, 404, { error: "unknown_asset" });
+					return;
+				}
+				sendJson(response, 200, updated);
+			} catch (error) {
+				if (error instanceof ReusableAssetMalformedBodyError) {
+					sendJson(response, 400, { error: "malformed_body" });
+					return;
+				}
+				if (error instanceof ReusableAssetNameConflictError) {
+					sendJson(response, 409, { error: "name_conflict" });
+					return;
+				}
+				throw error;
+			}
 			return;
 		}
 
