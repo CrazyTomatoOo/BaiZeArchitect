@@ -211,3 +211,9 @@ _Avoid_: 修复命令、常驻指标服务
 **Guard Period（发布守护期）**:
 首次新业务写入后的一段加强告警和值守窗口；发现零容忍不变量时停止新写并前向修复，不回退或启用旧路径。
 _Avoid_: 灰度双轨、rollback window
+
+**Actor（业务参与者）**:
+属于 Workspace、作为场景/用例参与者共享事实源的版本化可复用资产（kind=actor），content 仅含 name（workspace 内 trim+大小写不敏感唯一）与 description；与 Role Contract（Agent 角色）明确区分。
+_Avoid_: Agent Role、权限/职责枚举、RBAC 继承
+
+> **Actor 消歧**：本术语表出现两次「Actor」——① 业务参与者资产（kind=actor，中文「参与者」）：场景/用例的参与者事实源；② 操作者身份（可信 Actor / ActorRef / actor snapshot，中文「操作员」）：Gateway 认证的调用方。两者领域隔离，英文同名、中文不同词，互不交叉影响。
