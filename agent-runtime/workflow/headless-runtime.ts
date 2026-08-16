@@ -1,3 +1,4 @@
+import type { ReusableAssetKind } from "../persistence/reusable-asset-kind.js";
 import type { CrashInjector, FixtureClock, FixtureOperator, FixtureOutboxTransport, HashProvider } from "../testing/deterministic-fixtures.js";
 import { WorkflowStore, type BeginPlanningResult, type CommandReceipt, type CompletePlanningResult, type ExecuteCommandInput, type ReconciliationReport, type WorkflowCommandType, type WorkflowProjection, type EvidenceSnapshotResult, type RequiredArtifactSetResult, type TraceLinkResult, type FindingRecord, type FindingThreadRecord, type DecisionRecord, type ReadinessReport, type BuildApprovalPacketResult, type ApprovalPacketRecord, type HumanGateRecord, type ApprovalRecordEntry, type HumanDirectiveRecord, type DiagnosticRunRecord, type CommandReceiptDetail, type RequirementSummaryRecord, type RequirementDetailRecord, type BoundedWorkflowProjection, type PlanRevisionDetail, type TaskDetailRecord, type AttemptSummaryRecord, type AttemptDetailRecord, type RunDetailRecord, type ApprovalPacketDetailRecord, type DesignPackageRecord, type LegacyImportRecord, type ReusableAssetSummary, type ReusableAssetDetail, type WorkflowEventEnvelope, type RunEventEnvelope, type CommandReceiptListItem, type WorkflowIncidentRecord } from "../persistence/workflow-store.js";
 import type { BeginAttemptResult, CompleteAttemptResult, ExecuteTaskResult, RoleResult, TraceLinkProposal, CriticReport } from "./role-result.js";
@@ -98,12 +99,12 @@ export interface HeadlessWorkflowRuntime {
 	getApprovalPacketDetail(packetId: number): ApprovalPacketDetailRecord | undefined;
 	getDesignPackage(designPackageId: number): DesignPackageRecord | undefined;
 	getLegacyImport(requirementId: number): LegacyImportRecord | undefined;
-	createReusableAsset(input: { workspaceId: number; kind: "scenario" | "usecase" | "function"; title: string; content: unknown }): { assetId: number; revisionId: number };
+	createReusableAsset(input: { workspaceId: number; kind: ReusableAssetKind; title: string; content: unknown }): { assetId: number; revisionId: number };
 	listReusableAssets(workspaceId: number): readonly ReusableAssetSummary[];
 	getReusableAsset(assetId: number): ReusableAssetDetail | undefined;
 	deleteReusableAsset(assetId: number): boolean;
 	exportReusableAssets(workspaceId: number): readonly ReusableAssetDetail[];
-	importReusableAssets(workspaceId: number, assets: readonly { kind: "scenario" | "usecase" | "function"; title: string; content: unknown }[]): readonly number[];
+	importReusableAssets(workspaceId: number, assets: readonly { kind: ReusableAssetKind; title: string; content: unknown }[]): readonly number[];
 	appendRunEvent(runId: number, type: string, payload: Record<string, unknown>): number;
 	runExists(runId: number): boolean;
 	getRunEventWatermark(runId: number): number;

@@ -12,7 +12,7 @@ import {
 	type AssetSummary,
 } from "./workflow-client.js";
 
-type Kind = "scenario" | "usecase" | "function";
+type Kind = "scenario" | "usecase" | "function" | "actor";
 const KINDS: Kind[] = ["scenario", "usecase", "function"];
 
 /** baize-asset-library — 资产库:场景/用例/功能复用池,支持新建/删除/导入/导出。 */

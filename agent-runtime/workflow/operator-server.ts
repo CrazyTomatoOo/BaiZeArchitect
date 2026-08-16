@@ -17,6 +17,7 @@ import type { AddressInfo } from "node:net";
 import type { HeadlessWorkflowRuntime } from "./headless-runtime.js";
 import type { WorkflowCommandType } from "../persistence/workflow-store.js";
 import type { RequirementBaseline } from "./requirement.js";
+import { isReusableAssetKind, type ReusableAssetKind } from "../persistence/reusable-asset-kind.js";
 
 export interface OperatorIdentity {
 	actorRef: string;
@@ -580,12 +581,12 @@ export async function startOperatorServer(
 				return;
 			}
 			for (const asset of importBody.assets) {
-				if (typeof asset !== "object" || asset === null || !["scenario", "usecase", "function"].includes((asset as { kind?: unknown }).kind as string) || typeof (asset as { title?: unknown }).title !== "string" || !("content" in (asset as object))) {
+				if (typeof asset !== "object" || asset === null || !isReusableAssetKind((asset as { kind?: unknown }).kind) || typeof (asset as { title?: unknown }).title !== "string" || !("content" in (asset as object))) {
 					sendJson(response, 400, { error: "malformed_body" });
 					return;
 				}
 			}
-			const ids = options.runtime.importReusableAssets(workspaceId, importBody.assets as { kind: "scenario" | "usecase" | "function"; title: string; content: unknown }[]);
+			const ids = options.runtime.importReusableAssets(workspaceId, importBody.assets as { kind: ReusableAssetKind; title: string; content: unknown }[]);
 			sendJson(response, 201, { assetIds: ids });
 			return;
 		}
@@ -622,13 +623,13 @@ export async function startOperatorServer(
 				sendJson(response, 404, { error: "unknown_workspace" });
 				return;
 			}
-			if (!["scenario", "usecase", "function"].includes(createBody.kind as string) || typeof createBody.title !== "string" || !("content" in createBody)) {
+			if (!isReusableAssetKind(createBody.kind) || typeof createBody.title !== "string" || !("content" in createBody)) {
 				sendJson(response, 400, { error: "malformed_body" });
 				return;
 			}
 			const created = options.runtime.createReusableAsset({
 				workspaceId,
-				kind: createBody.kind as "scenario" | "usecase" | "function",
+				kind: createBody.kind as ReusableAssetKind,
 				title: createBody.title,
 				content: createBody.content,
 			});

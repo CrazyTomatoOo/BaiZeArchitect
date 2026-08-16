@@ -21,11 +21,13 @@ import { DECISIONS_AND_READINESS_MIGRATION } from "./migrations/0009-decisions-a
 import { HUMAN_GOVERNANCE_MIGRATION } from "./migrations/0010-human-governance.js";
 import { READ_MODEL_GOVERNANCE_MIGRATION } from "./migrations/0011-read-model-governance.js";
 import { RUN_EVENT_STREAM_MIGRATION } from "./migrations/0012-run-event-stream.js";
+import { ACTOR_KIND_MIGRATION } from "./migrations/0013-actor-kind.js";
+import type { ReusableAssetKind } from "./reusable-asset-kind.js";
 import { ARTIFACT_OWNERSHIP, type InputBinding, type TaskOutputInput } from "../workflow/plan-types.js";
 import type { RoleResult, ContextManifest, RoleContract, BeginAttemptResult, CompleteAttemptResult, TraceLinkProposal, CriticReport, FindingProposal, FindingSeverity } from "../workflow/role-result.js";
 import { deriveRequiredArtifactSet, type ImpactProfile, type RequiredArtifactSet } from "../workflow/impact-profile.js";
 
-const MIGRATIONS = [WORKFLOW_GOVERNANCE_MIGRATION, COMMAND_GOVERNANCE_MIGRATION, RECOVERY_GOVERNANCE_MIGRATION, PLANNING_GOVERNANCE_MIGRATION, ATTEMPT_EXECUTION_MIGRATION, DEPENDENT_TASK_SAFETY_MIGRATION, REQUIRED_ARTIFACTS_AND_EVIDENCE_MIGRATION, CRITIC_GOVERNANCE_MIGRATION, DECISIONS_AND_READINESS_MIGRATION, HUMAN_GOVERNANCE_MIGRATION, READ_MODEL_GOVERNANCE_MIGRATION, RUN_EVENT_STREAM_MIGRATION] as const;
+const MIGRATIONS = [WORKFLOW_GOVERNANCE_MIGRATION, COMMAND_GOVERNANCE_MIGRATION, RECOVERY_GOVERNANCE_MIGRATION, PLANNING_GOVERNANCE_MIGRATION, ATTEMPT_EXECUTION_MIGRATION, DEPENDENT_TASK_SAFETY_MIGRATION, REQUIRED_ARTIFACTS_AND_EVIDENCE_MIGRATION, CRITIC_GOVERNANCE_MIGRATION, DECISIONS_AND_READINESS_MIGRATION, HUMAN_GOVERNANCE_MIGRATION, READ_MODEL_GOVERNANCE_MIGRATION, RUN_EVENT_STREAM_MIGRATION, ACTOR_KIND_MIGRATION] as const;
 export type WorkflowCommandType =
 	| "start"
 	| "pause"
@@ -2712,7 +2714,7 @@ export class WorkflowStore {
 		};
 	}
 
-	createReusableAsset(input: { workspaceId: number; kind: "scenario" | "usecase" | "function"; title: string; content: unknown; source?: "manual" | "import" | "migration"; legacyOriginRequirementId?: number | null; actorSnapshotDocumentId?: number | null; migrationAttestationDocumentId?: number | null }): { assetId: number; revisionId: number } {
+	createReusableAsset(input: { workspaceId: number; kind: ReusableAssetKind; title: string; content: unknown; source?: "manual" | "import" | "migration"; legacyOriginRequirementId?: number | null; actorSnapshotDocumentId?: number | null; migrationAttestationDocumentId?: number | null }): { assetId: number; revisionId: number } {
 		if (!this.workspaceExists(input.workspaceId)) throw new Error("Workspace not found");
 		const timestamp = this.options.clock.now().toISOString();
 		const transaction = this.database.transaction(() => {
@@ -2788,7 +2790,7 @@ export class WorkflowStore {
 			.filter((detail): detail is ReusableAssetDetail => detail !== undefined);
 	}
 
-	importReusableAssets(workspaceId: number, assets: readonly { kind: "scenario" | "usecase" | "function"; title: string; content: unknown; provenanceDigest?: string }[]): readonly number[] {
+	importReusableAssets(workspaceId: number, assets: readonly { kind: ReusableAssetKind; title: string; content: unknown; provenanceDigest?: string }[]): readonly number[] {
 		if (!this.workspaceExists(workspaceId)) throw new Error("Workspace not found");
 		const ids: number[] = [];
 		const transaction = this.database.transaction(() => {
@@ -3548,7 +3550,7 @@ export interface LegacyImportRecord {
 export interface ReusableAssetSummary {
 	id: number;
 	workspaceId: number;
-	kind: "scenario" | "usecase" | "function";
+	kind: ReusableAssetKind;
 	title: string;
 	currentRevision: { id: number; revisionNo: number; digest: string } | null;
 	legacyOriginRequirementId: number | null;
@@ -3558,7 +3560,7 @@ export interface ReusableAssetSummary {
 export interface ReusableAssetDetail {
 	id: number;
 	workspaceId: number;
-	kind: "scenario" | "usecase" | "function";
+	kind: ReusableAssetKind;
 	title: string;
 	currentRevisionId: number | null;
 	legacyOriginRequirementId: number | null;
