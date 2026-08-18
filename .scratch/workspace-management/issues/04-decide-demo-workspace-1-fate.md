@@ -24,3 +24,5 @@ Grilled the human; shared understanding reached. Facts established (not asked): 
 **Keep as-is.** `seed-demo-workspace.ts` is unchanged; no normalization migration for existing DBs. demo workspace 1 is a normal workspace — in demo deployments it is the default first-active selection (per 03), and once the operator creates real workspaces they can archive it via `archiveWorkspace` (per 01). The `/tmp/baize/repos/test-repo` repo_path is left as a cosmetic label (02: unvalidated).
 
 No seeder change, no migration, no new tickets, no fog graduation — 04 was a leaf; nothing was blocked on it.
+
+**重绘注记（2026-08-18）**：01 作废后，本票 Resolution 中「可 archive 它（per 01）」表述失效。**Keep-as-is 决策本体不变**：seeder 不变、无迁移；demo 1 保持普通工作区，在「级联删除」新语义下可从管理页被直接删除（含其内 demo 需求/资产），删除语义见 07/08/10。

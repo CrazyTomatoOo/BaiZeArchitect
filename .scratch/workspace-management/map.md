@@ -1,37 +1,49 @@
-# Chart workspace lifecycle management and selection
-
-Label: wayfinder:map
+# Wayfinder Map — 工作区管理（登录首屏 · 增删查 · 级联删除） `wayfinder:map`
 
 ## Destination
 
-A locked decision set that clears the way to implementing workspace lifecycle management (list / create / rename / archive) and Web workspace selection/switching, with the mounted surface (`baize-workflow`'s workflow detail) following the selected workspace. Mounting the currently-unmounted `baize-requirements` list and `baize-review-center` views — and the shell/router to host them — is a separate future effort (see Out of scope).
+产出「工作区管理」实现 spec（评审通过后另行执行）：**token 登录后首屏 = 工作区管理页**（列表 + 创建 + 级联删除）；**进入工作区后才是需求列表**；「记住最近」工作区（localStorage）+ 需求列表显式返回管理页入口；后端配套 `GET / POST / DELETE /api/workspaces`（删除为级联：连同工作区下所有需求与资产）。Destination 达成 = spec 评审通过、待决问题清零。
 
 ## Notes
 
-- Domain: BaiZeArchitect's operator-server (HTTP) + workflow-store (SQLite) + Lit/Vite web shell. Workspaces already exist as a table (`workspaces`: id, repo_path unique, name, created_at) and `requirements` / `reusable_assets` / `design_packages` already carry `workspace_id on delete restrict`. The gap is lifecycle management + entry points, not the association itself.
-- This effort plans the decisions only; it does not implement. Resolution hands off to a later `/implement` session.
-- Consult `grilling` and `domain-modeling` while resolving tickets.
-- The web shell is `baize-workflow` (Lit, the root element in `index.html`); it is the ONLY mounted component in production. `baize-requirements` and `baize-review-center` are defined but unmounted (their tags appear nowhere in `web/src` or the HTML); `baize-workflow` dispatches a `baize-goto` event expecting an external shell that does not exist. All three currently hardcode `this.workspaceId = 1`; only `baize-workflow`'s matters for production.
-- Operator auth is single-process, server-side in-memory sessions (`sessions: Map<sessionId, OperatorIdentity>`), cookie `baize_operator`, operators pre-configured via bootstrap tokens. All operators see all workspaces; selected-workspace state is a browser preference, not a server-side concern.
-- `repo_path` is `not null unique` in `workspaces`; established as purely a uniqueness key + human label (no git/file operations) — kept required and unvalidated, see [Decide repo_path policy](issues/02-decide-repo-path-creation-policy.md).
+- Domain：BaiZeArchitect 的 operator-server（HTTP）+ workflow-store（SQLite）+ Lit/Vite web SPA。Workspace 实体已存在（`workspaces`: id, repo_path unique, name, created_at；migration 0001），`requirements` / `reusable_assets` / `design_packages` 均已带 `workspace_id on delete restrict`；缺口是生命周期管理与入口面，不是关联本身。
+- **当前树事实（2026-08-18 重绘侦察，已核对）**：`web/index.html` 挂载 `<baize-shell workspace-id="1">`；`baize-shell`（176 行，commit 05c9daa）管理 session（checkSession/bootstrapSession）+ 需求列表（`baize-requirements`）/ 详情（`baize-workflow`）切换，监听 `baize-open-requirement` / `baize-goto`；`workspaceId=1` 硬编码于 index.html 属性 + 三组件默认值；`baize-review-center` 仍未挂载（孤儿）。
+- **既有红（图外债务）**：negative-scan「production web entry imports only baize-workflow」当前红（shell 提交 05c9daa 使断言过期；其 commit message 注明「待 shell 定型后更新」）。同文件「old web components are deleted」含 `web/src/baize-workspaces.ts` → 新工作区管理组件不可复用该文件名（或显式修订该断言，属 09 决议）。
+- **契约耦合**：`agent-runtime/contracts/*.json`（workflow-api-v1 等）由 loader 装载，`workflow-contracts.test.ts` 断言与 `.wayfinder/2026-08-auto-orchestration/assets/` 字节一致 → 新增端点必须双侧同步，改单侧全测试红（08 决议范围）。
+- **级联删除底座（07 已闭，全量见票）**：33 表逆拓扑单事务、22 个删除阻断触发器事务内 suspend/restore、`snapshot_documents` 跳过（digest 去重 + 不可变 + 跨工作区共享，孤儿有界累积）、无需迁移 0014、启动 reconcile FK 违例即拒服。
+- **重绘历史**：本图 2026-08-16 chart（目的地 = 生命周期管理：软归档 + 重命名 + 选择器；前提 = 无 shell，`baize-workflow` 唯一挂载）。2026-08-18 用户重提交 shell（05c9daa，提交前 9 秒推翻图中「无 shell」前提）并重拍目的地（首屏管理页、级联删除、不改名、登录者全可见）→ **同图重绘**：01/03/05/06 作废，02/04 保留，新 frontier 07–11。
+- Tracker：local-markdown；票在 `issues/`（NN- 前缀沿用），`blocked-by` 表达依赖；open + 无阻塞 + 未认领即 frontier。
+- Skills：wayfinder、grilling、domain-modeling（CONTEXT.md 需新增「工作区」词条 —— 本图决议的一部分，10 起草、11 落 spec）。
 
 ## Decisions so far
 
-- [Decide workspace retirement semantics](issues/01-decide-workspace-archive-semantics.md) — Soft archive: migration 0014 adds `archived_at`; reversible (`archiveWorkspace` + `restoreWorkspace`); archived workspaces read-visible (writes rejected, not 404).
-- [Decide repo_path policy at workspace creation](issues/02-decide-repo-path-creation-policy.md) — repo_path stays required + user-supplied (no nullable migration, no generator); no real-path/git validation (accept any non-empty unique string); field is purely a uniqueness key + label.
-- [Decide the selected-workspace state carrier in the web shell](issues/03-decide-selected-workspace-state-carrier.md) — Shell-prop: `baize-workflow` `connectedCallback` reads `localStorage` (default first-active); no new module. Corrected a prior map error: only `baize-workflow` is mounted; `baize-requirements`/`baize-review-center` are unmounted orphans; no shell exists. Graduated the management-panel host question to [Decide the web host for workspace management](issues/05-decide-web-host-for-workspace-management.md).
-- [Decide the fate of the existing demo workspace 1](issues/04-decide-demo-workspace-1-fate.md) — Keep as-is: seeder unchanged, no migration; demo 1 is a normal workspace (default first-active in demo deployments, manually archivable via 01).
-- [Decide the web host for workspace management](issues/05-decide-web-host-for-workspace-management.md) — Extend `baize-workflow` (selector + management panel as internal views; no shell built); destination redrawn to drop "unmounted requirements-list/review-center follow"; building a shell/router + mounting those views ruled out of scope as a separate effort.
-- [Prototype the workspace management panel interaction](issues/06-prototype-workspace-management-panel.md) — Confirmed standard CRUD view following `baize-workflow`'s existing patterns (top-bar selector + internal management view, no shell); IA sketch at `prototypes/panel-ia-sketch.md`. No bespoke visual design. Route clear → hand off to `/implement`.
+<!-- 索引：每行一个 closed 票；决议本体只存在其票内，此处一行 gist + 链接。 -->
+
+- [Decide repo_path policy at workspace creation](issues/02-decide-repo-path-creation-policy.md) — repo_path 必填 + 用户提供 + 任意非空唯一字符串、无真实路径/git 校验；纯唯一键 + 标签；创建表单含 repo_path + name 两字段。（保留）
+- [Decide the fate of the existing demo workspace 1](issues/04-decide-demo-workspace-1-fate.md) — seeder 不变、无迁移；demo 1 是普通工作区；原「可归档」表述随 01 作废失效，新语义下可被级联删除。（保留）
+- [Research workspace cascade-delete FK graph](issues/07-research-cascade-delete-fk-graph.md) — 级联删除底座：33 表逆拓扑单事务删除、22 个删除阻断触发器事务内 suspend/restore、snapshot_documents 跳过（digest 去重不可变、可跨工作区共享）、**裁决无需迁移 0014**（cascade 无法绕过触发器且要重建 22 表）；outbox_jobs 同事务删（事件丢失 = 硬删除预期）；启动 reconcile FK 违例即拒服 → 删除必须原子；repo_path 目录永不删、session/run jsonl 最佳努力 GC。08/10/11 依此。
 
 ## Not yet specified
 
-- Multi-operator per-workspace visibility filtering. Currently judged unnecessary (single-process, pre-configured operators, all see all workspaces); holds as fog until something challenges it.
+- 多操作员按工作区可见性过滤（已拍「登录者全可见」；若有挑战再议）。
+- 级联删除的 `snapshot_documents` 孤儿长期累积成本与清理政策 — 机械面由 07 解析，政策面视 07 结论而定（暂不单列票）。
 
 ## Out of scope
 
-- A higher-level `project` concept above `workspace` (ruled out at charting — "项目" = existing workspace).
-- Per-operator workspace permissions/ACL (single-process, pre-configured operators).
-- Migrating existing assets/requirements between workspaces.
-- Workspace-scoped operator sessions.
-- Building a shell/router and mounting the currently-unmounted `baize-requirements` list and `baize-review-center` views. These are unmounted orphans; making them "follow the selected workspace" is really mounting them via a shell — general app navigation infrastructure, not workspace management. Deferred to a separate effort (decided at [Decide the web host for workspace management](issues/05-decide-web-host-for-workspace-management.md)).
+<!-- 超出本目的地的工作：scoping 行为，非路线步骤；closed 票在此留一行 gist + 链接。 -->
+
+- [Decide workspace retirement semantics](issues/01-decide-workspace-archive-semantics.md)（作废）— 软归档（archived_at / archive / restore / 只读归档视图）被用户拍板的「级联删除」取代；删除面迁至 07/08/10。
+- [Decide the selected-workspace state carrier in the web shell](issues/03-decide-selected-workspace-state-carrier.md)（作废）— 前提过期：「无 shell、baize-workflow 唯一挂载」被 05c9daa 推翻；且首屏重拍为管理页（03 的「默认首个活跃」不再成立）。状态载体决议点迁至 09。
+- [Decide the web host for workspace management](issues/05-decide-web-host-for-workspace-management.md)（作废）— 前提过期，同 03；「扩展 baize-workflow 内部视图、不建 shell」的根基（无 shell）已不存在；管理页宿主迁移至 shell 级首屏。导航/状态迁移至 09。
+- [Prototype the workspace management panel interaction](issues/06-prototype-workspace-management-panel.md)（作废）— 语义换血：重命名 / 已归档折叠区 / 恢复动作取消；IA 草图 `prototypes/panel-ia-sketch.md` 留作参考资产（创建表单、顶栏、零态观念可复用，重命名与已归档区不再适用）。
+- 工作区改名（用户 2026-08-18 拍板不支持）。
+- 按操作员隔离 workspace 可见性 / ACL（保持登录者全可见，2026-08-18）。
+- 更高层 `project` 概念（「项目」= 既有 workspace）；跨工作区资产/需求迁移；workspace 级操作员会话。（既有）
+- `baize-review-center` 挂载与泛化导航设施（仍为未挂载孤儿；本图仅在既有 shell 之上叠加首屏管理页）。
+
+## Frontier 查询（open + 无阻塞 + 未认领）
+
+- 09-decide-web-shell-navigation-and-state（grilling）
+- 08-decide-workspace-api-surface（grilling——07 已闭，解阻）
+- 10-decide-delete-guards（grilling，blocked by 08）
+- 11-task-write-mgmt-spec（task，terminal，blocked by 08–10）

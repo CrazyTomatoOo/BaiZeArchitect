@@ -2,7 +2,9 @@
 
 Label: wayfinder:prototype
 Assignee: pi-agent
-Status: closed
+Status: closed（作废）
+
+> **作废（2026-08-18 重绘）**：语义换血——重命名、已归档折叠区、恢复动作全部取消（用户拍板：不改名、删除 = 级联删除）；宿主由「baize-workflow 内部视图」改为「shell 级首屏管理页」。IA 草图 `prototypes/panel-ia-sketch.md` 留作参考资产：创建表单（repo_path + name）、顶栏选择器、零态观念可复用；重命名表单与「已归档」分区不再适用。新版 IA 随 [09-decide-web-shell-navigation-and-state](09-decide-web-shell-navigation-and-state.md) 决议。
 
 ## Question
 

@@ -2,7 +2,9 @@
 
 Label: wayfinder:grilling
 Assignee: pi-agent
-Status: closed
+Status: closed（作废）
+
+> **作废（2026-08-18 重绘）**：前提过期——commit 05c9daa（2026-08-18 18:45）重提交 `baize-shell` 挂载需求列表，「无 shell、baize-workflow 唯一挂载」不再成立；且目的地重拍为「登录首屏 = 工作区管理页、进入后才是需求列表」，03 的「默认首个活跃」被「首屏管理页 + 记住最近（失效回落管理页）」取代。状态载体决议点迁至 [09-decide-web-shell-navigation-and-state](09-decide-web-shell-navigation-and-state.md)。
 
 ## Question
 

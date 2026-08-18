@@ -2,7 +2,9 @@
 
 Label: wayfinder:grilling
 Assignee: pi-agent
-Status: closed
+Status: closed（作废）
+
+> **作废（2026-08-18 重绘）**：前提过期，同 03——shell 已存在（05c9daa），「扩展 baize-workflow 内部视图、不建 shell」的根基消失；且目的地重拍为「登录首屏 = 工作区管理页、进入工作区后才是需求列表」，管理页宿主迁移至 shell 级首屏视图，需求列表（已挂载）成为工作区落地页。Web 导航与状态决议点迁至 [09-decide-web-shell-navigation-and-state](09-decide-web-shell-navigation-and-state.md)。
 
 ## Question
 

@@ -2,7 +2,9 @@
 
 Label: wayfinder:grilling
 Assignee: pi-agent
-Status: closed
+Status: closed（作废）
+
+> **作废（2026-08-18 重绘）**：用户重拍删除语义——软归档（archived_at / archiveWorkspace / restoreWorkspace / 只读归档视图）被**级联删除**（连同工作区下所有需求与资产一并清掉）取代。本票决议不再成立；级联删除的 FK 全图与删除面迁至 [07-research-cascade-delete-fk-graph](07-research-cascade-delete-fk-graph.md)，API/治理地位迁至 [08-decide-workspace-api-surface](08-decide-workspace-api-surface.md)，护栏迁至 [10-decide-delete-guards](10-decide-delete-guards.md)。
 
 ## Question
 
