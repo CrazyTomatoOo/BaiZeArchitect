@@ -127,9 +127,7 @@
     "500": "Transaction or internal failure before a durable command outcome; caller may retry the same commandId"
   },
   "eventReads": {
-    "workflowJson": {"method": "GET", "path": "/api/workflows/:workflowId/events", "query": {"after": "sequence, default 0", "limit": "1..500, default 200"}},
     "workflowSse": {"method": "GET", "path": "/api/workflows/:workflowId/events/stream", "query": {"after": "initial sequence only"}},
-    "runJson": {"method": "GET", "path": "/api/runs/:runId/events", "query": {"after": "sequence, default 0", "limit": "1..500, default 200"}},
     "runSse": {"method": "GET", "path": "/api/runs/:runId/events/stream", "query": {"after": "initial sequence only"}}
   },
   "sse": {
@@ -152,6 +150,10 @@
     "GET /api/runs/stream",
     "GET /api/requirements/:id/evidence-snapshot",
     "GET /api/requirements/:id/design-package",
+    "GET /api/workflows/:workflowId/events",
+    "GET /api/runs/:runId/events",
+    "GET /api/workflows/:workflowId/receipts",
+    "GET /api/workflows/:workflowId/incidents",
     "client-supplied actor",
     "direct status mutation"
   ]

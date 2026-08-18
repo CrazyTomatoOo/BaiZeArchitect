@@ -14,7 +14,7 @@
         "workflow state hero",
         "single primary action",
         "five-step progress story",
-        "artifact/pending/audit summaries"
+        "artifact/pending/status summaries"
       ]
     },
     "workflowDetails": {
@@ -31,17 +31,6 @@
     "approvalReview": {
       "routeState": "panel=approval",
       "placement": "focused_mode_in_same_requirement_page"
-    },
-    "auditView": {
-      "placement": "separate_audit_view",
-      "prototypeVariant": "C",
-      "contents": [
-        "Workflow events",
-        "Run events",
-        "command receipts",
-        "incidents and recovery",
-        "exact versions and digests"
-      ]
     }
   },
   "statePrimaryActions": {

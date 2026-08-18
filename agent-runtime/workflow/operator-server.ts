@@ -455,30 +455,6 @@ export async function startOperatorServer(
 			return;
 		}
 
-		if (request.method === "GET" && segments.length === 4 && segments[0] === "api" && segments[1] === "workflows" && segments[3] === "receipts") {
-			if (!options.runtime.getBoundedProjection(Number(segments[2]))) {
-				sendJson(response, 404, { error: "unknown_workflow" });
-				return;
-			}
-			const limitParam = url.searchParams.get("limit");
-			const limit = limitParam === null ? 200 : Number(limitParam);
-			if (!Number.isInteger(limit) || limit < 1 || limit > 500) {
-				sendJson(response, 400, { error: "invalid_limit" });
-				return;
-			}
-			sendJson(response, 200, { receipts: options.runtime.listCommandReceipts(Number(segments[2]), limit) });
-			return;
-		}
-
-		if (request.method === "GET" && segments.length === 4 && segments[0] === "api" && segments[1] === "workflows" && segments[3] === "incidents") {
-			if (!options.runtime.getBoundedProjection(Number(segments[2]))) {
-				sendJson(response, 404, { error: "unknown_workflow" });
-				return;
-			}
-			sendJson(response, 200, { incidents: options.runtime.listWorkflowIncidents(Number(segments[2])) });
-			return;
-		}
-
 		if (request.method === "GET" && segments.length === 5 && segments[0] === "api" && segments[1] === "workflows" && segments[3] === "commands") {
 			const receipt = options.runtime.getCommandReceiptDetail(Number(segments[2]), segments[4]);
 			if (!receipt) {
@@ -715,29 +691,6 @@ export async function startOperatorServer(
 
 		if (
 			request.method === "GET"
-			&& segments.length === 4
-			&& segments[0] === "api"
-			&& segments[1] === "workflows"
-			&& segments[3] === "events"
-		) {
-			const workflowId = Number(segments[2]);
-			if (!Number.isInteger(workflowId) || !options.runtime.getWorkflowProjection(workflowId)) {
-				sendJson(response, 404, { error: "unknown_workflow" });
-				return;
-			}
-			const cursor = parseEventCursor(url, response);
-			if (cursor === null) return;
-			const watermark = options.runtime.getWorkflowEventWatermark(workflowId);
-			if (cursor.after > watermark) {
-				sendJson(response, 416, { error: "cursor_out_of_range", watermark });
-				return;
-			}
-			sendJson(response, 200, { events: options.runtime.getWorkflowEvents(workflowId, cursor.after, cursor.limit), watermark });
-			return;
-		}
-
-		if (
-			request.method === "GET"
 			&& segments.length === 5
 			&& segments[0] === "api"
 			&& segments[1] === "workflows"
@@ -767,29 +720,6 @@ export async function startOperatorServer(
 				}),
 				heartbeatMs: options.sseHeartbeatMs ?? 15_000,
 			});
-			return;
-		}
-
-		if (
-			request.method === "GET"
-			&& segments.length === 4
-			&& segments[0] === "api"
-			&& segments[1] === "runs"
-			&& segments[3] === "events"
-		) {
-			const runId = Number(segments[2]);
-			if (!Number.isInteger(runId) || !options.runtime.runExists(runId)) {
-				sendJson(response, 404, { error: "unknown_run" });
-				return;
-			}
-			const cursor = parseEventCursor(url, response);
-			if (cursor === null) return;
-			const watermark = options.runtime.getRunEventWatermark(runId);
-			if (cursor.after > watermark) {
-				sendJson(response, 416, { error: "cursor_out_of_range", watermark });
-				return;
-			}
-			sendJson(response, 200, { events: options.runtime.getRunEvents(runId, cursor.after, cursor.limit), watermark });
 			return;
 		}
 

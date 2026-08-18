@@ -160,14 +160,16 @@
     "POST /api/requirements/:id/archive",
     "GET /api/runs/stream",
     "GET /api/requirements/:id/evidence-snapshot",
-    "GET /api/requirements/:id/design-package"
+    "GET /api/requirements/:id/design-package",
+    "GET /api/workflows/:workflowId/events",
+    "GET /api/runs/:runId/events",
+    "GET /api/workflows/:workflowId/receipts",
+    "GET /api/workflows/:workflowId/incidents"
   ],
   "replacementReads": [
     "GET /api/requirements/:requirementId",
     "GET /api/workflows/:workflowId",
-    "GET /api/workflows/:workflowId/events",
     "GET /api/runs/:runId",
-    "GET /api/runs/:runId/events",
     "GET /api/design-packages/:designPackageId",
     "GET /api/legacy-imports/:requirementId"
   ],

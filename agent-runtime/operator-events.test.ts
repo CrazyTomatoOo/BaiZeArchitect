@@ -353,65 +353,23 @@ function latestRunId(databasePath: string): number {
 	}
 }
 
-test("workflow JSON history is paginated, versioned, and contiguous", async () => {
+test("event stream reads use explicit external error semantics", async () => {
 	await withServer(async (context) => {
 		const cookie = await bootstrap(context.server.url);
 		const { workflowId } = await createStartedWorkflow(context, cookie);
-		const all = await fetch(`${context.server.url}/api/workflows/${workflowId}/events`, { headers: { cookie } });
-		assert.equal(all.status, 200);
-		const body = (await all.json()) as { events: Array<{ schemaVersion: string; workflowId: number; seq: number; type: string; typeVersion: number; workflowVersion: number; createdAt: string }>; watermark: number };
-		assert.equal(body.events.length, 2);
-		assert.equal(body.watermark, 2);
-		assert.deepEqual(body.events.map((event) => event.seq), [1, 2]);
-		assert.deepEqual(body.events.map((event) => event.type), ["workflow_created", "workflow_started"]);
-		for (const event of body.events) {
-			assert.equal(event.schemaVersion, "workflow-event/v1");
-			assert.equal(event.workflowId, workflowId);
-			assert.equal(event.typeVersion, 1);
-		}
-		const paged = await fetch(`${context.server.url}/api/workflows/${workflowId}/events?after=1&limit=1`, { headers: { cookie } });
-		const pagedBody = (await paged.json()) as { events: Array<{ seq: number; type: string }> };
-		assert.deepEqual(pagedBody.events.map((event) => event.seq), [2]);
-	});
-});
-
-test("run JSON history carries model token and result facts with contiguous seq", async () => {
-	await withServer(async (context) => {
-		const cookie = await bootstrap(context.server.url);
-		const { workflowId } = await createStartedWorkflow(context, cookie);
-		await adoptPlan(context.runtime, workflowId);
-		const runId = latestRunId(context.databasePath);
-		const response = await fetch(`${context.server.url}/api/runs/${runId}/events`, { headers: { cookie } });
-		assert.equal(response.status, 200);
-		const body = (await response.json()) as { events: Array<{ schemaVersion: string; runId: number; seq: number; type: string; payload: Record<string, unknown> }>; watermark: number };
-		assert.deepEqual(body.events.map((event) => event.seq), [1, 2, 3]);
-		assert.deepEqual(body.events.map((event) => event.type), ["model_call_started", "model_tokens", "model_result"]);
-		assert.equal(body.events[0].schemaVersion, "run-event/v1");
-		assert.equal(body.events[1].payload.inputTokens, 11);
-		assert.equal(body.events[1].payload.outputTokens, 22);
-		assert.equal(body.watermark, 3);
-	});
-});
-
-test("event reads use explicit external error semantics", async () => {
-	await withServer(async (context) => {
-		const cookie = await bootstrap(context.server.url);
-		const { workflowId } = await createStartedWorkflow(context, cookie);
-		const unauth = await fetch(`${context.server.url}/api/workflows/${workflowId}/events`);
-		assert.equal(unauth.status, 401);
 		const unauthStream = await fetch(`${context.server.url}/api/workflows/${workflowId}/events/stream`);
 		assert.equal(unauthStream.status, 401);
-		const unknownWorkflow = await fetch(`${context.server.url}/api/workflows/9999/events`, { headers: { cookie } });
+		const unknownWorkflow = await fetch(`${context.server.url}/api/workflows/9999/events/stream`, { headers: { cookie } });
 		assert.equal(unknownWorkflow.status, 404);
-		const unknownRun = await fetch(`${context.server.url}/api/runs/9999/events`, { headers: { cookie } });
+		const unknownRun = await fetch(`${context.server.url}/api/runs/9999/events/stream`, { headers: { cookie } });
 		assert.equal(unknownRun.status, 404);
-		const badCursor = await fetch(`${context.server.url}/api/workflows/${workflowId}/events?after=abc`, { headers: { cookie } });
+		const badCursor = await fetch(`${context.server.url}/api/workflows/${workflowId}/events/stream?after=abc`, { headers: { cookie } });
 		assert.equal(badCursor.status, 400);
-		const badLimit = await fetch(`${context.server.url}/api/workflows/${workflowId}/events?limit=501`, { headers: { cookie } });
+		const badLimit = await fetch(`${context.server.url}/api/workflows/${workflowId}/events/stream?limit=501`, { headers: { cookie } });
 		assert.equal(badLimit.status, 400);
-		const zeroLimit = await fetch(`${context.server.url}/api/workflows/${workflowId}/events?limit=0`, { headers: { cookie } });
+		const zeroLimit = await fetch(`${context.server.url}/api/workflows/${workflowId}/events/stream?limit=0`, { headers: { cookie } });
 		assert.equal(zeroLimit.status, 400);
-		const outOfRange = await fetch(`${context.server.url}/api/workflows/${workflowId}/events?after=999`, { headers: { cookie } });
+		const outOfRange = await fetch(`${context.server.url}/api/workflows/${workflowId}/events/stream?after=999`, { headers: { cookie } });
 		assert.equal(outOfRange.status, 416);
 		const rangeBody = (await outOfRange.json()) as { error: string; watermark: number };
 		assert.equal(rangeBody.error, "cursor_out_of_range");
@@ -579,9 +537,7 @@ test("create to archive through public API, dual SSE, receipts, and projection",
 		const runWithEvents = db.prepare("select run_id as id from run_events order by run_id limit 1").get() as { id: number } | undefined;
 		db.close();
 		assert.ok(runWithEvents);
-		const runResponse = await fetch(`${context.server.url}/api/runs/${runWithEvents.id}/events`, { headers: { cookie } });
-		assert.equal(runResponse.status, 200);
-		const runBody = (await runResponse.json()) as { events: Array<{ type: string }> };
-		assert.ok(runBody.events.some((event) => event.type === "model_tokens"));
+		const runEvents = context.runtime.getRunEvents(runWithEvents.id, 0, 500);
+		assert.ok(runEvents.some((event) => event.type === "model_tokens"));
 	});
 });

@@ -1173,43 +1173,6 @@ export class WorkflowStore {
 		};
 	}
 
-	listCommandReceipts(workflowId: number, limit: number): readonly CommandReceiptListItem[] {
-		const rows = this.database
-			.prepare("select r.command_id, r.workflow_id, r.command_type, r.request_digest, r.outcome, r.http_status, r.workflow_version, r.last_event_seq, r.created_at, d.content as actor_content from command_receipts r left join snapshot_documents d on d.id = r.actor_snapshot_document_id where r.workflow_id = ? order by r.rowid limit ?")
-			.all(workflowId, limit) as Array<Record<string, unknown>>;
-		return rows.map((row) => ({
-			commandId: row.command_id as string,
-			workflowId: row.workflow_id as number,
-			commandType: row.command_type as WorkflowCommandType,
-			requestDigest: row.request_digest as string,
-			outcome: row.outcome as CommandOutcome,
-			httpStatus: row.http_status as number,
-			workflowVersion: row.workflow_version as number,
-			lastEventSeq: row.last_event_seq as number,
-			createdAt: row.created_at as string,
-			actorRef: typeof row.actor_content === "string"
-				? parseJson<{ actorRef: string }>(row.actor_content).actorRef
-				: null,
-		}));
-	}
-
-	listWorkflowIncidents(workflowId: number): readonly WorkflowIncidentRecord[] {
-		const rows = this.database
-			.prepare("select id, workflow_id, incident_type, failure_code, subject_type, subject_id, status, created_at, resolved_at from workflow_incidents where workflow_id = ? order by id")
-			.all(workflowId) as Array<Record<string, unknown>>;
-		return rows.map((row) => ({
-			id: row.id as number,
-			workflowId: row.workflow_id as number,
-			incidentType: row.incident_type as string,
-			failureCode: row.failure_code as string,
-			subjectType: row.subject_type as string,
-			subjectId: row.subject_id as number | null,
-			status: row.status as string,
-			createdAt: row.created_at as string,
-			resolvedAt: row.resolved_at as string | null,
-		}));
-	}
-
 	reconcile(): ReconciliationReport {
 		const resetCount = this.database
 			.prepare("update outbox_jobs set next_attempt_at = null where delivered_at is null and next_attempt_at is not null")
@@ -3444,23 +3407,6 @@ export class WorkflowStore {
 export interface CommandReceiptDetail extends CommandReceipt {
 	actorRef: string;
 	capabilities: readonly string[];
-}
-
-export interface CommandReceiptListItem extends CommandReceipt {
-	requestDigest: string;
-	actorRef: string | null;
-}
-
-export interface WorkflowIncidentRecord {
-	id: number;
-	workflowId: number;
-	incidentType: string;
-	failureCode: string;
-	subjectType: string;
-	subjectId: number | null;
-	status: string;
-	createdAt: string;
-	resolvedAt: string | null;
 }
 
 export interface RequirementSummaryRecord {
