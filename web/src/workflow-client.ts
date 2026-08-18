@@ -485,7 +485,7 @@ export function subscribeRunEvents(
 }
 
 // ---------------------------------------------------------------------------
-// 票17:专注 Approval 审阅 + 独立审计视图
+// 票17:专注 Approval 审阅
 // ---------------------------------------------------------------------------
 
 export interface ApprovalPacketArtifact {
@@ -542,73 +542,8 @@ export interface ApprovalPacketDetail {
 	createdAt: string;
 }
 
-export interface WorkflowEventEnvelope {
-	schemaVersion: "workflow-event/v1";
-	workflowId: number;
-	seq: number;
-	type: string;
-	typeVersion: number;
-	workflowVersion: number;
-	entity?: { type: string; id: number; version: number };
-	commandId?: string;
-	payload: Record<string, unknown>;
-	createdAt: string;
-}
-
-export interface RunEventEnvelope {
-	schemaVersion: "run-event/v1";
-	runId: number;
-	seq: number;
-	type: string;
-	payload: Record<string, unknown>;
-	createdAt: string;
-}
-
-export interface CommandReceiptListItem {
-	commandId: string;
-	workflowId: number;
-	commandType: string;
-	requestDigest: string;
-	outcome: string;
-	httpStatus: number;
-	workflowVersion: number;
-	lastEventSeq: number;
-	createdAt: string;
-	actorRef: string | null;
-}
-
-export interface WorkflowIncidentRecord {
-	id: number;
-	workflowId: number;
-	incidentType: string;
-	failureCode: string;
-	subjectType: string;
-	subjectId: number | null;
-	status: string;
-	createdAt: string;
-	resolvedAt: string | null;
-}
-
 export function getApprovalPacket(apiBase: string, packetId: number): Promise<ApprovalPacketDetail> {
 	return fetchJson(apiBase, `/api/approval-packets/${packetId}`);
-}
-
-export async function listWorkflowEvents(apiBase: string, workflowId: number, after: number, limit = 200): Promise<{ events: WorkflowEventEnvelope[]; watermark: number }> {
-	return fetchJson(apiBase, `/api/workflows/${workflowId}/events?after=${after}&limit=${limit}`);
-}
-
-export async function listRunEvents(apiBase: string, runId: number, after: number, limit = 200): Promise<{ events: RunEventEnvelope[]; watermark: number }> {
-	return fetchJson(apiBase, `/api/runs/${runId}/events?after=${after}&limit=${limit}`);
-}
-
-export async function listCommandReceipts(apiBase: string, workflowId: number): Promise<CommandReceiptListItem[]> {
-	const body = await fetchJson<{ receipts: CommandReceiptListItem[] }>(apiBase, `/api/workflows/${workflowId}/receipts`);
-	return body.receipts;
-}
-
-export async function listWorkflowIncidents(apiBase: string, workflowId: number): Promise<WorkflowIncidentRecord[]> {
-	const body = await fetchJson<{ incidents: WorkflowIncidentRecord[] }>(apiBase, `/api/workflows/${workflowId}/incidents`);
-	return body.incidents;
 }
 
 /** 专注审阅打开时固定的 Packet 绑定上下文。 */

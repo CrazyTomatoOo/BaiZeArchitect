@@ -12,11 +12,7 @@ import {
 	getDesignPackage,
 	getRequirement,
 	getWorkflowProjection,
-	listCommandReceipts,
 	listRequirements,
-	listRunEvents,
-	listWorkflowEvents,
-	listWorkflowIncidents,
 	packetReviewDrift,
 	pendingCounts,
 	recoveryActions,
@@ -32,16 +28,12 @@ import {
 	subscribeWorkflowEvents,
 	type ApprovalPacketDetail,
 	type CommandReceipt,
-	type CommandReceiptListItem,
 	type DesignPackageDetail,
 	type GateQueueItem,
 	type OperatorSession,
 	type PacketReviewContext,
 	type RequirementDetail,
 	type RequirementSummary,
-	type RunEventEnvelope,
-	type WorkflowEventEnvelope,
-	type WorkflowIncidentRecord,
 	type WorkflowProjection,
 } from "./workflow-client.js";
 
@@ -85,13 +77,6 @@ class BaizeWorkflow extends LitElement {
 		approvalStale: { state: true },
 		approvalReceipt: { state: true },
 		rejectOpen: { state: true },
-		auditOpen: { state: true },
-		auditEvents: { state: true },
-		auditReceipts: { state: true },
-		auditIncidents: { state: true },
-		auditRunEvents: { state: true },
-		auditRunId: { state: true },
-		auditLive: { state: true },
 		navOpen: { state: true },
 		pendingGate: { type: String, attribute: "pending-gate" },
 		pendingApproval: { type: Boolean, attribute: "pending-approval" },
@@ -127,13 +112,6 @@ class BaizeWorkflow extends LitElement {
 	declare approvalStale: boolean;
 	declare approvalReceipt: CommandReceipt | null;
 	declare rejectOpen: boolean;
-	declare auditOpen: boolean;
-	declare auditEvents: readonly WorkflowEventEnvelope[];
-	declare auditReceipts: readonly CommandReceiptListItem[];
-	declare auditIncidents: readonly WorkflowIncidentRecord[];
-	declare auditRunEvents: readonly RunEventEnvelope[];
-	declare auditRunId: number | null;
-	declare auditLive: boolean;
 	declare navOpen: boolean;
 	declare pendingGate: string | null;
 	declare pendingApproval: boolean;
@@ -145,7 +123,6 @@ class BaizeWorkflow extends LitElement {
 	private runStreamId: number | null = null;
 	/** 专注审阅绑定上下文 + 每个意图一个固定 commandId(approve/reject 各自幂等)。 */
 	private approvalContext: (PacketReviewContext & { approveCommandId: string; rejectCommandId: string }) | null = null;
-	private unsubscribeAudit: (() => void) | null = null;
 	constructor() {
 		super();
 		this.requirementId = 0;
@@ -178,13 +155,6 @@ class BaizeWorkflow extends LitElement {
 		this.approvalStale = false;
 		this.approvalReceipt = null;
 		this.rejectOpen = false;
-		this.auditOpen = false;
-		this.auditEvents = [];
-		this.auditReceipts = [];
-		this.auditIncidents = [];
-		this.auditRunEvents = [];
-		this.auditRunId = null;
-		this.auditLive = false;
 		this.navOpen = false;
 		this.pendingGate = null;
 		this.pendingApproval = false;
@@ -264,7 +234,7 @@ class BaizeWorkflow extends LitElement {
 		.details { margin-top: 16px; border: 1px solid var(--border); border-radius: var(--radius); padding: var(--pad); background: var(--surface); }
 		.details h3 { margin: 12px 0 6px; font-size: var(--text-sm); color: var(--text-muted); letter-spacing: 0.06em; }
 		.details h3:first-child { margin-top: 0; }
-		.audit { font-size: var(--text-xs); color: var(--text-muted); line-height: 1.7; word-break: break-all; }
+		.fact-block { font-size: var(--text-xs); color: var(--text-muted); line-height: 1.7; word-break: break-all; }
 
 		/* — 接管 — */
 		.takeover { margin-top: 12px; border-top: 1px dashed var(--border); padding-top: 10px; }
@@ -290,12 +260,6 @@ class BaizeWorkflow extends LitElement {
 		.approval .digest-line { font-family: var(--font-mono); font-size: var(--text-xs); word-break: break-all; }
 		.reject-form { margin-top: 10px; border: 1px solid var(--danger); border-radius: var(--radius); padding: 10px 12px; background: var(--warn-soft); }
 		.reject-form label { display: inline-flex; gap: 4px; align-items: center; margin-right: 10px; font-size: var(--text-sm); }
-
-		/* — 审计 — */
-		.audit-view { margin-top: 16px; border: 1px solid var(--border); border-radius: var(--radius); padding: var(--pad); background: var(--surface); }
-		.audit-view h3 { margin: 12px 0 6px; font-size: var(--text-sm); color: var(--text-muted); letter-spacing: 0.06em; }
-		.audit-view h3:first-child { margin-top: 0; }
-		.audit-view table td:first-child { font-variant-numeric: tabular-nums; color: var(--text-muted); }
 
 		/* — 设计包 — */
 		.package { margin-top: 16px; border: 1px solid var(--ok); background: var(--ok-soft); border-radius: var(--radius); padding: var(--pad); }
@@ -323,8 +287,6 @@ class BaizeWorkflow extends LitElement {
 		this.unsubscribeRunEvents?.();
 		this.unsubscribeRunEvents = null;
 		this.runStreamId = null;
-		this.unsubscribeAudit?.();
-		this.unsubscribeAudit = null;
 		super.disconnectedCallback();
 	}
 
@@ -552,19 +514,18 @@ class BaizeWorkflow extends LitElement {
 	}
 
 
-	private renderAuditSummary() {
+	private renderStatusSummary() {
 		const projection = this.projection;
 		if (!projection) return nothing;
 		const counts = pendingCounts(projection);
 		return html`
 			<div class="details" style="margin-top:16px">
-				<h3>待处理与审计</h3>
-				<div class="audit" data-testid="audit-summary">
+				<h3>待处理与版本</h3>
+				<div class="fact-block" data-testid="status-summary">
 					待处理:<span data-testid="pending-counts">门禁 ${counts.gates} · 决策 ${counts.decisions} · 发现 ${counts.findings}</span><br />
 					版本 ${projection.workflow.version} · 事件 ${projection.workflow.lastEventSeq} ·
 					计划 ${projection.currentPlan ? `r${projection.currentPlan.revisionNo}` : "—"} ·
-					策略 ${projection.workflow.policyBundle.digest.slice(0, 19)}…<br />
-					<button data-testid="open-audit" @click=${() => void this.openAuditView()}>打开审计视图</button>
+					策略 ${projection.workflow.policyBundle.digest.slice(0, 19)}…
 				</div>
 			</div>
 		`;
@@ -602,7 +563,7 @@ class BaizeWorkflow extends LitElement {
 				</div>
 
 				<h3>产物与证据</h3>
-				<div class="audit" data-testid="revision-facts">
+				<div class="fact-block" data-testid="revision-facts">
 					需求 r${projection.requirement.currentRevision.revisionNo}
 					(${statusLabel(projection.requirement.currentRevision.status)}, ${projection.requirement.currentRevision.digest.slice(0, 19)}…)<br />
 					产物完成:<span data-testid="artifact-summary">${artifactSummary(projection)}</span><br />
@@ -843,96 +804,6 @@ class BaizeWorkflow extends LitElement {
 	}
 
 	// ------------------------------------------------------------------
-	// 票17:独立审计视图(Workflow/Run 双流分离,SSE replay/重连)
-	// ------------------------------------------------------------------
-
-	private async openAuditView(): Promise<void> {
-		const projection = this.projection;
-		if (!projection) return;
-		const workflowId = projection.workflow.id;
-		const [eventsPage, receipts, incidents] = await Promise.all([
-			listWorkflowEvents(this.apiBase, workflowId, 0),
-			listCommandReceipts(this.apiBase, workflowId),
-			listWorkflowIncidents(this.apiBase, workflowId),
-		]);
-		this.auditEvents = eventsPage.events;
-		this.auditReceipts = receipts;
-		this.auditIncidents = incidents;
-		this.auditRunEvents = [];
-		this.auditRunId = projection.activeRun?.id ?? null;
-		if (this.auditRunId !== null) {
-			const runPage = await listRunEvents(this.apiBase, this.auditRunId, 0);
-			this.auditRunEvents = runPage.events;
-		}
-		this.auditOpen = true;
-		this.announce("审计视图已打开");
-		void this.updateComplete.then(() => {
-			this.shadowRoot?.querySelector<HTMLElement>("[data-testid='audit-heading']")?.focus();
-		});
-	}
-
-	private closeAuditView(): void {
-		this.auditOpen = false;
-		this.auditLive = false;
-		this.unsubscribeAudit?.();
-		this.unsubscribeAudit = null;
-		void this.updateComplete.then(() => {
-			this.shadowRoot?.querySelector<HTMLElement>("[data-testid='open-audit']")?.focus();
-		});
-	}
-
-	private async selectAuditRun(runId: number): Promise<void> {
-		this.auditRunId = runId;
-		const page = await listRunEvents(this.apiBase, runId, 0);
-		this.auditRunEvents = page.events;
-	}
-
-	private async loadMoreAuditEvents(): Promise<void> {
-		if (!this.projection || this.auditEvents.length === 0) return;
-		const last = this.auditEvents[this.auditEvents.length - 1]!.seq;
-		const page = await listWorkflowEvents(this.apiBase, this.projection.workflow.id, last);
-		const known = new Set(this.auditEvents.map((event) => event.seq));
-		this.auditEvents = [...this.auditEvents, ...page.events.filter((event) => !known.has(event.seq))];
-	}
-
-	/** 实时跟随:从已加载 watermark 之后 replay,新事件按 seq 去重追加;断线自动重连(EventSource)。 */
-	private toggleAuditLive(checked: boolean): void {
-		this.auditLive = checked;
-		this.unsubscribeAudit?.();
-		this.unsubscribeAudit = null;
-		if (!checked || !this.projection) return;
-		const workflowId = this.projection.workflow.id;
-		this.unsubscribeAudit = subscribeWorkflowEvents(
-			this.apiBase,
-			workflowId,
-			this.auditEvents[this.auditEvents.length - 1]?.seq ?? 0,
-			() => void this.tailAuditEvents(workflowId),
-		);
-	}
-
-	private async tailAuditEvents(workflowId: number): Promise<void> {
-		if (!this.auditLive) return;
-		const last = this.auditEvents[this.auditEvents.length - 1]?.seq ?? 0;
-		const page = await listWorkflowEvents(this.apiBase, workflowId, last);
-		const known = new Set(this.auditEvents.map((event) => event.seq));
-		const fresh = page.events.filter((event) => !known.has(event.seq));
-		if (fresh.length > 0) {
-			this.auditEvents = [...this.auditEvents, ...fresh];
-			this.announce(`审计事件流追加 ${fresh.length} 条新事件`);
-		}
-	}
-
-	/** 审计视图中的 Run id 选项:来自 Workflow 事件中的 run entity(保持两条时间线分离)。 */
-	private auditRunIds(): readonly number[] {
-		const ids = new Set<number>();
-		for (const event of this.auditEvents) {
-			if (event.entity?.type === "run") ids.add(event.entity.id);
-		}
-		if (this.auditRunId !== null) ids.add(this.auditRunId);
-		return [...ids].sort((a, b) => a - b);
-	}
-
-	// ------------------------------------------------------------------
 	// 票16:Gate Queue 表单(一次一个 exact subject,stale 冻结)
 	// ------------------------------------------------------------------
 	/** 消费来自 shell 的跳转意图(去处理门禁 / 去批准),一次性。 */
@@ -1161,7 +1032,7 @@ class BaizeWorkflow extends LitElement {
 	}
 
 	// ------------------------------------------------------------------
-	// 票17 渲染:专注 Approval 审阅 / 独立审计视图
+	// 票17 渲染:专注 Approval 审阅
 	// ------------------------------------------------------------------
 
 	private renderApprovalReview() {
@@ -1239,11 +1110,6 @@ class BaizeWorkflow extends LitElement {
 						)}
 					</div>
 
-					<h3>来源与溯源</h3>
-					<div data-testid="packet-provenance">
-						事件溯源与记录见<button data-testid="approval-open-audit" @click=${() => void this.openAuditView()}>审计视图</button>
-					</div>
-
 					${this.approvalReceipt
 						? html`<div class="context-receipt" data-testid="approval-receipt" data-outcome=${this.approvalReceipt.outcome}>
 							回执:${commandLabel(this.approvalReceipt.commandType)} → ${statusLabel(this.approvalReceipt.outcome)}(HTTP ${this.approvalReceipt.httpStatus})
@@ -1278,103 +1144,12 @@ class BaizeWorkflow extends LitElement {
 		`;
 	}
 
-	private renderAuditView() {
-		if (!this.auditOpen || !this.projection) return nothing;
-		return html`
-			<section class="audit-view" data-testid="audit-view" aria-label="审计视图"
-				@keydown=${(event: KeyboardEvent) => { if (event.key === "Escape") this.closeAuditView(); }}>
-				<h3 data-testid="audit-heading" tabindex="-1">审计视图 — Workflow #${this.projection.workflow.id}</h3>
-				<div class="command-row">
-					<button data-testid="audit-close" @click=${() => this.closeAuditView()}>关闭(Esc)</button>
-					<button data-testid="audit-more" @click=${() => void this.loadMoreAuditEvents()}>加载更多事件</button>
-					<label><input type="checkbox" data-testid="audit-live" .checked=${this.auditLive}
-						@change=${(event: Event) => this.toggleAuditLive((event.target as HTMLInputElement).checked)} /> 实时跟随</label>
-				</div>
-
-				<h3>工作流事件(不含运行 token/工具事件)</h3>
-				<table data-testid="audit-workflow-events">
-					<thead><tr><th>seq</th><th>type</th><th>workflow 版本</th><th>entity</th><th>command</th></tr></thead>
-					<tbody>
-						${this.auditEvents.map(
-							(event) => html`<tr data-seq=${event.seq} data-type=${event.type}>
-								<td>${event.seq}</td>
-								<td>${event.type}</td>
-								<td>${event.workflowVersion}</td>
-								<td>${event.entity ? `${event.entity.type}#${event.entity.id}` : "—"}</td>
-								<td class="mono">${event.commandId ?? "—"}</td>
-							</tr>`,
-						)}
-					</tbody>
-				</table>
-
-				<h3>运行事件(独立时间线)</h3>
-				<div class="command-row" data-testid="audit-run-picker">
-					${this.auditRunIds().map(
-						(runId) => html`<button data-testid="audit-run-${runId}" ?disabled=${runId === this.auditRunId}
-							@click=${() => void this.selectAuditRun(runId)}>Run #${runId}</button>`,
-					)}
-					${this.auditRunIds().length === 0 ? html`尚无 Run` : nothing}
-				</div>
-				<table data-testid="audit-run-events">
-					<thead><tr><th>seq</th><th>type</th><th>payload</th></tr></thead>
-					<tbody>
-						${this.auditRunEvents.map(
-							(event) => html`<tr data-seq=${event.seq} data-type=${event.type}>
-								<td>${event.seq}</td>
-								<td>${event.type}</td>
-								<td class="mono">${JSON.stringify(event.payload)}</td>
-							</tr>`,
-						)}
-					</tbody>
-				</table>
-
-				<h3>命令回执</h3>
-				<table data-testid="audit-receipts">
-					<thead><tr><th>commandId</th><th>type</th><th>outcome</th><th>HTTP</th><th>版本</th><th>actor</th><th>request digest</th></tr></thead>
-					<tbody>
-						${this.auditReceipts.map(
-							(receipt) => html`<tr data-command-id=${receipt.commandId}>
-								<td class="mono">${receipt.commandId}</td>
-								<td>${receipt.commandType}</td>
-								<td>${receipt.outcome}</td>
-								<td>${receipt.httpStatus}</td>
-								<td>${receipt.workflowVersion}</td>
-								<td>${receipt.actorRef ?? "—"}</td>
-								<td class="mono">${receipt.requestDigest.slice(0, 27)}…</td>
-							</tr>`,
-						)}
-					</tbody>
-				</table>
-
-				<h3>事故 / 恢复</h3>
-				<div data-testid="audit-incidents">
-					${this.auditIncidents.length === 0 ? html`无 Incident` : nothing}
-					${this.auditIncidents.map(
-						(incident) => html`<div>
-							<span class="badge" data-tone=${incident.status === "open" ? "bad" : "ok"}>${incident.status}</span>
-							${incident.incidentType} / ${incident.failureCode} — ${incident.subjectType} #${incident.subjectId ?? "—"} · ${incident.createdAt}
-						</div>`,
-					)}
-				</div>
-
-				<h3>版本与摘要</h3>
-				<div class="mono" data-testid="audit-versions">
-					workflow version ${this.projection.workflow.version} · last event seq ${this.projection.workflow.lastEventSeq}<br />
-					policy bundle ${this.projection.workflow.policyBundle.digest}<br />
-					requirement revision digest ${this.projection.requirement.currentRevision.digest}<br />
-					${this.projection.currentPacket ? html`packet ${this.projection.currentPacket.digest}(${this.projection.currentPacket.status})` : "尚无批准包"}
-				</div>
-			</section>
-		`;
-	}
-
-
 	private renderPackage() {
 		if (!this.packageDetail) return nothing;
 		return html`
 			<section class="package" data-testid="design-package">
 				<h3>设计包 #${this.packageDetail.id}</h3>
-				<div class="audit">
+				<div class="fact-block">
 					归档类别:${this.packageDetail.archiveClass}<br />
 					摘要:${this.packageDetail.digest}<br />
 					批准包:${this.packageDetail.approvalPacketId ?? "—"} · 批准记录:${this.packageDetail.approvalId ?? "—"}<br />
@@ -1421,10 +1196,9 @@ class BaizeWorkflow extends LitElement {
 			${this.renderReceipt()}
 			${this.renderGateQueue()}
 			${this.renderRecovery()}
-			${this.renderAuditSummary()}
+			${this.renderStatusSummary()}
 			${this.renderDetails()}
 			${this.renderApprovalReview()}
-			${this.renderAuditView()}
 			${this.renderPackage()}
 			<div class="sr-only" aria-live="polite" data-testid="live-region">${this.liveMessage}</div>
 		`;

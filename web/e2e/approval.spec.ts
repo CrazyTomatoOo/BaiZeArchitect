@@ -3,9 +3,9 @@ import { expect, test, type Page, type Route } from "@playwright/test";
 import { emitWorkflowEvent, installMockEventSource } from "./mock-event-source";
 
 /**
- * 票17 focused approval + audit e2e — 只 mock 新契约路由。
+ * 票17 focused approval e2e — 只 mock 新契约路由。
  * 验证:专注审阅(精确 digest 绑定)、sticky 批准/打回、packet stale 锁定与显式 reload、
- * 分阶段反馈(receipt → archived Projection)、独立审计视图(双流分离、receipts/incidents、live tail)。
+ * 分阶段反馈(receipt → archived Projection)。
  */
 
 const digest = (letter: string) => `sha256:${letter.repeat(64)}`;
@@ -108,34 +108,6 @@ function packetDetail(id: number, packetDigest: string, valid = true) {
 	};
 }
 
-function workflowEvents() {
-	return [
-		{ schemaVersion: "workflow-event/v1", workflowId: 7, seq: 1, type: "workflow_created", typeVersion: 1, workflowVersion: 0, entity: { type: "workflow", id: 7, version: 0 }, payload: {}, createdAt: "2026-08-12T10:00:00.000Z" },
-		{ schemaVersion: "workflow-event/v1", workflowId: 7, seq: 2, type: "workflow_started", typeVersion: 1, workflowVersion: 1, entity: { type: "workflow", id: 7, version: 1 }, commandId: "cmd-start", payload: {}, createdAt: "2026-08-12T10:00:01.000Z" },
-		{ schemaVersion: "workflow-event/v1", workflowId: 7, seq: 3, type: "run_queued", typeVersion: 1, workflowVersion: 2, entity: { type: "run", id: 12, version: 0 }, payload: {}, createdAt: "2026-08-12T10:00:02.000Z" },
-		{ schemaVersion: "workflow-event/v1", workflowId: 7, seq: 4, type: "workflow_ready_to_archive", typeVersion: 1, workflowVersion: 8, entity: { type: "approval_packet", id: 9, version: 0 }, payload: { digest: digest("p") }, createdAt: "2026-08-12T10:05:00.000Z" },
-	];
-}
-
-function runEvents() {
-	return [
-		{ schemaVersion: "run-event/v1", runId: 12, seq: 1, type: "model_call_started", payload: { role: "critic" }, createdAt: "2026-08-12T10:01:00.000Z" },
-		{ schemaVersion: "run-event/v1", runId: 12, seq: 2, type: "model_tokens", payload: { inputTokens: 100, outputTokens: 50 }, createdAt: "2026-08-12T10:01:01.000Z" },
-	];
-}
-
-function receipts() {
-	return [
-		{ commandId: "cmd-start", workflowId: 7, commandType: "start", requestDigest: digest("r"), outcome: "accepted", httpStatus: 201, workflowVersion: 1, lastEventSeq: 2, createdAt: "2026-08-12T10:00:01.000Z", actorRef: "operator:alice" },
-	];
-}
-
-function incidents() {
-	return [
-		{ id: 3, workflowId: 7, incidentType: "outbox_exhausted", failureCode: "outbox_exhausted", subjectType: "outbox_job", subjectId: 44, status: "resolved", createdAt: "2026-08-12T10:03:00.000Z", resolvedAt: "2026-08-12T10:04:00.000Z" },
-	];
-}
-
 async function fulfillJson(route: Route, value: unknown, status = 200): Promise<void> {
 	await route.fulfill({ status, contentType: "application/json", body: JSON.stringify(value) });
 }
@@ -148,27 +120,16 @@ function parseBody(raw: string | null): Record<string, unknown> {
 	}
 }
 
-async function mockApi(page: Page): Promise<{ commands: Record<string, unknown>[]; state: MockState; replacePacket: (id: number, letter: string) => void; appendEvent: (type: string) => void }> {
+async function mockApi(page: Page): Promise<{ commands: Record<string, unknown>[]; state: MockState; replacePacket: (id: number, letter: string) => void }> {
 	await installMockEventSource(page);
 	await page.route("**/api/session", (route) => fulfillJson(route, { actorRef: "operator", capabilities: ["workflow:operate", "workflow:approve"] }));
 	const state: MockState = { state: "ready_to_archive", version: 8, lastEventSeq: 4, packet: { id: 9, digest: digest("p") }, designPackageId: null };
 	const commands: Record<string, unknown>[] = [];
-	const extraEvents: ReturnType<typeof workflowEvents> = [];
 
 	await page.route("**/api/requirements/1", (route) => fulfillJson(route, requirementDetail(state.designPackageId)));
 	await page.route("**/api/workflows/7/events/stream**", (route) =>
 		route.fulfill({ status: 200, contentType: "text/event-stream", body: "" }),
 	);
-	await page.route("**/api/workflows/7/events?**", (route) => {
-		const url = new URL(route.request().url());
-		const after = Number(url.searchParams.get("after") ?? "0");
-		const all = [...workflowEvents(), ...extraEvents];
-		const events = all.filter((event) => event.seq > after);
-		return fulfillJson(route, { events, watermark: all[all.length - 1]!.seq });
-	});
-	await page.route("**/api/workflows/7/receipts", (route) => fulfillJson(route, { receipts: receipts() }));
-	await page.route("**/api/workflows/7/incidents", (route) => fulfillJson(route, { incidents: incidents() }));
-	await page.route("**/api/runs/12/events?**", (route) => fulfillJson(route, { events: runEvents(), watermark: 2 }));
 	await page.route("**/api/runs/12/events/stream**", (route) =>
 		route.fulfill({ status: 200, contentType: "text/event-stream", body: "" }),
 	);
@@ -187,10 +148,6 @@ async function mockApi(page: Page): Promise<{ commands: Record<string, unknown>[
 				state.version += 1;
 				state.lastEventSeq += 2;
 				state.designPackageId = 9;
-				extraEvents.push(
-					{ schemaVersion: "workflow-event/v1", workflowId: 7, seq: 5, type: "packet_approved", typeVersion: 1, workflowVersion: 9, entity: { type: "approval_packet", id: 9, version: 0 }, payload: {}, createdAt: "2026-08-12T10:06:00.000Z" },
-					{ schemaVersion: "workflow-event/v1", workflowId: 7, seq: 6, type: "workflow_archived", typeVersion: 1, workflowVersion: 9, entity: { type: "workflow", id: 7, version: 9 }, payload: {}, createdAt: "2026-08-12T10:06:01.000Z" },
-				);
 			}
 		}
 		if (envelope.type === "reject-packet") {
@@ -233,29 +190,15 @@ async function mockApi(page: Page): Promise<{ commands: Record<string, unknown>[
 			state.version += 1;
 			state.lastEventSeq += 1;
 		},
-		appendEvent: (type: string) => {
-			state.lastEventSeq += 1;
-			extraEvents.push({
-				schemaVersion: "workflow-event/v1",
-				workflowId: 7,
-				seq: state.lastEventSeq,
-				type,
-				typeVersion: 1,
-				workflowVersion: state.version,
-				entity: { type: "workflow", id: 7, version: state.version },
-				payload: {},
-				createdAt: "2026-08-12T10:07:00.000Z",
-			});
-		},
 	};
 }
 
 async function openFixture(page: Page): Promise<void> {
-	await page.goto("/e2e/approval-audit.html?requirementId=1");
+	await page.goto("/e2e/approval.html?requirementId=1");
 	await expect(page.getByTestId("hero")).toBeVisible();
 }
 
-test.describe("focused approval 与审计视图", () => {
+test.describe("focused approval", () => {
 	test("ready: 专注审阅展示 packet 事实,键盘批准 → receipt → archived 分阶段反馈", async ({ page }) => {
 		const { commands } = await mockApi(page);
 		await openFixture(page);
@@ -348,46 +291,5 @@ test.describe("focused approval 与审计视图", () => {
 		const approves = commands.filter((command) => command.type === "approve-packet");
 		expect(approves).toHaveLength(1);
 		expect((approves[0]!.payload as { packetDigest: string }).packetDigest).toBe(digest("q"));
-	});
-
-	test("审计视图:Workflow/Run 时间线分离、receipts/incidents/版本 digest、live tail 追加、Esc 关闭恢复焦点", async ({ page }) => {
-		const { appendEvent } = await mockApi(page);
-		await openFixture(page);
-
-		await page.getByTestId("open-audit").click();
-		const audit = page.getByTestId("audit-view");
-		await expect(audit).toBeVisible();
-		await expect(page.getByTestId("audit-heading")).toBeFocused();
-
-		const workflowRows = page.getByTestId("audit-workflow-events").locator("tbody tr");
-		await expect(workflowRows).toHaveCount(4);
-		await expect(page.getByTestId("audit-workflow-events")).toContainText("workflow_created");
-		await expect(page.getByTestId("audit-workflow-events")).toContainText("workflow_ready_to_archive");
-		// token/模型事件不混入 Workflow 时间线
-		await expect(page.getByTestId("audit-workflow-events")).not.toContainText("model_");
-
-		// Run 事件在独立时间线(活动 Run 默认已选中并加载)
-		await expect(page.getByTestId("audit-run-12")).toBeDisabled();
-		await expect(page.getByTestId("audit-run-events")).toContainText("model_call_started");
-		await expect(page.getByTestId("audit-run-events")).toContainText("model_tokens");
-		await expect(page.getByTestId("audit-run-events")).toContainText("inputTokens");
-		await expect(page.getByTestId("audit-receipts")).toContainText("cmd-start");
-		await expect(page.getByTestId("audit-receipts")).toContainText("operator:alice");
-		await expect(page.getByTestId("audit-incidents")).toContainText("outbox_exhausted");
-		await expect(page.getByTestId("audit-versions")).toContainText(digest("a"));
-
-		// live tail:打开实时跟随,追加事件并推送 → 新行按 seq 追加且不重复
-		await page.getByTestId("audit-live").check();
-		appendEvent("workflow_paused");
-		await emitWorkflowEvent(page);
-		await expect(workflowRows).toHaveCount(5);
-		await expect(page.getByTestId("audit-workflow-events")).toContainText("workflow_paused");
-		await emitWorkflowEvent(page);
-		await expect(workflowRows).toHaveCount(5);
-
-		// Esc 关闭并恢复焦点到入口按钮
-		await page.keyboard.press("Escape");
-		await expect(audit).toHaveCount(0);
-		await expect(page.getByTestId("open-audit")).toBeFocused();
 	});
 });
