@@ -23,6 +23,7 @@
 - [Decide the fate of the existing demo workspace 1](issues/04-decide-demo-workspace-1-fate.md) — seeder 不变、无迁移；demo 1 是普通工作区；原「可归档」表述随 01 作废失效，新语义下可被级联删除。（保留）
 - [Research workspace cascade-delete FK graph](issues/07-research-cascade-delete-fk-graph.md) — 级联删除底座：33 表逆拓扑单事务删除、22 个删除阻断触发器事务内 suspend/restore、snapshot_documents 跳过（digest 去重不可变、可跨工作区共享）、**裁决无需迁移 0014**（cascade 无法绕过触发器且要重建 22 表）；outbox_jobs 同事务删（事件丢失 = 硬删除预期）；启动 reconcile FK 违例即拒服 → 删除必须原子；repo_path 目录永不删、session/run jsonl 最佳努力 GC。08/10/11 依此。
 - [Decide web shell navigation and selected-workspace state](issues/09-decide-web-shell-navigation-and-state.md) — Web 面全锁：`managerOpen: boolean` 四态（登录/详情隐式）；管理页 = `baize-workspace-manager.ts`（避开 negative-scan 已删名）；行式卡（进入 primary + 删除 danger 行内显示）+ 新建窄表单 + 零态 + 共用顶栏；键 `baize.workspaceId` 记住最近、失效清键回管理页；创建后直接进入；列表顶栏「管理工作空间」入口（两级返回）；index.html 去 `workspace-id="1"` 硬编码。
+- [Decide workspace API surface](issues/08-decide-workspace-api-surface.md) — 引擎外注册表 CRUD（Reusable Asset 先例，无事件/outbox）；**不新增能力位**（服务端零能力校验现状，任何已登录可删，护栏归 10）；三端点：GET → 200 `{workspaces:[{id,name,repoPath,createdAt}]}`、POST → 201 `{workspaceId}`（400 trim 校验 / 409 重复 repo_path, name 允许重复）、DELETE → 沿 asset 先例 404 `unknown_workspace` / 200 `{deleted:true}`（07 单事务级联 + 删后 foreign_key_check）；runtime 增 listWorkspaces/deleteWorkspace；契约 workspaces 段双侧同步归 11。
 
 ## Not yet specified
 
@@ -44,6 +45,5 @@
 
 ## Frontier 查询（open + 无阻塞 + 未认领）
 
-- 08-decide-workspace-api-surface（grilling）
-- 10-decide-delete-guards（grilling，blocked by 08）
-- 11-task-write-mgmt-spec（task，terminal，blocked by 08–10）
+- 10-decide-delete-guards（grilling——08 已闭，解阻）
+- 11-task-write-mgmt-spec（task，terminal，blocked by 10）
