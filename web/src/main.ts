@@ -1,2 +1,2 @@
 import "@fontsource-variable/space-grotesk";
-import "./baize-workflow.ts";
+import "./baize-shell.ts";
