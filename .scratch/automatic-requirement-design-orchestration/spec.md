@@ -15,7 +15,7 @@ BaiZe 当前把需求设计暴露为一组由用户手工选择角色、填写�
 
 Engine 独占 Workflow 状态转换、计划采用、Task 调度、副作用发布、质量判断和归档控制。Agent 只能提出结构化计划或通过受限领域工具生成暂存事实。Artifact Policy 根据 Analyst 的 Impact Profile 派生 Required Artifact Set；Readiness Policy 用内容 Schema、来源、证据、Decision/Finding 处置、Critic coverage、一致性和 transcript 完整性进行十一项确定性检查。全部通过后，Engine 生成内容寻址的 ApprovalPacket，只有绑定当前版本与 digest 的真实人工批准才能归档。
 
-操作体验默认显示引导式 Workflow 概览，每个治理状态只有一个主动作；计划、Task、Attempt、Run、Artifact 和治理事实在同页详情渐进展开，完整事件与 Command Receipt 在独立审计视图呈现。人工可通过类型化命令暂停、继续、steer、取消 Run、重试、替换完整计划、回答门禁、修订需求和处置治理事实，但不能 force-skip、force-ready 或绕过真实批准。
+操作体验默认显示引导式 Workflow 概览，每个治理状态只有一个主动作；计划、Task、Attempt、Run、Artifact 和治理事实在同页详情渐进展开；不提供独立审计视图，完整事件与 Command Receipt 经 Workflow Doctor 与存储层直达可查。人工可通过类型化命令暂停、继续、steer、取消 Run、重试、替换完整计划、回答门禁、修订需求和处置治理事实，但不能 force-skip、force-ready 或绕过真实批准。
 
 新系统通过七个依赖实施切面构建，前六个切面只由测试入口装配；最后一个切面在维护窗口执行停写式 `check → apply` 历史迁移、接通唯一生产入口并硬删除旧手选角色、共享 Session、Reviewer、旧 API/UI/数据库路径。系统不保留双写、兼容适配器或长期双轨。
 
@@ -44,7 +44,7 @@ Engine 独占 Workflow 状态转换、计划采用、Task 调度、副作用发�
 21. As a requirement author, I want uncertain network retries to reuse the same command identity and request digest, so that duplicate clicks cannot repeat side effects.
 22. As a requirement author, I want version and digest conflicts shown in the original action context, so that I can reload and make a new explicit decision.
 23. As a requirement author, I want current plan progress, Task order, active Attempt and Run, artifacts, decisions, findings, and evidence available on the same page, so that I can inspect details without leaving the Requirement.
-24. As an auditor, I want a separate audit view for Workflow events, Run events, receipts, incidents, versions, and digests, so that operational history is traceable without cluttering the guided flow.
+24. ~~As an auditor, I want a separate audit view for Workflow events, Run events, receipts, incidents, versions, and digests, so that operational history is traceable without cluttering the guided flow.~~（已撤回 2026-08-18：独立审计视图已删除，见 `.wayfinder/2026-08-audit-view-removal/map.md`）
 25. As an approver, I want the ApprovalPacket to show exact required Artifact revisions, Decision dispositions, Finding treatment, Critic coverage, consistency results, policy versions, and provenance, so that approval is informed.
 26. As an approver, I want approval bound to the current packet digest, Workflow version, and subject versions, so that approval cannot drift to changed material.
 27. As an approver, I want approving the packet to approve included pending revisions and archive in one transaction, so that partial final approval is impossible.
@@ -81,7 +81,7 @@ Engine 独占 Workflow 状态转换、计划采用、Task 调度、副作用发�
 58. As a workflow operator, I want Engine and Outbox incidents recoverable through a precise retry-recovery command, so that infrastructure repair does not create a fake Task or Run.
 59. As an administrator, I want trusted ActorRef and capabilities derived from an authenticated Operator Session, so that clients cannot forge the actor recorded in approvals and commands.
 60. As an administrator, I want Workflow and Run events exposed as separate replayable SSE streams, so that governance history is not polluted by token traffic.
-61. As an administrator, I want a bounded current Workflow Projection and paged immutable history, so that normal reads remain usable while complete audit remains available.
+61. As an administrator, I want a bounded current Workflow Projection with complete retained event history, so that normal reads remain usable while full history stays replayable through SSE and storage.
 62. As an administrator, I want startup reconciliation to finish before HTTP accepts traffic, so that clients never observe a half-recovered state.
 63. As an administrator, I want state, receipts, events, incidents, and Outbox Jobs committed atomically, so that crashes cannot leave contradictory control-plane facts.
 64. As an administrator, I want a read-only Workflow Doctor to check DB/Session pairing, claims, event sequence, effects, outbox, approvals, consistency, transcripts, and legacy residue, so that release and incident checks use one authority.
@@ -163,7 +163,7 @@ Engine 独占 Workflow 状态转换、计划采用、Task 调度、副作用发�
 - State changes, receipts, events, incidents, staged-effect publication, claims, and Outbox Jobs use explicit SQLite transactions. Claim acquisition and Attempt/Run creation are atomic.
 - Public creation atomically creates Requirement, baseline revision, Design Session, pending Workflow, fixed Policy Bundle binding, and creation event.
 - All Workflow operations use one idempotent PUT command resource. Reads expose Requirement summaries, complete bounded Workflow Projection, immutable Plan/Task/Attempt/Run/Approval details, receipts, Design Packages, legacy imports, and workspace Reusable Assets.
-- Workflow and Run event streams are separate. Both support JSON history, SSE replay, Last-Event-ID, captured-watermark catch-up, live buffering, deduplication, and heartbeat; first release retains all events.
+- Workflow and Run event streams are separate. Both support SSE replay, Last-Event-ID, captured-watermark catch-up, live buffering, deduplication, and heartbeat; first release retains all events.
 - Workflow stream carries governance and audit events, not model tokens. Run stream carries process, token, tool, result, abort, and late-result events.
 - Durable Outbox Jobs perform model dispatch, finalization, abort, rescheduling, and other post-commit work with bounded retry. Exhaustion creates a Workflow Incident and fails safely.
 - Startup recovery completes before HTTP listening. Queued Runs are redispatched; running Runs become process-lost failures and consume Attempt budget; completed Runs with result snapshots finish deterministic validation/publication; claims and staged effects reconcile idempotently.
@@ -172,9 +172,9 @@ Engine 独占 Workflow 状态转换、计划采用、Task 调度、副作用发�
 
 ### Operator experience
 
-- The Requirement page defaults to a guided summary with state hero, one primary action, five-step progress story, and Artifact/pending/audit summaries.
+- The Requirement page defaults to a guided summary with state hero, one primary action, five-step progress story, and Artifact/pending/status summaries.
 - Workflow details expand on the same page and show stable Task order, current Attempt and Run, Artifact revisions, Decision/Finding/Evidence facts, and progressively disclosed takeover controls.
-- Approval uses a focused mode on the same page. Full Workflow/Run event, receipt, incident, version, and digest history uses a separate audit view.
+- Approval uses a focused mode on the same page. Full Workflow/Run event, receipt, incident, version, and digest history is retained immutably and reachable through SSE replay and Workflow Doctor; no separate audit view is provided.
 - Advanced controls are disclosed by risk: normal summary exposes only the primary action; details expose pause and cancel; advanced takeover exposes steer, replace-plan, and diagnostic Run.
 - Gate Queue processes one exact subject at a time: critical Decision, required Human Input, major Finding disposition, then Artifact rejection or command-conflict recovery; ties use opened event sequence.
 - UI never optimistically mutates governance state. It presents persisted receipt separately and waits for Workflow SSE and Projection to confirm actual state.

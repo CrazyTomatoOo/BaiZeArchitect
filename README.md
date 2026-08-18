@@ -104,11 +104,7 @@ npx tsx main.ts
 | GET | `/api/workflows/:id` | 有界 Workflow Projection |
 | PUT | `/api/workflows/:id/commands/:commandId` | 统一幂等命令资源 |
 | GET | `/api/workflows/:id/commands/:commandId` | 命令 Receipt 详情 |
-| GET | `/api/workflows/:id/receipts` | 命令 Receipt 列表 |
-| GET | `/api/workflows/:id/incidents` | Workflow Incident 列表 |
-| GET | `/api/workflows/:id/events` | Workflow 事件 JSON |
 | GET | `/api/workflows/:id/events/stream` | Workflow 事件 SSE |
-| GET | `/api/runs/:id/events` | Run 事件 JSON |
 | GET | `/api/runs/:id/events/stream` | Run 事件 SSE |
 | GET | `/api/plan-revisions/:id` | Plan Revision 详情 |
 | GET | `/api/tasks/:id` | Task 详情 |
@@ -163,7 +159,7 @@ web/
     baize-requirements.ts   需求列表 + 新建
     baize-review-center.ts  审核中心(聚合人工待办)
     baize-asset-library.ts  资产库(场景/用例/功能)
-    baize-workflow.ts       旅程式需求详情 + 批准/审计视图
+    baize-workflow.ts       旅程式需求详情 + 批准审阅
     baize-data.ts           需求聚合视图模型
     baize-styles.ts         共享样式(仅引用 token)
     workflow-client.ts      类型化 API 客户端

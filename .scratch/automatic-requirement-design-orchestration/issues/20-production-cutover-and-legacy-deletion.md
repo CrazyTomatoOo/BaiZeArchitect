@@ -9,7 +9,7 @@
 **Status:** ready-for-agent
 
 - [ ] production Gateway main 只注册 workflow-api/v1、Operator Session、Projection/detail、双 SSE、Reusable Asset、legacy import 和 Design Package 读取。
-- [ ] production Web shell 使用引导式 Workflow 页面与审计视图，正常路径没有角色选择、自由 Prompt Run 或 Reviewer。
+- [ ] production Web shell 使用引导式 Workflow 页面，正常路径没有角色选择、自由 Prompt Run、Reviewer 或审计视图（审计视图已删除 2026-08-18，见 `.wayfinder/2026-08-audit-view-removal/map.md`）。
 - [ ] 旧 Requirement Run list/create、Run steer/cancel、direct archive、global Run stream、old evidence/design-package Route 和 client-supplied actor endpoint 均不存在。
 - [ ] Reviewer Role/Skill、普通角色共享 Session、run_locks/RunInProgressError、旧 Store helpers、旧 Web components/controls、tombstone adapter 和兼容 fallback 均硬删除。
 - [ ] negative scan 与 Workflow Doctor 证明 cutover policy 中所有旧 Route、符号、UI、表和列不可达或不存在。

@@ -4,7 +4,7 @@
 
 **What to build:** 用声明式 fixture manifest 生成真实旧 SQLite 和 Session 文件树，并让只读 `cutover check` 对实际输入分类、对账、发现 anomaly，输出只能应用到同一配对输入的 Cutover Report。
 
-**Blocked by:** 17 — 交付专注审批与独立审计视图
+**Blocked by:** 17 — 交付专注审批
 
 **Status:** done
 
