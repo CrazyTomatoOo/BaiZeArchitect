@@ -6,10 +6,10 @@
 
 **Blocked by:** None — can start immediately.
 
-**Status:** ready-for-agent
+**Status:** done —— 实现于 fixed point `e10c671` 之后的工作树，提交见本票记录。
 
-- [ ] `GET /api/workspaces` → 200 `{ workspaces: [...] }`，id 升序，字段 `id / name / repoPath / createdAt`；匿名或伪造 cookie → 401（现有会话惯例）
-- [ ] `POST /api/workspaces` body `{ name, repoPath }`：任一 trim 空 → 400；重复 `repo_path` → 409（唯一约束捕获）；成功 201 `{ workspaceId }`；`name` 允许重复
-- [ ] store 增 `listWorkspaces()`（id/name/repoPath/createdAt，id 升序）并经 runtime 透传到路由；`createWorkspace` 沿用既有实现
-- [ ] 新增后端 HTTP 测试（operator-*.test.ts 风格，真实 SQLite）覆盖 200/201/400/401/409 与列表排序；负向断言：任一未登录访问 401
-- [ ] 既有红断言「production web entry imports only baize-workflow」修订为 shell 现实（main.ts 导入 baize-shell），`agent-runtime` 全量测试与 negative-scan 恢复全绿
+- [x] `GET /api/workspaces` → 200 `{ workspaces: [...] }`，id 升序，字段 `id / name / repoPath / createdAt`；匿名或伪造 cookie → 401（现有会话惯例）
+- [x] `POST /api/workspaces` body `{ name, repoPath }`：任一 trim 空 → 400 `{ error: "malformed_workspace" }`（决议 08 锁码）；重复 `repo_path` → 409（唯一约束捕获）；成功 201 `{ workspaceId }`；`name` 允许重复
+- [x] store 增 `listWorkspaces()`（id/name/repoPath/createdAt，id 升序）并经 runtime 透传到路由；`createWorkspace` 沿用既有实现
+- [x] 新增后端 HTTP 测试（operator-*.test.ts 风格，真实 SQLite）覆盖 200/201/400/401/409 与列表排序；负向断言：任一未登录访问 401
+- [x] 既有红断言「production web entry imports only baize-workflow」修订为 shell 现实（main.ts 导入 baize-shell，断言反向为「imports only baize-shell」），`agent-runtime` 全量测试与 negative-scan 恢复全绿

@@ -1,6 +1,6 @@
 import type { ReusableAssetKind } from "../persistence/reusable-asset-kind.js";
 import type { CrashInjector, FixtureClock, FixtureOperator, FixtureOutboxTransport, HashProvider } from "../testing/deterministic-fixtures.js";
-import { WorkflowStore, type BeginPlanningResult, type CommandReceipt, type CompletePlanningResult, type ExecuteCommandInput, type ReconciliationReport, type WorkflowCommandType, type WorkflowProjection, type EvidenceSnapshotResult, type RequiredArtifactSetResult, type TraceLinkResult, type FindingRecord, type FindingThreadRecord, type DecisionRecord, type ReadinessReport, type BuildApprovalPacketResult, type ApprovalPacketRecord, type HumanGateRecord, type ApprovalRecordEntry, type HumanDirectiveRecord, type DiagnosticRunRecord, type CommandReceiptDetail, type RequirementSummaryRecord, type RequirementDetailRecord, type BoundedWorkflowProjection, type PlanRevisionDetail, type TaskDetailRecord, type AttemptSummaryRecord, type AttemptDetailRecord, type RunDetailRecord, type ApprovalPacketDetailRecord, type DesignPackageRecord, type LegacyImportRecord, type ReusableAssetSummary, type ReusableAssetDetail, type WorkflowEventEnvelope, type RunEventEnvelope } from "../persistence/workflow-store.js";
+import { WorkflowStore, type BeginPlanningResult, type CommandReceipt, type CompletePlanningResult, type ExecuteCommandInput, type ReconciliationReport, type WorkflowCommandType, type WorkflowProjection, type EvidenceSnapshotResult, type RequiredArtifactSetResult, type TraceLinkResult, type FindingRecord, type FindingThreadRecord, type DecisionRecord, type ReadinessReport, type BuildApprovalPacketResult, type ApprovalPacketRecord, type HumanGateRecord, type ApprovalRecordEntry, type HumanDirectiveRecord, type DiagnosticRunRecord, type CommandReceiptDetail, type RequirementSummaryRecord, type RequirementDetailRecord, type BoundedWorkflowProjection, type PlanRevisionDetail, type TaskDetailRecord, type AttemptSummaryRecord, type AttemptDetailRecord, type RunDetailRecord, type ApprovalPacketDetailRecord, type DesignPackageRecord, type LegacyImportRecord, type ReusableAssetSummary, type ReusableAssetDetail, type WorkflowEventEnvelope, type WorkspaceSummary, type RunEventEnvelope } from "../persistence/workflow-store.js";
 import type { BeginAttemptResult, CompleteAttemptResult, ExecuteTaskResult, RoleResult, TraceLinkProposal, CriticReport } from "./role-result.js";
 import { loadWorkflowContracts } from "./contracts/loader.js";
 import { compileWorkflowSchema, type WorkflowSchemaValidator } from "./contracts/schema.js";
@@ -13,7 +13,7 @@ import type { RequirementBaseline } from "./requirement.js";
 import type { ImpactProfile } from "./impact-profile.js";
 
 export type { RequirementBaseline } from "./requirement.js";
-export type { CommandReceipt, ReconciliationReport, WorkflowCommandType, BeginPlanningResult, CompletePlanningResult, FindingRecord, FindingThreadRecord } from "../persistence/workflow-store.js";
+export type { CommandReceipt, ReconciliationReport, WorkflowCommandType, BeginPlanningResult, CompletePlanningResult, FindingRecord, FindingThreadRecord, WorkspaceSummary } from "../persistence/workflow-store.js";
 export type { BeginAttemptResult, CompleteAttemptResult, ExecuteTaskResult, RoleResult, CriticReport } from "./role-result.js";
 export type { DoctorReport } from "./workflow-doctor.js";
 
@@ -46,6 +46,7 @@ export interface PlanWorkflowResult {
 export interface HeadlessWorkflowRuntime {
 	createWorkspace(input: { repoPath: string; name: string }): number;
 	workspaceExists(workspaceId: number): boolean;
+	listWorkspaces(): readonly WorkspaceSummary[];
 	createRequirement(input: { workspaceId: number; baseline: RequirementBaseline }): {
 		requirementId: number;
 		workflowId: number;
@@ -162,6 +163,9 @@ export async function openHeadlessWorkflowRuntime(
 		},
 		workspaceExists(workspaceId) {
 			return store.workspaceExists(workspaceId);
+		},
+		listWorkspaces() {
+			return store.listWorkspaces();
 		},
 		createRequirement(input) {
 			if (!artifactValidator.check(input.baseline)) {

@@ -416,6 +416,18 @@ export class WorkflowStore {
 			.get(workspaceId) !== undefined;
 	}
 
+	listWorkspaces(): readonly WorkspaceSummary[] {
+		const rows = this.database
+			.prepare("select id, repo_path, name, created_at from workspaces order by id")
+			.all() as Array<{ id: number; repo_path: string; name: string; created_at: string }>;
+		return rows.map((row) => ({
+			id: row.id,
+			name: row.name,
+			repoPath: row.repo_path,
+			createdAt: row.created_at,
+		}));
+	}
+
 	createRequirement(input: CreateRequirementInput): CreationResult {
 		return this.createRequirementTransaction(input);
 	}
@@ -3565,6 +3577,13 @@ export interface DesignPackageRecord {
 	migrationAttestationDocumentId: number | null;
 	archiveClass: "governed" | "legacy_pre_policy";
 	archivedAt: string;
+}
+
+export interface WorkspaceSummary {
+	id: number;
+	name: string;
+	repoPath: string;
+	createdAt: string;
 }
 
 export interface LegacyImportRecord {

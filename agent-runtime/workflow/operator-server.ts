@@ -300,6 +300,52 @@ export async function startOperatorServer(
 			return;
 		}
 
+		if (request.method === "GET" && url.pathname === "/api/workspaces") {
+			sendJson(response, 200, { workspaces: options.runtime.listWorkspaces() });
+			return;
+		}
+
+		if (request.method === "POST" && url.pathname === "/api/workspaces") {
+			let body: unknown;
+			try {
+				body = JSON.parse(await readBody(request));
+			} catch {
+				sendJson(response, 400, { error: "malformed_workspace" });
+				return;
+			}
+			if (typeof body !== "object" || body === null || Array.isArray(body)) {
+				sendJson(response, 400, { error: "malformed_workspace" });
+				return;
+			}
+			const { name, repoPath } = body as Record<string, unknown>;
+			if (
+				typeof name !== "string" || typeof repoPath !== "string"
+				|| name.trim() === "" || repoPath.trim() === ""
+			) {
+				sendJson(response, 400, { error: "malformed_workspace" });
+				return;
+			}
+			let workspaceId: number;
+			try {
+				workspaceId = options.runtime.createWorkspace({
+					name: name.trim(),
+					repoPath: repoPath.trim(),
+				});
+			} catch (error) {
+				if (
+					error instanceof Error
+					&& "code" in error
+					&& (error as { code?: string }).code === "SQLITE_CONSTRAINT_UNIQUE"
+				) {
+					sendJson(response, 409, { error: "duplicate_repo_path" });
+					return;
+				}
+				throw error;
+			}
+			sendJson(response, 201, { workspaceId });
+			return;
+		}
+
 		if (
 			request.method === "POST"
 			&& segments.length === 4

@@ -78,7 +78,6 @@ test("old HTTP routes are not registered", () => {
 	for (const file of [...RUNTIME_FILES, ...WEB_FILES]) {
 		if (file.includes("cutover/") || file.includes("cutover-")) continue;
 		if (file.includes("negative-scan")) continue;
-		if (file.endsWith("baize-shell.ts")) continue; // user's unstaged file, not in production build
 		const source = readFileSync(path.join(ROOT, file), "utf8");
 		for (const pattern of oldRoutePatterns) {
 			if (pattern.test(source)) {
@@ -135,10 +134,10 @@ test("old web components are deleted", () => {
 	}
 });
 
-test("production web entry imports only baize-workflow", () => {
+test("production web entry imports only baize-shell", () => {
 	const mainSource = readFileSync(path.join(ROOT, "web/src/main.ts"), "utf8");
-	assert.match(mainSource, /baize-workflow\.ts/);
-	assert.doesNotMatch(mainSource, /baize-shell\.ts/);
+	assert.match(mainSource, /baize-shell\.ts/);
+	assert.doesNotMatch(mainSource, /baize-workflow\.ts/);
 	assert.doesNotMatch(mainSource, /baize-overview\.ts/);
 	assert.doesNotMatch(mainSource, /baize-requirement\.ts/);
 	assert.doesNotMatch(mainSource, /baize-run-rail\.ts/);
