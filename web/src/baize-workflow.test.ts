@@ -2,14 +2,19 @@ import { describe, expect, it } from "vitest";
 
 import workflowComponentSource from "./baize-workflow.ts?raw";
 import workflowClientSource from "./workflow-client.ts?raw";
+import workspaceManagerSource from "./baize-workspace-manager.ts?raw";
 import {
 	artifactSummary,
+	createWorkspaceErrorCopy,
+	deleteWorkspaceErrorCopy,
 	designStages,
 	gateQueue,
+	normalizeWorkspaceInput,
 	packetReviewDrift,
 	pendingCounts,
 	recoveryActions,
 	stateHero,
+	WorkspaceApiError,
 	type WorkflowProjection,
 	type WorkflowState,
 } from "./workflow-client";
@@ -306,5 +311,79 @@ describe("禁止的遗留控件 — Web 不包含 Reviewer/角色选择/自由 P
 		expect(combined).not.toMatch(/\/api\/requirements\/[^`]*\/runs/);
 		expect(combined).not.toMatch(/\/api\/runs\/[^`]*\/(steer|cancel)/);
 		expect(combined).toContain("/commands/");
+	});
+});
+
+// ---------------------------------------------------------------------------
+// 工作区管理页(票 09/10/04):输入归一 + 错误文案映射 + 负向扫描
+// ---------------------------------------------------------------------------
+
+describe("normalizeWorkspaceInput — 创建输入 trim 归一", () => {
+	it("trim 名称与仓库路径", () => {
+		expect(normalizeWorkspaceInput("  工作区 A  ", "  /repo/a  ")).toEqual({ name: "工作区 A", repoPath: "/repo/a" });
+	});
+
+	it("任一为空白 → null(服务端 400 同语义)", () => {
+		expect(normalizeWorkspaceInput("", "/repo/a")).toBeNull();
+		expect(normalizeWorkspaceInput("   ", "/repo/a")).toBeNull();
+		expect(normalizeWorkspaceInput("工作区 A", "")).toBeNull();
+		expect(normalizeWorkspaceInput("工作区 A", "   ")).toBeNull();
+	});
+});
+
+describe("createWorkspaceErrorCopy — 400/409 行内文案", () => {
+	it("malformed_workspace → 必填提示", () => {
+		expect(createWorkspaceErrorCopy(new WorkspaceApiError(400, "malformed_workspace", "x"))).toContain("必填");
+	});
+
+	it("duplicate_repo_path → 路径已被使用提示", () => {
+		expect(createWorkspaceErrorCopy(new WorkspaceApiError(409, "duplicate_repo_path", "x"))).toContain("已在其他工作区使用");
+	});
+
+	it("未知错误回退通用文案", () => {
+		expect(createWorkspaceErrorCopy(new Error("网络错误"))).toBe("网络错误");
+	});
+});
+
+describe("deleteWorkspaceErrorCopy — 409 busy / 404 行内文案", () => {
+	it("workspace_busy → 引擎在飞提示", () => {
+		expect(deleteWorkspaceErrorCopy(new WorkspaceApiError(409, "workspace_busy", "x"))).toContain("在飞");
+	});
+
+	it("unknown_workspace → 已不存在提示", () => {
+		expect(deleteWorkspaceErrorCopy(new WorkspaceApiError(404, "unknown_workspace", "x"))).toContain("已不存在");
+	});
+
+	it("未知错误回退通用文案", () => {
+		expect(deleteWorkspaceErrorCopy(new Error("网络错误"))).toBe("网络错误");
+	});
+});
+
+describe("baize-workspace-manager — 管理页安全约定", () => {
+	it("注册为 baize-workspace-manager 且不使用已删除的 baize-workspaces 名", () => {
+		expect(workspaceManagerSource).toContain('customElements.define("baize-workspace-manager"');
+		expect(workspaceManagerSource).not.toMatch(/baize-workspaces(?:\.|")/);
+	});
+
+	it("删除确认走行内两步 dialog,绝无 window.confirm", () => {
+		expect(workspaceManagerSource).toContain('role="dialog"');
+		expect(workspaceManagerSource).not.toMatch(/window\.confirm/);
+		expect(workspaceManagerSource).not.toMatch(/confirm\(\s*["']/);
+		expect(workspaceManagerSource).toContain("不可恢复");
+	});
+
+	it("对外事件契约:进入/创建后直接进入 + 删除成功通知", () => {
+		expect(workspaceManagerSource).toContain("baize-enter-workspace");
+		expect(workspaceManagerSource).toContain("baize-workspace-deleted");
+	});
+
+	it("行容器为 div 而非 button(防按钮嵌套)", () => {
+		const rowMarkup = workspaceManagerSource.match(/<div class="card item">\s*<div class="row">/);
+		expect(rowMarkup).not.toBeNull();
+	});
+
+	it("不持有静态 workspace-id / workspaceId 属性,API 委托 client 三函数", () => {
+		expect(workspaceManagerSource).not.toMatch(/workspace-id\s*=|workspaceId:\s*\{ type: Number/);
+		expect(workspaceManagerSource).toMatch(/createWorkspace|deleteWorkspace|listWorkspaces/);
 	});
 });

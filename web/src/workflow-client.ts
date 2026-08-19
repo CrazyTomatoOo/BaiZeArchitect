@@ -764,3 +764,81 @@ export async function importAssets(apiBase: string, workspaceId: number, assets:
 	const body = (await response.json()) as { assetIds: number[] };
 	return body.assetIds;
 }
+
+// ---------------------------------------------------------------------------
+// 工作区管理 API(契约 workflow-api/v1 workspaces 段 + 管理页行内文案真源)
+// ---------------------------------------------------------------------------
+
+export interface WorkspaceSummary {
+	id: number;
+	name: string;
+	repoPath: string;
+	createdAt: string;
+}
+
+/** 工作区注册表 API 错误:保留 HTTP 状态码与服务端 error code,供管理页行内文案映射。 */
+export class WorkspaceApiError extends Error {
+	constructor(
+		readonly status: number,
+		readonly code: string,
+		message: string,
+	) {
+		super(message);
+	}
+}
+
+export async function listWorkspaces(apiBase: string): Promise<readonly WorkspaceSummary[]> {
+	const body = await fetchJson<{ workspaces: WorkspaceSummary[] }>(apiBase, "/api/workspaces");
+	return body.workspaces;
+}
+
+export async function createWorkspace(apiBase: string, input: { name: string; repoPath: string }): Promise<number> {
+	const response = await fetch(`${apiBase}/api/workspaces`, {
+		method: "POST",
+		headers: { "Content-Type": "application/json" },
+		credentials: "same-origin",
+		body: JSON.stringify(input),
+	});
+	const body = (await response.json().catch(() => null)) as { workspaceId?: number; error?: string } | null;
+	if (!response.ok) {
+		throw new WorkspaceApiError(response.status, body?.error ?? "unknown", `创建工作区失败(${response.status})`);
+	}
+	return body?.workspaceId as number;
+}
+
+export async function deleteWorkspace(apiBase: string, workspaceId: number): Promise<void> {
+	const response = await fetch(`${apiBase}/api/workspaces/${workspaceId}`, {
+		method: "DELETE",
+		credentials: "same-origin",
+	});
+	const body = (await response.json().catch(() => null)) as { error?: string } | null;
+	if (!response.ok) {
+		throw new WorkspaceApiError(response.status, body?.error ?? "unknown", `删除工作区失败(${response.status})`);
+	}
+}
+
+/** 创建工作区输入归一:trim 后任一为空返回 null(服务端同语义 400)。 */
+export function normalizeWorkspaceInput(name: string, repoPath: string): { name: string; repoPath: string } | null {
+	const trimmedName = name.trim();
+	const trimmedRepoPath = repoPath.trim();
+	if (trimmedName === "" || trimmedRepoPath === "") return null;
+	return { name: trimmedName, repoPath: trimmedRepoPath };
+}
+
+/** 400/409 → 行内文案;未知错误回退通用文案。 */
+export function createWorkspaceErrorCopy(error: unknown): string {
+	if (error instanceof WorkspaceApiError) {
+		if (error.code === "malformed_workspace") return "名称与仓库路径必填,且不能为空白";
+		if (error.code === "duplicate_repo_path") return "该仓库路径已在其他工作区使用";
+	}
+	return error instanceof Error ? error.message : String(error);
+}
+
+/** 409 workspace_busy / 404 → 行内文案;未知错误回退通用文案。 */
+export function deleteWorkspaceErrorCopy(error: unknown): string {
+	if (error instanceof WorkspaceApiError) {
+		if (error.code === "workspace_busy") return "有运行或认领在飞,暂时无法删除,稍后再试";
+		if (error.code === "unknown_workspace") return "该工作区已不存在,请刷新列表";
+	}
+	return error instanceof Error ? error.message : String(error);
+}

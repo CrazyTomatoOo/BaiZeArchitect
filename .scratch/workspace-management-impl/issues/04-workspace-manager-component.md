@@ -6,10 +6,10 @@
 
 **Blocked by:** 01（list/create API）, 02（delete API）——组件消费真实端点。
 
-**Status:** ready-for-agent
+**Status:** done
 
-- [ ] 新组件 `baize-workspace-manager`：`.card.item` 行式卡（`name` 主行 + `repo_path` 等宽副行），行容器非 button（行内按钮防嵌套）；右侧「进入」primary + 「删除」danger 直接显示
-- [ ] 新建折叠表单：`名称` + `repo_path` 必填；400/409 行内错误回显（仓库路径提示：任意非空字符串，不校验）；成功通过事件/回调通知宿主
-- [ ] 删除：行内两步确认（「将级联删除其下所有需求与资产（含设计历史、审批记录），不可恢复」+ 删除/取消）；进行中禁用；409 `workspace_busy` 行内回显
-- [ ] 零态卡片：「还没有工作空间，创建第一个来组织需求与资产」+ 新建按钮；数据加载失败行内错误
-- [ ] workflow-client 增 `listWorkspaces / createWorkspace / deleteWorkspace`（typed）；组件测试（vitest）+ `npm run typecheck` `npm run test` `npm run build` 全绿
+- [x] 新组件 `baize-workspace-manager`：`.card.item` 行式卡（`name` 主行 + `repo_path` 等宽副行），行容器 div.card.item（行内按钮防嵌套）；右侧「进入」primary + 「删除」danger 直接显示
+- [x] 新建折叠表单：`名称` + `repo_path` 必填；400/409 行内错误回显（malformed_workspace/duplicate_repo_path 文案映射）；成功经 `baize-enter-workspace` 事件直达进入
+- [x] 删除：行内两步确认（role="dialog"，文案沿决议 10「将级联删除其下所有需求与资产（含设计历史、审批记录），不可恢复」）；失败保留弹层行内错误回显；进行中禁用
+- [x] 零态卡片「还没有工作空间,点击「新建工作空间」创建第一个来组织需求与资产。」；数据加载失败行内错误
+- [x] workflow-client 增 `listWorkspaces / createWorkspace / deleteWorkspace`（typed）+ WorkspaceApiError + 纯助手（normalizeWorkspaceInput / 错误文案映射，文案真源在 client 层）；组件测试（vitest 40/40）+ `npm run typecheck` `npm run test` `npm run build` 全绿
