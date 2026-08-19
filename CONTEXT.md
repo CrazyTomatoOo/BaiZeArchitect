@@ -184,6 +184,10 @@ _Avoid_: 当前 Artifact、兼容读取表
 由编号 migration 生成、绑定 source/target schema、bundle digest、分类、anomaly 和 cutover actor 的不可变证明。
 _Avoid_: 新版 Approval、人工补写记录
 
+**Workspace（工作区）**:
+由仓库注册（repo_path 唯一字符串 = 身份，name = 可重复标签）、快照归属与 Requirement / Reusable Asset / Design Package 容器构成的产品层第一类实体；删除 = 级联销毁其下全部治理事实（单事务、不可恢复）；多操作员共享，不按工作区隔离可见性或权限。
+_Avoid_: 上层 project 概念、软归档/可逆删除、按工作区 ACL
+
 **Reusable Asset（可复用资产）**:
 属于 Workspace、独立于 Requirement/Workflow/Attempt 的 scenario、usecase 或 function 版本化资产；被 Task 使用时必须引用精确 revision。
 _Avoid_: 隐藏 Requirement、fake Run、当前治理 Artifact

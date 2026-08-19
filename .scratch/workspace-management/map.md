@@ -25,6 +25,7 @@
 - [Decide web shell navigation and selected-workspace state](issues/09-decide-web-shell-navigation-and-state.md) — Web 面全锁：`managerOpen: boolean` 四态（登录/详情隐式）；管理页 = `baize-workspace-manager.ts`（避开 negative-scan 已删名）；行式卡（进入 primary + 删除 danger 行内显示）+ 新建窄表单 + 零态 + 共用顶栏；键 `baize.workspaceId` 记住最近、失效清键回管理页；创建后直接进入；列表顶栏「管理工作空间」入口（两级返回）；index.html 去 `workspace-id="1"` 硬编码。
 - [Decide workspace API surface](issues/08-decide-workspace-api-surface.md) — 引擎外注册表 CRUD（Reusable Asset 先例，无事件/outbox）；**不新增能力位**（服务端零能力校验现状，任何已登录可删，护栏归 10）；三端点：GET → 200 `{workspaces:[{id,name,repoPath,createdAt}]}`、POST → 201 `{workspaceId}`（400 trim 校验 / 409 重复 repo_path, name 允许重复）、DELETE → 沿 asset 先例 404 `unknown_workspace` / 200 `{deleted:true}`（07 单事务级联 + 删后 foreign_key_check）；runtime 增 listWorkspaces/deleteWorkspace；契约 workspaces 段双侧同步归 11。
 - [Decide workspace delete guards](issues/10-decide-delete-guards.md) — 行内两步确认（`role="dialog"` 沿 gate-form 例，danger + 不可恢复文案）；门禁 = **仅引擎在飞**（runs queued/running 或 claims active → 409 `workspace_busy`，store 事务内先探后删；human_gates/design_sessions 不挡，确认文案覆盖）；用后回管理页 + 清键（09 协约）；ADR 成立（docs/adr/ADR-005）+ CONTEXT「工作区」词条落笔归 11；snapshot 孤儿雾区收口。
+- [Task: write workspace management spec for review](issues/11-task-write-mgmt-spec.md) — spec 四处落笔（故事 77–79 + Implementation Decisions「Workspace lifecycle and management」节含执行期同步清单 + Testing Decisions 2 条 + Out of Scope 1 条）；CONTEXT「工作区」词条；ADR-005 草稿；README/契约/negative-scan 改动仅清单化未应用（评审后执行）。**Destination 达成 = spec 交付评审**。
 
 ## Not yet specified
 
@@ -43,6 +44,6 @@
 - 更高层 `project` 概念（「项目」= 既有 workspace）；跨工作区资产/需求迁移；workspace 级操作员会话。（既有）
 - `baize-review-center` 挂载与泛化导航设施（仍为未挂载孤儿；本图仅在既有 shell 之上叠加首屏管理页）。
 
-## Frontier 查询（open + 无阻塞 + 未认领）
+## 图状态
 
-- 11-task-write-mgmt-spec（task，terminal——已全解阻）
+**11/11 票 closed（02/04 保留 + 07/08/09/10/11 本轮决议；01/03/05/06 作废），frontier 空 —— Destination 达成：spec 交付评审（`.scratch/automatic-requirement-design-orchestration/spec.md` 故事 77–79 + 决策面「Workspace lifecycle and management」；CONTEXT 词条；ADR-005 草稿），待用户评审确认后另行执行。**

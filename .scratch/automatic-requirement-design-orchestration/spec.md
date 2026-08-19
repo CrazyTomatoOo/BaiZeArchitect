@@ -97,6 +97,9 @@ Engine 独占 Workflow 状态转换、计划采用、Task 调度、副作用发�
 74. As a maintainer, I want all old role selectors, free-form Run prompts, Reviewer paths, shared Sessions, direct archive routes, old locks, tables, and compatibility adapters removed in the cutover release, so that only one architecture remains.
 75. As a maintainer, I want the system delivered through seven dependency-ordered implementation slices whose first six are test-only assemblies, so that review can be incremental without deploying a half-built dual track.
 76. As a maintainer, I want product metrics recorded but not gated until at least twenty real completed Workflows exist, so that future thresholds are evidence-based rather than invented.
+77. As an operator, I want token login to land on a workspace management page that lists, creates, and cascade-deletes workspaces, so that I choose the workspace before any requirement list is shown.
+78. As an operator, I want the most recently entered workspace remembered across sessions and an explicit way back to the management page, so that switching workspaces does not require re-login and a missing or removed selection falls back to the management page.
+79. As an operator, I want deleting a workspace to cascade-delete all its requirements, assets, and governance history in one transaction, refused while any Run or claim is in flight, so that a workspace can be fully retired without orphans or racing live execution.
 
 ## Implementation Decisions
 
@@ -180,6 +183,15 @@ Engine 独占 Workflow 状态转换、计划采用、Task 调度、副作用发�
 - UI never optimistically mutates governance state. It presents persisted receipt separately and waits for Workflow SSE and Projection to confirm actual state.
 - When live updates stale an open form or packet, submission is disabled, draft input is preserved, and the user must inspect differences and reload; the client never auto-rebases.
 
+### Workspace lifecycle and management
+
+- Workspaces are registry-level entities outside the Workflow command engine: `GET /api/workspaces`, `POST /api/workspaces`, and `DELETE /api/workspaces/:id` follow the Reusable Asset CRUD precedent (runtime → Store passthrough; no events, receipts, or Outbox jobs). No capability gating: any authenticated Operator can manage workspaces; deletion is protected by in-UI confirmation and the engine-in-flight guard only.
+- Creation requires a non-empty `name` and `repo_path` (any non-empty string, unvalidated label; unique — `repo_path` is the workspace identity, `name` may repeat) and returns `201 { workspaceId }`; duplicate `repo_path` returns 409, malformed body 400.
+- Workspace deletion cascade-destroys the complete governance subtree (33 tables, reverse-topological, single transaction, delete-blocking triggers suspended/restored in-transaction; `snapshot_documents` skipped as digest-shared immutable) and is refused (`409 workspace_busy`) while any Run is `queued`/`running` or any governance Claim is `active` under the workspace. Deleted workspaces read as 404 everywhere (`unknown_workspace` on DELETE).
+- The Web shell lands authenticated sessions on the workspace management page; entering a workspace shows its requirement list; the selected workspace is remembered in `localStorage["baize.workspaceId"]`; an explicit management entry sits in the list top bar; a missing or removed selection falls back to the management page and clears the key.
+- `baize-workspace-manager.ts` hosts the management surface (row cards, inline create form, inline two-step delete confirmation with irreversible-loss copy); the shell no longer reads a static `workspace-id` attribute from the document. Deleting the currently-selected workspace returns to the management page and clears the key.
+- Execution-phase doc/contract sync (this specification documents, it does not apply): README endpoint table +3 rows; `workflow-api-v1.json` gains a `workspaces` section mirroring `reusableAssets`, applied identically on both byte-identity sides (agent-runtime/contracts/ ↔ .wayfinder/2026-08-auto-orchestration/assets/); the negative-scan assertion "production web entry imports only baize-workflow" is updated to the shell reality and `baize-workspace-manager` registered; CONTEXT.md gains the "Workspace" glossary entry; ADR-005 records the cascade-delete decision.
+
 ### Cutover and delivery
 
 - Implementation is organized as seven dependency-ordered vertical slices: S1 deterministic contract harness; S2 Workflow governance kernel; S3 planning and Task execution; S4 Artifact quality loop; S5 human control and public API; S6 Web operator experience; S7 cutover and hard deletion.
@@ -210,6 +222,8 @@ Engine 独占 Workflow 状态转换、计划采用、Task 调度、副作用发�
 - Each Golden Requirement runs three times. Safety invariants must pass 100%; each case must achieve its expected gate or `ready_to_archive` at least two of three times; overall expected-result rate must be at least 90%; all successes must remain within established budgets.
 - Golden tests compare Schema, governed facts, evidence, gates, and terminal state—not natural-language wording, exact Task count, or specific design prose.
 - Workflow Doctor, release checks, and CI use the same invariant validators. Product metrics such as first-plan pass rate, revisions, retries, rework, takeover, time-to-ready, token/latency, and Finding closure are recorded but receive no release thresholds until at least twenty real completed Workflows exist.
+- Workspace lifecycle tests cover: create/list/delete over HTTP with real SQLite; duplicate `repo_path` 409; anonymous/forged-cookie 401; delete of a fully-populated workspace followed by Store reopen with clean `PRAGMA foreign_key_check`; and delete refusal while a Run is `queued`/`running` or a Claim is `active`.
+- Browser tests cover the management page (list, create, inline delete confirmation, zero-state), the `localStorage` remembered-selection fallback (missing/removed workspace → management page), and list-to-management navigation; negative scans assert the management surface is reachable only after login.
 
 ## Out of Scope
 
@@ -225,6 +239,7 @@ Engine 独占 Workflow 状态转换、计划采用、Task 调度、副作用发�
 - Dual write, shadow write, runtime feature flags, compatibility adapters, or post-write rollback to the old system.
 - A new metrics service or product analytics backend for the initial release.
 - Modification of target repositories or implementation of their business code; BaiZe produces requirement-design artifacts and plans only.
+- Workspace renaming, per-workspace operator visibility/ACL, a higher-level `project` concept, migrating requirements/assets between workspaces, workspace-scoped operator sessions, or any soft-archive/restore path for workspaces.
 
 ## Further Notes
 
