@@ -6,10 +6,10 @@
 
 **Blocked by:** 04（管理页组件）, 05（shell 首屏与选中态）——全流程就绪后对接。
 
-**Status:** ready-for-agent
+**Status:** done
 
-- [ ] `workspace-management.spec.ts`（route-level 全 mock，沿用既有 MockEventSource/fulfillJson 惯例）：登录 → 管理页列出工作区 → 创建（走通 201 与直接进入）→ 进入既有工作区 → 需求列表 → 详情 → 返回
-- [ ] 删除流：行内两步确认（danger 文案）/ 409 `workspace_busy` 行内回显 / 删除成功回管理页
-- [ ] 记住最近：进入后 reload 直达该工作区；键值指向已删工作区（GET 列表不含）→ 管理页
-- [ ] 页面导航：列表顶栏「管理工作空间」→ 管理页；零态（空列表）显示
-- [ ] 负向：无会话直达任意管理面路由 → 登录表单；三视口桌面/平板/窄屏全绿；`npm run test:e2e` 通过
+- [x] `workspace-management.spec.ts`（route-level 全 mock，沿用 MockEventSource/fulfillJson 惯例）：登录 → 管理页列工作区 / 创建（201 + 直接进入 + 写键）/ 进入既有 → 需求列表 → 详情（primary-action 开始）→ 返回 → 顶栏回管理页
+- [x] 删除流：行内两步确认（全量 danger 文案：工作区名 + 设计历史/审批记录 + 不可恢复，scope 至 role="dialog"）；409 `workspace_busy` 行内错误保留弹层；放行后成功移除回零态；删当前工作区清键
+- [x] 记住最近：进入动作写键 + reload 直达该工作区；键失效（已删工作区）→ 管理页并清键
+- [x] 页面导航：列表顶栏「管理工作空间」→ 管理页；零态（空列表）显示
+- [x] 负向：无会话 → 登录表单，无管理面泄漏；三视口桌面/平板/窄屏全绿；`npm run test:e2e` 54/54 全量通过
