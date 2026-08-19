@@ -23,6 +23,20 @@ import { READ_MODEL_GOVERNANCE_MIGRATION } from "./migrations/0011-read-model-go
 import { RUN_EVENT_STREAM_MIGRATION } from "./migrations/0012-run-event-stream.js";
 import { ACTOR_KIND_MIGRATION } from "./migrations/0013-actor-kind.js";
 import type { ReusableAssetKind } from "./reusable-asset-kind.js";
+import { parseJson } from "./json.js";
+import { AssetStore } from "./asset-store.js";
+import type { ReusableAssetDetail, ReusableAssetSummary } from "./asset-store.js";
+import { SnapshotStore } from "./snapshot-store.js";
+import type { SnapshotDocument } from "./snapshot-store.js";
+import { WorkspaceStore } from "./workspace-store.js";
+import type { WorkspaceSummary } from "./workspace-store.js";
+
+// Store（存储域）面的人名/类型经此处再导出：headless-runtime 与 operator-server
+// 继续从 workflow-store 引用，保持既有导入路径稳定（ADR-006 门面形态）。
+export { BusyWorkspaceError } from "./workspace-store.js";
+export type { WorkspaceSummary } from "./workspace-store.js";
+export { ReusableAssetMalformedBodyError, ReusableAssetNameConflictError } from "./asset-store.js";
+export type { ReusableAssetDetail, ReusableAssetSummary } from "./asset-store.js";
 import { type WorkflowCommandType } from "../workflow/command-types.js";
 import { ARTIFACT_OWNERSHIP, type InputBinding, type TaskOutputInput } from "../workflow/plan-types.js";
 import type { RoleResult, ContextManifest, RoleContract, BeginAttemptResult, CompleteAttemptResult, TraceLinkProposal, CriticReport, FindingProposal, FindingSeverity } from "../workflow/role-result.js";
@@ -219,13 +233,6 @@ interface WorkflowStoreOptions {
 	planValidator?: { check(value: unknown): boolean; errors(value: unknown): readonly unknown[] };
 }
 
-interface SnapshotDocument {
-	id: number;
-	digest: string;
-	schemaRef: string;
-	content: unknown;
-}
-
 export interface WorkflowProjection {
 	requirement: {
 		id: number;
@@ -272,61 +279,13 @@ export interface WorkflowProjection {
 	}>;
 }
 
-function parseJson<T>(value: string): T {
-	try {
-		return JSON.parse(value) as T;
-	} catch (error) {
-		throw new Error("Persisted Workflow JSON is invalid", { cause: error });
-	}
-}
 
-export class ReusableAssetMalformedBodyError extends Error {
-	constructor() {
-		super("Reusable Asset request body is malformed");
-	}
-}
-
-export class ReusableAssetNameConflictError extends Error {
-	constructor() {
-		super("Reusable Asset actor name conflicts within the workspace");
-	}
-}
-
-export class BusyWorkspaceError extends Error {
-	constructor(
-		readonly activeRuns: number,
-		readonly activeClaims: number,
-	) {
-		super(`Workspace is busy: ${activeRuns} active Run(s), ${activeClaims} active Claim(s)`);
-	}
-}
-
-function normalizeActorName(value: unknown): string | undefined {
-	if (typeof value !== "string") return undefined;
-	const trimmed = value.trim();
-	return trimmed.length > 0 ? trimmed : undefined;
-}
-
-function normalizeActorDescription(value: unknown): string | undefined {
-	if (value === undefined || value === null) return "";
-	return typeof value === "string" ? value : undefined;
-}
-
-function normalizeActorContent(content: unknown): { name: string; description: string } | undefined {
-	if (typeof content !== "object" || content === null || Array.isArray(content)) return undefined;
-	const record = content as { name?: unknown; description?: unknown };
-	const name = normalizeActorName(record.name);
-	const description = normalizeActorDescription(record.description);
-	if (!name || description === undefined) return undefined;
-	return { name, description };
-}
-
-function actorNameKey(name: string): string {
-	return name.trim().toLowerCase();
-}
 
 export class WorkflowStore {
 	private readonly database: Database.Database;
+	private readonly snapshotStore: SnapshotStore;
+	private readonly workspaceStore: WorkspaceStore;
+	private readonly assetStore: AssetStore;
 	private readonly createRequirementTransaction: (
 		input: CreateRequirementInput,
 	) => CreationResult;
@@ -340,8 +299,11 @@ export class WorkflowStore {
 			this.database.pragma("foreign_keys = ON");
 			this.database.pragma("journal_mode = WAL");
 			this.database.pragma("synchronous = FULL");
-			this.database.pragma("busy_timeout = 5000");
-			this.applyMigrations();
+this.database.pragma("busy_timeout = 5000");
+		this.applyMigrations();
+		this.snapshotStore = new SnapshotStore(this.database, this.options.hashProvider);
+		this.workspaceStore = new WorkspaceStore(this.database, this.options.clock);
+		this.assetStore = new AssetStore(this.database, this.options.clock, this.snapshotStore);
 		this.createRequirementTransaction = this.database.transaction((input) =>
 			this.createRequirementRows(input),
 		).immediate;
@@ -390,142 +352,20 @@ export class WorkflowStore {
 		}
 	}
 
-	createWorkspace(input: { repoPath: string; name: string }): number {
-		const timestamp = this.options.clock.now().toISOString();
-		return Number(
-			this.database
-				.prepare("insert into workspaces(repo_path, name, created_at) values (?, ?, ?)")
-				.run(input.repoPath, input.name, timestamp).lastInsertRowid,
-		);
+createWorkspace(input: { repoPath: string; name: string }): number {
+		return this.workspaceStore.createWorkspace(input);
 	}
 
 	workspaceExists(workspaceId: number): boolean {
-		return this.database
-			.prepare("select 1 from workspaces where id = ?")
-			.get(workspaceId) !== undefined;
+		return this.workspaceStore.workspaceExists(workspaceId);
 	}
 
 	listWorkspaces(): readonly WorkspaceSummary[] {
-		const rows = this.database
-			.prepare("select id, repo_path, name, created_at from workspaces order by id")
-			.all() as Array<{ id: number; repo_path: string; name: string; created_at: string }>;
-		return rows.map((row) => ({
-			id: row.id,
-			name: row.name,
-			repoPath: row.repo_path,
-			createdAt: row.created_at,
-		}));
+		return this.workspaceStore.listWorkspaces();
 	}
 
-	/** The workflow-id subquery scoping every workflow-dependent table to one workspace. */
-	private static readonly WORKFLOW_SCOPE =
-		"workflow_id in (select id from workflows where requirement_id in (select id from requirements where workspace_id = ?))";
-
-	private static readonly REQUIREMENT_SCOPE =
-		"requirement_id in (select id from requirements where workspace_id = ?)";
-
-	// Reverse-topological deletion order for a workspace subtree (research ticket 07).
-	// Child rows always die before the parents they reference; `defer_foreign_keys`
-	// defers the remaining FK checks (self-referential revisions) to commit time
-	// where every referencing row is already gone. The same list drives trigger
-	// capture: any BEFORE DELETE trigger on these tables is suspended in-transaction.
-	private static readonly WORKSPACE_DELETE_ORDER: ReadonlyArray<{ table: string; where: string; params: readonly number[] }> = [
-		{ table: "run_events", where: `run_id in (select id from runs where ${WorkflowStore.WORKFLOW_SCOPE})`, params: [1] },
-		{ table: "trace_links", where: `evidence_snapshot_id in (select id from evidence_snapshots where ${WorkflowStore.WORKFLOW_SCOPE}) or artifact_revision_id in (select id from artifact_revisions where artifact_id in (select id from artifacts where requirement_id in (select id from requirements where workspace_id = ?)))`, params: [1, 1] },
-		{ table: "workflow_events", where: WorkflowStore.WORKFLOW_SCOPE, params: [1] },
-		{ table: "command_receipts", where: WorkflowStore.WORKFLOW_SCOPE, params: [1] },
-		{ table: "outbox_jobs", where: WorkflowStore.WORKFLOW_SCOPE, params: [1] },
-		{ table: "evidence_snapshots", where: WorkflowStore.WORKFLOW_SCOPE, params: [1] },
-		{ table: "impact_profiles", where: WorkflowStore.WORKFLOW_SCOPE, params: [1] },
-		{ table: "legacy_imports", where: WorkflowStore.REQUIREMENT_SCOPE, params: [1] },
-		{ table: "design_packages", where: WorkflowStore.REQUIREMENT_SCOPE, params: [1] },
-		{ table: "approval_records", where: WorkflowStore.WORKFLOW_SCOPE, params: [1] },
-		{ table: "human_gates", where: WorkflowStore.WORKFLOW_SCOPE, params: [1] },
-		{ table: "human_directives", where: WorkflowStore.WORKFLOW_SCOPE, params: [1] },
-		{ table: "diagnostic_runs", where: WorkflowStore.WORKFLOW_SCOPE, params: [1] },
-		{ table: "critic_coverage_targets", where: WorkflowStore.WORKFLOW_SCOPE, params: [1] },
-		{ table: "findings", where: WorkflowStore.WORKFLOW_SCOPE, params: [1] },
-		{ table: "finding_threads", where: WorkflowStore.WORKFLOW_SCOPE, params: [1] },
-		{ table: "decisions", where: WorkflowStore.WORKFLOW_SCOPE, params: [1] },
-		{ table: "approval_packets", where: WorkflowStore.WORKFLOW_SCOPE, params: [1] },
-		{ table: "attempt_effects", where: WorkflowStore.WORKFLOW_SCOPE, params: [1] },
-		{ table: "governance_claims", where: WorkflowStore.WORKFLOW_SCOPE, params: [1] },
-		{ table: "runs", where: WorkflowStore.WORKFLOW_SCOPE, params: [1] },
-		{ table: "task_attempts", where: WorkflowStore.WORKFLOW_SCOPE, params: [1] },
-		{ table: "tasks", where: WorkflowStore.WORKFLOW_SCOPE, params: [1] },
-		{ table: "plan_revisions", where: WorkflowStore.WORKFLOW_SCOPE, params: [1] },
-		{ table: "workflow_incidents", where: WorkflowStore.WORKFLOW_SCOPE, params: [1] },
-		{ table: "workflows", where: WorkflowStore.REQUIREMENT_SCOPE, params: [1] },
-		{ table: "artifact_revisions", where: "artifact_id in (select id from artifacts where requirement_id in (select id from requirements where workspace_id = ?))", params: [1] },
-		{ table: "artifacts", where: WorkflowStore.REQUIREMENT_SCOPE, params: [1] },
-		{ table: "design_sessions", where: WorkflowStore.REQUIREMENT_SCOPE, params: [1] },
-		{ table: "requirements", where: "workspace_id = ?", params: [1] },
-		{ table: "reusable_asset_revisions", where: "reusable_asset_id in (select id from reusable_assets where workspace_id = ?)", params: [1] },
-		{ table: "reusable_assets", where: "workspace_id = ?", params: [1] },
-		{ table: "workspaces", where: "id = ?", params: [1] },
-	];
-
-	/** BEFORE DELETE triggers on the deleted tables — suspended in-transaction and restored verbatim. */
-	private deleteBlockingTriggers(): Array<{ name: string; sql: string }> {
-		const tables = new Set(WorkflowStore.WORKSPACE_DELETE_ORDER.map((entry) => entry.table));
-		const triggers = this.database
-			.prepare("select name, tbl_name, sql from sqlite_master where type = 'trigger'")
-			.all() as Array<{ name: string; tbl_name: string; sql: string | null }>;
-		return triggers
-			.filter(
-				(trigger) =>
-					tables.has(trigger.tbl_name)
-					&& /before\s+delete/i.test(trigger.sql ?? ""),
-			)
-			.map((trigger) => ({ name: trigger.name, sql: trigger.sql as string }));
-	}
-
-	deleteWorkspace(workspaceId: number): boolean {
-		const blockers = this.deleteBlockingTriggers();
-		const runner = this.database.transaction(() => {
-			// Re-checked inside the write transaction: a concurrent delete of the same
-			// workspace commits first, and this second delete must report false.
-			if (!this.workspaceExists(workspaceId)) return false;
-			const busy = this.database
-				.prepare(
-					`select
-						(select count(*) from runs where ${WorkflowStore.WORKFLOW_SCOPE} and status in ('queued', 'running')) as active_runs,
-						(select count(*) from governance_claims where ${WorkflowStore.WORKFLOW_SCOPE} and status = 'active') as active_claims`,
-				)
-				.get(workspaceId, workspaceId) as { active_runs: number; active_claims: number };
-			if (busy.active_runs > 0 || busy.active_claims > 0) {
-				throw new BusyWorkspaceError(busy.active_runs, busy.active_claims);
-			}
-
-			this.database.pragma("defer_foreign_keys = ON");
-			// The governance kernel enforces row immutability through BEFORE DELETE triggers;
-			// suspending them for this transaction is what makes the cascade possible at all.
-			for (const trigger of blockers) {
-				this.database.exec(`drop trigger "${trigger.name}"`);
-			}
-
-			for (const entry of WorkflowStore.WORKSPACE_DELETE_ORDER) {
-				const where = entry.where.replace(/\?/g, () => String(workspaceId));
-				this.database.prepare(`delete from ${entry.table} where ${where}`).run();
-			}
-
-			const violations = this.database.pragma("foreign_key_check") as unknown[];
-			if (violations.length > 0) {
-				throw new Error(`Workspace cascade delete left foreign key violations: ${JSON.stringify(violations)}`);
-			}
-
-			for (const trigger of blockers) {
-				this.database.exec(trigger.sql);
-			}
-			return true;
-		});
-
-		try {
-			return runner.immediate();
-		} catch (error) {
-			// Any failure rolls back the whole transaction including the trigger DDL.
-			throw error;
-		}
+deleteWorkspace(workspaceId: number): boolean {
+		return this.workspaceStore.deleteWorkspace(workspaceId);
 	}
 
 	createRequirement(input: CreateRequirementInput): CreationResult {
@@ -534,13 +374,13 @@ export class WorkflowStore {
 
 	private createRequirementRows(input: CreateRequirementInput): CreationResult {
 		const timestamp = this.options.clock.now().toISOString();
-		const baseline = this.insertSnapshot(
+		const baseline = this.snapshotStore.insertSnapshot(
 			"artifact_content",
 			"artifact/requirement/v1",
 			input.baseline,
 			timestamp,
 		);
-		const policy = this.insertSnapshot(
+		const policy = this.snapshotStore.insertSnapshot(
 			"policy_bundle",
 			"policy-bundle/v1",
 			this.options.policyBundle,
@@ -618,36 +458,6 @@ export class WorkflowStore {
 			workflowVersion: 0,
 			lastEventSeq: 1,
 		};
-	}
-
-	private insertSnapshot(
-		kind: string,
-		schemaRef: string,
-		content: unknown,
-		createdAt: string,
-	): SnapshotDocument {
-		const digest = this.options.hashProvider.digest(content);
-		const encoded = this.options.hashProvider.canonicalize(content);
-		this.database
-			.prepare(
-				"insert into snapshot_documents(kind, schema_ref, media_type, content, digest, created_at) values (?, ?, 'application/json', ?, ?, ?) on conflict(kind, digest) do nothing",
-			)
-			.run(kind, schemaRef, encoded, digest, createdAt);
-		const row = this.database
-			.prepare(
-				"select id, digest, schema_ref, content, media_type from snapshot_documents where kind = ? and digest = ?",
-			)
-			.get(kind, digest) as {
-			id: number;
-			digest: string;
-			schema_ref: string;
-			content: string;
-			media_type: string;
-		};
-		if (row.schema_ref !== schemaRef || row.media_type !== "application/json" || row.content !== encoded) {
-			throw new Error(`Snapshot digest collision for ${kind}/${digest}`);
-		}
-		return { id: row.id, digest: row.digest, schemaRef: row.schema_ref, content };
 	}
 
 	listRequirements(workspaceId: number): Array<{ requirementId: number; workflowId: number }> {
@@ -792,7 +602,7 @@ export class WorkflowStore {
 		const workflow = this.database
 			.prepare("select state, version, last_event_seq, current_failure_code, current_plan_revision_id, current_approval_packet_id, requirement_id from workflows where id = ?")
 			.get(input.workflowId) as { state: string; version: number; last_event_seq: number; current_failure_code: string | null; current_plan_revision_id: number | null; current_approval_packet_id: number | null; requirement_id: number };
-		const actorSnapshot = this.insertSnapshot(
+		const actorSnapshot = this.snapshotStore.insertSnapshot(
 			"actor_snapshot",
 			"actor/v1",
 			{ actorRef: input.operator.actorRef, capabilities: input.operator.capabilities },
@@ -1069,7 +879,7 @@ export class WorkflowStore {
 			this.database
 				.prepare("update design_sessions set status = 'archived', archived_at = ?, updated_at = ? where requirement_id = ?")
 				.run(timestamp, timestamp, workflow.requirement_id);
-			const packetSnapshot = this.insertSnapshot("approval_packet", "approval-packet/v1", parseJson<unknown>(packet.content_json), timestamp);
+			const packetSnapshot = this.snapshotStore.insertSnapshot("approval_packet", "approval-packet/v1", parseJson<unknown>(packet.content_json), timestamp);
 			const approvalRecordId = Number(this.database
 				.prepare("insert into approval_records(workflow_id, record_type, subject_type, subject_id, subject_digest, reason, targets_json, actor_snapshot_document_id, command_id, created_at) values (?, 'packet_approval', 'approval_packet', ?, ?, null, null, ?, ?, ?)")
 				.run(input.workflowId, packet.id, packet.digest, actorSnapshot.id, input.commandId, timestamp).lastInsertRowid);
@@ -1139,7 +949,7 @@ export class WorkflowStore {
 		const artifact = this.database
 			.prepare("select id from artifacts where requirement_id = ? and kind = 'requirement'")
 			.get(requirementId) as { id: number };
-		const snapshot = this.insertSnapshot("artifact_content", "artifact/requirement/v1", baseline, timestamp);
+		const snapshot = this.snapshotStore.insertSnapshot("artifact_content", "artifact/requirement/v1", baseline, timestamp);
 		const revisionNo = (this.database.prepare("select coalesce(max(revision_no), 0) + 1 as next from artifact_revisions where artifact_id = ?").get(artifact.id) as { next: number }).next;
 		const revisionId = Number(
 			this.database
@@ -1154,7 +964,7 @@ export class WorkflowStore {
 	}
 
 	private adoptReplacementPlanRows(workflowId: number, workflow: { version: number; current_plan_revision_id: number | null }, proposal: PlanProposal, timestamp: string): number {
-		const proposalSnapshot = this.insertSnapshot("plan_proposal", "plan-proposal/v1", proposal, timestamp);
+		const proposalSnapshot = this.snapshotStore.insertSnapshot("plan_proposal", "plan-proposal/v1", proposal, timestamp);
 		const revisionNo = (this.database.prepare("select coalesce(max(revision_no), 0) + 1 as next from plan_revisions where workflow_id = ?").get(workflowId) as { next: number }).next;
 		const newVersion = workflow.version + 1;
 
@@ -1518,7 +1328,7 @@ export class WorkflowStore {
 			return this.supersedePlanningRows(workflowId, attemptId, "planning_context_changed");
 		}
 
-		const proposalSnapshot = this.insertSnapshot("plan_proposal", "plan-proposal/v1", proposal, timestamp);
+		const proposalSnapshot = this.snapshotStore.insertSnapshot("plan_proposal", "plan-proposal/v1", proposal, timestamp);
 		const revisionNo = (this.database.prepare("select coalesce(max(revision_no), 0) + 1 as next from plan_revisions where workflow_id = ?").get(workflowId) as { next: number }).next;
 		const newVersion = workflow.version + 1;
 
@@ -1656,7 +1466,7 @@ export class WorkflowStore {
 
 		const roleContract = this.getOrCreateRoleContract(task.role, timestamp);
 		const manifest = this.buildContextManifest(workflowId, workflow.version, task, resolvedInputs, roleContract, timestamp);
-		const contextSnapshot = this.insertSnapshot("context_manifest", "context-manifest/v1", manifest, timestamp);
+		const contextSnapshot = this.snapshotStore.insertSnapshot("context_manifest", "context-manifest/v1", manifest, timestamp);
 
 		const attemptNo = (this.database.prepare("select coalesce(max(attempt_no), 0) + 1 as next from task_attempts where task_id = ?").get(task.id) as { next: number }).next;
 		const attemptId = Number(this.database
@@ -1736,7 +1546,7 @@ export class WorkflowStore {
 			writableArtifactKinds: ARTIFACT_OWNERSHIP[role as keyof typeof ARTIFACT_OWNERSHIP] ?? [],
 			allowedEffectTypes: ["artifact_revision"],
 		};
-		const snapshot = this.insertSnapshot("role_contract", "role-contract/v1", contract, timestamp);
+		const snapshot = this.snapshotStore.insertSnapshot("role_contract", "role-contract/v1", contract, timestamp);
 		const identity = `role-contract/${role}/v1`;
 		return { ...contract, documentId: snapshot.id, identity, digest: snapshot.digest };
 	}
@@ -1772,7 +1582,7 @@ export class WorkflowStore {
 	const task = this.database.prepare("select id, key, kind, role, expected_artifact_effects_json, max_attempts, plan_revision_id from tasks where id = ?").get(attempt.task_id) as { id: number; key: string; kind: string; role: string; expected_artifact_effects_json: string; max_attempts: number; plan_revision_id: number };
 
 		if (attempt.status === "cancelled" || attempt.status === "superseded" || attempt.status === "failed") {
-			const resultSnapshot = this.insertSnapshot("artifact_content", "role-result/v1", structuredResult, timestamp);
+			const resultSnapshot = this.snapshotStore.insertSnapshot("artifact_content", "role-result/v1", structuredResult, timestamp);
 			this.appendEvent(workflowId, "late_result_audit", workflow.version, "task_attempt", attemptId, 0, { attemptId, terminalStatus: attempt.status, resultDigest: resultSnapshot.digest }, timestamp);
 			return { outcome: "late_result_audit", failureCode: null, workflowVersion: workflow.version, lastEventSeq: this.currentLastEventSeq(workflowId) };
 		}
@@ -1843,7 +1653,7 @@ export class WorkflowStore {
 		const runId = (this.database.prepare("select id from runs where attempt_id = ? order by id desc limit 1").get(attemptId) as { id: number }).id;
 
 		for (const effect of result.effects) {
-			const contentSnapshot = this.insertSnapshot("artifact_content", `artifact/${effect.artifactKind}/v1`, effect.content, timestamp);
+			const contentSnapshot = this.snapshotStore.insertSnapshot("artifact_content", `artifact/${effect.artifactKind}/v1`, effect.content, timestamp);
 			let artifactId = (this.database.prepare("select id from artifacts where requirement_id = ? and kind = ?").get(projection.requirement.id, effect.artifactKind) as { id: number } | undefined)?.id;
 			if (!artifactId) {
 				artifactId = Number(this.database
@@ -1994,7 +1804,7 @@ export class WorkflowStore {
 	}
 	bindEvidenceSnapshot(workflowId: number, repoDigest: string, files: unknown): EvidenceSnapshotResult {
 		const timestamp = this.options.clock.now().toISOString();
-		const filesSnapshot = this.insertSnapshot("repository_manifest", "repository-snapshot/v1", files, timestamp);
+		const filesSnapshot = this.snapshotStore.insertSnapshot("repository_manifest", "repository-snapshot/v1", files, timestamp);
 		this.database
 			.prepare("insert into evidence_snapshots(workflow_id, repo_digest, files_document_id, created_at) values (?, ?, ?, ?) on conflict(workflow_id, repo_digest) do nothing")
 			.run(workflowId, repoDigest, filesSnapshot.id, timestamp);
@@ -2826,140 +2636,34 @@ export class WorkflowStore {
 	}
 
 	createReusableAsset(input: { workspaceId: number; kind: ReusableAssetKind; title: string; content: unknown; source?: "manual" | "import" | "migration"; legacyOriginRequirementId?: number | null; actorSnapshotDocumentId?: number | null; migrationAttestationDocumentId?: number | null }): { assetId: number; revisionId: number; revisionNo: number } {
-		if (!this.workspaceExists(input.workspaceId)) throw new Error("Workspace not found");
-		const timestamp = this.options.clock.now().toISOString();
-		const content = input.kind === "actor" ? normalizeActorContent(input.content) : input.content;
-		if (input.kind === "actor" && !content) throw new ReusableAssetMalformedBodyError();
-		const title = input.kind === "actor" ? (content as { name: string }).name : input.title;
-		const schemaRef = input.kind === "actor" ? "asset/actor/v1" : `artifact/${input.kind}/v1`;
-		const transaction = this.database.transaction(() => {
-			if (input.kind === "actor" && this.actorNameExists(input.workspaceId, (content as { name: string }).name)) {
-				throw new ReusableAssetNameConflictError();
-			}
-			const document = this.insertSnapshot("reusable_asset_content", schemaRef, content, timestamp);
-			const assetId = Number(this.database
-				.prepare("insert into reusable_assets(workspace_id, kind, title, current_revision_id, legacy_origin_requirement_id, created_at, updated_at) values (?, ?, ?, null, ?, ?, ?)")
-				.run(input.workspaceId, input.kind, title, input.legacyOriginRequirementId ?? null, timestamp, timestamp).lastInsertRowid);
-			const revisionId = Number(this.database
-				.prepare("insert into reusable_asset_revisions(reusable_asset_id, revision_no, content_document_id, content_digest, source, actor_snapshot_document_id, migration_attestation_document_id, created_at) values (?, 1, ?, ?, ?, ?, ?, ?)")
-				.run(assetId, document.id, document.digest, input.source ?? "manual", input.actorSnapshotDocumentId ?? null, input.migrationAttestationDocumentId ?? null, timestamp).lastInsertRowid);
-			this.database.prepare("update reusable_assets set current_revision_id = ? where id = ?").run(revisionId, assetId);
-			return { assetId, revisionId, revisionNo: 1 };
-		}).immediate;
-		return transaction();
+		// workspace 存在性前置归门面（ADR-006）：AssetStore 不依赖 WorkspaceStore。
+		if (!this.workspaceStore.workspaceExists(input.workspaceId)) throw new Error("Workspace not found");
+		return this.assetStore.createReusableAsset(input);
 	}
 
 	updateActorReusableAsset(assetId: number, patch: unknown): { revisionId: number; revisionNo: number } | undefined {
-		if (typeof patch !== "object" || patch === null || Array.isArray(patch)) throw new ReusableAssetMalformedBodyError();
-		const record = patch as { name?: unknown; description?: unknown };
-		if (!("name" in record) && !("description" in record)) throw new ReusableAssetMalformedBodyError();
-		const hasName = "name" in record;
-		const hasDescription = "description" in record;
-		const patchName = hasName ? normalizeActorName(record.name) : undefined;
-		const patchDescription = hasDescription ? normalizeActorDescription(record.description) : undefined;
-		if ((hasName && !patchName) || (hasDescription && patchDescription === undefined)) throw new ReusableAssetMalformedBodyError();
-		const timestamp = this.options.clock.now().toISOString();
-		const transaction = this.database.transaction(() => {
-			const asset = this.database
-				.prepare("select a.id, a.workspace_id, a.kind, a.current_revision_id, r.revision_no, d.content from reusable_assets a join reusable_asset_revisions r on r.id = a.current_revision_id join snapshot_documents d on d.id = r.content_document_id where a.id = ?")
-				.get(assetId) as { id: number; workspace_id: number; kind: string; current_revision_id: number; revision_no: number; content: string } | undefined;
-			if (!asset || asset.kind !== "actor") return undefined;
-			const current = normalizeActorContent(parseJson<unknown>(asset.content));
-			if (!current) throw new ReusableAssetMalformedBodyError();
-			const next = {
-				name: patchName ?? current.name,
-				description: patchDescription ?? current.description,
-			};
-			if (this.actorNameExists(asset.workspace_id, next.name, asset.id)) throw new ReusableAssetNameConflictError();
-			const document = this.insertSnapshot("reusable_asset_content", "asset/actor/v1", next, timestamp);
-			const revisionNo = asset.revision_no + 1;
-			const revisionId = Number(this.database
-				.prepare("insert into reusable_asset_revisions(reusable_asset_id, revision_no, content_document_id, content_digest, source, actor_snapshot_document_id, migration_attestation_document_id, created_at) values (?, ?, ?, ?, 'manual', null, null, ?)")
-				.run(asset.id, revisionNo, document.id, document.digest, timestamp).lastInsertRowid);
-			this.database.prepare("update reusable_assets set title = ?, current_revision_id = ?, updated_at = ? where id = ?").run(next.name, revisionId, timestamp, asset.id);
-			return { revisionId, revisionNo };
-		}).immediate;
-		return transaction();
-	}
-
-	private actorNameExists(workspaceId: number, name: string, excludeAssetId?: number): boolean {
-		const rows = this.database
-			.prepare("select a.id, d.content from reusable_assets a join reusable_asset_revisions r on r.id = a.current_revision_id join snapshot_documents d on d.id = r.content_document_id where a.workspace_id = ? and a.kind = 'actor'")
-			.all(workspaceId) as Array<{ id: number; content: string }>;
-		const key = actorNameKey(name);
-		return rows.some((row) => row.id !== excludeAssetId && actorNameKey(normalizeActorContent(parseJson<unknown>(row.content))?.name ?? "") === key);
+		return this.assetStore.updateActorReusableAsset(assetId, patch);
 	}
 
 	listReusableAssets(workspaceId: number): readonly ReusableAssetSummary[] {
-		const rows = this.database
-			.prepare("select a.id, a.kind, a.title, a.current_revision_id, a.legacy_origin_requirement_id, a.created_at, r.revision_no, r.content_digest from reusable_assets a left join reusable_asset_revisions r on r.id = a.current_revision_id where a.workspace_id = ? order by a.id")
-			.all(workspaceId) as Array<{ id: number; kind: string; title: string; current_revision_id: number | null; legacy_origin_requirement_id: number | null; created_at: string; revision_no: number | null; content_digest: string | null }>;
-		return rows.map((row) => ({
-			id: row.id,
-			workspaceId,
-			kind: row.kind as ReusableAssetSummary["kind"],
-			title: row.title,
-			currentRevision: row.current_revision_id === null ? null : { id: row.current_revision_id, revisionNo: row.revision_no as number, digest: row.content_digest as string },
-			legacyOriginRequirementId: row.legacy_origin_requirement_id,
-			createdAt: row.created_at,
-		}));
+		return this.assetStore.listReusableAssets(workspaceId);
 	}
 
 	getReusableAsset(assetId: number): ReusableAssetDetail | undefined {
-		const asset = this.database
-			.prepare("select id, workspace_id, kind, title, current_revision_id, legacy_origin_requirement_id, created_at from reusable_assets where id = ?")
-			.get(assetId) as { id: number; workspace_id: number; kind: string; title: string; current_revision_id: number | null; legacy_origin_requirement_id: number | null; created_at: string } | undefined;
-		if (!asset) return undefined;
-		const revisions = this.database
-			.prepare("select r.id, r.revision_no, r.content_document_id, r.content_digest, r.source, r.created_at, d.content from reusable_asset_revisions r join snapshot_documents d on d.id = r.content_document_id where r.reusable_asset_id = ? order by r.revision_no")
-			.all(assetId) as Array<{ id: number; revision_no: number; content_document_id: number; content_digest: string; source: string; created_at: string; content: string }>;
-		return {
-			id: asset.id,
-			workspaceId: asset.workspace_id,
-			kind: asset.kind as ReusableAssetDetail["kind"],
-			title: asset.title,
-			currentRevisionId: asset.current_revision_id,
-			legacyOriginRequirementId: asset.legacy_origin_requirement_id,
-			createdAt: asset.created_at,
-			revisions: revisions.map((revision) => ({
-				id: revision.id,
-				revisionNo: revision.revision_no,
-				contentDocumentId: revision.content_document_id,
-				digest: revision.content_digest,
-				source: revision.source as "manual" | "import" | "migration",
-				content: parseJson<unknown>(revision.content),
-				createdAt: revision.created_at,
-			})),
-		};
+		return this.assetStore.getReusableAsset(assetId);
 	}
 
 	deleteReusableAsset(assetId: number): boolean {
-		const transaction = this.database.transaction(() => {
-			const asset = this.database.prepare("select id from reusable_assets where id = ?").get(assetId) as { id: number } | undefined;
-			if (!asset) return false;
-			this.database.prepare("delete from reusable_assets where id = ?").run(assetId);
-			return true;
-		}).immediate;
-		return transaction();
+		return this.assetStore.deleteReusableAsset(assetId);
 	}
 
 	exportReusableAssets(workspaceId: number): readonly ReusableAssetDetail[] {
-		return this.listReusableAssets(workspaceId)
-			.map((summary) => this.getReusableAsset(summary.id))
-			.filter((detail): detail is ReusableAssetDetail => detail !== undefined);
+		return this.assetStore.exportReusableAssets(workspaceId);
 	}
 
 	importReusableAssets(workspaceId: number, assets: readonly { kind: ReusableAssetKind; title: string; content: unknown; provenanceDigest?: string }[]): readonly number[] {
-		if (!this.workspaceExists(workspaceId)) throw new Error("Workspace not found");
-		const ids: number[] = [];
-		const transaction = this.database.transaction(() => {
-			for (const asset of assets) {
-				const created = this.createReusableAsset({ workspaceId, kind: asset.kind, title: asset.title, content: asset.content, source: "import" });
-				ids.push(created.assetId);
-			}
-		}).immediate;
-		transaction();
-		return ids;
+		if (!this.workspaceStore.workspaceExists(workspaceId)) throw new Error("Workspace not found");
+		return this.assetStore.importReusableAssets(workspaceId, assets);
 	}
 
 	appendRunEvent(runId: number, type: string, payload: Record<string, unknown>): number {
@@ -3080,7 +2784,7 @@ export class WorkflowStore {
 		timestamp: string,
 		crashInjector: { reach(point: string): void },
 	): CutoverApplyResult {
-		const reportDoc = this.insertSnapshot("cutover_report", "cutover-report/v1", report, timestamp);
+		const reportDoc = this.snapshotStore.insertSnapshot("cutover_report", "cutover-report/v1", report, timestamp);
 		const attestationContent = {
 			schemaVersion: "migration-attestation/v1",
 			reportDigest: report.reportDigest,
@@ -3090,7 +2794,7 @@ export class WorkflowStore {
 			anomalyCount: report.anomalies.length,
 			appliedAt: timestamp,
 		};
-		const attestationDoc = this.insertSnapshot(
+		const attestationDoc = this.snapshotStore.insertSnapshot(
 			"migration_attestation",
 			"migration-attestation/v1",
 			attestationContent,
@@ -3126,7 +2830,7 @@ export class WorkflowStore {
 				description: legacyReq.description ?? "",
 				sourceRefs: [],
 			};
-			const bundleDoc = this.insertSnapshot(
+			const bundleDoc = this.snapshotStore.insertSnapshot(
 				"legacy_requirement_bundle",
 				"legacy-requirement-bundle/v1",
 				{
@@ -3267,13 +2971,13 @@ export class WorkflowStore {
 		anomalyCount: number;
 		timestamp: string;
 	}): { requirementId: number; workflowId: number } {
-		const baselineDoc = this.insertSnapshot(
+		const baselineDoc = this.snapshotStore.insertSnapshot(
 			"artifact_content",
 			"artifact/requirement/v1",
 			input.baseline,
 			input.timestamp,
 		);
-		const policyDoc = this.insertSnapshot(
+		const policyDoc = this.snapshotStore.insertSnapshot(
 			"policy_bundle",
 			"policy-bundle/v1",
 			this.options.policyBundle,
@@ -3387,13 +3091,13 @@ export class WorkflowStore {
 		anomalyCount: number;
 		timestamp: string;
 	}): { requirementId: number; workflowId: number } {
-		const baselineDoc = this.insertSnapshot(
+		const baselineDoc = this.snapshotStore.insertSnapshot(
 			"artifact_content",
 			"artifact/requirement/v1",
 			input.baseline,
 			input.timestamp,
 		);
-		const policyDoc = this.insertSnapshot(
+		const policyDoc = this.snapshotStore.insertSnapshot(
 			"policy_bundle",
 			"policy-bundle/v1",
 			this.options.policyBundle,
@@ -3679,13 +3383,6 @@ export interface DesignPackageRecord {
 	archivedAt: string;
 }
 
-export interface WorkspaceSummary {
-	id: number;
-	name: string;
-	repoPath: string;
-	createdAt: string;
-}
-
 export interface LegacyImportRecord {
 	requirementId: number;
 	workflowId: number;
@@ -3694,35 +3391,6 @@ export interface LegacyImportRecord {
 	attestationDocumentId: number;
 	anomalySummary: { count: number };
 	createdAt: string;
-}
-
-export interface ReusableAssetSummary {
-	id: number;
-	workspaceId: number;
-	kind: ReusableAssetKind;
-	title: string;
-	currentRevision: { id: number; revisionNo: number; digest: string } | null;
-	legacyOriginRequirementId: number | null;
-	createdAt: string;
-}
-
-export interface ReusableAssetDetail {
-	id: number;
-	workspaceId: number;
-	kind: ReusableAssetKind;
-	title: string;
-	currentRevisionId: number | null;
-	legacyOriginRequirementId: number | null;
-	createdAt: string;
-	revisions: readonly {
-		id: number;
-		revisionNo: number;
-		contentDocumentId: number;
-		digest: string;
-		source: "manual" | "import" | "migration";
-		content: unknown;
-		createdAt: string;
-	}[];
 }
 
 export interface EvidenceSnapshotResult {
