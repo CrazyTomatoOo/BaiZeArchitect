@@ -47,6 +47,7 @@ export interface HeadlessWorkflowRuntime {
 	createWorkspace(input: { repoPath: string; name: string }): number;
 	workspaceExists(workspaceId: number): boolean;
 	listWorkspaces(): readonly WorkspaceSummary[];
+	deleteWorkspace(workspaceId: number): boolean;
 	createRequirement(input: { workspaceId: number; baseline: RequirementBaseline }): {
 		requirementId: number;
 		workflowId: number;
@@ -166,6 +167,9 @@ export async function openHeadlessWorkflowRuntime(
 		},
 		listWorkspaces() {
 			return store.listWorkspaces();
+		},
+		deleteWorkspace(workspaceId) {
+			return store.deleteWorkspace(workspaceId);
 		},
 		createRequirement(input) {
 			if (!artifactValidator.check(input.baseline)) {

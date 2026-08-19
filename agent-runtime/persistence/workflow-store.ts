@@ -312,6 +312,15 @@ export class ReusableAssetNameConflictError extends Error {
 	}
 }
 
+export class BusyWorkspaceError extends Error {
+	constructor(
+		readonly activeRuns: number,
+		readonly activeClaims: number,
+	) {
+		super(`Workspace is busy: ${activeRuns} active Run(s), ${activeClaims} active Claim(s)`);
+	}
+}
+
 function normalizeActorName(value: unknown): string | undefined {
 	if (typeof value !== "string") return undefined;
 	const trimmed = value.trim();
@@ -426,6 +435,117 @@ export class WorkflowStore {
 			repoPath: row.repo_path,
 			createdAt: row.created_at,
 		}));
+	}
+
+	/** The workflow-id subquery scoping every workflow-dependent table to one workspace. */
+	private static readonly WORKFLOW_SCOPE =
+		"workflow_id in (select id from workflows where requirement_id in (select id from requirements where workspace_id = ?))";
+
+	private static readonly REQUIREMENT_SCOPE =
+		"requirement_id in (select id from requirements where workspace_id = ?)";
+
+	// Reverse-topological deletion order for a workspace subtree (research ticket 07).
+	// Child rows always die before the parents they reference; `defer_foreign_keys`
+	// defers the remaining FK checks (self-referential revisions) to commit time
+	// where every referencing row is already gone. The same list drives trigger
+	// capture: any BEFORE DELETE trigger on these tables is suspended in-transaction.
+	private static readonly WORKSPACE_DELETE_ORDER: ReadonlyArray<{ table: string; where: string; params: readonly number[] }> = [
+		{ table: "run_events", where: `run_id in (select id from runs where ${WorkflowStore.WORKFLOW_SCOPE})`, params: [1] },
+		{ table: "trace_links", where: `evidence_snapshot_id in (select id from evidence_snapshots where ${WorkflowStore.WORKFLOW_SCOPE}) or artifact_revision_id in (select id from artifact_revisions where artifact_id in (select id from artifacts where requirement_id in (select id from requirements where workspace_id = ?)))`, params: [1, 1] },
+		{ table: "workflow_events", where: WorkflowStore.WORKFLOW_SCOPE, params: [1] },
+		{ table: "command_receipts", where: WorkflowStore.WORKFLOW_SCOPE, params: [1] },
+		{ table: "outbox_jobs", where: WorkflowStore.WORKFLOW_SCOPE, params: [1] },
+		{ table: "evidence_snapshots", where: WorkflowStore.WORKFLOW_SCOPE, params: [1] },
+		{ table: "impact_profiles", where: WorkflowStore.WORKFLOW_SCOPE, params: [1] },
+		{ table: "legacy_imports", where: WorkflowStore.REQUIREMENT_SCOPE, params: [1] },
+		{ table: "design_packages", where: WorkflowStore.REQUIREMENT_SCOPE, params: [1] },
+		{ table: "approval_records", where: WorkflowStore.WORKFLOW_SCOPE, params: [1] },
+		{ table: "human_gates", where: WorkflowStore.WORKFLOW_SCOPE, params: [1] },
+		{ table: "human_directives", where: WorkflowStore.WORKFLOW_SCOPE, params: [1] },
+		{ table: "diagnostic_runs", where: WorkflowStore.WORKFLOW_SCOPE, params: [1] },
+		{ table: "critic_coverage_targets", where: WorkflowStore.WORKFLOW_SCOPE, params: [1] },
+		{ table: "findings", where: WorkflowStore.WORKFLOW_SCOPE, params: [1] },
+		{ table: "finding_threads", where: WorkflowStore.WORKFLOW_SCOPE, params: [1] },
+		{ table: "decisions", where: WorkflowStore.WORKFLOW_SCOPE, params: [1] },
+		{ table: "approval_packets", where: WorkflowStore.WORKFLOW_SCOPE, params: [1] },
+		{ table: "attempt_effects", where: WorkflowStore.WORKFLOW_SCOPE, params: [1] },
+		{ table: "governance_claims", where: WorkflowStore.WORKFLOW_SCOPE, params: [1] },
+		{ table: "runs", where: WorkflowStore.WORKFLOW_SCOPE, params: [1] },
+		{ table: "task_attempts", where: WorkflowStore.WORKFLOW_SCOPE, params: [1] },
+		{ table: "tasks", where: WorkflowStore.WORKFLOW_SCOPE, params: [1] },
+		{ table: "plan_revisions", where: WorkflowStore.WORKFLOW_SCOPE, params: [1] },
+		{ table: "workflow_incidents", where: WorkflowStore.WORKFLOW_SCOPE, params: [1] },
+		{ table: "workflows", where: WorkflowStore.REQUIREMENT_SCOPE, params: [1] },
+		{ table: "artifact_revisions", where: "artifact_id in (select id from artifacts where requirement_id in (select id from requirements where workspace_id = ?))", params: [1] },
+		{ table: "artifacts", where: WorkflowStore.REQUIREMENT_SCOPE, params: [1] },
+		{ table: "design_sessions", where: WorkflowStore.REQUIREMENT_SCOPE, params: [1] },
+		{ table: "requirements", where: "workspace_id = ?", params: [1] },
+		{ table: "reusable_asset_revisions", where: "reusable_asset_id in (select id from reusable_assets where workspace_id = ?)", params: [1] },
+		{ table: "reusable_assets", where: "workspace_id = ?", params: [1] },
+		{ table: "workspaces", where: "id = ?", params: [1] },
+	];
+
+	/** BEFORE DELETE triggers on the deleted tables — suspended in-transaction and restored verbatim. */
+	private deleteBlockingTriggers(): Array<{ name: string; sql: string }> {
+		const tables = new Set(WorkflowStore.WORKSPACE_DELETE_ORDER.map((entry) => entry.table));
+		const triggers = this.database
+			.prepare("select name, tbl_name, sql from sqlite_master where type = 'trigger'")
+			.all() as Array<{ name: string; tbl_name: string; sql: string | null }>;
+		return triggers
+			.filter(
+				(trigger) =>
+					tables.has(trigger.tbl_name)
+					&& /before\s+delete/i.test(trigger.sql ?? ""),
+			)
+			.map((trigger) => ({ name: trigger.name, sql: trigger.sql as string }));
+	}
+
+	deleteWorkspace(workspaceId: number): boolean {
+		const blockers = this.deleteBlockingTriggers();
+		const runner = this.database.transaction(() => {
+			// Re-checked inside the write transaction: a concurrent delete of the same
+			// workspace commits first, and this second delete must report false.
+			if (!this.workspaceExists(workspaceId)) return false;
+			const busy = this.database
+				.prepare(
+					`select
+						(select count(*) from runs where ${WorkflowStore.WORKFLOW_SCOPE} and status in ('queued', 'running')) as active_runs,
+						(select count(*) from governance_claims where ${WorkflowStore.WORKFLOW_SCOPE} and status = 'active') as active_claims`,
+				)
+				.get(workspaceId, workspaceId) as { active_runs: number; active_claims: number };
+			if (busy.active_runs > 0 || busy.active_claims > 0) {
+				throw new BusyWorkspaceError(busy.active_runs, busy.active_claims);
+			}
+
+			this.database.pragma("defer_foreign_keys = ON");
+			// The governance kernel enforces row immutability through BEFORE DELETE triggers;
+			// suspending them for this transaction is what makes the cascade possible at all.
+			for (const trigger of blockers) {
+				this.database.exec(`drop trigger "${trigger.name}"`);
+			}
+
+			for (const entry of WorkflowStore.WORKSPACE_DELETE_ORDER) {
+				const where = entry.where.replace(/\?/g, () => String(workspaceId));
+				this.database.prepare(`delete from ${entry.table} where ${where}`).run();
+			}
+
+			const violations = this.database.pragma("foreign_key_check") as unknown[];
+			if (violations.length > 0) {
+				throw new Error(`Workspace cascade delete left foreign key violations: ${JSON.stringify(violations)}`);
+			}
+
+			for (const trigger of blockers) {
+				this.database.exec(trigger.sql);
+			}
+			return true;
+		});
+
+		try {
+			return runner.immediate();
+		} catch (error) {
+			// Any failure rolls back the whole transaction including the trigger DDL.
+			throw error;
+		}
 	}
 
 	createRequirement(input: CreateRequirementInput): CreationResult {

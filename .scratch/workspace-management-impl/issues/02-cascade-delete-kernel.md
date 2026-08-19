@@ -6,10 +6,10 @@
 
 **Blocked by:** None — can start immediately（与 01 并行，共享 store/runtime/server 文件但方法独立，改动以追加为主）。
 
-**Status:** ready-for-agent
+**Status:** done
 
-- [ ] store `deleteWorkspace(id)`：33 表逆拓扑单事务删除（顺序见 07 决议），22 个删除阻断触发器在事务内 suspend/restore（DDL 实时取自 sqlite_master，事务性可回滚）；`snapshot_documents` 永不触碰（digest 去重共享不可变）
-- [ ] 忙门禁在同一事务内先探后删：该工作区任一 `runs.status ∈ (queued, running)` 或 `governance_claims.status = active` → 抛 BusyWorkspaceError；并发竞态由事务原子性 + FK 兜底
-- [ ] `DELETE /api/workspaces/:id`：不存在 → 404 `{ error: "unknown_workspace" }`；忙 → 409 `{ error: "workspace_busy" }`（附命中计数）；成功 → 200 `{ deleted: true }`；删后该工作区一切 workspace-gated 读取 404
-- [ ] runtime 增 `deleteWorkspace(id)` 透传；路由接线完成
-- [ ] 集成测试：删除全量填充的工作区（含两级需求/资产/运行记录）→ 重开 Store，`PRAGMA foreign_key_check` 干净；忙拒绝用例（构造 queued run 与 active claim 各一）
+- [x] store `deleteWorkspace(id)`：33 表逆拓扑单事务删除（顺序见 07 决议），22 个删除阻断触发器在事务内 suspend/restore（DDL 实时取自 sqlite_master，事务性可回滚）；`snapshot_documents` 永不触碰（digest 去重共享不可变）
+- [x] 忙门禁在同一事务内先探后删：该工作区任一 `runs.status ∈ (queued, running)` 或 `governance_claims.status = active` → 抛 BusyWorkspaceError；并发竞态由事务原子性 + FK 兜底
+- [x] `DELETE /api/workspaces/:id`：不存在 → 404 `{ error: "unknown_workspace" }`；忙 → 409 `{ error: "workspace_busy" }`（附命中计数）；成功 → 200 `{ deleted: true }`；删后该工作区一切 workspace-gated 读取 404
+- [x] runtime 增 `deleteWorkspace(id)` 透传；路由接线完成
+- [x] 集成测试：删除全量填充的工作区（含两级需求/资产/运行记录）→ 重开 Store，`PRAGMA foreign_key_check` 干净；忙拒绝用例（构造 queued run 与 active claim 各一）

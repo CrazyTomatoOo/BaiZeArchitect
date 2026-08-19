@@ -15,7 +15,7 @@ import { resolve } from "node:path";
 import { readFile } from "node:fs/promises";
 import type { AddressInfo } from "node:net";
 import type { HeadlessWorkflowRuntime } from "./headless-runtime.js";
-import { ReusableAssetMalformedBodyError, ReusableAssetNameConflictError, type WorkflowCommandType } from "../persistence/workflow-store.js";
+import { BusyWorkspaceError, ReusableAssetMalformedBodyError, ReusableAssetNameConflictError, type WorkflowCommandType } from "../persistence/workflow-store.js";
 import type { RequirementBaseline } from "./requirement.js";
 import { isReusableAssetKind, type ReusableAssetKind } from "../persistence/reusable-asset-kind.js";
 
@@ -343,6 +343,34 @@ export async function startOperatorServer(
 				throw error;
 			}
 			sendJson(response, 201, { workspaceId });
+			return;
+		}
+
+		if (request.method === "DELETE" && segments.length === 3 && segments[0] === "api" && segments[1] === "workspaces") {
+			const workspaceId = Number(segments[2]);
+			if (!Number.isInteger(workspaceId) || !options.runtime.workspaceExists(workspaceId)) {
+				sendJson(response, 404, { error: "unknown_workspace" });
+				return;
+			}
+			try {
+				const deleted = options.runtime.deleteWorkspace(workspaceId);
+				if (!deleted) {
+					// Lost a concurrent delete race: the workspace is gone by now.
+					sendJson(response, 404, { error: "unknown_workspace" });
+					return;
+				}
+			} catch (error) {
+				if (error instanceof BusyWorkspaceError) {
+					sendJson(response, 409, {
+						error: "workspace_busy",
+						activeRuns: error.activeRuns,
+						activeClaims: error.activeClaims,
+					});
+					return;
+				}
+				throw error;
+			}
+			sendJson(response, 200, { deleted: true });
 			return;
 		}
 
