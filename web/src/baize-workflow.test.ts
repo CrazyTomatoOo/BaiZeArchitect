@@ -3,6 +3,8 @@ import { describe, expect, it } from "vitest";
 import workflowComponentSource from "./baize-workflow.ts?raw";
 import workflowClientSource from "./workflow-client.ts?raw";
 import workspaceManagerSource from "./baize-workspace-manager.ts?raw";
+import shellSource from "./baize-shell.ts?raw";
+import indexSource from "../index.html?raw";
 import {
 	artifactSummary,
 	createWorkspaceErrorCopy,
@@ -13,6 +15,7 @@ import {
 	packetReviewDrift,
 	pendingCounts,
 	recoveryActions,
+	resolveStoredWorkspace,
 	stateHero,
 	WorkspaceApiError,
 	type WorkflowProjection,
@@ -377,6 +380,11 @@ describe("baize-workspace-manager — 管理页安全约定", () => {
 		expect(workspaceManagerSource).toContain("baize-workspace-deleted");
 	});
 
+	it("删除在飞时禁用全部行操作(防删除-进入竞态,决议 10)", () => {
+		expect(workspaceManagerSource).toMatch(/\?disabled=\$\{this\.deletingId !== null\}[\s\S]*>进入</);
+		expect(workspaceManagerSource).toMatch(/\?disabled=\$\{this\.deletingId !== null\}[\s\S]*>删除</);
+	});
+
 	it("行容器为 div 而非 button(防按钮嵌套)", () => {
 		const rowMarkup = workspaceManagerSource.match(/<div class="card item">\s*<div class="row">/);
 		expect(rowMarkup).not.toBeNull();
@@ -385,5 +393,72 @@ describe("baize-workspace-manager — 管理页安全约定", () => {
 	it("不持有静态 workspace-id / workspaceId 属性,API 委托 client 三函数", () => {
 		expect(workspaceManagerSource).not.toMatch(/workspace-id\s*=|workspaceId:\s*\{ type: Number/);
 		expect(workspaceManagerSource).toMatch(/createWorkspace|deleteWorkspace|listWorkspaces/);
+	});
+});
+
+// ---------------------------------------------------------------------------
+// 票 05:shell 首屏与选中态
+// ---------------------------------------------------------------------------
+
+describe("resolveStoredWorkspace — 已存键解析规则(决议 09)", () => {
+	const workspaces = [
+		{ id: 3, name: "North", repoPath: "/north", createdAt: "t" },
+		{ id: 5, name: "South", repoPath: "/south", createdAt: "t" },
+	];
+
+	it("合法键值在列表内 → 直达,不清键", () => {
+		expect(resolveStoredWorkspace("3", workspaces)).toEqual({ workspaceId: 3, clearKey: false });
+		expect(resolveStoredWorkspace("5", workspaces)).toEqual({ workspaceId: 5, clearKey: false });
+	});
+
+	it("无键 → 管理页,不清键", () => {
+		expect(resolveStoredWorkspace(null, workspaces)).toEqual({ workspaceId: null, clearKey: false });
+	});
+
+	it("键值已失效(工作区被级联删除)→ 管理页并清键", () => {
+		expect(resolveStoredWorkspace("9", workspaces)).toEqual({ workspaceId: null, clearKey: true });
+	});
+
+	it("非整数值(脏数据)→ 管理页并清键", () => {
+		expect(resolveStoredWorkspace("abc", workspaces)).toEqual({ workspaceId: null, clearKey: true });
+		expect(resolveStoredWorkspace("0", workspaces)).toEqual({ workspaceId: null, clearKey: true });
+		expect(resolveStoredWorkspace("-1", workspaces)).toEqual({ workspaceId: null, clearKey: true });
+	});
+
+	it("列表不可用(网络失败)→ 管理页但不销毁已存选择", () => {
+		expect(resolveStoredWorkspace("3", null)).toEqual({ workspaceId: null, clearKey: false });
+	});
+});
+
+describe("baize-shell — 首屏与选中态安全约定(票 05)", () => {
+	it("挂载 baize-workspace-manager 并消费其进入/删除事件", () => {
+		expect(shellSource).toContain('import "./baize-workspace-manager.js"');
+		expect(shellSource).toContain("baize-enter-workspace");
+		expect(shellSource).toContain("baize-workspace-deleted");
+	});
+
+	it("持有 managerOpen 状态且渲染分支先于需求列表", () => {
+		expect(shellSource).toMatch(/managerOpen: \{ state: true \}/);
+		expect(shellSource).toContain("if (this.managerOpen)");
+	});
+
+	it("只用 localStorage[\"baize.workspaceId\"] 键,写/清时机齐", () => {
+		expect(shellSource).toContain('localStorage.getItem("baize.workspaceId")');
+		expect(shellSource).toContain('localStorage.setItem("baize.workspaceId"');
+		expect(shellSource).toContain('localStorage.removeItem("baize.workspaceId")');
+	});
+
+	it("不再持有静态 workspace-id / workspaceId 属性声明", () => {
+		expect(shellSource).not.toMatch(/workspace-id: \{ type: Number/);
+		expect(shellSource).not.toMatch(/workspaceId: \{ type: Number/);
+	});
+
+	it("绝无 window.confirm", () => {
+		expect(shellSource).not.toMatch(/window\.confirm/);
+	});
+
+	it("index.html 不再硬编码 workspace-id,仍挂载 baize-shell", () => {
+		expect(indexSource).toContain("<baize-shell>");
+		expect(indexSource).not.toMatch(/workspace-id\s*=/);
 	});
 });

@@ -3,33 +3,42 @@ import { sharedStyles } from "./baize-styles.js";
 import {
 	bootstrapSession,
 	checkSession,
+	listWorkspaces,
+	resolveStoredWorkspace,
 	type OperatorSession,
 } from "./workflow-client.js";
 import "./baize-requirements.js";
 import "./baize-workflow.js";
+import "./baize-workspace-manager.js";
 
 /**
- * baize-shell — 应用外壳:session 管理 + 需求列表/详情切换。
- * 需求列表点击进入详情;详情内联显示门禁/审批/恢复(workflow 组件自带)。
- * 监听 baize-open-requirement(列表)→ 切换到 workflow 详情;
- * 监听 baize-goto(workflow 返回)→ 切回需求列表。
+ * baize-shell — 应用外壳:session 管理 + 视图切换(管理页 / 需求列表 / 详情)。
+ * 视图四态(决议 09):!session → 登录;requirementId > 0 → 详情(优先);managerOpen → 管理页;否则需求列表。
+ * 登录后按 localStorage["baize.workspaceId"] 解析选中态:合法键直达该工作区需求列表;
+ * 无键/键已失效(工作区被删)→ 回管理页并清键。
+ * 监听:baize-open-requirement(列表→详情)、baize-goto(详情→列表)、
+ * baize-enter-workspace(管理页→进入)、baize-workspace-deleted(删除当前→清键)。
  */
 class BaizeShell extends LitElement {
 	static properties = {
 		apiBase: { type: String, attribute: "api-base" },
-		workspaceId: { type: Number, attribute: "workspace-id" },
 		session: { state: true },
 		loginToken: { state: true },
 		loginError: { state: true },
 		requirementId: { state: true },
+		managerOpen: { state: true },
+		workspaceId: { state: true },
+		initializing: { state: true },
 	};
 
 	declare apiBase: string;
-	declare workspaceId: number;
 	declare session: OperatorSession | null;
 	declare loginToken: string;
 	declare loginError: string | null;
 	declare requirementId: number;
+	declare managerOpen: boolean;
+	declare workspaceId: number;
+	declare initializing: boolean;
 
 	static styles = [sharedStyles, css`
 		:host { display: block; }
@@ -59,6 +68,7 @@ class BaizeShell extends LitElement {
 		}
 		.topbar .brand .dot { color: var(--accent); }
 		.topbar .spacer { flex: 1; }
+		.view-host { margin-top: var(--gap); }
 		.login-wrap {
 			display: flex;
 			align-items: center;
@@ -95,11 +105,13 @@ class BaizeShell extends LitElement {
 	constructor() {
 		super();
 		this.apiBase = "";
-		this.workspaceId = 1;
 		this.session = null;
 		this.loginToken = "";
 		this.loginError = null;
 		this.requirementId = 0;
+		this.managerOpen = false;
+		this.workspaceId = 0;
+		this.initializing = true;
 	}
 
 	connectedCallback(): void {
@@ -113,6 +125,34 @@ class BaizeShell extends LitElement {
 		} catch {
 			this.session = null;
 		}
+		if (this.session) await this.resolveInitialView();
+		this.initializing = false;
+	}
+
+	/** 登录成功后的加载序:合法已存键直达其需求列表;否则回管理页(无键不清、失效清键)。 */
+	private async resolveInitialView(): Promise<void> {
+		try {
+			const stored = localStorage.getItem("baize.workspaceId");
+			let workspaces: readonly import("./workflow-client.js").WorkspaceSummary[] | null = null;
+			try {
+				workspaces = await listWorkspaces(this.apiBase);
+			} catch {
+				workspaces = null; // 列表不可用:保留已存选择,仍回管理页
+			}
+			const resolved = resolveStoredWorkspace(stored, workspaces);
+			if (resolved.clearKey) localStorage.removeItem("baize.workspaceId");
+			if (resolved.workspaceId !== null) {
+				this.workspaceId = resolved.workspaceId;
+				this.managerOpen = false;
+				this.requirementId = 0;
+				return;
+			}
+		} catch {
+			// localStorage 不可用(如隐私模式)→ 不持久化,仍回管理页
+		}
+		this.workspaceId = 0;
+		this.managerOpen = true;
+		this.requirementId = 0;
 	}
 
 	private async handleLogin(event: Event): Promise<void> {
@@ -120,9 +160,46 @@ class BaizeShell extends LitElement {
 		try {
 			this.session = await bootstrapSession(this.apiBase, this.loginToken);
 			this.loginError = null;
+			// 先进入加载态再解析选中态:避免 session 已立但视图未决的闪屏。
+			this.initializing = true;
+			await this.resolveInitialView();
 		} catch (error) {
 			this.loginError = error instanceof Error ? error.message : String(error);
+		} finally {
+			this.initializing = false;
 		}
+	}
+
+	private handleEnterWorkspace(event: Event): void {
+		const id = (event as CustomEvent<{ id: number }>).detail.id;
+		this.workspaceId = id;
+		this.managerOpen = false;
+		this.requirementId = 0;
+		localStorage.setItem("baize.workspaceId", String(id));
+	}
+
+	private handleWorkspaceDeleted(event: Event): void {
+		const id = (event as CustomEvent<{ id: number }>).detail.id;
+		if (id === this.workspaceId) {
+			this.workspaceId = 0;
+			localStorage.removeItem("baize.workspaceId");
+		}
+	}
+
+	private handleOpenManager(): void {
+		this.managerOpen = true;
+		this.requirementId = 0;
+	}
+
+	private topbar(): ReturnType<typeof html> {
+		return html`<div class="topbar">
+			<div class="brand"><span class="dot">◇</span> BaiZe Architect</div>
+			<span class="spacer"></span>
+			${this.managerOpen
+				? nothing
+				: html`<button @click=${() => this.handleOpenManager()}>管理工作空间</button>`}
+			<button @click=${() => { this.session = null; }}>退出</button>
+		</div>`;
 	}
 
 	render() {
@@ -145,7 +222,11 @@ class BaizeShell extends LitElement {
 			</div>`;
 		}
 
-		// 需求详情视图(门禁/审批/恢复内联在 workflow 组件中)
+		if (this.initializing) {
+			return html`<div class="app"><div class="empty">加载中…</div></div>`;
+		}
+
+		// 需求详情视图(门禁/审批/恢复内联在 workflow 组件中);两级返回:详情 → 列表 → 管理页。
 		if (this.requirementId > 0) {
 			return html`<div class="app">
 				<baize-workflow
@@ -157,18 +238,29 @@ class BaizeShell extends LitElement {
 			</div>`;
 		}
 
+		if (this.managerOpen) {
+			return html`<div class="app">
+				${this.topbar()}
+				<div class="view-host">
+					<baize-workspace-manager
+						.apiBase=${this.apiBase}
+						@baize-enter-workspace=${(e: Event) => this.handleEnterWorkspace(e)}
+						@baize-workspace-deleted=${(e: Event) => this.handleWorkspaceDeleted(e)}
+					></baize-workspace-manager>
+				</div>
+			</div>`;
+		}
+
 		// 需求列表视图
 		return html`<div class="app">
-			<div class="topbar">
-				<div class="brand"><span class="dot">◇</span> BaiZe Architect</div>
-				<span class="spacer"></span>
-				<button @click=${() => { this.session = null; }}>退出</button>
+			${this.topbar()}
+			<div class="view-host">
+				<baize-requirements
+					.apiBase=${this.apiBase}
+					.workspaceId=${this.workspaceId}
+					@baize-open-requirement=${(e: Event) => { this.requirementId = (e as CustomEvent<{ id: number }>).detail.id; }}
+				></baize-requirements>
 			</div>
-			<baize-requirements
-				.apiBase=${this.apiBase}
-				.workspaceId=${this.workspaceId}
-				@baize-open-requirement=${(e: Event) => { this.requirementId = (e as CustomEvent<{ id: number }>).detail.id; }}
-			></baize-requirements>
 		</div>`;
 	}
 }

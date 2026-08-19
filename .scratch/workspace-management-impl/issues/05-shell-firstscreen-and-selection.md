@@ -6,11 +6,11 @@
 
 **Blocked by:** 04（管理页组件）——shell 渲染它并消费其事件。
 
-**Status:** ready-for-agent
+**Status:** done
 
-- [ ] shell 视图四态：`!session` → 登录；`requirementId > 0` → 详情（优先）；`managerOpen` → 管理页；否则需求列表；进入工作区 = 清 manager + 清 requirementId + 写键；返回管理页 = 置 manager
-- [ ] 选中态：`localStorage["baize.workspaceId"]` 进入时写入；加载序——有合法已存键直达该工作区需求列表；无键/键值不在工作区列表（已删）→ 管理页并清键；管理页列表数据每次进入拉取（无缓存）
-- [ ] 列表顶栏「管理工作空间」入口（与退出同排）；详情视图不加新入口（两级返回保持）
-- [ ] 删除当前所在工作区 → 回管理页 + 清键（消费 02 删除成功信号）
-- [ ] index.html 移除静态 `workspace-id="1"`；shell 自持选中态，列表/详情收到动态 workspaceId
-- [ ] shell 状态逻辑 vitest + `npm run typecheck` `npm run test` `npm run build` 全绿
+- [x] shell 视图四态：`!session` → 登录；`requirementId > 0` → 详情（优先）；`managerOpen` → 管理页；否则需求列表；进入工作区 = 清 manager + 清 requirementId + 写键；返回管理页 = 置 manager
+- [x] 选中态：`localStorage["baize.workspaceId"]` 进入时写入；加载序——有合法已存键直达该工作区需求列表；无键/键值不在工作区列表（已删）→ 管理页并清键；管理页列表数据每次进入拉取（无缓存）
+- [x] 列表顶栏「管理工作空间」入口（与退出同排）；详情视图不加新入口（两级返回保持）
+- [x] 删除当前所在工作区 → 回管理页 + 清键（消费 `baize-workspace-deleted`；评审补：删除在飞时禁用全行进入/删除，堵删除-进入竞态）
+- [x] index.html 移除静态 `workspace-id="1"`；shell 自持选中态，列表/详情收到动态 workspaceId
+- [x] shell 状态逻辑 vitest（resolveStoredWorkspace 纯规则 + shell/index 源扫描 52/52）+ `npm run typecheck` `npm run test` `npm run build` 全绿；backend negative-scan 9/9

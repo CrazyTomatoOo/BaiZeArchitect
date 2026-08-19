@@ -185,8 +185,8 @@ class BaizeWorkspaceManager extends LitElement {
 												<div class="meta mono">${workspace.repoPath}</div>
 											</div>
 											<div class="actions">
-												<button class="primary" @click=${() => this.enter(workspace.id)}>进入</button>
-												<button class="danger" @click=${() => this.askDelete(workspace.id)}>删除</button>
+												<button class="primary" ?disabled=${this.deletingId !== null} @click=${() => this.enter(workspace.id)}>进入</button>
+												<button class="danger" ?disabled=${this.deletingId !== null} @click=${() => this.askDelete(workspace.id)}>删除</button>
 											</div>
 										</div>
 										${this.confirmId === workspace.id

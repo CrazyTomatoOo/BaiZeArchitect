@@ -842,3 +842,20 @@ export function deleteWorkspaceErrorCopy(error: unknown): string {
 	}
 	return error instanceof Error ? error.message : String(error);
 }
+
+/**
+ * 选中态解析(决议 09):已存键值在工作区列表内 → 直达;无键 → 管理页(不清键);
+ * 键值已失效(工作区被级联删除)→ 管理页并清键;列表不可用(网络失败)→ 管理页但不销毁选择。
+ */
+export function resolveStoredWorkspace(
+	stored: string | null,
+	workspaces: readonly WorkspaceSummary[] | null,
+): { workspaceId: number | null; clearKey: boolean } {
+	if (stored === null) return { workspaceId: null, clearKey: false };
+	if (workspaces === null) return { workspaceId: null, clearKey: false };
+	const id = Number(stored);
+	if (Number.isInteger(id) && id > 0 && workspaces.some((workspace) => workspace.id === id)) {
+		return { workspaceId: id, clearKey: false };
+	}
+	return { workspaceId: null, clearKey: true };
+}
