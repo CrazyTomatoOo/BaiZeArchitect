@@ -8,7 +8,7 @@
     "build": "tsc",
     "typecheck": "tsc --noEmit",
     "test": "node --import tsx --test *.test.ts testing/*.test.ts",
-    "test:contracts": "node --import tsx --test workflow-contracts.test.ts workflow-schema.test.ts model-driver.test.ts production-model-boundary.test.ts testing/deterministic-fixtures.test.ts"
+    "test:contracts": "node --import tsx --test workflow-contracts.test.ts workflow-command-registry.test.ts workflow-schema.test.ts model-driver.test.ts production-model-boundary.test.ts testing/deterministic-fixtures.test.ts"
   },
   "dependencies": {
     "@earendil-works/pi-ai": "*",

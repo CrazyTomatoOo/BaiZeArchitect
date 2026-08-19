@@ -1,7 +1,8 @@
 import type { ReusableAssetKind } from "../persistence/reusable-asset-kind.js";
 import type { CrashInjector, FixtureClock, FixtureOperator, FixtureOutboxTransport, HashProvider } from "../testing/deterministic-fixtures.js";
-import { WorkflowStore, type BeginPlanningResult, type CommandReceipt, type CompletePlanningResult, type ExecuteCommandInput, type ReconciliationReport, type WorkflowCommandType, type WorkflowProjection, type EvidenceSnapshotResult, type RequiredArtifactSetResult, type TraceLinkResult, type FindingRecord, type FindingThreadRecord, type DecisionRecord, type ReadinessReport, type BuildApprovalPacketResult, type ApprovalPacketRecord, type HumanGateRecord, type ApprovalRecordEntry, type HumanDirectiveRecord, type DiagnosticRunRecord, type CommandReceiptDetail, type RequirementSummaryRecord, type RequirementDetailRecord, type BoundedWorkflowProjection, type PlanRevisionDetail, type TaskDetailRecord, type AttemptSummaryRecord, type AttemptDetailRecord, type RunDetailRecord, type ApprovalPacketDetailRecord, type DesignPackageRecord, type LegacyImportRecord, type ReusableAssetSummary, type ReusableAssetDetail, type WorkflowEventEnvelope, type WorkspaceSummary, type RunEventEnvelope } from "../persistence/workflow-store.js";
+import { WorkflowStore, type BeginPlanningResult, type CommandReceipt, type CompletePlanningResult, type ExecuteCommandInput, type ReconciliationReport, type WorkflowProjection, type EvidenceSnapshotResult, type RequiredArtifactSetResult, type TraceLinkResult, type FindingRecord, type FindingThreadRecord, type DecisionRecord, type ReadinessReport, type BuildApprovalPacketResult, type ApprovalPacketRecord, type HumanGateRecord, type ApprovalRecordEntry, type HumanDirectiveRecord, type DiagnosticRunRecord, type CommandReceiptDetail, type RequirementSummaryRecord, type RequirementDetailRecord, type BoundedWorkflowProjection, type PlanRevisionDetail, type TaskDetailRecord, type AttemptSummaryRecord, type AttemptDetailRecord, type RunDetailRecord, type ApprovalPacketDetailRecord, type DesignPackageRecord, type LegacyImportRecord, type ReusableAssetSummary, type ReusableAssetDetail, type WorkflowEventEnvelope, type WorkspaceSummary, type RunEventEnvelope } from "../persistence/workflow-store.js";
 import type { BeginAttemptResult, CompleteAttemptResult, ExecuteTaskResult, RoleResult, TraceLinkProposal, CriticReport } from "./role-result.js";
+import { WORKFLOW_COMMAND_TYPES, type WorkflowCommandType } from "./command-types.js";
 import { loadWorkflowContracts } from "./contracts/loader.js";
 import { compileWorkflowSchema, type WorkflowSchemaValidator } from "./contracts/schema.js";
 import type { DoctorReport } from "./workflow-doctor.js";
@@ -13,7 +14,8 @@ import type { RequirementBaseline } from "./requirement.js";
 import type { ImpactProfile } from "./impact-profile.js";
 
 export type { RequirementBaseline } from "./requirement.js";
-export type { CommandReceipt, ReconciliationReport, WorkflowCommandType, BeginPlanningResult, CompletePlanningResult, FindingRecord, FindingThreadRecord, WorkspaceSummary } from "../persistence/workflow-store.js";
+export type { CommandReceipt, ReconciliationReport, BeginPlanningResult, CompletePlanningResult, FindingRecord, FindingThreadRecord, WorkspaceSummary } from "../persistence/workflow-store.js";
+export type { WorkflowCommandType } from "./command-types.js";
 export type { BeginAttemptResult, CompleteAttemptResult, ExecuteTaskResult, RoleResult, CriticReport } from "./role-result.js";
 export type { DoctorReport } from "./workflow-doctor.js";
 
@@ -187,8 +189,7 @@ export async function openHeadlessWorkflowRuntime(
 			if (input.schemaVersion !== undefined && input.schemaVersion !== "workflow-command/v1") {
 				throw new Error("Command envelope schema is invalid");
 			}
-			const validTypes: readonly WorkflowCommandType[] = ["start", "pause", "resume", "retry-recovery", "cancel-run", "dispose-decision", "steer", "retry-task", "retry-planning", "replace-plan", "diagnostic-run", "provide-human-input", "revise-requirement", "approve-artifact", "reject-artifact", "accept-finding-risk", "revoke-approval", "approve-packet", "reject-packet"];
-			if (!validTypes.includes(input.type)) {
+			if (!WORKFLOW_COMMAND_TYPES.includes(input.type)) {
 				throw new Error("Command envelope schema is invalid");
 			}
 			if (!store.getWorkflowProjection(input.workflowId)) {

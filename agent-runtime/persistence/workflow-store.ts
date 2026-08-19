@@ -23,32 +23,12 @@ import { READ_MODEL_GOVERNANCE_MIGRATION } from "./migrations/0011-read-model-go
 import { RUN_EVENT_STREAM_MIGRATION } from "./migrations/0012-run-event-stream.js";
 import { ACTOR_KIND_MIGRATION } from "./migrations/0013-actor-kind.js";
 import type { ReusableAssetKind } from "./reusable-asset-kind.js";
+import { type WorkflowCommandType } from "../workflow/command-types.js";
 import { ARTIFACT_OWNERSHIP, type InputBinding, type TaskOutputInput } from "../workflow/plan-types.js";
 import type { RoleResult, ContextManifest, RoleContract, BeginAttemptResult, CompleteAttemptResult, TraceLinkProposal, CriticReport, FindingProposal, FindingSeverity } from "../workflow/role-result.js";
 import { deriveRequiredArtifactSet, type ImpactProfile, type RequiredArtifactSet } from "../workflow/impact-profile.js";
 
 const MIGRATIONS = [WORKFLOW_GOVERNANCE_MIGRATION, COMMAND_GOVERNANCE_MIGRATION, RECOVERY_GOVERNANCE_MIGRATION, PLANNING_GOVERNANCE_MIGRATION, ATTEMPT_EXECUTION_MIGRATION, DEPENDENT_TASK_SAFETY_MIGRATION, REQUIRED_ARTIFACTS_AND_EVIDENCE_MIGRATION, CRITIC_GOVERNANCE_MIGRATION, DECISIONS_AND_READINESS_MIGRATION, HUMAN_GOVERNANCE_MIGRATION, READ_MODEL_GOVERNANCE_MIGRATION, RUN_EVENT_STREAM_MIGRATION, ACTOR_KIND_MIGRATION] as const;
-export type WorkflowCommandType =
-	| "start"
-	| "pause"
-	| "resume"
-	| "retry-recovery"
-	| "cancel-run"
-	| "dispose-decision"
-	| "steer"
-	| "retry-task"
-	| "retry-planning"
-	| "replace-plan"
-	| "diagnostic-run"
-	| "provide-human-input"
-	| "revise-requirement"
-	| "approve-artifact"
-	| "reject-artifact"
-	| "accept-finding-risk"
-	| "revoke-approval"
-	| "approve-packet"
-	| "reject-packet";
-
 export type CommandOutcome =
 	| "accepted"
 	| "capability_denied"

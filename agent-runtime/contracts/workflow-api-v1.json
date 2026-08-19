@@ -115,10 +115,10 @@
     "dispose-decision": {"capability": "severity-dependent", "allowedStates": ["running", "waiting_for_human", "paused", "failed", "ready_to_archive"], "expectedSubjectType": "decision", "payloadRequired": ["decisionId", "outcome", "reason"]},
     "approve-artifact": {"capability": "workflow:approve", "allowedStates": ["running", "waiting_for_human", "paused", "failed", "ready_to_archive"], "expectedSubjectType": "artifact_revision", "payloadRequired": ["artifactRevisionId"]},
     "reject-artifact": {"capability": "workflow:operate", "allowedStates": ["running", "waiting_for_human", "paused", "failed", "ready_to_archive"], "expectedSubjectType": "artifact_revision", "payloadRequired": ["artifactRevisionId", "reason", "targets"]},
-    "accept-major-finding-risk": {"capability": "workflow:approve", "allowedStates": ["waiting_for_human", "paused", "ready_to_archive"], "expectedSubjectType": "finding_thread", "payloadRequired": ["findingThreadId", "impact", "reason"]},
+    "accept-finding-risk": {"capability": "workflow:approve", "allowedStates": ["waiting_for_human", "paused", "ready_to_archive"], "expectedSubjectType": "finding_thread", "payloadRequired": ["findingThreadId", "impact", "reason"]},
     "revoke-approval": {"capability": "workflow:approve", "allowedStates": ["running", "waiting_for_human", "paused", "failed", "ready_to_archive"], "expectedSubjectType": "approval", "payloadRequired": ["approvalId", "reason"]},
-    "approve-approval-packet": {"capability": "workflow:approve", "allowedStates": ["ready_to_archive"], "expectedSubjectType": "approval_packet", "payloadRequired": ["packetId"]},
-    "reject-approval-packet": {"capability": "workflow:operate", "allowedStates": ["ready_to_archive", "paused"], "expectedSubjectType": "approval_packet", "payloadRequired": ["packetId", "reason", "targets"]}
+    "approve-packet": {"capability": "workflow:approve", "allowedStates": ["ready_to_archive"], "expectedSubjectType": "approval_packet", "payloadRequired": ["packetId"]},
+    "reject-packet": {"capability": "workflow:operate", "allowedStates": ["ready_to_archive", "paused"], "expectedSubjectType": "approval_packet", "payloadRequired": ["packetId", "reason", "targets"]}
   },
   "httpStatuses": {
     "200": "Successful GET or exact replay whose original status was 200",

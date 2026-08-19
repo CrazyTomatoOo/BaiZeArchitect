@@ -15,7 +15,8 @@ import { resolve } from "node:path";
 import { readFile } from "node:fs/promises";
 import type { AddressInfo } from "node:net";
 import type { HeadlessWorkflowRuntime } from "./headless-runtime.js";
-import { BusyWorkspaceError, ReusableAssetMalformedBodyError, ReusableAssetNameConflictError, type WorkflowCommandType } from "../persistence/workflow-store.js";
+import { BusyWorkspaceError, ReusableAssetMalformedBodyError, ReusableAssetNameConflictError } from "../persistence/workflow-store.js";
+import { WORKFLOW_COMMAND_TYPES, type WorkflowCommandType } from "./command-types.js";
 import type { RequirementBaseline } from "./requirement.js";
 import { isReusableAssetKind, type ReusableAssetKind } from "../persistence/reusable-asset-kind.js";
 
@@ -45,28 +46,6 @@ export interface OperatorServer {
 	readonly port: number;
 	close(): Promise<void>;
 }
-
-const COMMAND_TYPES: readonly WorkflowCommandType[] = [
-	"start",
-	"pause",
-	"resume",
-	"retry-recovery",
-	"cancel-run",
-	"dispose-decision",
-	"steer",
-	"retry-task",
-	"retry-planning",
-	"replace-plan",
-	"diagnostic-run",
-	"provide-human-input",
-	"revise-requirement",
-	"approve-artifact",
-	"reject-artifact",
-	"accept-finding-risk",
-	"revoke-approval",
-	"approve-packet",
-	"reject-packet",
-];
 
 const LOOPBACK_HOSTS = new Set(["127.0.0.1", "::1", "localhost"]);
 
@@ -452,7 +431,7 @@ export async function startOperatorServer(
 			const envelope = body as Record<string, unknown>;
 			if (
 				typeof envelope.type !== "string"
-				|| !COMMAND_TYPES.includes(envelope.type as WorkflowCommandType)
+				|| !WORKFLOW_COMMAND_TYPES.includes(envelope.type as WorkflowCommandType)
 				|| typeof envelope.expectedWorkflowVersion !== "number"
 				|| (envelope.schemaVersion !== undefined && envelope.schemaVersion !== "workflow-command/v1")
 				|| (envelope.payload !== undefined && (typeof envelope.payload !== "object" || envelope.payload === null))
