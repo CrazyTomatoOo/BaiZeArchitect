@@ -98,6 +98,9 @@ npx tsx main.ts
 | --- | --- | --- |
 | POST | `/api/session` | Bearer bootstrap → Operator Session cookie |
 | GET | `/api/session` | Session 自省 |
+| GET | `/api/workspaces` | 工作区列表（id 升序） |
+| POST | `/api/workspaces` | 创建工作区（repo_path 唯一即身份，name 为标签） |
+| DELETE | `/api/workspaces/:id` | 级联删除工作区（含其下全部需求、资产与治理历史） |
 | POST | `/api/workspaces/:id/requirements` | 原子创建 Requirement + baseline + Workflow |
 | GET | `/api/requirements?workspaceId=` | 需求摘要列表 |
 | GET | `/api/requirements/:id` | 需求详情 |

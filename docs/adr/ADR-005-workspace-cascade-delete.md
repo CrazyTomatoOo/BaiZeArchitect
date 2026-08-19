@@ -1,6 +1,6 @@
 # Workspace deletion cascades through its full governance subtree
 
-Status: draft（pending spec review；决议来源 `.scratch/workspace-management/map.md` 票 07/08/10）
+Status: accepted（实现于 `9746f52`；决议来源 `.scratch/workspace-management/map.md` 票 07/08/10）
 
 BaiZe workspaces exist as registry rows (`workspaces`: repo_path unique, name) with all governance data scoped to them — requirements, workflows, events, receipts, incidents, plans, attempts, runs, findings, decisions, approval packets, design packages and reusable assets all carry `workspace_id`/requirement- or workflow-scoped foreign keys (`on delete restrict`). Earlier wayfinder drafting (2026-08-16) proposed soft archive (`archived_at`, reversible, read-only); the destination was redrawn on 2026-08-18 with the user decision: **deletion is cascade and irreversible** — a workspace is retired by destroying its whole subtree in one transaction.
 

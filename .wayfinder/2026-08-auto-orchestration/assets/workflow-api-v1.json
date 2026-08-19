@@ -39,6 +39,11 @@
     "import": {"method": "POST", "path": "/api/assets/import", "purpose": "Import ReusableAsset revisions with provenance"},
     "forbiddenSideEffects": ["Requirement", "Workflow", "Task", "Attempt", "Run", "Approval"]
   },
+  "workspaces": {
+    "list": {"method": "GET", "path": "/api/workspaces", "purpose": "List all workspaces ordered by id"},
+    "create": {"method": "POST", "path": "/api/workspaces", "purpose": "Create a workspace; repo_path is the unique identity, name is a label"},
+    "delete": {"method": "DELETE", "path": "/api/workspaces/:workspaceId", "purpose": "Cascade-delete a workspace and its full governance subtree in one transaction"}
+  },
   "readEndpoints": [
     {"method": "GET", "path": "/api/requirements", "purpose": "Workspace-filtered Requirement list with Workflow summary"},
     {"method": "GET", "path": "/api/requirements/:requirementId", "purpose": "Requirement identity, current baseline and workflow link"},
