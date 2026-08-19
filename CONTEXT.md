@@ -2,6 +2,8 @@
 
 BaiZe 需求设计上下文描述一个已确认需求从开始设计、自动推进、人工门禁到最终归档的治理语言。
 
+> Store（存储域）子域词表（Workspace / Reusable Asset / Actor / Snapshot Document）见 [agent-runtime/persistence/CONTEXT.md](agent-runtime/persistence/CONTEXT.md)；上下文关系见 [CONTEXT-MAP.md](CONTEXT-MAP.md)。
+
 ## Language
 
 **Requirement（需求）**:
@@ -136,10 +138,6 @@ _Avoid_: 文件锁、Artifact revision id
 Attempt 启动时固化 Plan、Task、Context、输入版本和 Artifact 写基线，并在发布 Staged Effect 前精确复核的不可变提交守卫。
 _Avoid_: 仅 Workflow version、Run 未取消检查
 
-**Snapshot Document（快照文档）**:
-以 kind 与内容 digest 寻址、插入后不可修改的治理大对象；Plan、Context、Contract、Policy、Result 与 Packet 通过精确引用复用。
-_Avoid_: 可变 JSON blob、仅保存文件路径
-
 **Repository Snapshot（仓库快照）**:
 领域工具读取的内容寻址只读仓库视图，可包含未提交修改并跨 Attempt 去重复用。
 _Avoid_: 实时工作树、仅记录 HEAD
@@ -184,14 +182,6 @@ _Avoid_: 当前 Artifact、兼容读取表
 由编号 migration 生成、绑定 source/target schema、bundle digest、分类、anomaly 和 cutover actor 的不可变证明。
 _Avoid_: 新版 Approval、人工补写记录
 
-**Workspace（工作区）**:
-由仓库注册（repo_path 唯一字符串 = 身份，name = 可重复标签）、快照归属与 Requirement / Reusable Asset / Design Package 容器构成的产品层第一类实体；删除 = 级联销毁其下全部治理事实（单事务、不可恢复）；多操作员共享，不按工作区隔离可见性或权限。
-_Avoid_: 上层 project 概念、软归档/可逆删除、按工作区 ACL
-
-**Reusable Asset（可复用资产）**:
-属于 Workspace、独立于 Requirement/Workflow/Attempt 的 scenario、usecase 或 function 版本化资产；被 Task 使用时必须引用精确 revision。
-_Avoid_: 隐藏 Requirement、fake Run、当前治理 Artifact
-
 **Legacy Pre-policy Archive（策略前历史归档）**:
 对切换前已归档 DesignPackage 的只读 archived Workflow 投影，由 migration attestation 而非新版 ApprovalPacket 证明其历史来源。
 _Avoid_: governed archive、运行时可创建状态
@@ -216,8 +206,4 @@ _Avoid_: 修复命令、常驻指标服务
 首次新业务写入后的一段加强告警和值守窗口；发现零容忍不变量时停止新写并前向修复，不回退或启用旧路径。
 _Avoid_: 灰度双轨、rollback window
 
-**Actor（业务参与者）**:
-属于 Workspace、作为场景/用例参与者共享事实源的版本化可复用资产（kind=actor），content 仅含 name（workspace 内 trim+大小写不敏感唯一）与 description；与 Role Contract（Agent 角色）明确区分。
-_Avoid_: Agent Role、权限/职责枚举、RBAC 继承
-
-> **Actor 消歧**：本术语表出现两次「Actor」——① 业务参与者资产（kind=actor，中文「参与者」）：场景/用例的参与者事实源；② 操作者身份（可信 Actor / ActorRef / actor snapshot，中文「操作员」）：Gateway 认证的调用方。两者领域隔离，英文同名、中文不同词，互不交叉影响。
+> **Actor 消歧**：治理域的「Actor」指操作者身份（可信 Actor / ActorRef / actor snapshot，中文「操作员」）；Store 子域的 Actor（业务参与者，kind=actor，中文「参与者」）词条见 [agent-runtime/persistence/CONTEXT.md](agent-runtime/persistence/CONTEXT.md)。两者领域隔离，英文同名、中文不同词。

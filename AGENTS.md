@@ -75,6 +75,7 @@ Single Node process hosting:
 - `agent-runtime/contracts/` — versioned workflow-governance JSON schemas (distinct from `schemas/`)
 - `.wayfinder/` — design artifacts, tickets, research (active development tracking)
 - `CONTEXT.md` — governing domain language (~70 glossary terms)
+- `CONTEXT-MAP.md` — context map: governance (CONTEXT.md) + Store (agent-runtime/persistence/CONTEXT.md)
 - `DESIGN.md` — locked web design system (must read before emitting page code)
 - `fixtures/test-repo/` — seed Go repo baked into Docker image
 - `scripts/` — container smoke test (smoke-gateway.mjs)
@@ -164,7 +165,7 @@ docker compose run --rm test # container smoke test (network none, tmpfs-only)
 - **Migrations**: numbered prefix (`0001-workflow-governance`, `0013-actor-kind`)
 - **Test files**: `*.test.ts` suffix
 - **E2E specs**: `*.spec.ts` suffix
-- **Domain terms**: see CONTEXT.md glossary (~70 terms)
+- **Domain terms**: see CONTEXT.md / CONTEXT-MAP.md glossaries
 
 ### Error Handling
 
@@ -210,7 +211,8 @@ docker compose run --rm test # container smoke test (network none, tmpfs-only)
 
 ### Documentation
 
-- `CONTEXT.md` — governing domain language (~70 glossary terms: Requirement, Workflow, Plan Revision, Task, Attempt, Run, Context Manifest, Review Bundle, Staged Effect, Approval Packet, Command Receipt, Outbox Job, Workflow Incident, Reusable Asset, Actor disambiguation)
+- `CONTEXT.md` — governance-context domain language (~70 glossary terms: Requirement, Workflow, Plan Revision, Task, Attempt, Run, Context Manifest, Review Bundle, Staged Effect, Approval Packet, Command Receipt, Outbox Job, Workflow Incident)
+- `CONTEXT-MAP.md` — context map (governance + Store); Store subdomain glossary at `agent-runtime/persistence/CONTEXT.md`
 - `DESIGN.md` — locked web design system (atmospheric dark AI workbench, Graphite Indigo, OKLCH tokens, ≥4.5:1 contrast, Space Grotesk + system fonts, 4pt spacing, motion 150/250ms, no scroll reveal, optimistic update + undo)
 - `README.md` — bilingual overview, demo commands, HTTP contract table, directory structure
 - `docs/GLOSSARY.md` — domain glossary
@@ -327,4 +329,4 @@ Default vocabulary: `needs-triage`, `needs-info`, `ready-for-agent`, `ready-for-
 
 ### Domain docs
 
-Single-context: `CONTEXT.md` + `docs/adr/` at the repo root. See `docs/agents/domain.md`.
+Multi-context: root `CONTEXT-MAP.md` links the governance context (`CONTEXT.md`) and the Store context (`agent-runtime/persistence/CONTEXT.md`); ADRs in `docs/adr/`. See `docs/agents/domain.md`.
