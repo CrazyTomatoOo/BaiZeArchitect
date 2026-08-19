@@ -6,9 +6,9 @@
 
 **Blocked by:** 01, 02, 03, 04, 05, 06——终验票，全链就绪后跑。
 
-**Status:** ready-for-agent
+**Status:** done
 
-- [ ] backend：`npm run test`（含新 operator-workspaces 测试与 02 集成用例）+ `npm run typecheck` + `npm run test:contracts` 全绿
-- [ ] web：`npm run typecheck` + `npm run test`（vitest）+ `npm run build` + `npm run test:e2e`（三视口）全绿
-- [ ] 手工冒烟：真实后端起服务——登录 → 管理页列表/创建/进入/删除（含忙拒绝）→ 刷新直达 → 返回入口；删后全站 404 观感正常
-- [ ] 负向扫描复核：无旧面残留（`baize-workspaces.ts` 等保持已删）、reviewer 角色无回归、`web/` 无审计视图残留（既有扫描全绿）
+- [x] backend：`npm run test` 273/273（含 operator-workspaces 与级联删除集成用例）+ `npm run typecheck` + `npm run test:contracts` 32/32 全绿
+- [x] web：`npm run typecheck` + vitest 52/52 + `npm run build` + `npm run test:e2e` 54/54（三视口）全绿
+- [x] 手工冒烟（真实 main.ts）：HTTP 层——登录/空列表/创建 201/重复 repo_path 409/删后 workspace-gated 读 404/二次删除 404；浏览器层——登录首屏管理页（零态）→ 创建直达写键 → 刷新直达 → 顶栏回管理 → 两步删除（锁定文案）→ 零态 + 清键
+- [x] 负向扫描复核：negative-scan 9/9（baize-workspaces.ts 等旧件保持已删、reviewer 角色无回归、审计视图无残留）
