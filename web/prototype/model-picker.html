@@ -1,0 +1,413 @@
+<!doctype html>
+<!--
+  PROTOTYPE (throwaway) — web/prototype/model-picker.html
+  Question: requirement 创建表单里，「模型档选择」（per-requirement modelRoles，全量四角色，缺省=部署默认档）
+  的交互应该长什么样？
+  3 variants switchable via ?variant=A|B|C (default A), floating bar bottom-center, ←/→ keys.
+  Run: cd web && npm run dev  →  http://localhost:5173/prototype/model-picker.html
+  Data is fake curated catalog — NOT the runtime config.
+-->
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Model Profile Picker — PROTOTYPE</title>
+<style>
+  :root {
+    --bg: oklch(18.6% 0.009 264.3);
+    --surface: oklch(23.0% 0.012 264.3);
+    --surface-2: oklch(26.0% 0.014 267.0);
+    --surface-hover: oklch(30.1% 0.016 264.3);
+    --border: oklch(43.4% 0.026 265.5);
+    --border-strong: oklch(50.5% 0.023 260.1);
+    --text: oklch(89.1% 0.008 260.7);
+    --text-muted: oklch(63.9% 0.016 264.5);
+    --text-subtle: oklch(60.6% 0.016 264.4);
+    --accent: oklch(68.1% 0.169 275.0);
+    --accent-fg: oklch(18.6% 0.009 264.3);
+    --run: oklch(75.4% 0.139 232.7);
+    --ok: oklch(77.3% 0.153 163.2);
+    --warn: oklch(83.7% 0.164 84.4);
+    --danger: oklch(71.9% 0.169 13.4);
+    --font-display: "Space Grotesk Variable", -apple-system, system-ui, sans-serif;
+    --font-body: -apple-system, "SF Pro Text", system-ui, sans-serif;
+    --font-mono: "SF Mono", ui-monospace, "JetBrains Mono", monospace;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; background: var(--bg); color: var(--text); font-family: var(--font-body); font-size: 14px; overflow-x: clip; }
+  .chrome { display: flex; align-items: center; gap: 12px; padding: 14px; border-bottom: 1px solid var(--border); }
+  .wordmark { font-family: var(--font-display); font-weight: 600; }
+  .chrome .muted { color: var(--text-muted); font-size: 12px; }
+  .page { max-width: 860px; margin: 0 auto; padding: 24px 16px 120px; }
+  h1 { font-family: var(--font-display); font-size: 1.4rem; margin: 0 0 4px; }
+  .sub { color: var(--text-muted); margin: 0 0 20px; font-size: 13px; }
+  .card { background: var(--surface); border: 1px solid var(--border); border-radius: 6px; padding: 16px; }
+  .field { margin-bottom: 12px; }
+  .field label { display: block; color: var(--text-subtle); font-size: 11px; letter-spacing: 0.06em; margin-bottom: 6px; }
+  .field input, .field textarea, select {
+    width: 100%; background: var(--surface-2); color: var(--text);
+    border: 1px solid var(--border); border-radius: 4px; padding: 8px 10px; font-family: var(--font-body); font-size: 13px;
+  }
+  .field input:focus, .field textarea:focus, select:focus { outline: 1px solid var(--border-strong); }
+
+  /* picker area (all variants) */
+  .picker-head { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; margin: 18px 0 10px; }
+  .picker-head h2 { font-size: 13px; margin: 0; color: var(--text); }
+  .picker-head .hint { color: var(--text-muted); font-size: 12px; }
+
+  .btn {
+    font-family: var(--font-body); font-size: 13px; font-weight: 600; border-radius: 6px;
+    padding: 8px 14px; cursor: pointer; border: 1px solid var(--border-strong); background: transparent; color: var(--text);
+  }
+  .btn.primary { background: var(--accent); color: var(--accent-fg); border-color: transparent; }
+  .btn:disabled { opacity: 0.4; cursor: not-allowed; }
+  .btn.small { padding: 4px 10px; font-size: 12px; }
+
+  .payload { margin-top: 14px; background: var(--bg); border: 1px solid var(--border); border-radius: 4px; padding: 10px 12px; font-family: var(--font-mono); font-size: 12px; white-space: pre-wrap; font-variant-numeric: tabular-nums; overflow-x: auto; }
+  .payload .omit { color: var(--text-subtle); }
+  .state-line { font-family: var(--font-mono); font-size: 12px; color: var(--text-muted); margin-top: 8px; }
+
+  /* ---- variant A: role cards ---- */
+  .role-card { background: var(--surface-2); border: 1px solid var(--border); border-radius: 6px; padding: 12px; margin-bottom: 10px; }
+  .role-card .rc-head { display: flex; align-items: baseline; gap: 8px; margin-bottom: 10px; }
+  .role-card .rc-name { font-weight: 600; font-size: 13px; }
+  .role-card .rc-duty { color: var(--text-muted); font-size: 12px; }
+  .role-card .rc-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+  .role-card.inherit { opacity: 0.75; border-style: dashed; }
+  .role-card.inherit .rc-grid { display: none; }
+  .role-card .rc-inherit-label { font-size: 12px; color: var(--text-subtle); }
+
+  /* ---- variant B: compact table ---- */
+  .table { width: 100%; border-collapse: collapse; }
+  .table th { text-align: left; color: var(--text-subtle); font-size: 11px; letter-spacing: 0.06em; padding: 6px 8px; border-bottom: 1px solid var(--border); font-weight: 400; }
+  .table td { padding: 6px 8px; border-bottom: 1px solid var(--border); vertical-align: middle; }
+  .table select { padding: 5px 8px; font-size: 12px; }
+  .table .role { font-weight: 600; font-size: 12px; }
+  .summary-strip { display: flex; align-items: center; justify-content: space-between; background: var(--surface-2); border: 1px solid var(--border); border-radius: 4px; padding: 8px 12px; margin-bottom: 10px; font-size: 12px; }
+  .summary-strip .mono { font-family: var(--font-mono); color: var(--text-muted); }
+
+  /* ---- variant C: assign view ---- */
+  .assign { display: grid; grid-template-columns: 1.2fr 1fr; gap: 14px; }
+  @media (max-width: 720px) { .assign { grid-template-columns: 1fr; } }
+  .catalog { border: 1px solid var(--border); border-radius: 6px; background: var(--surface-2); }
+  .catalog .prov { border-bottom: 1px solid var(--border); }
+  .catalog .prov:last-child { border-bottom: none; }
+  .catalog .prov-head { width: 100%; text-align: left; background: none; border: none; color: var(--text); padding: 10px 12px; font-size: 13px; font-weight: 600; cursor: pointer; display: flex; justify-content: space-between; }
+  .catalog .prov-models { padding: 0 12px 10px; display: flex; flex-direction: column; gap: 6px; }
+  .catalog .model-row { display: flex; align-items: center; gap: 8px; border: 1px solid transparent; border-radius: 4px; padding: 6px 8px; cursor: pointer; font-size: 12px; }
+  .catalog .model-row:hover { background: var(--surface-hover); }
+  .catalog .model-row.armed { border-color: var(--accent); background: oklch(68.1% 0.169 275.0 / 0.12); }
+  .catalog .model-row .meta { color: var(--text-subtle); font-family: var(--font-mono); font-size: 11px; margin-left: auto; }
+  .assign-panel { border: 1px solid var(--border); border-radius: 6px; background: var(--surface); padding: 12px; }
+  .assign-panel h3 { font-size: 12px; margin: 0 0 10px; color: var(--text-muted); letter-spacing: 0.06em; font-weight: 400; }
+  .role-chip { display: flex; align-items: center; justify-content: space-between; gap: 8px; border: 1px solid var(--border); border-radius: 4px; padding: 8px 10px; margin-bottom: 8px; font-size: 12px; cursor: pointer; }
+  .role-chip:hover { background: var(--surface-hover); }
+  .role-chip .rlabel { font-weight: 600; }
+  .role-chip .rval { font-family: var(--font-mono); color: var(--text-muted); font-size: 11px; text-align: right; }
+  .role-chip.assignable { border-style: dashed; }
+  .armed-hint { color: var(--accent); font-size: 12px; margin-bottom: 8px; min-height: 16px; }
+
+  /* floating switcher */
+  .switcher { position: fixed; bottom: 18px; left: 50%; transform: translateX(-50%); z-index: 50; display: flex; align-items: center; gap: 10px; background: var(--surface-2); border: 1px solid var(--border-strong); border-radius: 999px; padding: 6px 14px; box-shadow: 0 4px 16px oklch(0% 0 0 / 0.4); font-size: 12px; }
+  .switcher button { background: none; border: none; color: var(--text); font-size: 16px; cursor: pointer; padding: 0 4px; }
+  .switcher .tag { color: var(--text-subtle); }
+</style>
+</head>
+<body>
+  <div class="chrome">
+    <span class="wordmark">◇ BaiZe Architect</span>
+    <span class="muted">PROTOTYPE — 模型档选择器 · throwaway</span>
+  </div>
+
+  <div class="page">
+    <h1>新建需求</h1>
+    <p class="sub">工作区 demo · 原型只关心「模型档」卡片部分，其余字段为桩</p>
+
+    <div class="card">
+      <div class="field"><label>标题</label><input value="订单履约流程重构" disabled /></div>
+      <div class="field"><label>概述</label><textarea rows="2" disabled>性能与可用性改造，含人工审批 gate。</textarea></div>
+      <div class="field"><label>说明</label><textarea rows="2" disabled>基线见需求文档。</textarea></div>
+
+      <div class="picker-head">
+        <h2>模型档 <span id="variant-title" class="hint"></span></h2>
+        <div class="hint">创建后不可改 · 缺省 = 部署默认档</div>
+      </div>
+
+      <div id="variant-root"></div>
+
+      <div class="payload" id="payload"></div>
+      <div class="state-line" id="state-line"></div>
+
+      <div style="display:flex; gap:10px; margin-top:16px; justify-content:flex-end;">
+        <button class="btn">取消</button>
+        <button class="btn primary" id="create">创建需求</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="switcher" id="switcher">
+    <button id="prev" title="前一变体">◀</button>
+    <span id="sw-label">A</span>
+    <button id="next" title="后一变体">▶</button>
+  </div>
+
+<script>
+// ---- 样例精选目录（假数据，非运行时配置） ----
+const CATALOG = [
+  { id: "qwen-token-plan-cn", name: "Qwen Token Plan (CN)", authEnv: ["QWEN_TOKEN_PLAN_CN_API_KEY"], models: [
+    { id: "glm-5.2", name: "GLM-5.2", contextWindow: 1048576, maxTokens: 16384, reasoning: true },
+    { id: "qwen-max", name: "Qwen-Max", contextWindow: 131072, maxTokens: 8192, reasoning: false },
+  ]},
+  { id: "deepseek", name: "DeepSeek", authEnv: ["DEEPSEEK_API_KEY"], models: [
+    { id: "deepseek-chat", name: "DeepSeek Chat", contextWindow: 128000, maxTokens: 8192, reasoning: false },
+    { id: "deepseek-reasoner", name: "DeepSeek Reasoner", contextWindow: 128000, maxTokens: 8192, reasoning: true },
+  ]},
+  { id: "openai", name: "OpenAI", authEnv: ["OPENAI_API_KEY"], models: [
+    { id: "gpt-5.2", name: "GPT-5.2", contextWindow: 400000, maxTokens: 32768, reasoning: true },
+  ]},
+  { id: "anthropic", name: "Anthropic", authEnv: ["ANTHROPIC_API_KEY"], models: [
+    { id: "claude-4.7-sonnet", name: "Claude 4.7 Sonnet", contextWindow: 200000, maxTokens: 32000, reasoning: true },
+  ]},
+];
+const ROLES = [
+  ["orchestrator", "零工具规划"],
+  ["analyst", "场景/用例/功能产出"],
+  ["architect", "设计/架构/数据/API 产出"],
+  ["critic", "Review Bundle 评审"],
+];
+const DEFAULT_ROLES = {
+  orchestrator: { provider: "qwen-token-plan-cn", modelId: "glm-5.2" },
+  analyst:      { provider: "qwen-token-plan-cn", modelId: "glm-5.2" },
+  architect:    { provider: "qwen-token-plan-cn", modelId: "glm-5.2" },
+  critic:       { provider: "qwen-token-plan-cn", modelId: "glm-5.2" },
+};
+
+// 共享状态：entries[role] = {provider, modelId} | null(null=继承默认)
+let entries = {};
+ROLES.forEach(([r]) => { entries[r] = null; });
+let armed = null; // variant C 的待指派模型
+
+function allDefault() { return ROLES.every(([r]) => entries[r] === null); }
+function payload() {
+  if (allDefault()) return { modelRoles: null };
+  const full = {};
+  ROLES.forEach(([r]) => { full[r] = entries[r] ?? DEFAULT_ROLES[r]; });
+  return { modelRoles: full };
+}
+function renderPayload() {
+  const p = payload();
+  const baseline = { baseline: { title: "订单履约流程重构", summary: "性能与可用性改造，含人工审批 gate。" } };
+  const el = document.getElementById("payload");
+  if (p.modelRoles === null) {
+    el.innerHTML = '<span class="omit">// modelRoles 省略 → 全部角色使用部署默认档</span>\n' + hl(JSON.stringify({ ...baseline, modelRoles: "omitted (default profile)" }, null, 2));
+  } else {
+    el.textContent = JSON.stringify({ ...baseline, ...p }, null, 2);
+  }
+}
+function hl(s) { const d = document.createElement("div"); d.textContent = s; return d.innerHTML; }
+function stated() { document.getElementById("state-line").textContent = allDefault() ? "state: 全部继承默认档 — modelRoles 省略" : "state: 自定义档 — modelRoles 将携带全部 4 角色（含继承项实值）"; }
+function refresh() { renderPayload(); stated(); render(); }
+
+function modelById(provider, modelId) {
+  const pv = CATALOG.find((p) => p.id === provider);
+  return pv?.models.find((m) => m.id === modelId) ?? null;
+}
+function fmtMeta(m) { return m ? `${m.contextWindow.toLocaleString()} ctx · ${m.maxTokens} tok${m.reasoning ? " · thinking" : ""}` : ""; }
+
+// ---- 变体 A：四角色卡片 ----
+function renderA() {
+  const root = document.getElementById("variant-root");
+  root.innerHTML = "";
+  const sel = (role, kind, value, onChange) => {
+    const s = document.createElement("select");
+    s.innerHTML = kind === "provider"
+      ? `<option value="">继承默认档</option>` + CATALOG.map((p) => `<option value="${p.id}">${p.name}</option>`).join("")
+      : `<option value="">继承默认档</option>` +
+        CATALOG.flatMap((p) => p.models.map((m) => ({ p: p.id, m: m.id, label: `${p.name} · ${m.name}` })))
+          .map((o) => `<option value="${o.p}|${o.m}">${o.label}</option>`).join("");
+    s.value = value;
+    s.addEventListener("change", () => onChange(s.value));
+    return s;
+  };
+  ROLES.forEach(([role, duty]) => {
+    const card = document.createElement("div");
+    card.className = "role-card" + (entries[role] === null ? " inherit" : "");
+    const head = document.createElement("div"); head.className = "rc-head";
+    head.innerHTML = `<span class="rc-name">${role}</span><span class="rc-duty">${duty}</span>`;
+    const body = document.createElement("div");
+    const toggler = document.createElement("button");
+    toggler.className = "btn small";
+    toggler.style.cssText = "margin-bottom:10px;";
+    if (entries[role] === null) {
+      toggler.textContent = "自定义模型";
+      toggler.addEventListener("click", () => { entries[role] = { ...DEFAULT_ROLES[role] }; refresh(); });
+    } else {
+      toggler.textContent = "恢复默认档";
+      toggler.addEventListener("click", () => { entries[role] = null; refresh(); });
+    }
+    body.append(toggler);
+    const grid = document.createElement("div"); grid.className = "rc-grid";
+    const provSel = sel(role, "provider", entries[role]?.provider ?? "");
+    provSel.addEventListener("change", (v) => {
+      if (!v) { entries[role] = null; refresh(); return; }
+      const first = CATALOG.find((p) => p.id === v)?.models[0]?.id;
+      entries[role] = { provider: v, modelId: first ?? "" };
+      refresh();
+    });
+    const mdlSel = sel(role, "model", entries[role] ? `${entries[role].provider}|${entries[role].modelId}` : "");
+    mdlSel.addEventListener("change", (v) => {
+      if (!v) { entries[role] = null; refresh(); return; }
+      const [p, m] = v.split("|");
+      entries[role] = { provider: p, modelId: m };
+      refresh();
+    });
+    const provWrap = document.createElement("div"); provWrap.append(label("提供方"), provSel);
+    const mdlWrap = document.createElement("div"); mdlWrap.append(label("模型"), mdlSel);
+    grid.append(provWrap, mdlWrap);
+    body.append(grid, inherLabel(role));
+    card.append(head, body);
+    root.append(card);
+  });
+}
+function label(t) { const l = document.createElement("label"); l.innerHTML = t; l.style.cssText = "display:block;color:var(--text-subtle);font-size:11px;letter-spacing:.06em;margin-bottom:5px;"; return l; }
+function inherLabel(role) {
+  const d = document.createElement("div");
+  d.className = "rc-inherit-label";
+  const m = DEFAULT_ROLES[role];
+  const mm = modelById(m.provider, m.modelId);
+  d.textContent = entries[role] === null ? `当前继承默认档：${m.provider} / ${m.modelId}` : "";
+  return d;
+}
+
+// ---- 变体 B：紧凑表 ----
+function renderB() {
+  const root = document.getElementById("variant-root");
+  root.innerHTML = "";
+  const strip = document.createElement("div"); strip.className = "summary-strip";
+  strip.innerHTML = `<span>有效模型档 · ${ROLES.filter(([r]) => entries[r] !== null).length}/4 自定义</span>
+    <span class="mono">默认：qwen-token-plan-cn / glm-5.2</span>
+    <button class="btn small" id="reset-b">恢复默认档</button>`;
+  const table = document.createElement("table"); table.className = "table";
+  table.innerHTML = `<thead><tr><th>角色</th><th>提供方</th><th>模型</th><th></th></tr></thead><tbody></tbody>`;
+  const tbody = table.querySelector("tbody");
+  ROLES.forEach(([role, duty]) => {
+    const tr = document.createElement("tr");
+    const ent = entries[role];
+    tr.innerHTML = `<td class="role" title="${duty}">${role}</td>`;
+    const tdP = document.createElement("td");
+    const sP = document.createElement("select");
+    sP.innerHTML = `<option value="">默认档</option>` + CATALOG.map((p) => `<option value="${p.id}" ${ent?.provider === p.id ? "selected" : ""}>${p.name}</option>`).join("");
+    sP.addEventListener("change", () => {
+      if (!sP.value) { entries[role] = null; refresh(); return; }
+      entries[role] = { provider: sP.value, modelId: CATALOG.find((p) => p.id === sP.value).models[0].id };
+      refresh();
+    });
+    tdP.append(sP);
+    const tdM = document.createElement("td");
+    const sM = document.createElement("select");
+    const provOptions = ent ? CATALOG.filter((p) => p.id === ent.provider) : CATALOG;
+    const flatten = (ps) => ps.flatMap((p) => p.models.map((m) => ({ p: p.id, m: m.id })));
+    sM.innerHTML = `<option value="">默认档</option>` + flatten(provOptions).map((o) => `<option value="${o.p}|${o.m}" ${ent?.provider === o.p && ent?.modelId === o.m ? "selected" : ""}>${o.m} · ${fmtMeta(modelById(o.p, o.m))}</option>`).join("");
+    sM.addEventListener("change", () => {
+      if (!sM.value) { entries[role] = null; refresh(); return; }
+      const [p, m] = sM.value.split("|");
+      entries[role] = { provider: p, modelId: m };
+      refresh();
+    });
+    tdM.append(sM);
+    const tdR = document.createElement("td");
+    const reset = document.createElement("button"); reset.className = "btn small"; reset.textContent = "重置";
+    reset.style.cssText = "border-color:transparent;color:var(--text-muted);padding:2px 6px;";
+    reset.addEventListener("click", () => { entries[role] = null; refresh(); });
+    tdR.append(reset);
+    tr.append(tdP, tdM, tdR);
+    tbody.append(tr);
+  });
+  root.append(strip, table);
+  document.getElementById("reset-b")?.addEventListener("click", () => { entries = {}; ROLES.forEach(([r]) => { entries[r] = null; }); refresh(); });
+}
+
+// ---- 变体 C：指派视图 ----
+function renderC() {
+  const root = document.getElementById("variant-root");
+  root.innerHTML = "";
+  const wrap = document.createElement("div"); wrap.className = "assign";
+  const catalog = document.createElement("div"); catalog.className = "catalog";
+  CATALOG.forEach((p, pi) => {
+    const prov = document.createElement("div"); prov.className = "prov";
+    const head = document.createElement("button"); head.className = "prov-head";
+    head.innerHTML = `<span>${p.name}</span><span style="color:var(--text-subtle);font-size:11px;font-family:var(--font-mono)">${p.models.length}</span>`;
+    const models = document.createElement("div"); models.className = "prov-models"; models.hidden = pi > 0;
+    head.addEventListener("click", () => { models.hidden = !models.hidden; });
+    p.models.forEach((m) => {
+      const row = document.createElement("div"); row.className = "model-row";
+      row.innerHTML = `<span>${m.name}</span><span class="meta">${fmtMeta(m)}</span>`;
+      row.addEventListener("click", () => { armed = { provider: p.id, modelId: m.id }; renderC(); });
+      if (armed?.provider === p.id && armed?.modelId === m.id) row.classList.add("armed");
+      models.append(row);
+    });
+    prov.append(head, models);
+    catalog.append(prov);
+  });
+  const panel = document.createElement("div"); panel.className = "assign-panel";
+  panel.innerHTML = `<h3>角色指派 — 点击模型后点角色</h3>`;
+  const hint = document.createElement("div"); hint.className = "armed-hint";
+  hint.textContent = armed ? `待指派：${armed.provider} / ${armed.modelId} → 点击右侧角色` : "先选左侧模型";
+  panel.append(hint);
+  const resetAll = document.createElement("button"); resetAll.className = "btn small";
+  resetAll.textContent = "全部恢复默认档"; resetAll.style.marginBottom = "10px";
+  resetAll.addEventListener("click", () => { armed = null; entries = {}; ROLES.forEach(([r]) => { entries[r] = null; }); refresh(); });
+  panel.append(resetAll);
+  ROLES.forEach(([role, duty]) => {
+    const chip = document.createElement("div"); chip.className = "role-chip";
+    const ent = entries[role];
+    const val = ent ? `${ent.provider} / ${ent.modelId}` : `默认档 · ${DEFAULT_ROLES[role].provider} / ${DEFAULT_ROLES[role].modelId}`;
+    chip.innerHTML = `<span class="rlabel">${role}<br/><span style="color:var(--text-subtle);font-size:11px;font-weight:400">${duty}</span></span><span class="rval">${val}</span>`;
+    chip.addEventListener("click", () => {
+      if (!armed) return;
+      entries[role] = { ...armed };
+      armed = null;
+      refresh();
+    });
+    if (armed && entries[role] === null) chip.classList.add("assignable");
+    panel.append(chip);
+  });
+  wrap.append(catalog, panel);
+  root.append(wrap);
+}
+
+// ---- 变体注册 ----
+const VARIANTS = [
+  { key: "A", name: "角色卡片", render: renderA },
+  { key: "B", name: "紧凑表", render: renderB },
+  { key: "C", name: "指派视图", render: renderC },
+];
+let current = "A";
+function render() {
+  document.getElementById("variant-root").innerHTML = "";
+  const v = VARIANTS.find((x) => x.key === current);
+  v.render();
+  document.getElementById("variant-title").textContent = `· ${v.name}`;
+  document.getElementById("sw-label").textContent = `${v.key} — ${v.name}`;
+  renderPayload(); stated();
+}
+function cycle(dir) {
+  const active = document.activeElement;
+  if (active && (active.tagName === "INPUT" || active.tagName === "TEXTAREA" || active.tagName === "SELECT" || active.isContentEditable)) return;
+  const i = VARIANTS.findIndex((x) => x.key === current);
+  current = VARIANTS[(i + dir + VARIANTS.length) % VARIANTS.length].key;
+  history.replaceState(null, "", "?variant=" + current);
+  render();
+}
+document.getElementById("prev").addEventListener("click", () => cycle(-1));
+document.getElementById("next").addEventListener("click", () => cycle(1));
+document.addEventListener("keydown", (e) => {
+  if (e.key === "ArrowLeft") cycle(-1);
+  if (e.key === "ArrowRight") cycle(1);
+});
+current = new URLSearchParams(location.search).get("variant") ?? "A";
+if (!VARIANTS.find((x) => x.key === current)) current = "A";
+render();
+</script>
+</body>
+</html>
