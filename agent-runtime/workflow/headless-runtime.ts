@@ -6,7 +6,7 @@ import { WORKFLOW_COMMAND_TYPES, type WorkflowCommandType } from "./command-type
 import { loadWorkflowContracts } from "./contracts/loader.js";
 import { compileWorkflowSchema, type WorkflowSchemaValidator } from "./contracts/schema.js";
 import type { DoctorReport } from "./workflow-doctor.js";
-import type { ModelDriver } from "./model-driver.js";
+import type { ModelDriver, ModelRoles } from "./model-driver.js";
 import { validatePlanProposal, type PlanValidationContext } from "./plan-validator.js";
 import type { TaskRole } from "./plan-types.js";
 import type { PlanProposal } from "./plan-types.js";
@@ -50,7 +50,7 @@ export interface HeadlessWorkflowRuntime {
 	workspaceExists(workspaceId: number): boolean;
 	listWorkspaces(): readonly WorkspaceSummary[];
 	deleteWorkspace(workspaceId: number): boolean;
-	createRequirement(input: { workspaceId: number; baseline: RequirementBaseline }): {
+	createRequirement(input: { workspaceId: number; baseline: RequirementBaseline; modelRoles?: ModelRoles }): {
 		requirementId: number;
 		workflowId: number;
 		workflowState: "pending";
@@ -212,6 +212,8 @@ export async function openHeadlessWorkflowRuntime(
 			return completePlanningInternal(workflowId, attemptId, structuredResult);
 		},
 		async planWorkflow(workflowId, modelDriver) {
+			const projection = store.getWorkflowProjection(workflowId);
+			const modelRoles = projection?.workflow.modelRoles;
 			for (let iteration = 0; iteration < 10; iteration += 1) {
 				const begin = store.beginPlanning(workflowId);
 				if (begin.taskId === 0) {
@@ -221,14 +223,14 @@ export async function openHeadlessWorkflowRuntime(
 			let result;
 			try {
 				result = await modelDriver.execute(
-					{ role: "orchestrator", contextDigest: begin.planningContextDigest, instruction: "Produce a complete PlanProposal DAG for the requirement." },
+					{ role: "orchestrator", contextDigest: begin.planningContextDigest, instruction: "Produce a complete PlanProposal DAG for the requirement.", modelRoles },
 					[],
 				);
 			} catch (error) {
 				store.appendRunEvent(begin.runId, "model_call_failed", { role: "orchestrator", error: error instanceof Error ? error.message : String(error) });
 				throw error;
 			}
-			store.appendRunEvent(begin.runId, "model_tokens", { role: "orchestrator", inputTokens: result.modelUsage.inputTokens, outputTokens: result.modelUsage.outputTokens });
+			store.appendRunEvent(begin.runId, "token", { role: "orchestrator", provider: result.modelUsage.provider, modelId: result.modelUsage.modelId, inputTokens: result.modelUsage.inputTokens, outputTokens: result.modelUsage.outputTokens });
 			store.appendRunEvent(begin.runId, "model_result", { role: "orchestrator", produced: "plan-proposal/v1" });
 			const complete = completePlanningInternal(workflowId, begin.attemptId, result.structuredResult);
 				if (complete.outcome === "adopted") {
@@ -250,6 +252,8 @@ export async function openHeadlessWorkflowRuntime(
 			return completeAttemptInternal(workflowId, attemptId, structuredResult);
 		},
 		async executeTask(workflowId, modelDriver) {
+			const projection = store.getWorkflowProjection(workflowId);
+			const modelRoles = projection?.workflow.modelRoles;
 			for (let iteration = 0; iteration < 10; iteration += 1) {
 				const begin = store.beginAttempt(workflowId);
 				if (begin.taskId === 0) {
@@ -259,14 +263,14 @@ export async function openHeadlessWorkflowRuntime(
 			let result;
 			try {
 				result = await modelDriver.execute(
-					{ role: begin.taskRole as TaskRole, contextDigest: begin.contextDigest, instruction: "Produce the required output." },
+					{ role: begin.taskRole as TaskRole, contextDigest: begin.contextDigest, instruction: "Produce the required output.", modelRoles },
 					[],
 				);
 			} catch (error) {
 				store.appendRunEvent(begin.runId, "model_call_failed", { role: begin.taskRole, error: error instanceof Error ? error.message : String(error) });
 				throw error;
 			}
-			store.appendRunEvent(begin.runId, "model_tokens", { role: begin.taskRole, inputTokens: result.modelUsage.inputTokens, outputTokens: result.modelUsage.outputTokens });
+			store.appendRunEvent(begin.runId, "token", { role: begin.taskRole, provider: result.modelUsage.provider, modelId: result.modelUsage.modelId, inputTokens: result.modelUsage.inputTokens, outputTokens: result.modelUsage.outputTokens });
 			store.appendRunEvent(begin.runId, "model_result", { role: begin.taskRole, produced: "role-result/v1" });
 			const complete = completeAttemptInternal(workflowId, begin.attemptId, result.structuredResult);
 				if (complete.outcome === "published") {

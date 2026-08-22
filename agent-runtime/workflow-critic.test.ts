@@ -72,7 +72,7 @@ async function createWorkflowWithReviewPlan(runtime: Runtime): Promise<{ workflo
 			contextDigest,
 			orderedToolCalls: [],
 			structuredResult: reviewPlanProposal(created.workflowId, contextDigest),
-			modelUsage: { inputTokens: 100, outputTokens: 200 },
+			modelUsage: { provider: "test", modelId: "test", inputTokens: 100, outputTokens: 200 },
 		},
 	]);
 	await runtime.planWorkflow(created.workflowId, driver);

@@ -96,7 +96,7 @@ async function adoptPlan(runtime: HeadlessWorkflowRuntime, workflowId: number): 
 		rationale: "rationale",
 	};
 	const driver = new ScriptedModelDriver([
-		{ role: "orchestrator", contextDigest, orderedToolCalls: [], structuredResult: proposal, modelUsage: { inputTokens: 10, outputTokens: 20 } },
+		{ role: "orchestrator", contextDigest, orderedToolCalls: [], structuredResult: proposal, modelUsage: { provider: "test", modelId: "test", inputTokens: 10, outputTokens: 20 } },
 	]);
 	const result = await runtime.planWorkflow(workflowId, driver);
 	assert.equal(result.outcome, "adopted");

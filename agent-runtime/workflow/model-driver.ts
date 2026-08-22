@@ -4,10 +4,23 @@ export type WorkflowAgentRole =
 	| "architect"
 	| "critic";
 
+export interface ModelRef {
+	provider: string;
+	modelId: string;
+}
+
+export interface ModelRoles {
+	orchestrator: ModelRef;
+	analyst: ModelRef;
+	architect: ModelRef;
+	critic: ModelRef;
+}
+
 export interface ModelDriverInput {
 	role: WorkflowAgentRole;
 	contextDigest: string;
 	instruction: string;
+	modelRoles?: ModelRoles;
 }
 
 export interface ModelTool {
@@ -16,6 +29,8 @@ export interface ModelTool {
 }
 
 export interface ModelUsage {
+	provider: string;
+	modelId: string;
 	inputTokens: number;
 	outputTokens: number;
 }

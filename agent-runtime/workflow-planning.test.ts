@@ -148,7 +148,7 @@ test("valid proposal is adopted as immutable PlanRevision", async () => {
 		const { workflowId } = await createStartedWorkflow(runtime);
 		const contextDigest = runtime.getPlanningContextDigest(workflowId);
 		const driver = new ScriptedModelDriver([
-			{ role: "orchestrator", contextDigest, orderedToolCalls: [], structuredResult: validProposal(workflowId, contextDigest), modelUsage: { inputTokens: 0, outputTokens: 0 } },
+			{ role: "orchestrator", contextDigest, orderedToolCalls: [], structuredResult: validProposal(workflowId, contextDigest), modelUsage: { provider: "test", modelId: "test", inputTokens: 0, outputTokens: 0 } },
 		]);
 		const result = await runtime.planWorkflow(workflowId, driver);
 		assert.equal(result.outcome, "adopted");
@@ -167,8 +167,8 @@ test("invalid proposal consumes planning attempt and fails workflow after budget
 		const { workflowId } = await createStartedWorkflow(runtime);
 		const contextDigest = runtime.getPlanningContextDigest(workflowId);
 		const driver = new ScriptedModelDriver([
-			{ role: "orchestrator", contextDigest, orderedToolCalls: [], structuredResult: invalidProposal(workflowId, contextDigest), modelUsage: { inputTokens: 0, outputTokens: 0 } },
-			{ role: "orchestrator", contextDigest, orderedToolCalls: [], structuredResult: invalidProposal(workflowId, contextDigest), modelUsage: { inputTokens: 0, outputTokens: 0 } },
+			{ role: "orchestrator", contextDigest, orderedToolCalls: [], structuredResult: invalidProposal(workflowId, contextDigest), modelUsage: { provider: "test", modelId: "test", inputTokens: 0, outputTokens: 0 } },
+			{ role: "orchestrator", contextDigest, orderedToolCalls: [], structuredResult: invalidProposal(workflowId, contextDigest), modelUsage: { provider: "test", modelId: "test", inputTokens: 0, outputTokens: 0 } },
 		]);
 		const result = await runtime.planWorkflow(workflowId, driver);
 		assert.equal(result.outcome, "planning_exhausted");
@@ -185,8 +185,8 @@ test("no partial Plan or Task writes on validation failure", async () => {
 		const { workflowId } = await createStartedWorkflow(runtime);
 		const contextDigest = runtime.getPlanningContextDigest(workflowId);
 		const driver = new ScriptedModelDriver([
-			{ role: "orchestrator", contextDigest, orderedToolCalls: [], structuredResult: invalidProposal(workflowId, contextDigest), modelUsage: { inputTokens: 0, outputTokens: 0 } },
-			{ role: "orchestrator", contextDigest, orderedToolCalls: [], structuredResult: invalidProposal(workflowId, contextDigest), modelUsage: { inputTokens: 0, outputTokens: 0 } },
+			{ role: "orchestrator", contextDigest, orderedToolCalls: [], structuredResult: invalidProposal(workflowId, contextDigest), modelUsage: { provider: "test", modelId: "test", inputTokens: 0, outputTokens: 0 } },
+			{ role: "orchestrator", contextDigest, orderedToolCalls: [], structuredResult: invalidProposal(workflowId, contextDigest), modelUsage: { provider: "test", modelId: "test", inputTokens: 0, outputTokens: 0 } },
 		]);
 		await runtime.planWorkflow(workflowId, driver);
 		assert.equal(queryPlanRevisionCount(databasePath, workflowId), 0, "no plan revisions should exist after failure");
@@ -202,7 +202,7 @@ test("five consecutive plan revisions exhaust budget and fail workflow", async (
 		const projection = runtime.getWorkflowProjection(workflowId);
 		const basePlanRevisionId = projection?.workflow.currentPlanRevisionId ?? null;
 		const driver = new ScriptedModelDriver([
-			{ role: "orchestrator", contextDigest, orderedToolCalls: [], structuredResult: validProposal(workflowId, contextDigest, i * 2 + 1, basePlanRevisionId), modelUsage: { inputTokens: 0, outputTokens: 0 } },
+			{ role: "orchestrator", contextDigest, orderedToolCalls: [], structuredResult: validProposal(workflowId, contextDigest, i * 2 + 1, basePlanRevisionId), modelUsage: { provider: "test", modelId: "test", inputTokens: 0, outputTokens: 0 } },
 		]);
 		const result = await runtime.planWorkflow(workflowId, driver);
 		assert.equal(result.outcome, "adopted", `iteration ${i}: expected adopted, got ${result.outcome}`);
@@ -210,7 +210,7 @@ test("five consecutive plan revisions exhaust budget and fail workflow", async (
 	}
 		const contextDigest = runtime.getPlanningContextDigest(workflowId);
 		const driver = new ScriptedModelDriver([
-			{ role: "orchestrator", contextDigest, orderedToolCalls: [], structuredResult: validProposal(workflowId, contextDigest, 11), modelUsage: { inputTokens: 0, outputTokens: 0 } },
+			{ role: "orchestrator", contextDigest, orderedToolCalls: [], structuredResult: validProposal(workflowId, contextDigest, 11), modelUsage: { provider: "test", modelId: "test", inputTokens: 0, outputTokens: 0 } },
 		]);
 		const result = await runtime.planWorkflow(workflowId, driver);
 		assert.equal(result.outcome, "plan_budget_exhausted");
@@ -250,7 +250,7 @@ test("plan_adopted event is emitted with correct entity", async () => {
 		const { workflowId } = await createStartedWorkflow(runtime);
 		const contextDigest = runtime.getPlanningContextDigest(workflowId);
 		const driver = new ScriptedModelDriver([
-			{ role: "orchestrator", contextDigest, orderedToolCalls: [], structuredResult: validProposal(workflowId, contextDigest), modelUsage: { inputTokens: 0, outputTokens: 0 } },
+			{ role: "orchestrator", contextDigest, orderedToolCalls: [], structuredResult: validProposal(workflowId, contextDigest), modelUsage: { provider: "test", modelId: "test", inputTokens: 0, outputTokens: 0 } },
 		]);
 		await runtime.planWorkflow(workflowId, driver);
 		const projection = runtime.getWorkflowProjection(workflowId);
@@ -258,6 +258,44 @@ test("plan_adopted event is emitted with correct entity", async () => {
 		const planAdopted = projection.events.find((e) => e.type === "plan_adopted");
 		assert.ok(planAdopted, "plan_adopted event should exist");
 		assert.equal(planAdopted.entity.type, "plan_revision");
+	});
+});
+
+test("planWorkflow passes workflow modelRoles to the ModelDriver", async () => {
+	await withPlanningRuntime(async ({ runtime }) => {
+		const workspaceId = runtime.createWorkspace({ repoPath: "/tmp/repo", name: "Repo" });
+		const modelRoles = {
+			orchestrator: { provider: "qwen-token-plan-cn", modelId: "qwen-max" },
+			analyst: { provider: "qwen-token-plan-cn", modelId: "glm-5.2" },
+			architect: { provider: "qwen-token-plan-cn", modelId: "glm-5.2" },
+			critic: { provider: "qwen-token-plan-cn", modelId: "glm-5.2" },
+		};
+		const created = runtime.createRequirement({ workspaceId, baseline: BASELINE, modelRoles });
+		runtime.executeCommand({
+			workflowId: created.workflowId,
+			commandId: "cmd-start",
+			expectedWorkflowVersion: 0,
+			type: "start",
+			operator: OPERATOR,
+		});
+		const contextDigest = runtime.getPlanningContextDigest(created.workflowId);
+		let receivedModelRoles: unknown;
+		const driver = new ScriptedModelDriver([
+			{
+				role: "orchestrator",
+				contextDigest,
+				orderedToolCalls: [],
+				structuredResult: validProposal(created.workflowId, contextDigest),
+				modelUsage: { provider: "test", modelId: "test", inputTokens: 0, outputTokens: 0 },
+				invoke: async ({ input }) => {
+					receivedModelRoles = input.modelRoles;
+				},
+			},
+		]);
+		const result = await runtime.planWorkflow(created.workflowId, driver);
+		assert.equal(result.outcome, "adopted");
+		assert.deepEqual(receivedModelRoles, modelRoles);
+		driver.assertExhausted();
 	});
 });
 

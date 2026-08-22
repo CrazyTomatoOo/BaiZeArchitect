@@ -22,6 +22,7 @@ import { HUMAN_GOVERNANCE_MIGRATION } from "./migrations/0010-human-governance.j
 import { READ_MODEL_GOVERNANCE_MIGRATION } from "./migrations/0011-read-model-governance.js";
 import { RUN_EVENT_STREAM_MIGRATION } from "./migrations/0012-run-event-stream.js";
 import { ACTOR_KIND_MIGRATION } from "./migrations/0013-actor-kind.js";
+import { MODEL_ROLES_MIGRATION } from "./migrations/0014-model-roles.js";
 import type { ReusableAssetKind } from "./reusable-asset-kind.js";
 import { parseJson } from "./json.js";
 import { AssetStore } from "./asset-store.js";
@@ -41,8 +42,9 @@ import { type WorkflowCommandType } from "../workflow/command-types.js";
 import { ARTIFACT_OWNERSHIP, type InputBinding, type TaskOutputInput } from "../workflow/plan-types.js";
 import type { RoleResult, ContextManifest, RoleContract, BeginAttemptResult, CompleteAttemptResult, TraceLinkProposal, CriticReport, FindingProposal, FindingSeverity } from "../workflow/role-result.js";
 import { deriveRequiredArtifactSet, type ImpactProfile, type RequiredArtifactSet } from "../workflow/impact-profile.js";
+import type { ModelRoles } from "../workflow/model-driver.js";
 
-const MIGRATIONS = [WORKFLOW_GOVERNANCE_MIGRATION, COMMAND_GOVERNANCE_MIGRATION, RECOVERY_GOVERNANCE_MIGRATION, PLANNING_GOVERNANCE_MIGRATION, ATTEMPT_EXECUTION_MIGRATION, DEPENDENT_TASK_SAFETY_MIGRATION, REQUIRED_ARTIFACTS_AND_EVIDENCE_MIGRATION, CRITIC_GOVERNANCE_MIGRATION, DECISIONS_AND_READINESS_MIGRATION, HUMAN_GOVERNANCE_MIGRATION, READ_MODEL_GOVERNANCE_MIGRATION, RUN_EVENT_STREAM_MIGRATION, ACTOR_KIND_MIGRATION] as const;
+const MIGRATIONS = [WORKFLOW_GOVERNANCE_MIGRATION, COMMAND_GOVERNANCE_MIGRATION, RECOVERY_GOVERNANCE_MIGRATION, PLANNING_GOVERNANCE_MIGRATION, ATTEMPT_EXECUTION_MIGRATION, DEPENDENT_TASK_SAFETY_MIGRATION, REQUIRED_ARTIFACTS_AND_EVIDENCE_MIGRATION, CRITIC_GOVERNANCE_MIGRATION, DECISIONS_AND_READINESS_MIGRATION, HUMAN_GOVERNANCE_MIGRATION, READ_MODEL_GOVERNANCE_MIGRATION, RUN_EVENT_STREAM_MIGRATION, ACTOR_KIND_MIGRATION, MODEL_ROLES_MIGRATION] as const;
 export type CommandOutcome =
 	| "accepted"
 	| "capability_denied"
@@ -212,6 +214,7 @@ export interface PolicyBundleDocument {
 export interface CreateRequirementInput {
 	workspaceId: number;
 	baseline: RequirementBaseline;
+	modelRoles?: ModelRoles;
 }
 
 export interface CreationResult {
@@ -264,6 +267,7 @@ export interface WorkflowProjection {
 		currentPlanRevisionId: number | null;
 		currentApprovalPacketId: number | null;
 		currentFailureCode: string | null;
+		modelRoles?: ModelRoles;
 		policyBundle: SnapshotDocument & { content: PolicyBundleDocument; documentId: number };
 	};
 	events: Array<{
@@ -428,20 +432,24 @@ deleteWorkspace(workspaceId: number): boolean {
 					timestamp,
 				).lastInsertRowid,
 		);
+		const modelRolesJson = input.modelRoles === undefined ? null : JSON.stringify(input.modelRoles);
 		const workflowId = Number(
 			this.database
 				.prepare(
-					"insert into workflows(requirement_id, state, version, last_event_seq, policy_bundle_document_id, created_at, updated_at) values (?, 'pending', 0, 0, ?, ?, ?)",
+					"insert into workflows(requirement_id, state, version, last_event_seq, policy_bundle_document_id, model_roles, created_at, updated_at) values (?, 'pending', 0, 0, ?, ?, ?, ?)",
 				)
-				.run(requirementId, policy.id, timestamp, timestamp).lastInsertRowid,
+				.run(requirementId, policy.id, modelRolesJson, timestamp, timestamp).lastInsertRowid,
 		);
-		const payload = {
+		const payload: Record<string, unknown> = {
 			requirementId,
 			requirementRevisionId: revisionId,
 			designSessionId,
 			policyBundleDocumentId: policy.id,
 			policyBundleDigest: policy.digest,
 		};
+		if (input.modelRoles !== undefined) {
+			payload.modelRoles = input.modelRoles;
+		}
 		this.database
 			.prepare(
 				"insert into workflow_events(workflow_id, seq, type, type_version, schema_version, workflow_version, entity_type, entity_id, entity_version, payload, created_at) values (?, 1, 'workflow_created', 1, 'workflow-event/v1', 0, 'workflow', ?, 0, ?, ?)",
@@ -473,7 +481,7 @@ deleteWorkspace(workspaceId: number): boolean {
 			.prepare(
 				`select
 				w.id as workflow_id, w.state, w.version as workflow_version, w.last_event_seq,
-				w.current_plan_revision_id, w.current_approval_packet_id, w.current_failure_code,
+				w.current_plan_revision_id, w.current_approval_packet_id, w.current_failure_code, w.model_roles,
 				r.id as requirement_id, r.workspace_id, r.title, r.version as requirement_version,
 				a.id as artifact_id, ar.id as revision_id, ar.revision_no, ar.status, ar.schema_ref,
 				ar.content_document_id, ar.content_digest, content.content as baseline_content,
@@ -525,6 +533,7 @@ deleteWorkspace(workspaceId: number): boolean {
 				currentPlanRevisionId: row.current_plan_revision_id as number | null,
 				currentApprovalPacketId: row.current_approval_packet_id as number | null,
 				currentFailureCode: row.current_failure_code as string | null,
+				modelRoles: row.model_roles === null ? undefined : parseJson<ModelRoles>(row.model_roles as string),
 				policyBundle: {
 					documentId: row.policy_document_id as number,
 					id: row.policy_document_id as number,
@@ -2362,8 +2371,8 @@ deleteWorkspace(workspaceId: number): boolean {
 
 	getRequirementDetail(requirementId: number): RequirementDetailRecord | undefined {
 		const row = this.database
-			.prepare("select r.id, r.workspace_id, r.title, r.version, w.id as workflow_id, (select dp.id from design_packages dp where dp.requirement_id = r.id) as design_package_id from requirements r join workflows w on w.requirement_id = r.id where r.id = ?")
-			.get(requirementId) as { id: number; workspace_id: number; title: string; version: number; workflow_id: number; design_package_id: number | null } | undefined;
+			.prepare("select r.id, r.workspace_id, r.title, r.version, w.id as workflow_id, w.model_roles, (select dp.id from design_packages dp where dp.requirement_id = r.id) as design_package_id from requirements r join workflows w on w.requirement_id = r.id where r.id = ?")
+			.get(requirementId) as { id: number; workspace_id: number; title: string; version: number; workflow_id: number; design_package_id: number | null; model_roles: string | null } | undefined;
 		if (!row) return undefined;
 		const revision = this.database
 			.prepare("select ar.id, ar.artifact_id, ar.revision_no, ar.status, ar.schema_ref, ar.content_document_id, ar.content_digest, d.content from artifact_revisions ar join artifacts a on a.id = ar.artifact_id join snapshot_documents d on d.id = ar.content_document_id where a.requirement_id = ? and a.kind = 'requirement' order by ar.id desc limit 1")
@@ -2376,6 +2385,7 @@ deleteWorkspace(workspaceId: number): boolean {
 			version: row.version,
 			workflowId: row.workflow_id,
 			designPackageId: row.design_package_id,
+			modelRoles: row.model_roles === null ? undefined : parseJson<ModelRoles>(row.model_roles),
 			currentRevision: {
 				id: revision.id,
 				artifactId: revision.artifact_id,
@@ -2391,8 +2401,8 @@ deleteWorkspace(workspaceId: number): boolean {
 
 	getBoundedProjection(workflowId: number): BoundedWorkflowProjection | undefined {
 		const workflow = this.database
-			.prepare("select w.id, w.state, w.version, w.last_event_seq, w.current_plan_revision_id, w.current_approval_packet_id, w.current_failure_code, w.policy_bundle_document_id, w.requirement_id from workflows w where w.id = ?")
-			.get(workflowId) as { id: number; state: string; version: number; last_event_seq: number; current_plan_revision_id: number | null; current_approval_packet_id: number | null; current_failure_code: string | null; policy_bundle_document_id: number; requirement_id: number } | undefined;
+			.prepare("select w.id, w.state, w.version, w.last_event_seq, w.current_plan_revision_id, w.current_approval_packet_id, w.current_failure_code, w.policy_bundle_document_id, w.requirement_id, w.model_roles from workflows w where w.id = ?")
+			.get(workflowId) as { id: number; state: string; version: number; last_event_seq: number; current_plan_revision_id: number | null; current_approval_packet_id: number | null; current_failure_code: string | null; policy_bundle_document_id: number; requirement_id: number; model_roles: string | null } | undefined;
 		if (!workflow) return undefined;
 		const policyBundle = this.database.prepare("select id, digest from snapshot_documents where id = ?").get(workflow.policy_bundle_document_id) as { id: number; digest: string };
 		const requirement = this.database
@@ -2455,6 +2465,7 @@ deleteWorkspace(workspaceId: number): boolean {
 				lastEventSeq: workflow.last_event_seq,
 				currentFailureCode: workflow.current_failure_code,
 				policyBundle: { documentId: policyBundle.id, digest: policyBundle.digest },
+				modelRoles: workflow.model_roles === null ? undefined : parseJson<ModelRoles>(workflow.model_roles),
 			},
 			requirement: {
 				id: requirement.id,
@@ -3239,6 +3250,7 @@ export interface RequirementDetailRecord {
 	version: number;
 	workflowId: number;
 	designPackageId: number | null;
+	modelRoles?: ModelRoles;
 	currentRevision: {
 		id: number;
 		artifactId: number;
@@ -3259,6 +3271,7 @@ export interface BoundedWorkflowProjection {
 		lastEventSeq: number;
 		currentFailureCode: string | null;
 		policyBundle: { documentId: number; digest: string };
+		modelRoles?: ModelRoles;
 	};
 	requirement: {
 		id: number;

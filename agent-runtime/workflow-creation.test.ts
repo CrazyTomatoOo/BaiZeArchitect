@@ -100,7 +100,7 @@ test("creates a Requirement with its complete pending governance projection atom
 		assert.equal(projection.workflow.currentFailureCode, null);
 		assert.equal(projection.workflow.policyBundle.schemaRef, "policy-bundle/v1");
 		assert.match(projection.workflow.policyBundle.digest, /^sha256:[a-f0-9]{64}$/);
-		assert.equal(projection.workflow.policyBundle.content.contracts.length, 11);
+		assert.equal(projection.workflow.policyBundle.content.contracts.length, 12);
 		for (const contract of projection.workflow.policyBundle.content.contracts) {
 			assert.equal(typeof contract.identity, "string");
 			assert.match(contract.digest, /^sha256:[a-f0-9]{64}$/);
@@ -125,6 +125,35 @@ test("creates a Requirement with its complete pending governance projection atom
 				createdAt: "2026-08-12T10:00:00.000Z",
 			},
 		]);
+	});
+});
+
+test("persists per-workflow modelRoles and exposes them in projections and the created event", async () => {
+	await withRuntime(async ({ runtime }) => {
+		const workspaceId = runtime.createWorkspace({ repoPath: "/tmp/repo", name: "Repo" });
+		const modelRoles = {
+			orchestrator: { provider: "qwen-token-plan-cn", modelId: "qwen-max" },
+			analyst: { provider: "qwen-token-plan-cn", modelId: "glm-5.2" },
+			architect: { provider: "qwen-token-plan-cn", modelId: "glm-5.2" },
+			critic: { provider: "qwen-token-plan-cn", modelId: "glm-5.2" },
+		};
+		const created = runtime.createRequirement({ workspaceId, baseline: BASELINE, modelRoles });
+
+		const projection = runtime.getWorkflowProjection(created.workflowId);
+		assert.ok(projection);
+		assert.deepEqual(projection.workflow.modelRoles, modelRoles);
+
+		const detail = runtime.getRequirementDetail(created.requirementId);
+		assert.ok(detail);
+		assert.deepEqual(detail.modelRoles, modelRoles);
+
+		const bounded = runtime.getBoundedProjection(created.workflowId);
+		assert.ok(bounded);
+		assert.deepEqual(bounded.workflow.modelRoles, modelRoles);
+
+		const createdEvent = projection.events.find((event) => event.type === "workflow_created");
+		assert.ok(createdEvent);
+		assert.deepEqual((createdEvent.payload as { modelRoles?: typeof modelRoles }).modelRoles, modelRoles);
 	});
 });
 
@@ -360,12 +389,12 @@ test("startup refuses an unknown newer Workflow schema migration", async () => {
 	const runtime = await openHeadlessWorkflowRuntime(runtimeOptions(databasePath));
 	runtime.close();
 	const database = new Database(databasePath);
-	database.prepare("insert into schema_migrations(version, name, checksum, applied_at) values (14, 'future', 'sha256:future', ?)").run("2026-08-12T10:00:00.000Z");
+		database.prepare("insert into schema_migrations(version, name, checksum, applied_at) values (99, 'future', 'sha256:future', ?)").run("2026-08-12T10:00:00.000Z");
 	database.close();
 	try {
 		await assert.rejects(
 			openHeadlessWorkflowRuntime(runtimeOptions(databasePath)),
-			/Workflow database migration 14 is newer than supported version 13/,
+			/Workflow database migration 99 is newer than supported version 14/,
 		);
 	} finally {
 		await rm(directory, { recursive: true, force: true });

@@ -174,7 +174,7 @@ async function adoptPlan(runtime: Runtime, workflowId: number, tasks: TaskPropos
 			contextDigest,
 			orderedToolCalls: [],
 			structuredResult: proposal,
-			modelUsage: { inputTokens: 10, outputTokens: 20 },
+			modelUsage: { provider: "test", modelId: "test", inputTokens: 10, outputTokens: 20 },
 		},
 	]);
 	const result = await runtime.planWorkflow(workflowId, driver);

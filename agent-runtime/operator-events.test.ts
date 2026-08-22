@@ -100,7 +100,7 @@ async function createStartedWorkflow(
 	const created = await fetch(`${context.server.url}/api/workspaces/${context.workspaceId}/requirements`, {
 		method: "POST",
 		headers: { "content-type": "application/json", cookie },
-		body: JSON.stringify(BASELINE),
+		body: JSON.stringify({ baseline: BASELINE }),
 	});
 	assert.equal(created.status, 201);
 	const body = (await created.json()) as { requirementId: number; workflowId: number };
@@ -240,7 +240,7 @@ async function adoptPlan(runtime: HeadlessWorkflowRuntime, workflowId: number): 
 			contextDigest: proposal.base.planningContextDigest,
 			orderedToolCalls: [],
 			structuredResult: proposal,
-			modelUsage: { inputTokens: 11, outputTokens: 22 },
+			modelUsage: { provider: "test", modelId: "test", inputTokens: 11, outputTokens: 22 },
 		},
 	]);
 	const result = await runtime.planWorkflow(workflowId, driver);
@@ -439,7 +439,7 @@ test("run SSE streams run-event frames and token facts never enter the workflow 
 		const runEvents = runFrames.filter((frame) => frame.event === "run-event");
 		assert.deepEqual(runEvents.map((frame) => frame.id), ["1", "2", "3"]);
 		const types = runEvents.map((frame) => (JSON.parse(frame.data ?? "{}") as { type: string }).type);
-		assert.deepEqual(types, ["model_call_started", "model_tokens", "model_result"]);
+		assert.deepEqual(types, ["model_call_started", "token", "model_result"]);
 		const workflowEvents = context.runtime.getWorkflowEvents(workflowId, 0, 500);
 		assert.ok(!workflowEvents.some((event) => event.type.startsWith("model_")), "workflow audit stream must not contain model/token facts");
 	});
@@ -538,6 +538,10 @@ test("create to archive through public API, dual SSE, receipts, and projection",
 		db.close();
 		assert.ok(runWithEvents);
 		const runEvents = context.runtime.getRunEvents(runWithEvents.id, 0, 500);
-		assert.ok(runEvents.some((event) => event.type === "model_tokens"));
+		const tokenEvent = runEvents.find((event) => event.type === "token");
+		assert.ok(tokenEvent, "run events must include a token event");
+		assert.equal((tokenEvent.payload as { role: string }).role, "orchestrator");
+		assert.equal(typeof (tokenEvent.payload as { provider: string }).provider, "string");
+		assert.equal(typeof (tokenEvent.payload as { modelId: string }).modelId, "string");
 	});
 });

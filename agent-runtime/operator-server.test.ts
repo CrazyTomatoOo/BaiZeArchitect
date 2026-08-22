@@ -98,7 +98,7 @@ async function createStartedWorkflow(
 	const created = await fetch(`${context.server.url}/api/workspaces/${context.workspaceId}/requirements`, {
 		method: "POST",
 		headers: { "content-type": "application/json", cookie },
-		body: JSON.stringify(baseline()),
+		body: JSON.stringify({ baseline: baseline() }),
 	});
 	assert.equal(created.status, 201);
 	const body = (await created.json()) as { requirementId: number; workflowId: number };
@@ -301,13 +301,13 @@ test("protected routes reject missing or forged session cookies", async () => {
 		const anonymous = await fetch(`${server.url}/api/workspaces/${workspaceId}/requirements`, {
 			method: "POST",
 			headers: { "content-type": "application/json" },
-			body: JSON.stringify(baseline()),
+			body: JSON.stringify({ baseline: baseline() }),
 		});
 		assert.equal(anonymous.status, 401);
 		const forged = await fetch(`${server.url}/api/workspaces/${workspaceId}/requirements`, {
 			method: "POST",
 			headers: { "content-type": "application/json", cookie: "baize_operator=forged" },
-			body: JSON.stringify(baseline()),
+			body: JSON.stringify({ baseline: baseline() }),
 		});
 		assert.equal(forged.status, 401);
 	});
@@ -319,20 +319,20 @@ test("requirement creation over HTTP atomically returns the pending workflow ide
 		const response = await fetch(`${server.url}/api/workspaces/${workspaceId}/requirements`, {
 			method: "POST",
 			headers: { "content-type": "application/json", cookie },
-			body: JSON.stringify(baseline()),
+			body: JSON.stringify({ baseline: baseline() }),
 		});
 		assert.equal(response.status, 201);
 		const body = (await response.json()) as {
 			requirementId: number;
 			workflowId: number;
-			state: string;
-			version: number;
+			workflowState: string;
+			workflowVersion: number;
 			lastEventSeq: number;
 		};
 		assert.ok(body.requirementId > 0);
 		assert.ok(body.workflowId > 0);
-		assert.equal(body.state, "pending");
-		assert.equal(body.version, 0);
+		assert.equal(body.workflowState, "pending");
+		assert.equal(body.workflowVersion, 0);
 		assert.equal(body.lastEventSeq, 1);
 		const projection = runtime.getWorkflowProjection(body.workflowId);
 		assert.equal(projection?.workflow.state, "pending");
@@ -346,19 +346,19 @@ test("requirement creation rejects unknown workspace, invalid baseline, and acto
 		const unknownWorkspace = await fetch(`${server.url}/api/workspaces/999999/requirements`, {
 			method: "POST",
 			headers: { "content-type": "application/json", cookie },
-			body: JSON.stringify(baseline()),
+			body: JSON.stringify({ baseline: baseline() }),
 		});
 		assert.equal(unknownWorkspace.status, 404);
 		const invalidBaseline = await fetch(`${server.url}/api/workspaces/${workspaceId}/requirements`, {
 			method: "POST",
 			headers: { "content-type": "application/json", cookie },
-			body: JSON.stringify({ title: "missing schema" }),
+			body: JSON.stringify({ baseline: { title: "missing schema" } }),
 		});
 		assert.equal(invalidBaseline.status, 400);
 		const withActor = await fetch(`${server.url}/api/workspaces/${workspaceId}/requirements`, {
 			method: "POST",
 			headers: { "content-type": "application/json", cookie },
-			body: JSON.stringify({ ...baseline(), actor: "operator:forged" }),
+			body: JSON.stringify({ baseline: baseline(), actor: "operator:forged" }),
 		});
 		assert.equal(withActor.status, 400);
 	});
@@ -372,7 +372,7 @@ test("commands execute through the unified idempotent resource", async () => {
 			{
 				method: "POST",
 				headers: { "content-type": "application/json", cookie },
-				body: JSON.stringify(baseline()),
+				body: JSON.stringify({ baseline: baseline() }),
 			},
 		);
 		const { workflowId } = (await created.json()) as { workflowId: number };

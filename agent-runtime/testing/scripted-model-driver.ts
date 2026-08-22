@@ -17,9 +17,10 @@ export interface ScriptedToolCall {
 export interface ScriptedModelInvocation {
 	role: WorkflowAgentRole;
 	contextDigest: string;
+	input: ModelDriverInput;
 	tools: readonly {
 		name: string;
-		call(argumentsValue: unknown): Promise<unknown>;
+		call: (argumentsValue: unknown) => Promise<unknown>;
 	}[];
 }
 
@@ -122,7 +123,7 @@ export class ScriptedModelDriver implements ModelDriver {
 		}));
 		for (const expected of step.orderedToolCalls) uniqueTool(tools, expected.name);
 		if (step.invoke) {
-			await step.invoke({ role: input.role, contextDigest: input.contextDigest, tools: instrumentedTools });
+			await step.invoke({ role: input.role, contextDigest: input.contextDigest, input, tools: instrumentedTools });
 		} else {
 			for (const expected of step.orderedToolCalls) {
 				const tool = instrumentedTools.find(({ name }) => name === expected.name);

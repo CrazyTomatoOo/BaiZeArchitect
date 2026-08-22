@@ -216,12 +216,14 @@ test("DELETE /api/workspaces/:id removes the workspace and all workspace-gated r
 		assert.equal(created.status, 201);
 		const { workspaceId } = (await created.json()) as { workspaceId: number };
 		const requirement = await postJson(context, `/api/workspaces/${workspaceId}/requirements`, {
-			schemaVersion: "artifact/requirement/v1",
-			artifactKind: "requirement",
-			summary: "Req",
-			sourceRefs: [],
-			title: "Req",
-			description: "Req",
+			baseline: {
+				schemaVersion: "artifact/requirement/v1",
+				artifactKind: "requirement",
+				summary: "Req",
+				sourceRefs: [],
+				title: "Req",
+				description: "Req",
+			},
 		});
 		assert.equal(requirement.status, 201);
 
@@ -265,7 +267,7 @@ test("DELETE /api/workspaces/:id refuses a busy workspace with 409 workspace_bus
 			rationale: "rationale",
 		};
 		const driver = new ScriptedModelDriver([
-			{ role: "orchestrator", contextDigest, orderedToolCalls: [], structuredResult: proposal, modelUsage: { inputTokens: 0, outputTokens: 0 } },
+			{ role: "orchestrator", contextDigest, orderedToolCalls: [], structuredResult: proposal, modelUsage: { provider: "test", modelId: "test", inputTokens: 0, outputTokens: 0 } },
 		]);
 		const planned = await context.runtime.planWorkflow(created.workflowId, driver);
 		assert.equal(planned.outcome, "adopted");

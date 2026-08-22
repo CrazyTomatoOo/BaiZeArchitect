@@ -127,7 +127,7 @@ async function adoptPlan(runtime: Runtime, workflowId: number, tasks: TaskPropos
 		tasks,
 		rationale: "rationale",
 	};
-	const driver = new ScriptedModelDriver([{ role: "orchestrator", contextDigest, orderedToolCalls: [], structuredResult: proposal, modelUsage: { inputTokens: 10, outputTokens: 20 } }]);
+	const driver = new ScriptedModelDriver([{ role: "orchestrator", contextDigest, orderedToolCalls: [], structuredResult: proposal, modelUsage: { provider: "test", modelId: "test", inputTokens: 10, outputTokens: 20 } }]);
 	const result = await runtime.planWorkflow(workflowId, driver);
 	assert.equal(result.outcome, "adopted");
 	driver.assertExhausted();
@@ -329,8 +329,8 @@ test("retry-planning resumes a planning-exhausted Workflow and planning can adop
 	await withRuntime(async ({ runtime }) => {
 		const workflowId = await createStartedWorkflow(runtime);
 		const badDriver = new ScriptedModelDriver([
-			{ role: "orchestrator", contextDigest: runtime.getPlanningContextDigest(workflowId), orderedToolCalls: [], structuredResult: { invalid: true }, modelUsage: { inputTokens: 1, outputTokens: 1 } },
-			{ role: "orchestrator", contextDigest: runtime.getPlanningContextDigest(workflowId), orderedToolCalls: [], structuredResult: { invalid: true }, modelUsage: { inputTokens: 1, outputTokens: 1 } },
+			{ role: "orchestrator", contextDigest: runtime.getPlanningContextDigest(workflowId), orderedToolCalls: [], structuredResult: { invalid: true }, modelUsage: { provider: "test", modelId: "test", inputTokens: 1, outputTokens: 1 } },
+			{ role: "orchestrator", contextDigest: runtime.getPlanningContextDigest(workflowId), orderedToolCalls: [], structuredResult: { invalid: true }, modelUsage: { provider: "test", modelId: "test", inputTokens: 1, outputTokens: 1 } },
 		]);
 		const failed = await runtime.planWorkflow(workflowId, badDriver);
 		assert.equal(failed.outcome, "planning_exhausted");

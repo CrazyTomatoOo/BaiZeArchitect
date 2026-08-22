@@ -82,7 +82,7 @@ async function createWorkflowWithPlan(runtime: Runtime): Promise<{ workflowId: n
 			contextDigest,
 			orderedToolCalls: [],
 			structuredResult: validPlanProposal(created.workflowId, contextDigest),
-			modelUsage: { inputTokens: 100, outputTokens: 200 },
+			modelUsage: { provider: "test", modelId: "test", inputTokens: 100, outputTokens: 200 },
 		},
 	]);
 	await runtime.planWorkflow(created.workflowId, driver);
@@ -393,7 +393,7 @@ test("executeTask drives analyst model and publishes via the model/tool boundary
 				contextDigest: begin.contextDigest,
 				orderedToolCalls: [],
 				structuredResult,
-				modelUsage: { inputTokens: 50, outputTokens: 100 },
+				modelUsage: { provider: "test", modelId: "test", inputTokens: 50, outputTokens: 100 },
 			},
 		]);
 		const result = runtime.completeAttempt(workflowId, begin.attemptId, structuredResult);

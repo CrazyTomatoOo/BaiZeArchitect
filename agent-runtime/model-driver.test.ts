@@ -47,7 +47,7 @@ const fixture = {
 		outcome: "completed",
 		effectRefs: ["finding:9"],
 	},
-	modelUsage: { inputTokens: 120, outputTokens: 45 },
+	modelUsage: { provider: "test", modelId: "test", inputTokens: 120, outputTokens: 45 },
 };
 
 test("ScriptedModelDriver executes the exact ordered tool transcript", async () => {
@@ -179,12 +179,12 @@ test("ScriptedModelDriver reaches an optional fixture Crash Point", async () => 
 test("production ModelDriver construction always returns PiModelDriver", async () => {
 	const executor: PiModelExecutor = async () => ({
 		structuredResult: { ok: true },
-		modelUsage: { inputTokens: 1, outputTokens: 1 },
+		modelUsage: { provider: "test", modelId: "test", inputTokens: 1, outputTokens: 1 },
 	});
 	const driver = createProductionModelDriver(executor);
 	assert.ok(driver instanceof PiModelDriver);
 	assert.deepEqual(await driver.execute(input, []), {
 		structuredResult: { ok: true },
-		modelUsage: { inputTokens: 1, outputTokens: 1 },
+		modelUsage: { provider: "test", modelId: "test", inputTokens: 1, outputTokens: 1 },
 	});
 });

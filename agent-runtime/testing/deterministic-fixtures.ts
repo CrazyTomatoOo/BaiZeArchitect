@@ -105,9 +105,14 @@ export function createFixtureOperator(name: string): FixtureOperator {
 	};
 }
 
+export interface TokenUsageSummary {
+	inputTokens: number;
+	outputTokens: number;
+}
+
 export interface ModelUsageRecorder {
 	record(usage: ModelUsage): void;
-	snapshot(): ModelUsage;
+	snapshot(): TokenUsageSummary;
 }
 
 export function createModelUsageRecorder(): ModelUsageRecorder {

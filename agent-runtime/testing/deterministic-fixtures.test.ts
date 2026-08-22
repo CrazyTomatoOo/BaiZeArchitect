@@ -51,8 +51,8 @@ test("fixed test dependencies are deterministic and injectable", async () => {
 	});
 
 	const usage = createModelUsageRecorder();
-	usage.record({ inputTokens: 11, outputTokens: 4 });
-	usage.record({ inputTokens: 3, outputTokens: 2 });
+	usage.record({ provider: "p", modelId: "m", inputTokens: 11, outputTokens: 4 });
+	usage.record({ provider: "p", modelId: "m", inputTokens: 3, outputTokens: 2 });
 	assert.deepEqual(usage.snapshot(), {
 		inputTokens: 14,
 		outputTokens: 6,

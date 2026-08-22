@@ -23,7 +23,11 @@ import { openHeadlessWorkflowRuntime } from "./workflow/headless-runtime.js";
 import { startOperatorServer, type OperatorIdentity } from "./workflow/operator-server.js";
 import { PiModelDriver } from "./workflow/pi-model-driver.js";
 import type { PiModelExecutor } from "./workflow/model-driver.js";
-import { currentModelConfig, modelRuntime } from "./model-config.js";
+import {
+	modelRuntime,
+	resolveRoleModel,
+} from "./model-config.js";
+import type { WorkflowAgentRole } from "./workflow/model-driver.js";
 import {
 	createAgentSession,
 	DefaultResourceLoader,
@@ -125,13 +129,9 @@ const resourceLoader = new DefaultResourceLoader({
 await resourceLoader.reload({ resolveProjectTrust: async () => true });
 
 async function createPiExecutor(): Promise<PiModelExecutor> {
-	const config = currentModelConfig();
-	const model =
-		modelRuntime.getModel(config.provider ?? "bailian", config.modelId ?? "glm-5.2") ??
-		modelRuntime.getModel("bailian", "glm-5.2");
-	if (!model) throw new Error("production model not resolved");
 	return async (input, _tools) => {
 		void _tools;
+		const model = resolveRoleModel(input.role as WorkflowAgentRole, input.modelRoles);
 		const { session } = await createAgentSession({
 			cwd: PROJECT_ROOT,
 			model,
@@ -174,6 +174,8 @@ async function createPiExecutor(): Promise<PiModelExecutor> {
 		return {
 			structuredResult,
 			modelUsage: {
+				provider: model.provider,
+				modelId: model.id,
 				inputTokens: usage?.inputTokens ?? 0,
 				outputTokens: usage?.outputTokens ?? 0,
 			},

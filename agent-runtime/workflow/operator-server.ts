@@ -19,6 +19,8 @@ import { BusyWorkspaceError, ReusableAssetMalformedBodyError, ReusableAssetNameC
 import { WORKFLOW_COMMAND_TYPES, type WorkflowCommandType } from "./command-types.js";
 import type { RequirementBaseline } from "./requirement.js";
 import { isReusableAssetKind, type ReusableAssetKind } from "../persistence/reusable-asset-kind.js";
+import { effectiveModelCatalog, validateModelRoles } from "../model-config.js";
+import type { ModelRoles } from "./model-driver.js";
 
 export interface OperatorIdentity {
 	actorRef: string;
@@ -380,11 +382,24 @@ export async function startOperatorServer(
 				sendJson(response, 400, { error: "actor_fields_are_not_accepted" });
 				return;
 			}
+			const createBody = body as { baseline?: unknown; modelRoles?: unknown };
+			if (typeof createBody.baseline !== "object" || createBody.baseline === null) {
+				sendJson(response, 400, { error: "malformed_body" });
+				return;
+			}
+			if (createBody.modelRoles !== undefined) {
+				const problems = validateModelRoles(createBody.modelRoles);
+				if (problems.length > 0) {
+					sendJson(response, 400, { error: "invalid_model_roles", detail: problems });
+					return;
+				}
+			}
 			let created;
 			try {
 				created = options.runtime.createRequirement({
 					workspaceId,
-					baseline: body as RequirementBaseline,
+					baseline: createBody.baseline as RequirementBaseline,
+					modelRoles: createBody.modelRoles as ModelRoles | undefined,
 				});
 			} catch {
 				sendJson(response, 400, { error: "invalid_baseline" });
@@ -393,8 +408,8 @@ export async function startOperatorServer(
 			sendJson(response, 201, {
 				requirementId: created.requirementId,
 				workflowId: created.workflowId,
-				state: created.workflowState,
-				version: created.workflowVersion,
+				workflowState: created.workflowState,
+				workflowVersion: created.workflowVersion,
 				lastEventSeq: created.lastEventSeq,
 			});
 			return;
@@ -455,6 +470,11 @@ export async function startOperatorServer(
 
 		if (request.method === "GET" && url.pathname === "/api/session") {
 			sendJson(response, 200, { actorRef: operator.actorRef, capabilities: operator.capabilities });
+			return;
+		}
+
+		if (request.method === "GET" && url.pathname === "/api/model-config") {
+			sendJson(response, 200, effectiveModelCatalog());
 			return;
 		}
 
