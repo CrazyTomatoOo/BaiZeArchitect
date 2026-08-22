@@ -173,6 +173,30 @@
         "source_refs_resolve",
         "local_evidence_requirements_pass"
       ]
+    },
+    "analysis/v1": {
+      "allowedRoles": [
+        "analysis-analyst"
+      ],
+      "validators": [
+        "expected_effects_present",
+        "owned_artifact_kinds_only",
+        "artifact_content_schema_valid",
+        "source_refs_resolve",
+        "local_evidence_requirements_pass"
+      ]
+    },
+    "design/v1": {
+      "allowedRoles": [
+        "design-architect"
+      ],
+      "validators": [
+        "expected_effects_present",
+        "owned_artifact_kinds_only",
+        "artifact_content_schema_valid",
+        "source_refs_resolve",
+        "local_evidence_requirements_pass"
+      ]
     }
   },
   "evidencePolicy": {
@@ -361,11 +385,6 @@
       "blocking": true
     },
     {
-      "id": "impact_profile_complete",
-      "validator": "all_impact_dimensions_known",
-      "blocking": true
-    },
-    {
       "id": "required_artifacts_complete",
       "validator": "exactly_one_current_eligible_schema_valid_revision_per_required_kind",
       "blocking": true
@@ -417,7 +436,7 @@
       "policy_versions",
       "requirement_and_plan_refs",
       "repository_and_evidence_snapshot",
-      "impact_profile_and_required_artifact_set",
+      "template_required_artifact_set",
       "selected_artifacts_and_diffs",
       "decisions",
       "finding_threads_and_dispositions",

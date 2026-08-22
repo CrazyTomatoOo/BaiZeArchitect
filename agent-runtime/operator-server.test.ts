@@ -425,11 +425,14 @@ test("same commandId replay returns the stored receipt without new effects", asy
 	await withServer(async (context) => {
 		const cookie = await bootstrap(context.server.url);
 		const { workflowId } = await createStartedWorkflow(context, cookie);
+		const projection = context.runtime.getWorkflowProjection(workflowId);
+		assert.ok(projection);
+		const workflowVersion = projection.workflow.version;
 		const first = await putCommand(
 			context.server.url,
 			workflowId,
 			"cmd-pause",
-			{ type: "pause", expectedWorkflowVersion: 1 },
+			{ type: "pause", expectedWorkflowVersion: workflowVersion },
 			cookie,
 		);
 		assert.equal(first.status, 201);
@@ -438,15 +441,15 @@ test("same commandId replay returns the stored receipt without new effects", asy
 			context.server.url,
 			workflowId,
 			"cmd-pause",
-			{ type: "pause", expectedWorkflowVersion: 1 },
+			{ type: "pause", expectedWorkflowVersion: workflowVersion },
 			cookie,
 		);
 		assert.equal(replay.status, 201);
 		const replayReceipt = (await replay.json()) as { workflowVersion: number; lastEventSeq: number };
 		assert.deepEqual(replayReceipt, firstReceipt);
-		const projection = context.runtime.getWorkflowProjection(workflowId);
-		assert.equal(projection?.workflow.version, firstReceipt.workflowVersion);
-		assert.equal(projection?.workflow.lastEventSeq, firstReceipt.lastEventSeq);
+		const currentProjection = context.runtime.getWorkflowProjection(workflowId);
+		assert.equal(currentProjection?.workflow.version, firstReceipt.workflowVersion);
+		assert.equal(currentProjection?.workflow.lastEventSeq, firstReceipt.lastEventSeq);
 	});
 });
 
@@ -454,11 +457,14 @@ test("same commandId with a different payload is an idempotency conflict", async
 	await withServer(async (context) => {
 		const cookie = await bootstrap(context.server.url);
 		const { workflowId } = await createStartedWorkflow(context, cookie);
+		const projection = context.runtime.getWorkflowProjection(workflowId);
+		assert.ok(projection);
+		const workflowVersion = projection.workflow.version;
 		const first = await putCommand(
 			context.server.url,
 			workflowId,
 			"cmd-conflict",
-			{ type: "pause", expectedWorkflowVersion: 1 },
+			{ type: "pause", expectedWorkflowVersion: workflowVersion },
 			cookie,
 		);
 		assert.equal(first.status, 201);
@@ -466,7 +472,7 @@ test("same commandId with a different payload is an idempotency conflict", async
 			context.server.url,
 			workflowId,
 			"cmd-conflict",
-			{ type: "pause", expectedWorkflowVersion: 1, reason: "different" },
+			{ type: "pause", expectedWorkflowVersion: workflowVersion, reason: "different" },
 			cookie,
 		);
 		assert.equal(conflict.status, 409);
@@ -516,11 +522,14 @@ test("invalid transitions and business-rule violations map to conflict and rejec
 	await withServer(async (context) => {
 		const cookie = await bootstrap(context.server.url);
 		const { workflowId } = await createStartedWorkflow(context, cookie);
+		const projection = context.runtime.getWorkflowProjection(workflowId);
+		assert.ok(projection);
+		const workflowVersion = projection.workflow.version;
 		const stateConflict = await putCommand(
 			context.server.url,
 			workflowId,
 			"cmd-resume",
-			{ type: "resume", expectedWorkflowVersion: 1 },
+			{ type: "resume", expectedWorkflowVersion: workflowVersion },
 			cookie,
 		);
 		assert.equal(stateConflict.status, 409);
@@ -529,7 +538,7 @@ test("invalid transitions and business-rule violations map to conflict and rejec
 			context.server.url,
 			workflowId,
 			"cmd-dispose",
-			{ type: "dispose-decision", expectedWorkflowVersion: 1, payload: {} },
+			{ type: "dispose-decision", expectedWorkflowVersion: workflowVersion, payload: {} },
 			cookie,
 		);
 		assert.equal(businessRule.status, 422);

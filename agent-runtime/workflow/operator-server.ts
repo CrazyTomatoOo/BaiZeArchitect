@@ -464,6 +464,13 @@ export async function startOperatorServer(
 				reason: envelope.reason as string | undefined,
 				operator,
 			});
+			// #19：Engine 直生成 —— start 接受后异步实例化模板计划（无 Orchestrator 模型调用）。
+			// workflow 状态机保证幂等：已有计划/非 running 时 planWorkflow 返回 budget 而非破坏。
+			if (receipt.outcome === "accepted" && envelope.type === "start") {
+				void options.runtime.planWorkflow(workflowId, null).catch((error) => {
+					console.error(`[baize] template plan failed for workflow ${workflowId}:`, error);
+				});
+			}
 			sendJson(response, receipt.httpStatus, receipt);
 			return;
 		}

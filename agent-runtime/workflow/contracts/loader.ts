@@ -275,6 +275,53 @@ function assertStringSet(
 		);
 	}
 }
+
+const TEMPLATE_ROLES: Readonly<Record<string, true>> = {
+	"analysis-analyst": true,
+	"scenario-analyst": true,
+	"usecase-analyst": true,
+	"function-analyst": true,
+	"design-architect": true,
+	"architecture-architect": true,
+	"data-architect": true,
+	"api-architect": true,
+	critic: true,
+};
+
+/** plan-template/v1 深度校验（#19 验收：boot 加载校验）。模板 = 10 Task 固定链，#12 决议。 */
+function assertPlanTemplateStructure(asset: WorkflowContractAsset): void {
+	const content = asset.content as { tasks?: unknown };
+	const rawTasks = content.tasks;
+	if (!Array.isArray(rawTasks) || rawTasks.length !== 10) {
+		throw new ContractValidationError(
+			"contract_structure_invalid",
+			asset.fileName,
+			`${asset.fileName} must declare exactly 10 template tasks`,
+		);
+	}
+	const keys = new Set<string>();
+	let criticCount = 0;
+	for (const raw of rawTasks) {
+		if (typeof raw !== "object" || raw === null) {
+			throw new ContractValidationError("contract_structure_invalid", asset.fileName, `${asset.fileName} task entries must be objects`);
+		}
+		const task = raw as Record<string, unknown>;
+		if (typeof task.key !== "string" || keys.has(task.key)) {
+			throw new ContractValidationError("contract_structure_invalid", asset.fileName, `${asset.fileName} tasks must have unique string keys`);
+		}
+		keys.add(task.key);
+		if (typeof task.role !== "string" || !(TEMPLATE_ROLES as Record<string, boolean>)[task.role]) {
+			throw new ContractValidationError("contract_structure_invalid", asset.fileName, `${asset.fileName} task ${String(task.key)} has illegal role ${String(task.role)}`);
+		}
+		if (task.dependsOn !== undefined && (!Array.isArray(task.dependsOn) || task.dependsOn.some((dep) => typeof dep !== "string" || !keys.has(dep)))) {
+			throw new ContractValidationError("contract_structure_invalid", asset.fileName, `${asset.fileName} task ${String(task.key)} dependsOn references must resolve inside the template`);
+		}
+		if (task.role === "critic") criticCount += 1;
+	}
+	if (criticCount !== 5) {
+		throw new ContractValidationError("contract_structure_invalid", asset.fileName, `${asset.fileName} must declare exactly 5 critic review tasks`);
+	}
+}
 function validateCrossReferences(byIdentity: ReadonlyMap<string, WorkflowContractAsset>): void {
 	const readiness = byIdentity.get("readiness-policy/v1");
 	const persistence = byIdentity.get("persistence-model/v1");
@@ -446,3 +493,4 @@ export async function loadWorkflowContracts(
 		},
 	};
 }
+

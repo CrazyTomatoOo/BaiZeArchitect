@@ -24,8 +24,8 @@ function asTaskProposal(value: unknown): TaskProposal {
 		role: task.role as TaskProposal["role"],
 		objective: task.objective as string,
 		dependsOn: (task.dependsOn as unknown[]).map(String),
-		inputs: task.inputs as TaskProposal["inputs"],
-		expectedArtifactEffects: task.expectedArtifactEffects as TaskProposal["expectedArtifactEffects"],
+		inputs: (task.inputs as unknown[]).map((input) => ({ ...(input as Record<string, unknown>) }) as unknown) as TaskProposal["inputs"],
+		expectedArtifactEffects: (task.expectedArtifactEffects as unknown[]).map((effect) => ({ ...(effect as Record<string, unknown>) }) as unknown) as TaskProposal["expectedArtifactEffects"],
 		completionPolicyRef: task.completionPolicyRef as string,
 		maxAttempts: task.maxAttempts as number,
 	};

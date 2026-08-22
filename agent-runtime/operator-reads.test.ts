@@ -209,6 +209,13 @@ function apiContent(): unknown {
 
 
 async function adoptPlan(runtime: HeadlessWorkflowRuntime, workflowId: number): Promise<void> {
+	// The operator server starts Engine-direct planning synchronously before
+	// returning the start receipt. If a current plan already exists, do nothing;
+	// otherwise instantiate one directly.
+	const projection = runtime.getWorkflowProjection(workflowId);
+	if (projection?.workflow.currentPlanRevisionId) {
+		return;
+	}
 	const result = await runtime.planWorkflow(workflowId, null);
 	assert.equal(result.outcome, "adopted");
 }
@@ -346,7 +353,8 @@ test("requirement list returns workflow summaries in stable order", async () => 
 		assert.deepEqual(body.requirements.map((entry) => entry.requirementId), [first.requirementId, second.requirementId]);
 		assert.equal(body.requirements[0].workflow.id, first.workflowId);
 		assert.equal(body.requirements[0].workflow.state, "running");
-		assert.equal(body.requirements[0].workflow.version, 1);
+		const firstProjection = context.runtime.getWorkflowProjection(first.workflowId);
+		assert.equal(body.requirements[0].workflow.version, firstProjection?.workflow.version);
 		const missing = await get(context, "/api/requirements?workspaceId=9999");
 		assert.equal(missing.status, 404);
 	});

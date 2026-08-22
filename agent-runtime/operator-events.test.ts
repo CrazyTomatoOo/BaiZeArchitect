@@ -177,6 +177,13 @@ async function collectSse(
 
 
 async function adoptPlan(runtime: HeadlessWorkflowRuntime, workflowId: number): Promise<void> {
+	// The operator server starts Engine-direct planning synchronously before
+	// returning the start receipt. If a current plan already exists, do nothing;
+	// otherwise instantiate one directly.
+	const projection = runtime.getWorkflowProjection(workflowId);
+	if (projection?.workflow.currentPlanRevisionId) {
+		return;
+	}
 	const result = await runtime.planWorkflow(workflowId, null);
 	assert.equal(result.outcome, "adopted");
 }
@@ -411,7 +418,8 @@ test("event stream reads use explicit external error semantics", async () => {
 		assert.equal(outOfRange.status, 416);
 		const rangeBody = (await outOfRange.json()) as { error: string; watermark: number };
 		assert.equal(rangeBody.error, "cursor_out_of_range");
-		assert.equal(rangeBody.watermark, 2);
+		const watermark = context.runtime.getWorkflowEvents(workflowId, 0, 500).length;
+		assert.equal(rangeBody.watermark, watermark);
 	});
 });
 
@@ -427,13 +435,20 @@ test("workflow SSE replays catch-up then streams live events without loss or dup
 		assert.equal(paused.status, 201);
 		const resumed = await putCommand(context.server.url, workflowId, "resume-1", { type: "resume", expectedWorkflowVersion: projection.workflow.version + 1 }, cookie);
 		assert.equal(resumed.status, 201);
-		const frames = await collectSse(response, (collected) => collected.filter((frame) => frame.event === "workflow-event").length >= 4);
+		const frames = await collectSse(response, (collected) => {
+			const events = collected.filter((frame) => frame.event === "workflow-event");
+			return events.some((frame) => (frame.data ?? "").includes("workflow_paused"))
+				&& events.some((frame) => (frame.data ?? "").includes("workflow_resumed"));
+		});
 		const events = frames.filter((frame) => frame.event === "workflow-event");
-		assert.equal(events.length, 4);
-		assert.deepEqual(events.map((frame) => frame.id), ["1", "2", "3", "4"]);
+		assert.ok(events.length >= 4, "catch-up plus live pause/resume events expected");
 		const payloads = events.map((frame) => JSON.parse(frame.data ?? "{}") as { seq: number; type: string });
-		assert.deepEqual(payloads.map((event) => event.seq), [1, 2, 3, 4]);
-		assert.deepEqual(payloads.map((event) => event.type), ["workflow_created", "workflow_started", "workflow_paused", "workflow_resumed"]);
+		const seqs = payloads.map((event) => event.seq);
+		assert.deepEqual(seqs, Array.from({ length: seqs.length }, (_, index) => index + 1), "workflow seq must be contiguous from 1");
+		assert.equal(events[0].id, "1");
+		assert.equal(payloads[0].type, "workflow_created");
+		assert.equal(payloads.at(-2)?.type, "workflow_paused");
+		assert.equal(payloads.at(-1)?.type, "workflow_resumed");
 	});
 });
 
@@ -455,13 +470,17 @@ test("heartbeat frames do not consume sequence and Last-Event-ID takes precedenc
 		})();
 		const frames = await collectSse(response, (collected) => {
 			const events = collected.filter((frame) => frame.event === "workflow-event");
-			return events.length >= 2 && collected.some((frame) => frame.comment);
+			return events.some((frame) => (frame.data ?? "").includes("workflow_paused")) && collected.some((frame) => frame.comment);
 		});
 		await pauseAfterDelay;
 		const allEvents = frames.filter((frame) => frame.event === "workflow-event");
 		// Last-Event-ID: 1 wins over after=0 — replay starts at seq 2; the heartbeat
-		// comment consumed no sequence, so the live pause event continues at seq 3.
-		assert.deepEqual(allEvents.map((frame) => frame.id), ["2", "3"]);
+		// comment consumed no sequence, so the live pause event continues at the next seq.
+		assert.equal(allEvents[0].id, "2");
+		const payloads = allEvents.map((frame) => JSON.parse(frame.data ?? "{}") as { seq: number; type: string });
+		const seqs = payloads.map((event) => event.seq);
+		assert.deepEqual(seqs, Array.from({ length: seqs.length }, (_, index) => index + 2), "workflow seq must be contiguous after last-event-id 1");
+		assert.equal(payloads.at(-1)?.type, "workflow_paused");
 		assert.ok(frames.some((frame) => frame.comment), "heartbeat comment frame expected");
 	});
 });
@@ -475,11 +494,13 @@ test("run SSE streams run-event frames and token facts never enter the workflow 
 		const runResponse = await fetch(`${context.server.url}/api/runs/${runId}/events/stream?after=0`, { headers: { cookie } });
 		const runFrames = await collectSse(runResponse, (collected) => collected.filter((frame) => frame.event === "run-event").length >= 1);
 		const runEvents = runFrames.filter((frame) => frame.event === "run-event");
-		assert.deepEqual(runEvents.map((frame) => frame.id), ["1"]);
+		assert.ok(runEvents.length >= 1, "planning run must emit run-event frames");
 		const payloads = runEvents.map((frame) => JSON.parse(frame.data ?? "{}") as { type: string; payload: { role?: string } });
-		assert.deepEqual(payloads.map((event) => event.type), ["plan_template_instantiated"]);
+		assert.equal(runEvents[0].id, "1");
+		assert.equal(payloads[0].type, "plan_template_instantiated");
 		const firstPayload = payloads[0].payload as { role: string };
 		assert.equal(firstPayload.role, "engine");
+		assert.ok(!payloads.some((event) => event.type === "token" || event.type.startsWith("model_")), "engine-direct planning emits no token/model facts");
 		const workflowEvents = context.runtime.getWorkflowEvents(workflowId, 0, 500);
 		assert.ok(!workflowEvents.some((event) => event.type.startsWith("model_")), "workflow audit stream must not contain model/token facts");
 	});
@@ -489,10 +510,11 @@ test("replayed commandId appends no duplicate domain events", async () => {
 	await withServer(async (context) => {
 		const cookie = await bootstrap(context.server.url);
 		const { workflowId } = await createStartedWorkflow(context, cookie);
-		const first = await putCommand(context.server.url, workflowId, "pause-dup", { type: "pause", expectedWorkflowVersion: 1 }, cookie);
+		const projection = (await (await fetch(`${context.server.url}/api/workflows/${workflowId}`, { headers: { cookie } })).json()) as { workflow: { version: number } };
+		const first = await putCommand(context.server.url, workflowId, "pause-dup", { type: "pause", expectedWorkflowVersion: projection.workflow.version }, cookie);
 		assert.equal(first.status, 201);
 		const firstReceipt = (await first.json()) as { workflowVersion: number; lastEventSeq: number };
-		const replay = await putCommand(context.server.url, workflowId, "pause-dup", { type: "pause", expectedWorkflowVersion: 1 }, cookie);
+		const replay = await putCommand(context.server.url, workflowId, "pause-dup", { type: "pause", expectedWorkflowVersion: projection.workflow.version }, cookie);
 		assert.equal(replay.status, 201);
 		const replayReceipt = (await replay.json()) as { workflowVersion: number; lastEventSeq: number };
 		assert.deepEqual(replayReceipt, firstReceipt);
@@ -505,9 +527,10 @@ test("two concurrent commands expose only the persisted winner plus the failed r
 	await withServer(async (context) => {
 		const cookie = await bootstrap(context.server.url);
 		const { workflowId } = await createStartedWorkflow(context, cookie);
+		const projection = (await (await fetch(`${context.server.url}/api/workflows/${workflowId}`, { headers: { cookie } })).json()) as { workflow: { version: number } };
 		const [winner, loser] = await Promise.all([
-			putCommand(context.server.url, workflowId, "pause-a", { type: "pause", expectedWorkflowVersion: 1 }, cookie),
-			putCommand(context.server.url, workflowId, "pause-b", { type: "pause", expectedWorkflowVersion: 1 }, cookie),
+			putCommand(context.server.url, workflowId, "pause-a", { type: "pause", expectedWorkflowVersion: projection.workflow.version }, cookie),
+			putCommand(context.server.url, workflowId, "pause-b", { type: "pause", expectedWorkflowVersion: projection.workflow.version }, cookie),
 		]);
 		const statuses = [winner.status, loser.status].sort((left, right) => left - right);
 		assert.deepEqual(statuses, [201, 409]);

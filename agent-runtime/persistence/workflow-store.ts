@@ -2055,13 +2055,13 @@ deleteWorkspace(workspaceId: number): boolean {
 	}
 
 	/** 模板固定必需产物集（#12 决议：废除 Impact Profile 派生，模板 8 生产 kinds 即必需集）。 */
-	private templateRequiredKinds(): readonly string[] {
-		return ["requirement", "analysis", "scenario", "usecase", "function", "design", "architecture", "data", "api"];
-	}
+	private static readonly TEMPLATE_REQUIRED_KINDS: readonly string[] = [
+		"requirement", "analysis", "scenario", "usecase", "function", "design", "architecture", "data", "api",
+	];
 
 	/** 模板产物状态（当前 revision 存在性 + trace link 覆盖），供 readiness 与 approval packet 组装使用。 */
 	private getTemplateArtifactStatuses(requirementId: number): Array<{ kind: string; hasCurrentRevision: boolean; hasTraceLinks: boolean }> {
-		return this.templateRequiredKinds()
+		return WorkflowStore.TEMPLATE_REQUIRED_KINDS
 			.filter((kind) => kind !== "requirement")
 			.map((kind) => {
 				const revision = this.currentRevisionForKind(requirementId, kind);
@@ -2227,7 +2227,7 @@ deleteWorkspace(workspaceId: number): boolean {
 			criticCoverage: { coveredRevisionIds },
 			warnings: packetWarnings,
 			policyBundleDigest: projection.workflow.policyBundle.digest,
-			requiredArtifactKinds: [...this.templateRequiredKinds()].sort(),
+			requiredArtifactKinds: [...WorkflowStore.TEMPLATE_REQUIRED_KINDS].sort(),
 		};
 	}
 
@@ -3413,20 +3413,6 @@ export interface EvidenceSnapshotResult {
 	workflowId: number;
 	repoDigest: string;
 	createdAt: string;
-}
-
-export interface RequiredArtifactKindStatus {
-	kind: string;
-	hasCurrentRevision: boolean;
-	revisionStatus: string | null;
-	hasTraceLinks: boolean;
-}
-
-export interface RequiredArtifactSetResult {
-	requiredKinds: readonly string[];
-	blockingDimensions: readonly string[];
-	complete: boolean;
-	kindStatuses: readonly RequiredArtifactKindStatus[];
 }
 
 export interface TraceLinkResult {
