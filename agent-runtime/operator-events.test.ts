@@ -10,15 +10,13 @@ import {
 	createHashProvider,
 	createOutboxTransport,
 } from "./testing/deterministic-fixtures.js";
-import { ScriptedModelDriver } from "./testing/scripted-model-driver.js";
 import {
 	openHeadlessWorkflowRuntime,
 	type HeadlessWorkflowRuntime,
 } from "./workflow/headless-runtime.js";
 import { startOperatorServer, type OperatorServer } from "./workflow/operator-server.js";
-import type { PlanProposal, TaskProposal } from "./workflow/plan-types.js";
 import type { RequirementBaseline } from "./workflow/requirement.js";
-import type { CriticReport, RoleResult } from "./workflow/role-result.js";
+import type { ArtifactEffectProposal, CriticReport, RoleResult } from "./workflow/role-result.js";
 import Database from "better-sqlite3";
 
 const ADMIN = createFixtureOperator("admin");
@@ -177,75 +175,10 @@ async function collectSse(
 	return parseSseFrames(text);
 }
 
-function taskPlan(): TaskProposal[] {
-	return [
-		{
-			key: "analyze-req",
-			kind: "analyze",
-			role: "analyst",
-			objective: "Produce analysis",
-			dependsOn: [],
-			inputs: [],
-			expectedArtifactEffects: [{ kind: "analysis", operation: "create_or_revise" }],
-			completionPolicyRef: "analysis/v1",
-			maxAttempts: 3,
-		},
-		{
-			key: "design-sol",
-			kind: "design",
-			role: "architect",
-			objective: "Produce design",
-			dependsOn: ["analyze-req"],
-			inputs: [{ type: "task_output", taskKey: "analyze-req", artifactKind: "analysis", purpose: "design input" }],
-			expectedArtifactEffects: [{ kind: "design", operation: "create_or_revise" }],
-			completionPolicyRef: "design/v1",
-			maxAttempts: 3,
-		},
-		{
-			key: "review-all",
-			kind: "review",
-			role: "critic",
-			objective: "Review artifacts",
-			dependsOn: ["design-sol"],
-			inputs: [{ type: "task_output", taskKey: "design-sol", artifactKind: "design", purpose: "review" }],
-			expectedArtifactEffects: [],
-			completionPolicyRef: "review/v1",
-			maxAttempts: 3,
-		},
-	];
-}
-
-function planProposal(runtime: HeadlessWorkflowRuntime, workflowId: number): PlanProposal {
-	const projection = runtime.getWorkflowProjection(workflowId);
-	assert.ok(projection);
-	return {
-		schemaVersion: "plan-proposal/v1",
-		base: {
-			workflowId,
-			workflowVersion: projection.workflow.version,
-			basePlanRevisionId: projection.workflow.currentPlanRevisionId,
-			planningContextDigest: runtime.getPlanningContextDigest(workflowId),
-		},
-		objective: "Plan",
-		tasks: taskPlan(),
-		rationale: "rationale",
-	};
-}
 
 async function adoptPlan(runtime: HeadlessWorkflowRuntime, workflowId: number): Promise<void> {
-	const proposal = planProposal(runtime, workflowId);
-	const driver = new ScriptedModelDriver([
-		{
-			role: "orchestrator",
-			contextDigest: proposal.base.planningContextDigest,
-			orderedToolCalls: [],
-			structuredResult: proposal,
-			modelUsage: { provider: "test", modelId: "test", inputTokens: 11, outputTokens: 22 },
-		},
-	]);
-	const result = await runtime.planWorkflow(workflowId, driver);
+	const result = await runtime.planWorkflow(workflowId, null);
 	assert.equal(result.outcome, "adopted");
-	driver.assertExhausted();
 }
 
 function analysisContent(): unknown {
@@ -280,28 +213,114 @@ function designContent(): unknown {
 	};
 }
 
+function scenarioContent(): unknown {
+	return {
+		schemaVersion: "artifact/scenario/v1",
+		artifactKind: "scenario",
+		summary: "Scenarios for points expiry",
+		sourceRefs: [{ type: "requirement_revision", revisionId: 1 }],
+		scenarios: [{ id: "sc1", title: "User redeems before expiry", actors: ["User"], preconditions: ["Points exist"], trigger: "Expiry reminder received", mainFlow: ["Open wallet", "Redeem points"], alternateFlows: [], expectedOutcome: "Points redeemed" }],
+	};
+}
+
+function usecaseContent(): unknown {
+	return {
+		schemaVersion: "artifact/usecase/v1",
+		artifactKind: "usecase",
+		summary: "Use cases for points expiry",
+		sourceRefs: [{ type: "requirement_revision", revisionId: 1 }],
+		useCases: [{ id: "uc1", actor: "User", goal: "Redeem points before expiry", preconditions: ["Wallet active"], mainFlow: ["Receive reminder", "Redeem points"], alternativeFlows: [], postconditions: ["Points consumed"] }],
+	};
+}
+
+function functionContent(): unknown {
+	return {
+		schemaVersion: "artifact/function/v1",
+		artifactKind: "function",
+		summary: "Functions for points expiry",
+		sourceRefs: [{ type: "requirement_revision", revisionId: 1 }],
+		functions: [{ id: "fn1", name: "Expiry scheduler", responsibility: "Expire points past threshold", inputs: ["points ledger"], outputs: ["expiry events"], businessRules: ["Expiry after 365 days"], acceptanceCriteria: ["Expired points are removed"] }],
+	};
+}
+
+function architectureContent(): unknown {
+	return {
+		schemaVersion: "artifact/architecture/v1",
+		artifactKind: "architecture",
+		summary: "Architecture of points expiry solution",
+		sourceRefs: [{ type: "requirement_revision", revisionId: 1 }],
+		components: [{ id: "c1", name: "Expiry service", responsibility: "Schedule and execute expiry" }],
+		relationships: [{ from: "c1", to: "Points ledger", interaction: "reads and writes balances" }],
+		constraints: ["No downtime during expiry runs"],
+		nonFunctionalRequirements: ["Expiry completes within the nightly window"],
+		decisions: [],
+	};
+}
+
+function dataContent(): unknown {
+	return {
+		schemaVersion: "artifact/data/v1",
+		artifactKind: "data",
+		summary: "Data model for points expiry",
+		sourceRefs: [{ type: "requirement_revision", revisionId: 1 }],
+		entities: [{ name: "points_ledger", purpose: "Track point balances and expiries", fields: ["id", "user_id", "balance", "expires_at"], lifecycle: "append-heavy with nightly expiry updates" }],
+		relationships: ["points_ledger.user_id -> users.id"],
+		migrationPlan: "Add expires_at column with backfill",
+		rollbackPlan: "Drop expires_at column",
+		privacyAndRetention: ["Expiry records retained for 90 days"],
+	};
+}
+
+function apiContent(): unknown {
+	return {
+		schemaVersion: "artifact/api/v1",
+		artifactKind: "api",
+		summary: "API surface for points expiry",
+		sourceRefs: [{ type: "requirement_revision", revisionId: 1 }],
+		interfaces: [{ id: "api1", kind: "http", name: "GET /points", contract: "Returns balance with expiry dates", errors: ["404 not found"], compatibility: "Additive fields only" }],
+		security: ["Operator token required"],
+		versioning: "URL path versioning",
+		testStrategy: ["Contract tests against the public surface"],
+	};
+}
+
 function traceLink(runtime: HeadlessWorkflowRuntime, workflowId: number): { evidenceSnapshotId: number; sourceRef: { type: string; path: string } } {
 	const snapshot = runtime.bindEvidenceSnapshot(workflowId, "sha256:repo-abc", { files: [] });
 	return { evidenceSnapshotId: snapshot.id, sourceRef: { type: "code", path: "/src/analysis.ts" } };
 }
 
-function publishEffect(runtime: HeadlessWorkflowRuntime, workflowId: number, role: string, kind: "analysis" | "design", content: unknown): void {
+function artifactEffect(
+	runtime: HeadlessWorkflowRuntime,
+	workflowId: number,
+	kind: ArtifactEffectProposal["artifactKind"],
+	content: unknown,
+	links?: Array<{ evidenceSnapshotId: number; sourceRef: { type: string; path: string } }>,
+): ArtifactEffectProposal {
+	return {
+		effectType: "artifact_revision",
+		artifactKind: kind,
+		logicalKey: kind,
+		content,
+		baseRevisionId: null,
+		traceLinks: links ?? [traceLink(runtime, workflowId)],
+	};
+}
+
+function publishTaskEffects(
+	runtime: HeadlessWorkflowRuntime,
+	workflowId: number,
+	taskKey: string,
+	taskRole: string,
+	effects: ReadonlyArray<ArtifactEffectProposal>,
+): void {
 	const begin = runtime.beginAttempt(workflowId);
-	assert.equal(begin.taskRole, role);
+	assert.equal(begin.taskKey, taskKey);
+	assert.equal(begin.taskRole, taskRole);
 	const result: RoleResult = {
 		schemaVersion: "role-result/v1",
 		workflowId,
 		attemptId: begin.attemptId,
-		effects: [
-			{
-				effectType: "artifact_revision",
-				artifactKind: kind,
-				logicalKey: kind,
-				content,
-				baseRevisionId: null,
-				traceLinks: [traceLink(runtime, workflowId)],
-			},
-		],
+		effects,
 	};
 	assert.equal(runtime.completeAttempt(workflowId, begin.attemptId, result).outcome, "published");
 }
@@ -319,7 +338,7 @@ function getRevisionId(databasePath: string, kind: string): number {
 	}
 }
 
-function publishCriticReview(runtime: HeadlessWorkflowRuntime, databasePath: string, workflowId: number): void {
+function publishCriticReview(runtime: HeadlessWorkflowRuntime, databasePath: string, workflowId: number, coverKinds: readonly string[]): void {
 	const begin = runtime.beginAttempt(workflowId);
 	assert.equal(begin.taskRole, "critic");
 	const report: CriticReport = {
@@ -327,7 +346,7 @@ function publishCriticReview(runtime: HeadlessWorkflowRuntime, databasePath: str
 		workflowId,
 		attemptId: begin.attemptId,
 		coverageAttestation: {
-			reviewTargets: ["requirement", "analysis", "design"].map((kind) => ({ revisionId: getRevisionId(databasePath, kind), artifactKind: kind })),
+			reviewTargets: coverKinds.map((kind) => ({ revisionId: getRevisionId(databasePath, kind), artifactKind: kind })),
 			complete: true,
 		},
 		findings: [],
@@ -340,6 +359,25 @@ function publishCriticReview(runtime: HeadlessWorkflowRuntime, databasePath: str
 		criticReport: report,
 	};
 	assert.equal(runtime.completeAttempt(workflowId, begin.attemptId, result).outcome, "published");
+}
+
+function executeTemplateChain(runtime: HeadlessWorkflowRuntime, databasePath: string, workflowId: number): void {
+	publishTaskEffects(runtime, workflowId, "analyze", "analysis-analyst", [artifactEffect(runtime, workflowId, "analysis", analysisContent())]);
+	publishCriticReview(runtime, databasePath, workflowId, ["requirement", "analysis"]);
+	publishTaskEffects(runtime, workflowId, "scenario", "scenario-analyst", [artifactEffect(runtime, workflowId, "scenario", scenarioContent())]);
+	publishCriticReview(runtime, databasePath, workflowId, ["scenario"]);
+	publishTaskEffects(runtime, workflowId, "usecase", "usecase-analyst", [artifactEffect(runtime, workflowId, "usecase", usecaseContent())]);
+	publishCriticReview(runtime, databasePath, workflowId, ["usecase"]);
+	publishTaskEffects(runtime, workflowId, "function", "function-analyst", [artifactEffect(runtime, workflowId, "function", functionContent())]);
+	publishCriticReview(runtime, databasePath, workflowId, ["function"]);
+	const links = [traceLink(runtime, workflowId)];
+	publishTaskEffects(runtime, workflowId, "design", "design-architect", [
+		artifactEffect(runtime, workflowId, "design", designContent(), links),
+		artifactEffect(runtime, workflowId, "architecture", architectureContent(), links),
+		artifactEffect(runtime, workflowId, "data", dataContent(), links),
+		artifactEffect(runtime, workflowId, "api", apiContent(), links),
+	]);
+	publishCriticReview(runtime, databasePath, workflowId, ["design", "architecture", "data", "api"]);
 }
 
 function latestRunId(databasePath: string): number {
@@ -435,11 +473,13 @@ test("run SSE streams run-event frames and token facts never enter the workflow 
 		await adoptPlan(context.runtime, workflowId);
 		const runId = latestRunId(context.databasePath);
 		const runResponse = await fetch(`${context.server.url}/api/runs/${runId}/events/stream?after=0`, { headers: { cookie } });
-		const runFrames = await collectSse(runResponse, (collected) => collected.filter((frame) => frame.event === "run-event").length >= 3);
+		const runFrames = await collectSse(runResponse, (collected) => collected.filter((frame) => frame.event === "run-event").length >= 1);
 		const runEvents = runFrames.filter((frame) => frame.event === "run-event");
-		assert.deepEqual(runEvents.map((frame) => frame.id), ["1", "2", "3"]);
-		const types = runEvents.map((frame) => (JSON.parse(frame.data ?? "{}") as { type: string }).type);
-		assert.deepEqual(types, ["model_call_started", "token", "model_result"]);
+		assert.deepEqual(runEvents.map((frame) => frame.id), ["1"]);
+		const payloads = runEvents.map((frame) => JSON.parse(frame.data ?? "{}") as { type: string; payload: { role?: string } });
+		assert.deepEqual(payloads.map((event) => event.type), ["plan_template_instantiated"]);
+		const firstPayload = payloads[0].payload as { role: string };
+		assert.equal(firstPayload.role, "engine");
 		const workflowEvents = context.runtime.getWorkflowEvents(workflowId, 0, 500);
 		assert.ok(!workflowEvents.some((event) => event.type.startsWith("model_")), "workflow audit stream must not contain model/token facts");
 	});
@@ -487,11 +527,10 @@ test("create to archive through public API, dual SSE, receipts, and projection",
 		const { workflowId } = await createStartedWorkflow(context, cookie);
 		// Catch-up replays from seq 0, so opening the stream after creation loses nothing.
 		const workflowStreamResponse = await fetch(`${context.server.url}/api/workflows/${workflowId}/events/stream?after=0`, { headers: { cookie } });
-		// Engine execution: plan, analyze, design, review (model-driving is engine-internal).
+		// Engine execution: deterministic plan-template instantiation, then the
+		// full 10-task template chain (no orchestrator model call anywhere).
 		await adoptPlan(context.runtime, workflowId);
-		publishEffect(context.runtime, workflowId, "analyst", "analysis", analysisContent());
-		publishEffect(context.runtime, workflowId, "architect", "design", designContent());
-		publishCriticReview(context.runtime, context.databasePath, workflowId);
+		executeTemplateChain(context.runtime, context.databasePath, workflowId);
 
 		const built = context.runtime.buildApprovalPacket(workflowId);
 		assert.equal(built.ready, true);
@@ -531,17 +570,18 @@ test("create to archive through public API, dual SSE, receipts, and projection",
 		assert.ok(events.some((event) => event.type === "packet_approved"));
 		assert.ok(!events.some((event) => event.type.startsWith("model_")), "no token facts in workflow audit");
 
-		// Run streams carry the model execution facts separately (the planning run
-		// executed a real model call; direct begin/completeAttempt runs do not).
+		// Run streams carry the engine execution facts: planning instantiates the
+		// template deterministically (role engine); no model/token facts exist
+		// because direct begin/completeAttempt runs make no model calls.
 		const db = new Database(context.databasePath, { readonly: true });
 		const runWithEvents = db.prepare("select run_id as id from run_events order by run_id limit 1").get() as { id: number } | undefined;
 		db.close();
 		assert.ok(runWithEvents);
 		const runEvents = context.runtime.getRunEvents(runWithEvents.id, 0, 500);
-		const tokenEvent = runEvents.find((event) => event.type === "token");
-		assert.ok(tokenEvent, "run events must include a token event");
-		assert.equal((tokenEvent.payload as { role: string }).role, "orchestrator");
-		assert.equal(typeof (tokenEvent.payload as { provider: string }).provider, "string");
-		assert.equal(typeof (tokenEvent.payload as { modelId: string }).modelId, "string");
+		const templateEvent = runEvents.find((event) => event.type === "plan_template_instantiated");
+		assert.ok(templateEvent, "run events must include the plan_template_instantiated event");
+		const templatePayload = templateEvent.payload as { role: string };
+		assert.equal(templatePayload.role, "engine");
+		assert.ok(!runEvents.some((event) => event.type === "token"), "engine-direct planning emits no token facts");
 	});
 });

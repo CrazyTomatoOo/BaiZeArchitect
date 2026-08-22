@@ -14,7 +14,7 @@ import {
 	type FixtureOperator,
 	type FixtureOutboxTransport,
 } from "./testing/deterministic-fixtures.js";
-import { ScriptedModelDriver } from "./testing/scripted-model-driver.js";
+
 import {
 	openHeadlessWorkflowRuntime,
 	type RequirementBaseline,
@@ -75,31 +75,26 @@ async function createWorkflowWithDepPlan(runtime: Runtime): Promise<{ workflowId
 		type: "start",
 		operator: OPERATOR,
 	});
+	// #19：Orchestrator 退场 —— 本文件聚焦 analyze→design 依赖语义，沿用两 Task 手工计划
+	// （生产角色 analysis-analyst / design-architect），经 beginPlanning + completePlanning 直接采纳。
+	// base.workflowVersion = beginPlanning 前的工作流版本（start 后为 1；beginPlanning 事件将版本抬到 2）。
+	const begin = runtime.beginPlanning(created.workflowId);
 	const contextDigest = runtime.getPlanningContextDigest(created.workflowId);
-	const driver = new ScriptedModelDriver([
-		{
-			role: "orchestrator",
-			contextDigest,
-			orderedToolCalls: [],
-			structuredResult: depPlanProposal(created.workflowId, contextDigest),
-			modelUsage: { provider: "test", modelId: "test", inputTokens: 100, outputTokens: 200 },
-		},
-	]);
-	await runtime.planWorkflow(created.workflowId, driver);
-	driver.assertExhausted();
+	const result = runtime.completePlanning(created.workflowId, begin.attemptId, depPlanProposal(created.workflowId, contextDigest, 1));
+	assert.equal(result.outcome, "adopted");
 	return { workflowId: created.workflowId };
 }
 
-function depPlanProposal(workflowId: number, contextDigest: string): PlanProposal {
+function depPlanProposal(workflowId: number, contextDigest: string, workflowVersion: number): PlanProposal {
 	return {
 		schemaVersion: "plan-proposal/v1",
-		base: { workflowId, workflowVersion: 1, basePlanRevisionId: null, planningContextDigest: contextDigest },
+		base: { workflowId, workflowVersion, basePlanRevisionId: null, planningContextDigest: contextDigest },
 		objective: "Analyze then design",
 		tasks: [
 			{
 				key: "analyze-req",
 				kind: "analyze",
-				role: "analyst",
+				role: "analysis-analyst",
 				objective: "Produce the analysis artifact",
 				dependsOn: [],
 				inputs: [],
@@ -110,7 +105,7 @@ function depPlanProposal(workflowId: number, contextDigest: string): PlanProposa
 			{
 				key: "design-sol",
 				kind: "design",
-				role: "architect",
+				role: "design-architect",
 				objective: "Design the solution using analysis output",
 				dependsOn: ["analyze-req"],
 				inputs: [{ type: "task_output", taskKey: "analyze-req", artifactKind: "analysis", purpose: "Analysis as design input" }],

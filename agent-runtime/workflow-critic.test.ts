@@ -11,12 +11,10 @@ import {
 	createHashProvider,
 	createOutboxTransport,
 } from "./testing/deterministic-fixtures.js";
-import { ScriptedModelDriver } from "./testing/scripted-model-driver.js";
 import {
 	openHeadlessWorkflowRuntime,
 	type RequirementBaseline,
 } from "./workflow/headless-runtime.js";
-import type { PlanProposal } from "./workflow/plan-types.js";
 import type { CriticReport, RoleResult, TraceLinkProposal } from "./workflow/role-result.js";
 
 const BASELINE: RequirementBaseline = {
@@ -55,7 +53,7 @@ async function withCriticRuntime(work: (fixture: CriticFixture) => Promise<void>
 
 type Runtime = CriticFixture["runtime"];
 
-async function createWorkflowWithReviewPlan(runtime: Runtime): Promise<{ workflowId: number; contextDigest: string }> {
+async function createWorkflowWithReviewPlan(runtime: Runtime): Promise<{ workflowId: number }> {
 	const workspaceId = runtime.createWorkspace({ repoPath: "/tmp/repo", name: "Repo" });
 	const created = runtime.createRequirement({ workspaceId, baseline: BASELINE });
 	runtime.executeCommand({
@@ -65,52 +63,9 @@ async function createWorkflowWithReviewPlan(runtime: Runtime): Promise<{ workflo
 		type: "start",
 		operator: OPERATOR,
 	});
-	const contextDigest = runtime.getPlanningContextDigest(created.workflowId);
-	const driver = new ScriptedModelDriver([
-		{
-			role: "orchestrator",
-			contextDigest,
-			orderedToolCalls: [],
-			structuredResult: reviewPlanProposal(created.workflowId, contextDigest),
-			modelUsage: { provider: "test", modelId: "test", inputTokens: 100, outputTokens: 200 },
-		},
-	]);
-	await runtime.planWorkflow(created.workflowId, driver);
-	driver.assertExhausted();
-	return { workflowId: created.workflowId, contextDigest };
-}
-
-function reviewPlanProposal(workflowId: number, contextDigest: string): PlanProposal {
-	return {
-		schemaVersion: "plan-proposal/v1",
-		base: { workflowId, workflowVersion: 1, basePlanRevisionId: null, planningContextDigest: contextDigest },
-		objective: "Analyze then review",
-		tasks: [
-			{
-				key: "analyze-req",
-				kind: "analyze",
-				role: "analyst",
-				objective: "Produce analysis",
-				dependsOn: [],
-				inputs: [],
-				expectedArtifactEffects: [{ kind: "analysis", operation: "create_or_revise" }],
-				completionPolicyRef: "analysis/v1",
-				maxAttempts: 3,
-			},
-			{
-				key: "review-req",
-				kind: "review",
-				role: "critic",
-				objective: "Review analysis",
-				dependsOn: ["analyze-req"],
-				inputs: [{ type: "task_output", taskKey: "analyze-req", artifactKind: "analysis", purpose: "review" }],
-				expectedArtifactEffects: [],
-				completionPolicyRef: "review/v1",
-				maxAttempts: 3,
-			},
-		],
-		rationale: "Analyze then review",
-	};
+	const planned = await runtime.planWorkflow(created.workflowId, null);
+	assert.equal(planned.outcome, "adopted");
+	return { workflowId: created.workflowId };
 }
 
 function validAnalysisContent(): unknown {
@@ -212,7 +167,8 @@ function getAnalysisRevisionId(databasePath: string): number {
 
 async function executeAnalysisTask(runtime: Runtime, workflowId: number): Promise<void> {
 	const begin = runtime.beginAttempt(workflowId);
-	assert.equal(begin.taskKey, "analyze-req");
+	assert.equal(begin.taskKey, "analyze");
+	assert.equal(begin.taskRole, "analysis-analyst");
 	const traceLinks = [setupEvidence(runtime, workflowId)];
 	const complete = runtime.completeAttempt(workflowId, begin.attemptId, validAnalysisRoleResult(workflowId, begin.attemptId, traceLinks));
 	assert.equal(complete.outcome, "published");
@@ -220,7 +176,7 @@ async function executeAnalysisTask(runtime: Runtime, workflowId: number): Promis
 
 function executeReviewTask(runtime: Runtime, workflowId: number, report: CriticReport): { attemptId: number; outcome: string } {
 	const begin = runtime.beginAttempt(workflowId);
-	assert.equal(begin.taskKey, "review-req");
+	assert.equal(begin.taskKey, "review-analysis");
 	assert.equal(begin.taskRole, "critic");
 	report.attemptId = begin.attemptId;
 	const result: RoleResult = {

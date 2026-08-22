@@ -12,13 +12,13 @@ import {
 	createOutboxTransport,
 	type HashProvider,
 } from "./testing/deterministic-fixtures.js";
-import { ScriptedModelDriver } from "./testing/scripted-model-driver.js";
 import {
 	openHeadlessWorkflowRuntime,
+	type HeadlessWorkflowRuntime,
 	type RequirementBaseline,
 } from "./workflow/headless-runtime.js";
 import type { PlanProposal, TaskProposal } from "./workflow/plan-types.js";
-import type { CriticReport, RoleResult, TraceLinkProposal } from "./workflow/role-result.js";
+import type { ArtifactEffectProposal, CriticReport, RoleResult, TraceLinkProposal } from "./workflow/role-result.js";
 
 const BASELINE: RequirementBaseline = {
 	schemaVersion: "artifact/requirement/v1",
@@ -34,11 +34,11 @@ const TIMESTAMP = "2026-08-12T10:00:00.000Z";
 
 interface ReadinessFixture {
 	databasePath: string;
-	runtime: Awaited<ReturnType<typeof openHeadlessWorkflowRuntime>>;
+	runtime: HeadlessWorkflowRuntime;
 	hashProvider: HashProvider;
 }
 
-type Runtime = ReadinessFixture["runtime"];
+type Runtime = HeadlessWorkflowRuntime;
 
 async function withReadinessRuntime(
 	work: (fixture: ReadinessFixture) => Promise<void> | void,
@@ -62,8 +62,10 @@ async function withReadinessRuntime(
 	}
 }
 
-function analysisContent(impactStatus: "yes" | "no" | "unknown" = "no"): unknown {
-	const dimension = { status: impactStatus, rationale: "rationale" };
+// #12 决议：Impact Profile 派生废除后 analysis 内容仍须 schema 合法（impactProfile 为 artifact-content/v1 必填字段），
+// 但 readiness 不再依据维度 status 拒绝（complete_impact_profile 检查已删除）。
+function analysisContent(): unknown {
+	const dimension = { status: "no", rationale: "rationale" };
 	return {
 		schemaVersion: "artifact/analysis/v1",
 		artifactKind: "analysis",
@@ -85,6 +87,67 @@ function analysisContent(impactStatus: "yes" | "no" | "unknown" = "no"): unknown
 	};
 }
 
+function scenarioContent(): unknown {
+	return {
+		schemaVersion: "artifact/scenario/v1",
+		artifactKind: "scenario",
+		summary: "Scenarios of points expiry",
+		sourceRefs: [{ type: "requirement_revision", revisionId: 1 }],
+		scenarios: [
+			{
+				id: "s1",
+				title: "Points expire after grace period",
+				actors: ["Member"],
+				preconditions: ["Member holds points"],
+				trigger: "Grace period ends",
+				mainFlow: ["System notifies member", "System expires points"],
+				alternateFlows: [],
+				expectedOutcome: "Points expired",
+			},
+		],
+	};
+}
+
+function usecaseContent(): unknown {
+	return {
+		schemaVersion: "artifact/usecase/v1",
+		artifactKind: "usecase",
+		summary: "Use cases of points expiry",
+		sourceRefs: [{ type: "requirement_revision", revisionId: 1 }],
+		useCases: [
+			{
+				id: "u1",
+				actor: "Member",
+				goal: "Be notified before points expire",
+				preconditions: [],
+				mainFlow: ["System lists expiring points", "System sends reminder"],
+				alternativeFlows: [],
+				postconditions: ["Member informed"],
+			},
+		],
+	};
+}
+
+function functionContent(): unknown {
+	return {
+		schemaVersion: "artifact/function/v1",
+		artifactKind: "function",
+		summary: "Functions of points expiry",
+		sourceRefs: [{ type: "requirement_revision", revisionId: 1 }],
+		functions: [
+			{
+				id: "f1",
+				name: "Expiry scheduler",
+				responsibility: "Expire points after grace period",
+				inputs: [],
+				outputs: [],
+				businessRules: [],
+				acceptanceCriteria: ["Expired points never negative"],
+			},
+		],
+	};
+}
+
 function designContent(): unknown {
 	return {
 		schemaVersion: "artifact/design/v1",
@@ -101,43 +164,69 @@ function designContent(): unknown {
 	};
 }
 
-function standardTasks(): TaskProposal[] {
-	return [
-		{
-			key: "analyze-req",
-			kind: "analyze",
-			role: "analyst",
-			objective: "Produce analysis",
-			dependsOn: [],
-			inputs: [],
-			expectedArtifactEffects: [{ kind: "analysis", operation: "create_or_revise" }],
-			completionPolicyRef: "analysis/v1",
-			maxAttempts: 3,
-		},
-		{
-			key: "design-sol",
-			kind: "design",
-			role: "architect",
-			objective: "Produce design",
-			dependsOn: ["analyze-req"],
-			inputs: [{ type: "task_output", taskKey: "analyze-req", artifactKind: "analysis", purpose: "design input" }],
-			expectedArtifactEffects: [{ kind: "design", operation: "create_or_revise" }],
-			completionPolicyRef: "design/v1",
-			maxAttempts: 3,
-		},
-		{
-			key: "review-all",
-			kind: "review",
-			role: "critic",
-			objective: "Review artifacts",
-			dependsOn: ["design-sol"],
-			inputs: [{ type: "task_output", taskKey: "design-sol", artifactKind: "design", purpose: "review" }],
-			expectedArtifactEffects: [],
-			completionPolicyRef: "review/v1",
-			maxAttempts: 3,
-		},
-	];
+function architectureContent(): unknown {
+	return {
+		schemaVersion: "artifact/architecture/v1",
+		artifactKind: "architecture",
+		summary: "Architecture of points expiry solution",
+		sourceRefs: [{ type: "requirement_revision", revisionId: 1 }],
+		components: [{ id: "c1", name: "Expiry service", responsibility: "Runs expiry batch" }],
+		relationships: [],
+		constraints: [],
+		nonFunctionalRequirements: ["Batch completes within window"],
+		decisions: [],
+	};
 }
+
+function dataContent(): unknown {
+	return {
+		schemaVersion: "artifact/data/v1",
+		artifactKind: "data",
+		summary: "Data model of points expiry",
+		sourceRefs: [{ type: "requirement_revision", revisionId: 1 }],
+		entities: [{ name: "points_ledger", purpose: "Track point balances", fields: ["member_id", "balance", "expires_at"], lifecycle: "append-mostly" }],
+		relationships: [],
+		migrationPlan: "Add expiry column",
+		rollbackPlan: "Drop expiry column",
+		privacyAndRetention: ["Ledger retained 24 months"],
+	};
+}
+
+function apiContent(): unknown {
+	return {
+		schemaVersion: "artifact/api/v1",
+		artifactKind: "api",
+		summary: "API surface of points expiry",
+		sourceRefs: [{ type: "requirement_revision", revisionId: 1 }],
+		interfaces: [{ id: "api1", kind: "http", name: "expiry-run", contract: "POST /internal/expiry/run", errors: [], compatibility: "additive" }],
+		security: ["Internal only"],
+		versioning: "uri",
+		testStrategy: ["Contract tests"],
+	};
+}
+
+/** 模板生产环节（#12 决议：analysis→scenario→usecase→function→design，design 一次产 4 kinds）。 */
+const TEMPLATE_STAGES: ReadonlyArray<{ key: string; role: string; kinds: readonly ArtifactEffectProposal["artifactKind"][] }> = [
+	{ key: "analyze", role: "analysis-analyst", kinds: ["analysis"] },
+	{ key: "scenario", role: "scenario-analyst", kinds: ["scenario"] },
+	{ key: "usecase", role: "usecase-analyst", kinds: ["usecase"] },
+	{ key: "function", role: "function-analyst", kinds: ["function"] },
+	{ key: "design", role: "design-architect", kinds: ["design", "architecture", "data", "api"] },
+];
+
+const STAGE_CONTENT: Readonly<Record<string, () => unknown>> = {
+	analysis: analysisContent,
+	scenario: scenarioContent,
+	usecase: usecaseContent,
+	function: functionContent,
+	design: designContent,
+	architecture: architectureContent,
+	data: dataContent,
+	api: apiContent,
+};
+
+/** code 类产物发布时必须携带 TraceLink（artifact-content/publish 校验）。 */
+const TRACE_LINK_KINDS: readonly string[] = ["analysis", "design", "architecture", "data", "api"];
 
 async function createStartedWorkflow(runtime: Runtime): Promise<number> {
 	const workspaceId = runtime.createWorkspace({ repoPath: "/tmp/repo", name: "Repo" });
@@ -152,84 +241,43 @@ async function createStartedWorkflow(runtime: Runtime): Promise<number> {
 	return created.workflowId;
 }
 
-async function adoptPlan(runtime: Runtime, workflowId: number, tasks: TaskProposal[]): Promise<void> {
+/** #12 决议：引擎直接实例化 plan-template/v1（10 Task），无需 Orchestrator ModelDriver。 */
+async function adoptTemplatePlan(runtime: Runtime, workflowId: number): Promise<void> {
+	const result = await runtime.planWorkflow(workflowId, null);
+	assert.equal(result.outcome, "adopted");
+	assert.ok(result.planRevisionId !== null);
+}
+
+/** 人工替换计划（rework/verify 周期的唯一入口；模板计划之外的自定义任务经 replace-plan 进入）。 */
+async function replacePlan(runtime: Runtime, workflowId: number, tasks: TaskProposal[], objective = "Plan"): Promise<void> {
 	const projection = runtime.getWorkflowProjection(workflowId);
 	assert.ok(projection, "workflow projection should exist");
-	const contextDigest = runtime.getPlanningContextDigest(workflowId);
 	const proposal: PlanProposal = {
 		schemaVersion: "plan-proposal/v1",
 		base: {
 			workflowId,
 			workflowVersion: projection.workflow.version,
 			basePlanRevisionId: projection.workflow.currentPlanRevisionId,
-			planningContextDigest: contextDigest,
+			planningContextDigest: runtime.getPlanningContextDigest(workflowId),
 		},
-		objective: "Plan",
+		objective,
 		tasks,
 		rationale: "rationale",
 	};
-	const driver = new ScriptedModelDriver([
-		{
-			role: "orchestrator",
-			contextDigest,
-			orderedToolCalls: [],
-			structuredResult: proposal,
-			modelUsage: { provider: "test", modelId: "test", inputTokens: 10, outputTokens: 20 },
-		},
-	]);
-	const result = await runtime.planWorkflow(workflowId, driver);
-	assert.equal(result.outcome, "adopted");
-	driver.assertExhausted();
+	const receipt = runtime.executeCommand({
+		workflowId,
+		commandId: "cmd-replace-plan",
+		expectedWorkflowVersion: projection.workflow.version,
+		type: "replace-plan",
+		payload: { proposal },
+		operator: OPERATOR,
+	});
+	assert.equal(receipt.outcome, "accepted");
 }
 
 function setupEvidence(runtime: Runtime, workflowId: number): TraceLinkProposal {
 	const snapshot = runtime.bindEvidenceSnapshot(workflowId, "sha256:repo-abc", { files: [] });
 	return { evidenceSnapshotId: snapshot.id, sourceRef: { type: "code", path: "/src/analysis.ts" } };
-}
-
-function executeAnalystTask(runtime: Runtime, workflowId: number, options?: { impactStatus?: "yes" | "no" | "unknown"; decisions?: Array<{ severity: "critical" | "major" | "minor"; summary: string }>; baseRevisionId?: number | null }): void {
-	const begin = runtime.beginAttempt(workflowId);
-	assert.equal(begin.taskRole, "analyst");
-	const result: RoleResult = {
-		schemaVersion: "role-result/v1",
-		workflowId,
-		attemptId: begin.attemptId,
-		effects: [
-			{
-				effectType: "artifact_revision",
-				artifactKind: "analysis",
-				logicalKey: "analysis",
-				content: analysisContent(options?.impactStatus ?? "no"),
-				baseRevisionId: options?.baseRevisionId ?? null,
-				traceLinks: [setupEvidence(runtime, workflowId)],
-			},
-		],
-		...(options?.decisions ? { decisionProposals: options.decisions } : {}),
-	};
-	const complete = runtime.completeAttempt(workflowId, begin.attemptId, result);
-	assert.equal(complete.outcome, "published");
-}
-
-function executeArchitectTask(runtime: Runtime, workflowId: number): void {
-	const begin = runtime.beginAttempt(workflowId);
-	assert.equal(begin.taskRole, "architect");
-	const result: RoleResult = {
-		schemaVersion: "role-result/v1",
-		workflowId,
-		attemptId: begin.attemptId,
-		effects: [
-			{
-				effectType: "artifact_revision",
-				artifactKind: "design",
-				logicalKey: "design",
-				content: designContent(),
-				baseRevisionId: null,
-				traceLinks: [setupEvidence(runtime, workflowId)],
-			},
-		],
-	};
-	const complete = runtime.completeAttempt(workflowId, begin.attemptId, result);
-	assert.equal(complete.outcome, "published");
 }
 
 function getRevisionId(databasePath: string, kind: string): number {
@@ -245,15 +293,78 @@ function getRevisionId(databasePath: string, kind: string): number {
 	}
 }
 
+interface FindingScript {
+	fingerprint: string;
+	severity: "critical" | "major" | "minor" | "info";
+	summary: string;
+	resolved?: boolean;
+}
+
+function executeTemplateStage(
+	runtime: Runtime,
+	workflowId: number,
+	stage: { key: string; role: string; kinds: readonly ArtifactEffectProposal["artifactKind"][] },
+	options?: { decisions?: Array<{ severity: "critical" | "major" | "minor"; summary: string }> },
+): void {
+	const begin = runtime.beginAttempt(workflowId);
+	assert.equal(begin.taskKey, stage.key);
+	assert.equal(begin.taskRole, stage.role);
+	const needsEvidence = stage.kinds.some((kind) => TRACE_LINK_KINDS.includes(kind));
+	const evidence = needsEvidence ? setupEvidence(runtime, workflowId) : undefined;
+	const result: RoleResult = {
+		schemaVersion: "role-result/v1",
+		workflowId,
+		attemptId: begin.attemptId,
+		effects: stage.kinds.map((kind): ArtifactEffectProposal => ({
+			effectType: "artifact_revision",
+			artifactKind: kind,
+			logicalKey: kind,
+			content: STAGE_CONTENT[kind]!(),
+			baseRevisionId: null,
+			traceLinks: evidence && TRACE_LINK_KINDS.includes(kind) ? [evidence] : [],
+		})),
+		...(options?.decisions ? { decisionProposals: options.decisions } : {}),
+	};
+	const complete = runtime.completeAttempt(workflowId, begin.attemptId, result);
+	assert.equal(complete.outcome, "published");
+}
+
+/** Rework 任务（replace-plan 引入的 analyst 复analysis 修订）。 */
+function executeAnalysisReworkTask(runtime: Runtime, workflowId: number, taskKey: string, baseRevisionId: number | null): void {
+	const begin = runtime.beginAttempt(workflowId);
+	assert.equal(begin.taskKey, taskKey);
+	assert.equal(begin.taskRole, "analyst");
+	const result: RoleResult = {
+		schemaVersion: "role-result/v1",
+		workflowId,
+		attemptId: begin.attemptId,
+		effects: [
+			{
+				effectType: "artifact_revision",
+				artifactKind: "analysis",
+				logicalKey: "analysis",
+				content: analysisContent(),
+				baseRevisionId,
+				traceLinks: [setupEvidence(runtime, workflowId)],
+			},
+		],
+	};
+	const complete = runtime.completeAttempt(workflowId, begin.attemptId, result);
+	assert.equal(complete.outcome, "published");
+}
+
+/** Critic 任务（review 与 verify 同一提交面：critic-report/v1 + coverageAttestation）。 */
 function executeCriticTask(
 	runtime: Runtime,
 	databasePath: string,
 	workflowId: number,
-	options?: { findings?: Array<{ fingerprint: string; severity: "critical" | "major" | "minor" | "info"; summary: string; resolved?: boolean }>; coverKinds?: string[] },
+	expectedTaskKey: string,
+	options?: { findings?: readonly FindingScript[]; coverKinds?: readonly string[] },
 ): void {
 	const begin = runtime.beginAttempt(workflowId);
+	assert.equal(begin.taskKey, expectedTaskKey);
 	assert.equal(begin.taskRole, "critic");
-	const coverKinds = options?.coverKinds ?? ["requirement", "analysis", "design"];
+	const coverKinds = options?.coverKinds ?? [];
 	const report: CriticReport = {
 		schemaVersion: "critic-report/v1",
 		workflowId,
@@ -268,7 +379,7 @@ function executeCriticTask(
 			summary: f.summary,
 			targetRevisionId: getRevisionId(databasePath, "analysis"),
 			targetArtifactKind: "analysis" as const,
-			sourceRef: "review-all",
+			sourceRef: expectedTaskKey,
 			resolved: f.resolved,
 		})),
 	};
@@ -283,16 +394,27 @@ function executeCriticTask(
 	assert.equal(complete.outcome, "published");
 }
 
+/** 模板全链执行：5 生产环节 + 每环节尾 Critic 复审（coverKinds 覆盖该环节产物）。 */
 async function createFullyReviewedWorkflow(
 	fixture: ReadinessFixture,
-	options?: { findings?: Array<{ fingerprint: string; severity: "critical" | "major" | "minor" | "info"; summary: string; resolved?: boolean }>; coverKinds?: string[]; decisions?: Array<{ severity: "critical" | "major" | "minor"; summary: string }>; impactStatus?: "yes" | "no" | "unknown" },
+	options?: { findings?: readonly FindingScript[]; coverKinds?: readonly string[]; decisions?: Array<{ severity: "critical" | "major" | "minor"; summary: string }> },
 ): Promise<number> {
 	const { runtime, databasePath } = fixture;
 	const workflowId = await createStartedWorkflow(runtime);
-	await adoptPlan(runtime, workflowId, standardTasks());
-	executeAnalystTask(runtime, workflowId, { impactStatus: options?.impactStatus, decisions: options?.decisions });
-	executeArchitectTask(runtime, workflowId);
-	executeCriticTask(runtime, databasePath, workflowId, { findings: options?.findings, coverKinds: options?.coverKinds });
+	await adoptTemplatePlan(runtime, workflowId);
+	executeTemplateStage(runtime, workflowId, TEMPLATE_STAGES[0]!, { decisions: options?.decisions });
+	executeCriticTask(runtime, databasePath, workflowId, "review-analysis", { coverKinds: ["analysis"] });
+	executeTemplateStage(runtime, workflowId, TEMPLATE_STAGES[1]!);
+	executeCriticTask(runtime, databasePath, workflowId, "review-scenario", { coverKinds: ["scenario"] });
+	executeTemplateStage(runtime, workflowId, TEMPLATE_STAGES[2]!);
+	executeCriticTask(runtime, databasePath, workflowId, "review-usecase", { coverKinds: ["usecase"] });
+	executeTemplateStage(runtime, workflowId, TEMPLATE_STAGES[3]!);
+	executeCriticTask(runtime, databasePath, workflowId, "review-function", { coverKinds: ["function"] });
+	executeTemplateStage(runtime, workflowId, TEMPLATE_STAGES[4]!);
+	executeCriticTask(runtime, databasePath, workflowId, "review-design", {
+		coverKinds: options?.coverKinds ?? ["design", "architecture", "data", "api"],
+		findings: options?.findings,
+	});
 	return workflowId;
 }
 
@@ -306,7 +428,8 @@ test("all checks pass builds immutable ApprovalPacket and transitions to ready_t
 		const workflowId = await createFullyReviewedWorkflow(fixture);
 		const report = fixture.runtime.checkReadiness(workflowId);
 		assert.equal(report.ready, true);
-		assert.equal(report.checks.length, 11);
+		// #12 决议：complete_impact_profile 已删除，共 10 项检查
+		assert.equal(report.checks.length, 10);
 		const built = fixture.runtime.buildApprovalPacket(workflowId);
 		assert.equal(built.ready, true);
 		assert.ok(built.packetId !== null);
@@ -318,8 +441,9 @@ test("all checks pass builds immutable ApprovalPacket and transitions to ready_t
 		assert.equal(packet.digest, built.digest);
 		const content = packet.content as { schemaVersion: string; artifacts: unknown[]; requiredArtifactKinds: string[] };
 		assert.equal(content.schemaVersion, "approval-packet/v1");
-		assert.deepEqual(content.requiredArtifactKinds, ["analysis", "design", "requirement"]);
-		assert.equal(content.artifacts.length, 3);
+		// 模板固定必需集（8 生产 kinds + requirement）
+		assert.deepEqual(content.requiredArtifactKinds, ["analysis", "api", "architecture", "data", "design", "function", "requirement", "scenario", "usecase"]);
+		assert.equal(content.artifacts.length, 8);
 		// Rebuild with unchanged inputs reuses the same packet
 		const rebuilt = fixture.runtime.buildApprovalPacket(workflowId);
 		assert.equal(rebuilt.ready, true);
@@ -329,24 +453,47 @@ test("all checks pass builds immutable ApprovalPacket and transitions to ready_t
 });
 
 test("terminal_current_work blocks readiness when a plan task is still pending", async () => {
-	await withReadinessRuntime(async ({ runtime, databasePath }) => {
-		const workflowId = await createStartedWorkflow(runtime);
-		const tasks = standardTasks();
-		tasks.push({
-			key: "review-extra",
-			kind: "review",
-			role: "critic",
-			objective: "Extra review",
-			dependsOn: ["review-all"],
-			inputs: [],
-			expectedArtifactEffects: [],
-			completionPolicyRef: "review/v1",
-			maxAttempts: 3,
-		});
-		await adoptPlan(runtime, workflowId, tasks);
-		executeAnalystTask(runtime, workflowId);
-		executeArchitectTask(runtime, workflowId);
-		executeCriticTask(runtime, databasePath, workflowId);
+	await withReadinessRuntime(async (fixture) => {
+		const { runtime, databasePath } = fixture;
+		const workflowId = await createFullyReviewedWorkflow(fixture);
+		// 人工替换计划追加复审环节：review-close 覆盖 rework 修订后 review-extra 保持 pending
+		await replacePlan(runtime, workflowId, [
+			{
+				key: "analyze-2",
+				kind: "analyze",
+				role: "analyst",
+				objective: "Revise analysis",
+				dependsOn: [],
+				inputs: [],
+				expectedArtifactEffects: [{ kind: "analysis", operation: "create_or_revise" }],
+				completionPolicyRef: "analysis/v1",
+				maxAttempts: 3,
+			},
+			{
+				key: "review-close",
+				kind: "review",
+				role: "critic",
+				objective: "Review revised analysis",
+				dependsOn: ["analyze-2"],
+				inputs: [],
+				expectedArtifactEffects: [],
+				completionPolicyRef: "review/v1",
+				maxAttempts: 3,
+			},
+			{
+				key: "review-extra",
+				kind: "review",
+				role: "critic",
+				objective: "Extra review",
+				dependsOn: ["review-close"],
+				inputs: [],
+				expectedArtifactEffects: [],
+				completionPolicyRef: "review/v1",
+				maxAttempts: 3,
+			},
+		]);
+		executeAnalysisReworkTask(runtime, workflowId, "analyze-2", getRevisionId(databasePath, "analysis"));
+		executeCriticTask(runtime, databasePath, workflowId, "review-close", { coverKinds: ["analysis"] });
 		const report = runtime.checkReadiness(workflowId);
 		assert.equal(report.ready, false);
 		assertOnlyCheckFails(report, "terminal_current_work");
@@ -362,8 +509,9 @@ test("no_gate blocks readiness when a Finding Thread escalates to human gate aft
 		);
 		const findingId = runtime.getFindings(workflowId)[0]!.id;
 		const analysisRevisionId = getRevisionId(databasePath, "analysis");
-		// Replan with rework + two verify cycles targeting the open Finding Thread
-		await adoptPlan(runtime, workflowId, [
+		// 替换计划：rework + 两个 verify 周期指向未闭环 Finding Thread
+		const verifyInput: TaskProposal["inputs"][number] = { type: "finding", findingId, targetRevisionId: analysisRevisionId, purpose: "verify closure" };
+		await replacePlan(runtime, workflowId, [
 			{
 				key: "analyze-2",
 				kind: "analyze",
@@ -381,7 +529,7 @@ test("no_gate blocks readiness when a Finding Thread escalates to human gate aft
 				role: "critic",
 				objective: "Verify finding closure",
 				dependsOn: ["analyze-2"],
-				inputs: [{ type: "finding", findingId, targetRevisionId: analysisRevisionId, purpose: "verify closure" }],
+				inputs: [verifyInput],
 				expectedArtifactEffects: [],
 				completionPolicyRef: "verify/v1",
 				maxAttempts: 3,
@@ -392,15 +540,15 @@ test("no_gate blocks readiness when a Finding Thread escalates to human gate aft
 				role: "critic",
 				objective: "Verify finding closure again",
 				dependsOn: ["verify-1"],
-				inputs: [{ type: "finding", findingId, targetRevisionId: analysisRevisionId, purpose: "verify closure" }],
+				inputs: [verifyInput],
 				expectedArtifactEffects: [],
 				completionPolicyRef: "verify/v1",
 				maxAttempts: 3,
 			},
 		]);
-		executeAnalystTask(runtime, workflowId, { baseRevisionId: analysisRevisionId });
-		executeCriticTask(runtime, databasePath, workflowId, { findings: [{ fingerprint: "fp-minor-1", severity: "minor", summary: "Still open", resolved: false }] });
-		executeCriticTask(runtime, databasePath, workflowId, { findings: [{ fingerprint: "fp-minor-1", severity: "minor", summary: "Still open", resolved: false }] });
+		executeAnalysisReworkTask(runtime, workflowId, "analyze-2", analysisRevisionId);
+		executeCriticTask(runtime, databasePath, workflowId, "verify-1", { findings: [{ fingerprint: "fp-minor-1", severity: "minor", summary: "Still open", resolved: false }], coverKinds: ["analysis"] });
+		executeCriticTask(runtime, databasePath, workflowId, "verify-2", { findings: [{ fingerprint: "fp-minor-1", severity: "minor", summary: "Still open", resolved: false }], coverKinds: ["analysis"] });
 		const projection = runtime.getWorkflowProjection(workflowId);
 		assert.equal(projection?.workflow.state, "waiting_for_human");
 		const report = runtime.checkReadiness(workflowId);
@@ -409,35 +557,38 @@ test("no_gate blocks readiness when a Finding Thread escalates to human gate aft
 	});
 });
 
-test("complete_impact_profile blocks readiness when a dimension is unknown", async () => {
-	await withReadinessRuntime(async (fixture) => {
-		const workflowId = await createFullyReviewedWorkflow(fixture, { impactStatus: "unknown" });
-		const report = fixture.runtime.checkReadiness(workflowId);
-		assert.equal(report.ready, false);
-		assertOnlyCheckFails(report, "complete_impact_profile");
-	});
-});
-
 test("complete_required_artifacts blocks readiness when a required kind is missing", async () => {
 	await withReadinessRuntime(async ({ runtime, databasePath }) => {
 		const workflowId = await createStartedWorkflow(runtime);
-		// Plan without a design task: design remains a required kind but is never produced
-		await adoptPlan(runtime, workflowId, [
-			standardTasks()[0]!,
+		await adoptTemplatePlan(runtime, workflowId);
+		// 模板必需集固定（planMayRemoveRequiredKinds=false）：替换为仅产 analysis 的计划，
+		// 其余 7 个生产 kinds 无 current revision → 仅 complete_required_artifacts 失败
+		await replacePlan(runtime, workflowId, [
 			{
-				key: "review-all",
+				key: "analyze-only",
+				kind: "analyze",
+				role: "analyst",
+				objective: "Produce analysis",
+				dependsOn: [],
+				inputs: [],
+				expectedArtifactEffects: [{ kind: "analysis", operation: "create_or_revise" }],
+				completionPolicyRef: "analysis/v1",
+				maxAttempts: 3,
+			},
+			{
+				key: "review-only",
 				kind: "review",
 				role: "critic",
-				objective: "Review artifacts",
-				dependsOn: ["analyze-req"],
-				inputs: [{ type: "task_output", taskKey: "analyze-req", artifactKind: "analysis", purpose: "review" }],
+				objective: "Review analysis",
+				dependsOn: ["analyze-only"],
+				inputs: [],
 				expectedArtifactEffects: [],
 				completionPolicyRef: "review/v1",
 				maxAttempts: 3,
 			},
 		]);
-		executeAnalystTask(runtime, workflowId);
-		executeCriticTask(runtime, databasePath, workflowId, { coverKinds: ["requirement", "analysis"] });
+		executeAnalysisReworkTask(runtime, workflowId, "analyze-only", null);
+		executeCriticTask(runtime, databasePath, workflowId, "review-only", { coverKinds: ["analysis"] });
 		const report = runtime.checkReadiness(workflowId);
 		assert.equal(report.ready, false);
 		assertOnlyCheckFails(report, "complete_required_artifacts");
@@ -535,7 +686,7 @@ test("major Finding with fresh risk acceptance passes; stale risk acceptance blo
 		assert.equal(freshReport.ready, true);
 		// A successor analysis revision makes the risk acceptance stale
 		const analysisRevisionId = getRevisionId(fixture.databasePath, "analysis");
-		await adoptPlan(fixture.runtime, workflowId, [
+		await replacePlan(fixture.runtime, workflowId, [
 			{
 				key: "analyze-2",
 				kind: "analyze",
@@ -553,14 +704,14 @@ test("major Finding with fresh risk acceptance passes; stale risk acceptance blo
 				role: "critic",
 				objective: "Review revised analysis",
 				dependsOn: ["analyze-2"],
-				inputs: [{ type: "task_output", taskKey: "analyze-2", artifactKind: "analysis", purpose: "review" }],
+				inputs: [],
 				expectedArtifactEffects: [],
 				completionPolicyRef: "review/v1",
 				maxAttempts: 3,
 			},
 		]);
-		executeAnalystTask(fixture.runtime, workflowId, { baseRevisionId: analysisRevisionId });
-		executeCriticTask(fixture.runtime, fixture.databasePath, workflowId);
+		executeAnalysisReworkTask(fixture.runtime, workflowId, "analyze-2", analysisRevisionId);
+		executeCriticTask(fixture.runtime, fixture.databasePath, workflowId, "review-2", { coverKinds: ["analysis"] });
 		const staleReport = fixture.runtime.checkReadiness(workflowId);
 		assert.equal(staleReport.ready, false);
 		assertOnlyCheckFails(staleReport, "disposed_findings");
@@ -727,16 +878,12 @@ test("pure pause retains the valid packet and rebuild after resume reuses it", a
 
 test("dispose-decision enforces severity rules", async () => {
 	await withReadinessRuntime(async (fixture) => {
-		const workflowId = await createStartedWorkflow(fixture.runtime);
-		await adoptPlan(fixture.runtime, workflowId, standardTasks());
-		executeAnalystTask(fixture.runtime, workflowId, {
+		const workflowId = await createFullyReviewedWorkflow(fixture, {
 			decisions: [
 				{ severity: "critical", summary: "Critical choice" },
 				{ severity: "minor", summary: "Minor choice" },
 			],
 		});
-		executeArchitectTask(fixture.runtime, workflowId);
-		executeCriticTask(fixture.runtime, fixture.databasePath, workflowId);
 		const decisions = fixture.runtime.getDecisions(workflowId);
 		const critical = decisions.find((d) => d.severity === "critical")!;
 		const minor = decisions.find((d) => d.severity === "minor")!;

@@ -20,7 +20,6 @@ import {
 } from "./workflow/headless-runtime.js";
 import type { PlanProposal } from "./workflow/plan-types.js";
 import type { RoleResult, TraceLinkProposal, ArtifactEffectProposal } from "./workflow/role-result.js";
-import type { ImpactProfile } from "./workflow/impact-profile.js";
 
 const BASELINE: RequirementBaseline = {
 	schemaVersion: "artifact/requirement/v1",
@@ -116,15 +115,15 @@ function validAnalysisContent(requirementRevisionId: number): unknown {
 		goals: ["Understand impact"],
 		nonGoals: ["Full rearchitecture"],
 		constraints: ["Must be backward compatible"],
-		acceptanceCriteria: ["Impact profile covers all dimensions"],
+		acceptanceCriteria: ["Analysis covers all requirement aspects"],
 		impactProfile: {
-			process: { status: "yes", rationale: "Process changes needed" },
+			process: { status: "no", rationale: "No process changes" },
 			actors: { status: "no", rationale: "No actor changes" },
-			behavior: { status: "yes", rationale: "Behavior changes needed" },
+			behavior: { status: "no", rationale: "No behavior changes" },
 			architecture: { status: "no", rationale: "No architecture changes" },
 			data: { status: "no", rationale: "No data changes" },
 			api: { status: "no", rationale: "No API changes" },
-		} satisfies ImpactProfile,
+		},
 		openQuestions: ["What is the expiry period?"],
 	};
 }
@@ -163,45 +162,6 @@ function queryTraceLinkCount(databasePath: string): number {
 		database.close();
 	}
 }
-
-test("storeImpactProfile derives and persists Required Artifact Set", async () => {
-	await withRuntime(async ({ runtime }) => {
-		const { workflowId } = await createStartedWorkflow(runtime);
-		const profile: ImpactProfile = {
-			process: { status: "yes", rationale: "Process changes" },
-			actors: { status: "no", rationale: "No actor changes" },
-			behavior: { status: "yes", rationale: "Behavior changes" },
-			architecture: { status: "no", rationale: "No arch changes" },
-			data: { status: "no", rationale: "No data changes" },
-			api: { status: "no", rationale: "No API changes" },
-		};
-		runtime.storeImpactProfile(workflowId, profile);
-		const set = runtime.getRequiredArtifactSet(workflowId);
-		assert(set);
-		assert.deepEqual(set.requiredKinds, ["requirement", "analysis", "design", "scenario", "function"]);
-		assert.equal(set.complete, true);
-		assert.equal(set.blockingDimensions.length, 0);
-	});
-});
-
-test("storeImpactProfile with unknown dimension blocks completion", async () => {
-	await withRuntime(async ({ runtime }) => {
-		const { workflowId } = await createStartedWorkflow(runtime);
-		const profile: ImpactProfile = {
-			process: { status: "unknown", rationale: "Uncertain" },
-			actors: { status: "no", rationale: "No" },
-			behavior: { status: "no", rationale: "No" },
-			architecture: { status: "no", rationale: "No" },
-			data: { status: "no", rationale: "No" },
-			api: { status: "no", rationale: "No" },
-		};
-		runtime.storeImpactProfile(workflowId, profile);
-		const set = runtime.getRequiredArtifactSet(workflowId);
-		assert(set);
-		assert.equal(set.complete, false);
-		assert.deepEqual(set.blockingDimensions, ["process"]);
-	});
-});
 
 test("bindEvidenceSnapshot creates immutable evidence snapshot", async () => {
 	await withRuntime(async ({ runtime }) => {
@@ -317,11 +277,12 @@ test("trace link validation passes for analysis with trace links", async () => {
 		const complete = runtime.completeAttempt(workflowId, begin.attemptId, result);
 		assert.equal(complete.outcome, "published");
 		assert.equal(queryTraceLinkCount(databasePath), 1);
-		assert.equal(queryImpactProfileCount(databasePath, workflowId), 1);
+		// 画像写入已废除（#12）：impact_profiles 表不再写入
+		assert.equal(queryImpactProfileCount(databasePath, workflowId), 0);
 	});
 });
 
-test("impact profile extracted from published analysis content", async () => {
+test("template required artifact set covers all fixed kinds after analysis published", async () => {
 	await withRuntime(async ({ runtime }) => {
 		const { workflowId } = await createPlannedWorkflow(runtime);
 		const projection = runtime.getWorkflowProjection(workflowId);
@@ -341,14 +302,12 @@ test("impact profile extracted from published analysis content", async () => {
 			},
 		]);
 		runtime.completeAttempt(workflowId, begin.attemptId, result);
-		const set = runtime.getRequiredArtifactSet(workflowId);
-		assert(set);
-		assert(set.requiredKinds.includes("scenario"));
-		assert(set.requiredKinds.includes("function"));
-		assert(set.requiredKinds.includes("requirement"));
-		assert(set.requiredKinds.includes("analysis"));
-		assert(set.requiredKinds.includes("design"));
-		assert.equal(set.complete, true);
+		// 模板固定必需集：仅 analysis 已产，scenario/usecase/function/design/architecture/data/api 七类缺失
+		const report = runtime.checkReadiness(workflowId);
+		const artifactsCheck = report.checks.find((check) => check.name === "complete_required_artifacts");
+		assert.ok(artifactsCheck);
+		assert.equal(artifactsCheck.passed, false);
+		assert.match(artifactsCheck.detail, /scenario/);
 	});
 });
 
@@ -403,15 +362,15 @@ test("required artifact set kind statuses reflect current revisions", async () =
 			},
 		]);
 		runtime.completeAttempt(workflowId, begin.attemptId, result);
-		const set = runtime.getRequiredArtifactSet(workflowId);
-		assert(set);
-		const analysisStatus = set.kindStatuses.find((s) => s.kind === "analysis");
-		assert(analysisStatus);
-		assert.equal(analysisStatus.hasCurrentRevision, true);
-		assert.equal(analysisStatus.revisionStatus, "pending");
-		assert.equal(analysisStatus.hasTraceLinks, true);
-		const designStatus = set.kindStatuses.find((s) => s.kind === "design");
-		assert(designStatus);
-		assert.equal(designStatus.hasCurrentRevision, false);
+		// 模板必需集：analysis 有 current revision（evidence 覆盖）而 design 尚无——readiness 反映
+		const report = runtime.checkReadiness(workflowId);
+		const artifactsCheck = report.checks.find((check) => check.name === "complete_required_artifacts");
+		assert.ok(artifactsCheck);
+		// 模板 8 kinds 中仅 analysis 已产，scenario/usecase/function/design/architecture/data/api 缺失
+		assert.equal(artifactsCheck.passed, false);
+		assert.match(artifactsCheck.detail, /scenario/);
+		const evidenceCheck = report.checks.find((check) => check.name === "evidence_coverage");
+		assert.ok(evidenceCheck);
+		assert.equal(evidenceCheck.passed, true);
 	});
 });

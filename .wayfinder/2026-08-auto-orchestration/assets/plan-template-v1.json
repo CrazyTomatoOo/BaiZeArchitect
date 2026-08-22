@@ -1,0 +1,121 @@
+{
+  "schemaVersion": "plan-template/v1",
+  "objective": "按预置模板自动编排设计：分析→场景→用例→功能→功能设计（每环节尾 Critic 复审）。",
+  "tasks": [
+    {
+      "key": "analyze",
+      "kind": "analyze",
+      "role": "analysis-analyst",
+      "objective": "Produce analysis",
+      "dependsOn": [],
+      "inputs": [],
+      "expectedArtifactEffects": [{ "kind": "analysis", "operation": "create_or_revise" }],
+      "completionPolicyRef": "analysis/v1",
+      "maxAttempts": 3
+    },
+    {
+      "key": "review-analysis",
+      "kind": "review",
+      "role": "critic",
+      "objective": "Review analysis artifacts",
+      "dependsOn": ["analyze"],
+      "inputs": [{ "type": "task_output", "taskKey": "analyze", "artifactKind": "analysis", "purpose": "review" }],
+      "expectedArtifactEffects": [],
+      "completionPolicyRef": "critic-review/v1",
+      "maxAttempts": 3
+    },
+    {
+      "key": "scenario",
+      "kind": "analyze",
+      "role": "scenario-analyst",
+      "objective": "Produce scenarios",
+      "dependsOn": ["review-analysis"],
+      "inputs": [{ "type": "task_output", "taskKey": "analyze", "artifactKind": "analysis", "purpose": "scenario input" }],
+      "expectedArtifactEffects": [{ "kind": "scenario", "operation": "create_or_revise" }],
+      "completionPolicyRef": "scenario/v1",
+      "maxAttempts": 3
+    },
+    {
+      "key": "review-scenario",
+      "kind": "review",
+      "role": "critic",
+      "objective": "Review scenario artifacts",
+      "dependsOn": ["scenario"],
+      "inputs": [{ "type": "task_output", "taskKey": "scenario", "artifactKind": "scenario", "purpose": "review" }],
+      "expectedArtifactEffects": [],
+      "completionPolicyRef": "critic-review/v1",
+      "maxAttempts": 3
+    },
+    {
+      "key": "usecase",
+      "kind": "analyze",
+      "role": "usecase-analyst",
+      "objective": "Produce use cases",
+      "dependsOn": ["review-scenario"],
+      "inputs": [{ "type": "task_output", "taskKey": "scenario", "artifactKind": "scenario", "purpose": "usecase input" }],
+      "expectedArtifactEffects": [{ "kind": "usecase", "operation": "create_or_revise" }],
+      "completionPolicyRef": "usecase/v1",
+      "maxAttempts": 3
+    },
+    {
+      "key": "review-usecase",
+      "kind": "review",
+      "role": "critic",
+      "objective": "Review use case artifacts",
+      "dependsOn": ["usecase"],
+      "inputs": [{ "type": "task_output", "taskKey": "usecase", "artifactKind": "usecase", "purpose": "review" }],
+      "expectedArtifactEffects": [],
+      "completionPolicyRef": "critic-review/v1",
+      "maxAttempts": 3
+    },
+    {
+      "key": "function",
+      "kind": "analyze",
+      "role": "function-analyst",
+      "objective": "Produce functions",
+      "dependsOn": ["review-usecase"],
+      "inputs": [{ "type": "task_output", "taskKey": "usecase", "artifactKind": "usecase", "purpose": "function input" }],
+      "expectedArtifactEffects": [{ "kind": "function", "operation": "create_or_revise" }],
+      "completionPolicyRef": "function/v1",
+      "maxAttempts": 3
+    },
+    {
+      "key": "review-function",
+      "kind": "review",
+      "role": "critic",
+      "objective": "Review function artifacts",
+      "dependsOn": ["function"],
+      "inputs": [{ "type": "task_output", "taskKey": "function", "artifactKind": "function", "purpose": "review" }],
+      "expectedArtifactEffects": [],
+      "completionPolicyRef": "critic-review/v1",
+      "maxAttempts": 3
+    },
+    {
+      "key": "design",
+      "kind": "design",
+      "role": "design-architect",
+      "objective": "Produce design, architecture, data, and api artifacts",
+      "dependsOn": ["review-function"],
+      "inputs": [{ "type": "task_output", "taskKey": "function", "artifactKind": "function", "purpose": "design input" }],
+      "expectedArtifactEffects": [
+        { "kind": "design", "operation": "create_or_revise" },
+        { "kind": "architecture", "operation": "create_or_revise" },
+        { "kind": "data", "operation": "create_or_revise" },
+        { "kind": "api", "operation": "create_or_revise" }
+      ],
+      "completionPolicyRef": "design/v1",
+      "maxAttempts": 3
+    },
+    {
+      "key": "review-design",
+      "kind": "review",
+      "role": "critic",
+      "objective": "Review design, architecture, data, and api artifacts",
+      "dependsOn": ["design"],
+      "inputs": [{ "type": "task_output", "taskKey": "design", "artifactKind": "design", "purpose": "review" }],
+      "expectedArtifactEffects": [],
+      "completionPolicyRef": "critic-review/v1",
+      "maxAttempts": 3
+    }
+  ]
+}

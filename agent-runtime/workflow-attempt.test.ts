@@ -14,12 +14,12 @@ import {
 	type FixtureOperator,
 	type FixtureOutboxTransport,
 } from "./testing/deterministic-fixtures.js";
-import { ScriptedModelDriver } from "./testing/scripted-model-driver.js";
+
 import {
 	openHeadlessWorkflowRuntime,
 	type RequirementBaseline,
 } from "./workflow/headless-runtime.js";
-import type { PlanProposal } from "./workflow/plan-types.js";
+
 import type { RoleResult, TraceLinkProposal } from "./workflow/role-result.js";
 
 const BASELINE: RequirementBaseline = {
@@ -65,7 +65,7 @@ async function withAttemptRuntime(
 
 type Runtime = AttemptFixture["runtime"];
 
-async function createWorkflowWithPlan(runtime: Runtime): Promise<{ workflowId: number; contextDigest: string }> {
+async function createWorkflowWithPlan(runtime: Runtime): Promise<{ workflowId: number }> {
 	const workspaceId = runtime.createWorkspace({ repoPath: "/tmp/repo", name: "Repo" });
 	const created = runtime.createRequirement({ workspaceId, baseline: BASELINE });
 	runtime.executeCommand({
@@ -75,41 +75,10 @@ async function createWorkflowWithPlan(runtime: Runtime): Promise<{ workflowId: n
 		type: "start",
 		operator: OPERATOR,
 	});
-	const contextDigest = runtime.getPlanningContextDigest(created.workflowId);
-	const driver = new ScriptedModelDriver([
-		{
-			role: "orchestrator",
-			contextDigest,
-			orderedToolCalls: [],
-			structuredResult: validPlanProposal(created.workflowId, contextDigest),
-			modelUsage: { provider: "test", modelId: "test", inputTokens: 100, outputTokens: 200 },
-		},
-	]);
-	await runtime.planWorkflow(created.workflowId, driver);
-	driver.assertExhausted();
-	return { workflowId: created.workflowId, contextDigest };
-}
-
-function validPlanProposal(workflowId: number, contextDigest: string): PlanProposal {
-	return {
-		schemaVersion: "plan-proposal/v1",
-		base: { workflowId, workflowVersion: 1, basePlanRevisionId: null, planningContextDigest: contextDigest },
-		objective: "Analyze the requirement",
-		tasks: [
-			{
-				key: "analyze-req",
-				kind: "analyze",
-				role: "analyst",
-				objective: "Produce the analysis artifact",
-				dependsOn: [],
-				inputs: [],
-				expectedArtifactEffects: [{ kind: "analysis", operation: "create_or_revise" }],
-				completionPolicyRef: "analysis/v1",
-				maxAttempts: 3,
-			},
-		],
-		rationale: "Single analyst task",
-	};
+	// #19：模板规划 —— planWorkflow(workflowId, null) 确定性实例化模板计划（首个就绪 Task = analyze / analysis-analyst）。
+	const result = await runtime.planWorkflow(created.workflowId, null);
+	assert.equal(result.outcome, "adopted");
+	return { workflowId: created.workflowId };
 }
 
 function validAnalysisContent(): unknown {
@@ -227,7 +196,7 @@ test("analyst attempt acquires claim, creates attempt, run, and context manifest
 			assert.equal(attempt.status, "running");
 			const run = db.prepare("select mode, role, session_file, session_id, status from runs where attempt_id = ?").get(begin.attemptId) as { mode: string; role: string; session_file: string; session_id: string; status: string };
 			assert.equal(run.mode, "governance");
-			assert.equal(run.role, "analyst");
+			assert.equal(run.role, "analysis-analyst");
 			assert.ok(run.session_file);
 			assert.ok(run.session_id);
 			assert.equal(run.status, "running");
@@ -387,15 +356,6 @@ test("executeTask drives analyst model and publishes via the model/tool boundary
 		const evidenceSnapshotId = runtime.getEvidenceSnapshots(workflowId)[0]!.id;
 		const begin = runtime.beginAttempt(workflowId);
 		const structuredResult = validRoleResult(workflowId, begin.attemptId, validAnalysisContent(), [{ evidenceSnapshotId, sourceRef: { type: "requirement_revision", revisionId: 1 } }]);
-		const driver = new ScriptedModelDriver([
-			{
-				role: "analyst",
-				contextDigest: begin.contextDigest,
-				orderedToolCalls: [],
-				structuredResult,
-				modelUsage: { provider: "test", modelId: "test", inputTokens: 50, outputTokens: 100 },
-			},
-		]);
 		const result = runtime.completeAttempt(workflowId, begin.attemptId, structuredResult);
 		assert.equal(result.outcome, "published");
 		const revision = queryArtifactRevision(databasePath, workflowId, "analysis");

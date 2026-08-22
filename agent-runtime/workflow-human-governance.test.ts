@@ -11,9 +11,8 @@ import {
 	createHashProvider,
 	createOutboxTransport,
 } from "./testing/deterministic-fixtures.js";
-import { ScriptedModelDriver } from "./testing/scripted-model-driver.js";
 import { openHeadlessWorkflowRuntime, type RequirementBaseline } from "./workflow/headless-runtime.js";
-import type { PlanProposal, TaskProposal } from "./workflow/plan-types.js";
+import type { PlanProposal } from "./workflow/plan-types.js";
 import type { CriticReport, RoleResult, TraceLinkProposal } from "./workflow/role-result.js";
 
 const BASELINE: RequirementBaseline = {
@@ -101,13 +100,77 @@ function designContent(): unknown {
 	};
 }
 
-function standardTasks(): TaskProposal[] {
-	return [
-		{ key: "analyze-req", kind: "analyze", role: "analyst", objective: "Produce analysis", dependsOn: [], inputs: [], expectedArtifactEffects: [{ kind: "analysis", operation: "create_or_revise" }], completionPolicyRef: "analysis/v1", maxAttempts: 3 },
-		{ key: "design-sol", kind: "design", role: "architect", objective: "Produce design", dependsOn: ["analyze-req"], inputs: [{ type: "task_output", taskKey: "analyze-req", artifactKind: "analysis", purpose: "design input" }], expectedArtifactEffects: [{ kind: "design", operation: "create_or_revise" }], completionPolicyRef: "design/v1", maxAttempts: 3 },
-		{ key: "review-all", kind: "review", role: "critic", objective: "Review artifacts", dependsOn: ["design-sol"], inputs: [{ type: "task_output", taskKey: "design-sol", artifactKind: "design", purpose: "review" }], expectedArtifactEffects: [], completionPolicyRef: "review/v1", maxAttempts: 3 },
-	];
+function scenarioContent(): unknown {
+	return {
+		schemaVersion: "artifact/scenario/v1",
+		artifactKind: "scenario",
+		summary: "Scenarios for points expiry",
+		sourceRefs: [{ type: "requirement_revision", revisionId: 1 }],
+		scenarios: [{ id: "sc1", title: "User redeems before expiry", actors: ["User"], preconditions: ["Points exist"], trigger: "Expiry reminder received", mainFlow: ["Open wallet", "Redeem points"], alternateFlows: ["Points already expired"], expectedOutcome: "Points redeemed" }],
+	};
 }
+
+function usecaseContent(): unknown {
+	return {
+		schemaVersion: "artifact/usecase/v1",
+		artifactKind: "usecase",
+		summary: "Use cases for points expiry",
+		sourceRefs: [{ type: "requirement_revision", revisionId: 1 }],
+		useCases: [{ id: "uc1", actor: "User", goal: "Redeem points before expiry", preconditions: ["Wallet active"], mainFlow: ["Receive reminder", "Redeem points"], alternativeFlows: ["Contact support"], postconditions: ["Points consumed"] }],
+	};
+}
+
+function functionContent(): unknown {
+	return {
+		schemaVersion: "artifact/function/v1",
+		artifactKind: "function",
+		summary: "Functions for points expiry",
+		sourceRefs: [{ type: "requirement_revision", revisionId: 1 }],
+		functions: [{ id: "fn1", name: "Expiry scheduler", responsibility: "Expire points past threshold", inputs: ["points ledger"], outputs: ["expiry events"], businessRules: ["Expiry after 365 days"], acceptanceCriteria: ["Expired points are removed"] }],
+	};
+}
+
+function architectureContent(): unknown {
+	return {
+		schemaVersion: "artifact/architecture/v1",
+		artifactKind: "architecture",
+		summary: "Architecture of points expiry solution",
+		sourceRefs: [{ type: "requirement_revision", revisionId: 1 }],
+		components: [{ id: "c1", name: "Expiry service", responsibility: "Schedule and execute expiry" }],
+		relationships: [{ from: "c1", to: "Points ledger", interaction: "reads and writes balances" }],
+		constraints: ["No downtime during expiry runs"],
+		nonFunctionalRequirements: ["Expiry completes within the nightly window"],
+		decisions: [],
+	};
+}
+
+function dataContent(): unknown {
+	return {
+		schemaVersion: "artifact/data/v1",
+		artifactKind: "data",
+		summary: "Data model for points expiry",
+		sourceRefs: [{ type: "requirement_revision", revisionId: 1 }],
+		entities: [{ name: "points_ledger", purpose: "Track point balances and expiries", fields: ["id", "user_id", "balance", "expires_at"], lifecycle: "append-heavy with nightly expiry updates" }],
+		relationships: ["points_ledger.user_id -> users.id"],
+		migrationPlan: "Add expires_at column with backfill",
+		rollbackPlan: "Drop expires_at column",
+		privacyAndRetention: ["Expiry records retained for 90 days"],
+	};
+}
+
+function apiContent(): unknown {
+	return {
+		schemaVersion: "artifact/api/v1",
+		artifactKind: "api",
+		summary: "API surface for points expiry",
+		sourceRefs: [{ type: "requirement_revision", revisionId: 1 }],
+		interfaces: [{ id: "api1", kind: "http", name: "GET /points", contract: "Returns balance with expiry dates", errors: ["404 not found"], compatibility: "Additive fields only" }],
+		security: ["Operator token required"],
+		versioning: "URL path versioning",
+		testStrategy: ["Contract tests against the public surface"],
+	};
+}
+
 
 async function createStartedWorkflow(runtime: Runtime): Promise<number> {
 	const workspaceId = runtime.createWorkspace({ repoPath: "/tmp/repo", name: "Repo" });
@@ -116,21 +179,9 @@ async function createStartedWorkflow(runtime: Runtime): Promise<number> {
 	return created.workflowId;
 }
 
-async function adoptPlan(runtime: Runtime, workflowId: number, tasks: TaskProposal[]): Promise<void> {
-	const projection = runtime.getWorkflowProjection(workflowId);
-	assert.ok(projection);
-	const contextDigest = runtime.getPlanningContextDigest(workflowId);
-	const proposal: PlanProposal = {
-		schemaVersion: "plan-proposal/v1",
-		base: { workflowId, workflowVersion: projection.workflow.version, basePlanRevisionId: projection.workflow.currentPlanRevisionId, planningContextDigest: contextDigest },
-		objective: "Plan",
-		tasks,
-		rationale: "rationale",
-	};
-	const driver = new ScriptedModelDriver([{ role: "orchestrator", contextDigest, orderedToolCalls: [], structuredResult: proposal, modelUsage: { provider: "test", modelId: "test", inputTokens: 10, outputTokens: 20 } }]);
-	const result = await runtime.planWorkflow(workflowId, driver);
+async function adoptPlan(runtime: Runtime, workflowId: number): Promise<void> {
+	const result = await runtime.planWorkflow(workflowId, null);
 	assert.equal(result.outcome, "adopted");
-	driver.assertExhausted();
 }
 
 function setupEvidence(runtime: Runtime, workflowId: number): TraceLinkProposal {
@@ -140,7 +191,8 @@ function setupEvidence(runtime: Runtime, workflowId: number): TraceLinkProposal 
 
 function executeAnalystTask(runtime: Runtime, workflowId: number): void {
 	const begin = runtime.beginAttempt(workflowId);
-	assert.equal(begin.taskRole, "analyst");
+	assert.equal(begin.taskKey, "analyze");
+	assert.equal(begin.taskRole, "analysis-analyst");
 	const result: RoleResult = {
 		schemaVersion: "role-result/v1",
 		workflowId,
@@ -150,14 +202,60 @@ function executeAnalystTask(runtime: Runtime, workflowId: number): void {
 	assert.equal(runtime.completeAttempt(workflowId, begin.attemptId, result).outcome, "published");
 }
 
-function executeArchitectTask(runtime: Runtime, workflowId: number): void {
+function executeScenarioTask(runtime: Runtime, workflowId: number): void {
 	const begin = runtime.beginAttempt(workflowId);
-	assert.equal(begin.taskRole, "architect");
+	assert.equal(begin.taskKey, "scenario");
+	assert.equal(begin.taskRole, "scenario-analyst");
 	const result: RoleResult = {
 		schemaVersion: "role-result/v1",
 		workflowId,
 		attemptId: begin.attemptId,
-		effects: [{ effectType: "artifact_revision", artifactKind: "design", logicalKey: "design", content: designContent(), baseRevisionId: null, traceLinks: [setupEvidence(runtime, workflowId)] }],
+		effects: [{ effectType: "artifact_revision", artifactKind: "scenario", logicalKey: "scenario", content: scenarioContent(), baseRevisionId: null, traceLinks: [setupEvidence(runtime, workflowId)] }],
+	};
+	assert.equal(runtime.completeAttempt(workflowId, begin.attemptId, result).outcome, "published");
+}
+
+function executeUsecaseTask(runtime: Runtime, workflowId: number): void {
+	const begin = runtime.beginAttempt(workflowId);
+	assert.equal(begin.taskKey, "usecase");
+	assert.equal(begin.taskRole, "usecase-analyst");
+	const result: RoleResult = {
+		schemaVersion: "role-result/v1",
+		workflowId,
+		attemptId: begin.attemptId,
+		effects: [{ effectType: "artifact_revision", artifactKind: "usecase", logicalKey: "usecase", content: usecaseContent(), baseRevisionId: null, traceLinks: [setupEvidence(runtime, workflowId)] }],
+	};
+	assert.equal(runtime.completeAttempt(workflowId, begin.attemptId, result).outcome, "published");
+}
+
+function executeFunctionTask(runtime: Runtime, workflowId: number): void {
+	const begin = runtime.beginAttempt(workflowId);
+	assert.equal(begin.taskKey, "function");
+	assert.equal(begin.taskRole, "function-analyst");
+	const result: RoleResult = {
+		schemaVersion: "role-result/v1",
+		workflowId,
+		attemptId: begin.attemptId,
+		effects: [{ effectType: "artifact_revision", artifactKind: "function", logicalKey: "function", content: functionContent(), baseRevisionId: null, traceLinks: [setupEvidence(runtime, workflowId)] }],
+	};
+	assert.equal(runtime.completeAttempt(workflowId, begin.attemptId, result).outcome, "published");
+}
+
+function executeArchitectTask(runtime: Runtime, workflowId: number): void {
+	const begin = runtime.beginAttempt(workflowId);
+	assert.equal(begin.taskKey, "design");
+	assert.equal(begin.taskRole, "design-architect");
+	const links = [setupEvidence(runtime, workflowId)];
+	const result: RoleResult = {
+		schemaVersion: "role-result/v1",
+		workflowId,
+		attemptId: begin.attemptId,
+		effects: [
+			{ effectType: "artifact_revision", artifactKind: "design", logicalKey: "design", content: designContent(), baseRevisionId: null, traceLinks: links },
+			{ effectType: "artifact_revision", artifactKind: "architecture", logicalKey: "architecture", content: architectureContent(), baseRevisionId: null, traceLinks: links },
+			{ effectType: "artifact_revision", artifactKind: "data", logicalKey: "data", content: dataContent(), baseRevisionId: null, traceLinks: links },
+			{ effectType: "artifact_revision", artifactKind: "api", logicalKey: "api", content: apiContent(), baseRevisionId: null, traceLinks: links },
+		],
 	};
 	assert.equal(runtime.completeAttempt(workflowId, begin.attemptId, result).outcome, "published");
 }
@@ -184,7 +282,13 @@ function getArtifactId(databasePath: string, kind: string): number {
 	}
 }
 
-function executeCriticTask(runtime: Runtime, databasePath: string, workflowId: number, findings: Array<{ fingerprint: string; severity: "critical" | "major" | "minor" | "info"; summary: string }> = []): void {
+function executeCriticTask(
+	runtime: Runtime,
+	databasePath: string,
+	workflowId: number,
+	coverKinds: readonly string[],
+	findings: Array<{ fingerprint: string; severity: "critical" | "major" | "minor" | "info"; summary: string }> = [],
+): void {
 	const begin = runtime.beginAttempt(workflowId);
 	assert.equal(begin.taskRole, "critic");
 	const report: CriticReport = {
@@ -192,10 +296,10 @@ function executeCriticTask(runtime: Runtime, databasePath: string, workflowId: n
 		workflowId,
 		attemptId: begin.attemptId,
 		coverageAttestation: {
-			reviewTargets: ["requirement", "analysis", "design"].map((kind) => ({ revisionId: getRevisionId(databasePath, kind), artifactKind: kind })),
+			reviewTargets: coverKinds.map((kind) => ({ revisionId: getRevisionId(databasePath, kind), artifactKind: kind })),
 			complete: true,
 		},
-		findings: findings.map((f) => ({ fingerprint: f.fingerprint, severity: f.severity, summary: f.summary, targetRevisionId: getRevisionId(databasePath, "analysis"), targetArtifactKind: "analysis" as const, sourceRef: "review-all" })),
+		findings: findings.map((f) => ({ fingerprint: f.fingerprint, severity: f.severity, summary: f.summary, targetRevisionId: getRevisionId(databasePath, "analysis"), targetArtifactKind: "analysis" as const, sourceRef: begin.taskKey })),
 	};
 	const result: RoleResult = { schemaVersion: "role-result/v1", workflowId, attemptId: begin.attemptId, effects: [], criticReport: report };
 	assert.equal(runtime.completeAttempt(workflowId, begin.attemptId, result).outcome, "published");
@@ -203,10 +307,17 @@ function executeCriticTask(runtime: Runtime, databasePath: string, workflowId: n
 
 async function createReadyWorkflow(runtime: Runtime, databasePath: string): Promise<{ workflowId: number; digest: string }> {
 	const workflowId = await createStartedWorkflow(runtime);
-	await adoptPlan(runtime, workflowId, standardTasks());
+	await adoptPlan(runtime, workflowId);
 	executeAnalystTask(runtime, workflowId);
+	executeCriticTask(runtime, databasePath, workflowId, ["requirement", "analysis"]);
+	executeScenarioTask(runtime, workflowId);
+	executeCriticTask(runtime, databasePath, workflowId, ["scenario"]);
+	executeUsecaseTask(runtime, workflowId);
+	executeCriticTask(runtime, databasePath, workflowId, ["usecase"]);
+	executeFunctionTask(runtime, workflowId);
+	executeCriticTask(runtime, databasePath, workflowId, ["function"]);
 	executeArchitectTask(runtime, workflowId);
-	executeCriticTask(runtime, databasePath, workflowId);
+	executeCriticTask(runtime, databasePath, workflowId, ["design", "architecture", "data", "api"]);
 	const built = runtime.buildApprovalPacket(workflowId);
 	assert.equal(built.ready, true);
 	assert.ok(built.digest);
@@ -243,7 +354,7 @@ test("steer requires a non-empty directive and a steering-capable state", async 
 test("replace-plan validates and adopts a complete Proposal and supersedes non-terminal work", async () => {
 	await withRuntime(async ({ runtime, databasePath }) => {
 		const workflowId = await createStartedWorkflow(runtime);
-		await adoptPlan(runtime, workflowId, standardTasks());
+		await adoptPlan(runtime, workflowId);
 		const projection = runtime.getWorkflowProjection(workflowId);
 		assert.ok(projection);
 		const oldPlanRevisionId = projection.workflow.currentPlanRevisionId;
@@ -267,7 +378,7 @@ test("replace-plan validates and adopts a complete Proposal and supersedes non-t
 			const oldPlan = db.prepare("select status from plan_revisions where id = ?").get(oldPlanRevisionId) as { status: string };
 			assert.equal(oldPlan.status, "superseded");
 			const superseded = (db.prepare("select count(*) as count from tasks where workflow_id = ? and plan_revision_id = ? and status = 'superseded'").get(workflowId, oldPlanRevisionId) as { count: number }).count;
-			assert.equal(superseded, 3);
+			assert.equal(superseded, 10);
 			const newTasks = db.prepare("select key, status from tasks where workflow_id = ? and plan_revision_id = ?").all(workflowId, after.workflow.currentPlanRevisionId) as Array<{ key: string; status: string }>;
 			assert.deepEqual(newTasks, [{ key: "analyze-v2", status: "pending" }]);
 		} finally {
@@ -279,7 +390,7 @@ test("replace-plan validates and adopts a complete Proposal and supersedes non-t
 test("replace-plan rejects a Proposal bound to a stale base", async () => {
 	await withRuntime(async ({ runtime }) => {
 		const workflowId = await createStartedWorkflow(runtime);
-		await adoptPlan(runtime, workflowId, standardTasks());
+		await adoptPlan(runtime, workflowId);
 		const projection = runtime.getWorkflowProjection(workflowId);
 		assert.ok(projection);
 		const stale: PlanProposal = {
@@ -297,15 +408,18 @@ test("replace-plan rejects a Proposal bound to a stale base", async () => {
 test("retry-task resets an exhausted Task and resumes the Workflow", async () => {
 	await withRuntime(async ({ runtime, databasePath }) => {
 		const workflowId = await createStartedWorkflow(runtime);
-		await adoptPlan(runtime, workflowId, [
-			{ key: "analyze-req", kind: "analyze", role: "analyst", objective: "Analyze", dependsOn: [], inputs: [], expectedArtifactEffects: [{ kind: "analysis", operation: "create_or_revise" }], completionPolicyRef: "analysis/v1", maxAttempts: 1 },
-		]);
-		const begin = runtime.beginAttempt(workflowId);
-		const invalid: RoleResult = { schemaVersion: "role-result/v1", workflowId, attemptId: begin.attemptId, effects: [] };
-		assert.equal(runtime.completeAttempt(workflowId, begin.attemptId, invalid).outcome, "task_exhausted");
+		await adoptPlan(runtime, workflowId);
+		for (let attemptNo = 1; attemptNo <= 3; attemptNo += 1) {
+			const begin = runtime.beginAttempt(workflowId);
+			assert.equal(begin.taskKey, "analyze");
+			const invalid: RoleResult = { schemaVersion: "role-result/v1", workflowId, attemptId: begin.attemptId, effects: [] };
+			const outcome = runtime.completeAttempt(workflowId, begin.attemptId, invalid).outcome;
+			assert.equal(outcome, attemptNo < 3 ? "failed" : "task_exhausted");
+		}
 		assert.equal(runtime.getWorkflowProjection(workflowId)?.workflow.state, "failed");
 		const db = new Database(databasePath, { readonly: true });
-		const taskId = (db.prepare("select id from tasks where workflow_id = ? and key = 'analyze-req'").get(workflowId) as { id: number }).id;
+		const taskRow = db.prepare("select id from tasks where workflow_id = ? and key = 'analyze'").get(workflowId) as { id: number };
+		const taskId = taskRow.id;
 		db.close();
 		const receipt = command(runtime, workflowId, "retry-task", { taskId });
 		assert.equal(receipt.outcome, "accepted");
@@ -328,17 +442,16 @@ test("retry-task is rejected without task_budget_exhausted or with a wrong subje
 test("retry-planning resumes a planning-exhausted Workflow and planning can adopt", async () => {
 	await withRuntime(async ({ runtime }) => {
 		const workflowId = await createStartedWorkflow(runtime);
-		const badDriver = new ScriptedModelDriver([
-			{ role: "orchestrator", contextDigest: runtime.getPlanningContextDigest(workflowId), orderedToolCalls: [], structuredResult: { invalid: true }, modelUsage: { provider: "test", modelId: "test", inputTokens: 1, outputTokens: 1 } },
-			{ role: "orchestrator", contextDigest: runtime.getPlanningContextDigest(workflowId), orderedToolCalls: [], structuredResult: { invalid: true }, modelUsage: { provider: "test", modelId: "test", inputTokens: 1, outputTokens: 1 } },
-		]);
-		const failed = await runtime.planWorkflow(workflowId, badDriver);
-		assert.equal(failed.outcome, "planning_exhausted");
+		for (let planningNo = 1; planningNo <= 2; planningNo += 1) {
+			const begin = runtime.beginPlanning(workflowId);
+			const failed = runtime.completePlanning(workflowId, begin.attemptId, { invalid: true });
+			assert.equal(failed.outcome, planningNo < 2 ? "validation_failed" : "planning_exhausted");
+		}
 		assert.equal(runtime.getWorkflowProjection(workflowId)?.workflow.state, "failed");
 		const receipt = command(runtime, workflowId, "retry-planning");
 		assert.equal(receipt.outcome, "accepted");
 		assert.equal(runtime.getWorkflowProjection(workflowId)?.workflow.state, "running");
-		await adoptPlan(runtime, workflowId, standardTasks());
+		await adoptPlan(runtime, workflowId);
 		assert.ok(runtime.getWorkflowProjection(workflowId)?.workflow.currentPlanRevisionId !== null);
 	});
 });
@@ -363,7 +476,7 @@ test("diagnostic-run appends an immutable record without changing state", async 
 test("provide-human-input resolves the exact gate, unblocks the Task, and resumes", async () => {
 	await withRuntime(async ({ runtime, databasePath }) => {
 		const workflowId = await createStartedWorkflow(runtime);
-		await adoptPlan(runtime, workflowId, standardTasks());
+		await adoptPlan(runtime, workflowId);
 		const begin = runtime.beginAttempt(workflowId);
 		const blocked: RoleResult = { schemaVersion: "role-result/v1", workflowId, attemptId: begin.attemptId, effects: [], outcome: "blocked", blockReason: "Need the expiry threshold" } as RoleResult;
 		assert.equal(runtime.completeAttempt(workflowId, begin.attemptId, blocked).outcome, "blocked");
@@ -380,7 +493,8 @@ test("provide-human-input resolves the exact gate, unblocks the Task, and resume
 		assert.equal(resolved[0].status, "resolved");
 		assert.equal(runtime.getWorkflowProjection(workflowId)?.workflow.state, "running");
 		const db = new Database(databasePath, { readonly: true });
-		assert.equal((db.prepare("select status from tasks where workflow_id = ? and key = 'analyze-req'").get(workflowId) as { status: string }).status, "pending");
+		const statusRow = db.prepare("select status from tasks where workflow_id = ? and key = 'analyze'").get(workflowId) as { status: string };
+		assert.equal(statusRow.status, "pending");
 		db.close();
 		const again = command(runtime, workflowId, "provide-human-input", { gateId: gates[0].id, input: "again" });
 		assert.equal(again.outcome, "state_conflict", "after the last gate resolves the workflow is running and no longer accepts gate input");
@@ -390,7 +504,7 @@ test("provide-human-input resolves the exact gate, unblocks the Task, and resume
 test("revise-requirement creates an approved successor baseline and stales exact dependents", async () => {
 	await withRuntime(async ({ runtime, databasePath }) => {
 		const workflowId = await createStartedWorkflow(runtime);
-		await adoptPlan(runtime, workflowId, standardTasks());
+		await adoptPlan(runtime, workflowId);
 		const digestBefore = runtime.getPlanningContextDigest(workflowId);
 		const revised: RequirementBaseline = { ...BASELINE, title: "Points expiry v2", description: "Revised scope." };
 		const receipt = command(runtime, workflowId, "revise-requirement", { baseline: revised });
@@ -413,7 +527,7 @@ test("revise-requirement creates an approved successor baseline and stales exact
 test("approve-artifact and reject-artifact bind the exact current pending revision", async () => {
 	await withRuntime(async ({ runtime, databasePath }) => {
 		const workflowId = await createStartedWorkflow(runtime);
-		await adoptPlan(runtime, workflowId, standardTasks());
+		await adoptPlan(runtime, workflowId);
 		executeAnalystTask(runtime, workflowId);
 		const artifactId = getArtifactId(databasePath, "analysis");
 		const revisionId = getRevisionId(databasePath, "analysis");
@@ -439,10 +553,9 @@ test("approve-artifact and reject-artifact bind the exact current pending revisi
 test("accept-finding-risk binds the exact major Finding and target revision; critical is rejected", async () => {
 	await withRuntime(async ({ runtime, databasePath }) => {
 		const workflowId = await createStartedWorkflow(runtime);
-		await adoptPlan(runtime, workflowId, standardTasks());
+		await adoptPlan(runtime, workflowId);
 		executeAnalystTask(runtime, workflowId);
-		executeArchitectTask(runtime, workflowId);
-		executeCriticTask(runtime, databasePath, workflowId, [
+		executeCriticTask(runtime, databasePath, workflowId, ["requirement", "analysis"], [
 			{ fingerprint: "fp-major-1", severity: "major", summary: "Major gap" },
 			{ fingerprint: "fp-critical-1", severity: "critical", summary: "Critical flaw" },
 		]);
@@ -482,8 +595,8 @@ test("approve-packet archives atomically: approval record, revisions approved, s
 		assert.equal(approval.subjectDigest, digest);
 		const db = new Database(databasePath, { readonly: true });
 		try {
-			const pending = (db.prepare("select count(*) as count from artifact_revisions where status = 'pending'").get() as { count: number }).count;
-			assert.equal(pending, 0, "packet approval approves all included pending revisions");
+			const pendingRow = db.prepare("select count(*) as count from artifact_revisions where status = 'pending' and artifact_id in (select id from artifacts where kind != 'requirement')").get() as { count: number };
+			assert.equal(pendingRow.count, 0, "packet approval approves all included pending revisions (the requirement baseline revision is not packet content)");
 			const session = db.prepare("select status, archived_at from design_sessions").get() as { status: string; archived_at: string | null };
 			assert.equal(session.status, "archived");
 			assert.ok(session.archived_at !== null);
@@ -591,7 +704,7 @@ test("force-* and waiver command types are rejected at the envelope", async () =
 test("an Agent cannot smuggle a Decision disposition through decisionProposals", async () => {
 	await withRuntime(async ({ runtime }) => {
 		const workflowId = await createStartedWorkflow(runtime);
-		await adoptPlan(runtime, workflowId, standardTasks());
+		await adoptPlan(runtime, workflowId);
 		const begin = runtime.beginAttempt(workflowId);
 		const smuggled = {
 			schemaVersion: "role-result/v1",

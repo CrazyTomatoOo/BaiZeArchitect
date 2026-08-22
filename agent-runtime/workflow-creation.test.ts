@@ -100,7 +100,7 @@ test("creates a Requirement with its complete pending governance projection atom
 		assert.equal(projection.workflow.currentFailureCode, null);
 		assert.equal(projection.workflow.policyBundle.schemaRef, "policy-bundle/v1");
 		assert.match(projection.workflow.policyBundle.digest, /^sha256:[a-f0-9]{64}$/);
-		assert.equal(projection.workflow.policyBundle.content.contracts.length, 12);
+		assert.equal(projection.workflow.policyBundle.content.contracts.length, 13);
 		for (const contract of projection.workflow.policyBundle.content.contracts) {
 			assert.equal(typeof contract.identity, "string");
 			assert.match(contract.digest, /^sha256:[a-f0-9]{64}$/);

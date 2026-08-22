@@ -42,7 +42,6 @@ export type { ReusableAssetDetail, ReusableAssetSummary } from "./asset-store.js
 import { type WorkflowCommandType } from "../workflow/command-types.js";
 import { ARTIFACT_OWNERSHIP, type InputBinding, type TaskOutputInput } from "../workflow/plan-types.js";
 import type { RoleResult, ContextManifest, RoleContract, BeginAttemptResult, CompleteAttemptResult, TraceLinkProposal, CriticReport, FindingProposal, FindingSeverity } from "../workflow/role-result.js";
-import { deriveRequiredArtifactSet, type ImpactProfile, type RequiredArtifactSet } from "../workflow/impact-profile.js";
 import type { ModelRolesOverride } from "../workflow/model-driver.js";
 
 const MIGRATIONS = [WORKFLOW_GOVERNANCE_MIGRATION, COMMAND_GOVERNANCE_MIGRATION, RECOVERY_GOVERNANCE_MIGRATION, PLANNING_GOVERNANCE_MIGRATION, ATTEMPT_EXECUTION_MIGRATION, DEPENDENT_TASK_SAFETY_MIGRATION, REQUIRED_ARTIFACTS_AND_EVIDENCE_MIGRATION, CRITIC_GOVERNANCE_MIGRATION, DECISIONS_AND_READINESS_MIGRATION, HUMAN_GOVERNANCE_MIGRATION, READ_MODEL_GOVERNANCE_MIGRATION, RUN_EVENT_STREAM_MIGRATION, ACTOR_KIND_MIGRATION, MODEL_ROLES_MIGRATION, PRODUCTION_ROLE_KIND_MIGRATION] as const;
@@ -1702,14 +1701,6 @@ deleteWorkspace(workspaceId: number): boolean {
 			}
 		}
 		}
-		const analysisEffect = result.effects.find((e) => e.artifactKind === "analysis");
-		if (analysisEffect && typeof analysisEffect.content === "object" && analysisEffect.content !== null) {
-			const content = analysisEffect.content as { impactProfile?: ImpactProfile };
-			if (content.impactProfile) {
-				this.storeImpactProfile(workflowId, content.impactProfile);
-			}
-		}
-
 		if (result.decisionProposals) {
 			for (const proposal of result.decisionProposals) {
 				const decisionId = Number(this.database
@@ -1849,44 +1840,6 @@ deleteWorkspace(workspaceId: number): boolean {
 			.get(workflowId) as { repo_digest: string } | undefined;
 		if (!row) return true;
 		return row.repo_digest !== currentRepoDigest;
-	}
-
-	storeImpactProfile(workflowId: number, profile: ImpactProfile): RequiredArtifactSet {
-		const timestamp = this.options.clock.now().toISOString();
-		const requiredSet = deriveRequiredArtifactSet(profile);
-		this.database
-			.prepare("insert into impact_profiles(workflow_id, profile_json, required_kinds_json, blocking_dimensions_json, complete, created_at) values (?, ?, ?, ?, ?, ?)")
-			.run(workflowId, this.options.hashProvider.canonicalize(profile), JSON.stringify(requiredSet.requiredKinds), JSON.stringify(requiredSet.blockingDimensions), requiredSet.complete ? 1 : 0, timestamp);
-		return requiredSet;
-	}
-
-	getRequiredArtifactSet(workflowId: number): RequiredArtifactSetResult | undefined {
-		const row = this.database
-			.prepare("select required_kinds_json, blocking_dimensions_json, complete from impact_profiles where workflow_id = ? order by id desc limit 1")
-			.get(workflowId) as { required_kinds_json: string; blocking_dimensions_json: string; complete: number } | undefined;
-		if (!row) return undefined;
-		const requiredKinds = parseJson<string[]>(row.required_kinds_json);
-		const blockingDimensions = parseJson<string[]>(row.blocking_dimensions_json);
-		const projection = this.getWorkflowProjection(workflowId);
-		const requirementId = projection?.requirement.id ?? null;
-		const kindStatuses: RequiredArtifactKindStatus[] = requiredKinds.map((kind) => {
-			const revisionRow = this.database
-				.prepare("select ar.status from artifact_revisions ar join artifacts a on a.id = ar.artifact_id where a.requirement_id = ? and a.kind = ? order by ar.id desc limit 1")
-				.get(requirementId, kind) as { status: string } | undefined;
-			const hasCurrent = revisionRow !== undefined;
-			let hasTraceLinks = false;
-			if (hasCurrent) {
-				const revId = (this.database
-					.prepare("select ar.id from artifact_revisions ar join artifacts a on a.id = ar.artifact_id where a.requirement_id = ? and a.kind = ? order by ar.id desc limit 1")
-					.get(requirementId, kind) as { id: number }).id;
-				const linkCount = (this.database
-					.prepare("select count(*) as count from trace_links where artifact_revision_id = ?")
-					.get(revId) as { count: number }).count;
-				hasTraceLinks = linkCount > 0;
-			}
-			return { kind, hasCurrentRevision: hasCurrent, revisionStatus: revisionRow?.status ?? null, hasTraceLinks };
-		});
-		return { requiredKinds, blockingDimensions, complete: row.complete === 1, kindStatuses };
 	}
 
 	getTraceLinks(artifactRevisionId: number): readonly TraceLinkResult[] {
@@ -2101,6 +2054,25 @@ deleteWorkspace(workspaceId: number): boolean {
 			.get(requirementId, kind) as { id: number; status: string; content_digest: string; revision_no: number; artifact_id: number } | undefined;
 	}
 
+	/** 模板固定必需产物集（#12 决议：废除 Impact Profile 派生，模板 8 生产 kinds 即必需集）。 */
+	private templateRequiredKinds(): readonly string[] {
+		return ["requirement", "analysis", "scenario", "usecase", "function", "design", "architecture", "data", "api"];
+	}
+
+	/** 模板产物状态（当前 revision 存在性 + trace link 覆盖），供 readiness 与 approval packet 组装使用。 */
+	private getTemplateArtifactStatuses(requirementId: number): Array<{ kind: string; hasCurrentRevision: boolean; hasTraceLinks: boolean }> {
+		return this.templateRequiredKinds()
+			.filter((kind) => kind !== "requirement")
+			.map((kind) => {
+				const revision = this.currentRevisionForKind(requirementId, kind);
+				if (!revision) return { kind, hasCurrentRevision: false, hasTraceLinks: false };
+				const traceCount = this.database
+					.prepare("select count(*) as count from trace_links where artifact_revision_id = ?")
+					.get(revision.id) as { count: number };
+				return { kind, hasCurrentRevision: true, hasTraceLinks: traceCount.count > 0 };
+			});
+	}
+
 	checkReadiness(workflowId: number): ReadinessReport {
 		const projection = this.getWorkflowProjection(workflowId);
 		if (!projection) throw new Error("Workflow not found");
@@ -2123,25 +2095,19 @@ deleteWorkspace(workspaceId: number): boolean {
 		const openHumanGates = (this.database.prepare("select count(*) as count from human_gates where workflow_id = ? and status = 'open'").get(workflowId) as { count: number }).count;
 		push("no_gate", humanGateThreads === 0 && openHumanGates === 0, `humanGateThreads=${humanGateThreads} openHumanGates=${openHumanGates}`);
 
-		// 3. Complete Impact Profile
-		const impactRow = this.database.prepare("select complete from impact_profiles where workflow_id = ? order by id desc limit 1").get(workflowId) as { complete: number } | undefined;
-		push("complete_impact_profile", impactRow !== undefined && impactRow.complete === 1, impactRow === undefined ? "no impact profile" : `complete=${impactRow.complete}`);
+		// 3. Complete required Artifacts（模板必需集：#12 决议废除 Impact Profile 派生）
+		const artifactStatuses = this.getTemplateArtifactStatuses(requirementId);
+		const missingKinds = artifactStatuses.filter((status) => !status.hasCurrentRevision).map((status) => status.kind);
+		push("complete_required_artifacts", missingKinds.length === 0, `missing=${missingKinds.join(",")}`);
 
-		// 4. Complete required Artifacts
-		const requiredSet = this.getRequiredArtifactSet(workflowId);
-		const missingKinds = requiredSet ? requiredSet.kindStatuses.filter((s) => !s.hasCurrentRevision).map((s) => s.kind) : [];
-		push("complete_required_artifacts", requiredSet !== undefined && missingKinds.length === 0, requiredSet === undefined ? "no required artifact set" : `missing=${missingKinds.join(",")}`);
-
-		// 5. No unpublished effects
+		// 4. No unpublished effects
 		const stagedEffects = (this.database.prepare("select count(*) as count from attempt_effects where workflow_id = ? and state = 'staged'").get(workflowId) as { count: number }).count;
 		push("no_unpublished_effects", stagedEffects === 0, `stagedEffects=${stagedEffects}`);
 
-		// 6. Evidence coverage: every required code-related kind with a current revision has TraceLinks
+		// 5. Evidence coverage: 模板 code 类产物 current revision 须有 TraceLinks
 		const codeKinds = ["analysis", "design", "architecture", "data", "api"];
-		const uncoveredKinds = requiredSet
-			? requiredSet.kindStatuses.filter((s) => codeKinds.includes(s.kind) && s.hasCurrentRevision && !s.hasTraceLinks).map((s) => s.kind)
-			: [];
-		push("evidence_coverage", requiredSet !== undefined && uncoveredKinds.length === 0, `uncovered=${uncoveredKinds.join(",")}`);
+		const uncoveredKinds = artifactStatuses.filter((status) => codeKinds.includes(status.kind) && status.hasCurrentRevision && !status.hasTraceLinks).map((status) => status.kind);
+		push("evidence_coverage", uncoveredKinds.length === 0, `uncovered=${uncoveredKinds.join(",")}`);
 
 		// 7. Disposed Decisions: no open Decision of any severity
 		const openDecisions = (this.database.prepare("select count(*) as count from decisions where workflow_id = ? and status = 'open'").get(workflowId) as { count: number }).count;
@@ -2159,25 +2125,23 @@ deleteWorkspace(workspaceId: number): boolean {
 		}).length;
 		push("disposed_findings", openCritical === 0 && undisposedMajor === 0, `openCritical=${openCritical} undisposedMajor=${undisposedMajor}`);
 
-		// 9. Current Critic coverage: every required kind's current revision has a coverage target
+		// 8. Current Critic coverage: 模板每个 current revision 有 coverage target
 		const uncoveredRevisions: string[] = [];
-		if (requiredSet) {
-			for (const status of requiredSet.kindStatuses) {
-				if (!status.hasCurrentRevision) continue;
-				const revision = this.currentRevisionForKind(requirementId, status.kind);
-				if (!revision) continue;
-				const covered = this.database
-					.prepare("select count(*) as count from critic_coverage_targets where workflow_id = ? and revision_id = ?")
-					.get(workflowId, revision.id) as { count: number };
-				if (covered.count === 0) uncoveredRevisions.push(`${status.kind}#${revision.id}`);
-			}
+		for (const status of artifactStatuses) {
+			if (!status.hasCurrentRevision) continue;
+			const revision = this.currentRevisionForKind(requirementId, status.kind);
+			if (!revision) continue;
+			const covered = this.database
+				.prepare("select count(*) as count from critic_coverage_targets where workflow_id = ? and revision_id = ?")
+				.get(workflowId, revision.id) as { count: number };
+			if (covered.count === 0) uncoveredRevisions.push(`${status.kind}#${revision.id}`);
 		}
-		push("current_critic_coverage", requiredSet !== undefined && uncoveredRevisions.length === 0, `uncovered=${uncoveredRevisions.join(",")}`);
+		push("current_critic_coverage", uncoveredRevisions.length === 0, `uncovered=${uncoveredRevisions.join(",")}`);
 
-		// 10. No consistency error (schema validation of current revisions); warnings are disclosed
+		// 9. No consistency error (schema validation of current revisions); warnings are disclosed
 		const consistencyErrors: string[] = [];
-		if (this.options.artifactValidator && requiredSet) {
-			for (const status of requiredSet.kindStatuses) {
+		if (this.options.artifactValidator) {
+			for (const status of artifactStatuses) {
 				if (!status.hasCurrentRevision) continue;
 				const revision = this.currentRevisionForKind(requirementId, status.kind);
 				if (!revision) continue;
@@ -2217,16 +2181,13 @@ deleteWorkspace(workspaceId: number): boolean {
 		const projection = this.getWorkflowProjection(workflowId);
 		if (!projection) throw new Error("Workflow not found");
 		const requirementId = projection.requirement.id;
-		const requiredSet = this.getRequiredArtifactSet(workflowId);
-		const artifactRows = requiredSet
-			? requiredSet.kindStatuses
-					.filter((status) => status.hasCurrentRevision)
-					.map((status) => {
-						const revision = this.currentRevisionForKind(requirementId, status.kind)!;
-						return { artifactId: revision.artifact_id, revisionId: revision.id, kind: status.kind, revisionNo: revision.revision_no, status: revision.status, contentDigest: revision.content_digest };
-					})
-					.sort((left, right) => left.kind.localeCompare(right.kind))
-			: [];
+		const artifactRows = this.getTemplateArtifactStatuses(requirementId)
+			.filter((status) => status.hasCurrentRevision)
+			.map((status) => {
+				const revision = this.currentRevisionForKind(requirementId, status.kind)!;
+				return { artifactId: revision.artifact_id, revisionId: revision.id, kind: status.kind, revisionNo: revision.revision_no, status: revision.status, contentDigest: revision.content_digest };
+			})
+			.sort((left, right) => left.kind.localeCompare(right.kind));
 		const decisions = this.getDecisions(workflowId).map((decision) => ({
 			id: decision.id,
 			severity: decision.severity,
@@ -2266,7 +2227,7 @@ deleteWorkspace(workspaceId: number): boolean {
 			criticCoverage: { coveredRevisionIds },
 			warnings: packetWarnings,
 			policyBundleDigest: projection.workflow.policyBundle.digest,
-			requiredArtifactKinds: requiredSet ? [...requiredSet.requiredKinds].sort() : [],
+			requiredArtifactKinds: [...this.templateRequiredKinds()].sort(),
 		};
 	}
 

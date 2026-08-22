@@ -12,6 +12,7 @@ export const CONTRACT_FILE_IDENTITIES = {
 	"operator-experience-v1.json": "operator-experience/v1",
 	"persistence-model-v1.json": "persistence-model/v1",
 	"plan-proposal-v1.schema.json": "plan-proposal/v1",
+	"plan-template-v1.json": "plan-template/v1",
 	"readiness-policy-v1.json": "readiness-policy/v1",
 	"recovery-policy-v1.json": "recovery-policy/v1",
 	"workflow-api-v1.json": "workflow-api/v1",
@@ -96,6 +97,11 @@ const REQUIRED_TOP_LEVEL_SHAPES: Readonly<
 		informationArchitecture: "object",
 		statePrimaryActions: "object",
 		liveUpdates: "object",
+	},
+	"plan-template/v1": {
+		schemaVersion: "string",
+		objective: "string",
+		tasks: "array",
 	},
 	"persistence-model/v1": {
 		database: "object",
@@ -290,9 +296,9 @@ function validateCrossReferences(byIdentity: ReadonlyMap<string, WorkflowContrac
 	);
 	assertReference(
 		readiness,
-		recordAt(readiness, "artifactRequirementPolicy").impactProfileSchemaVersion,
-		"artifact/analysis/v1",
-		"artifactRequirementPolicy.impactProfileSchemaVersion",
+		recordAt(readiness, "artifactRequirementPolicy").source,
+		"plan-template/v1",
+		"artifactRequirementPolicy.source",
 	);
 	assertReference(
 		persistence,

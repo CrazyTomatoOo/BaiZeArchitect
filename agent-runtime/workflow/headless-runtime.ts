@@ -8,10 +8,10 @@ import { compileWorkflowSchema, type WorkflowSchemaValidator } from "./contracts
 import type { DoctorReport } from "./workflow-doctor.js";
 import type { ModelDriver, ModelRoles, ModelRolesOverride } from "./model-driver.js";
 import { validatePlanProposal, type PlanValidationContext } from "./plan-validator.js";
+import { instantiatePlanTemplate } from "./plan-template.js";
 import type { TaskRole } from "./plan-types.js";
 import type { PlanProposal } from "./plan-types.js";
 import type { RequirementBaseline } from "./requirement.js";
-import type { ImpactProfile } from "./impact-profile.js";
 
 export type { RequirementBaseline } from "./requirement.js";
 export type { CommandReceipt, ReconciliationReport, BeginPlanningResult, CompletePlanningResult, FindingRecord, FindingThreadRecord, WorkspaceSummary } from "../persistence/workflow-store.js";
@@ -64,7 +64,7 @@ export interface HeadlessWorkflowRuntime {
 	getCommandReceiptDetail(workflowId: number, commandId: string): CommandReceiptDetail | undefined;
 	beginPlanning(workflowId: number): BeginPlanningResult;
 	completePlanning(workflowId: number, attemptId: number, structuredResult: unknown): CompletePlanningResult;
-	planWorkflow(workflowId: number, modelDriver: ModelDriver): Promise<PlanWorkflowResult>;
+	planWorkflow(workflowId: number, modelDriver: ModelDriver | null): Promise<PlanWorkflowResult>;
 	getPlanningContextDigest(workflowId: number): string;
 	beginAttempt(workflowId: number): BeginAttemptResult;
 	completeAttempt(workflowId: number, attemptId: number, structuredResult: unknown): CompleteAttemptResult;
@@ -73,8 +73,6 @@ export interface HeadlessWorkflowRuntime {
 	processOutbox(): { delivered: number; exhausted: number; incidentsCreated: number };
 	diagnose(): DoctorReport;
 	bindEvidenceSnapshot(workflowId: number, repoDigest: string, files: unknown): EvidenceSnapshotResult;
-	storeImpactProfile(workflowId: number, profile: ImpactProfile): unknown;
-	getRequiredArtifactSet(workflowId: number): RequiredArtifactSetResult | undefined;
 	getTraceLinks(artifactRevisionId: number): readonly TraceLinkResult[];
 	isEvidenceStale(workflowId: number, currentRepoDigest: string): boolean;
 	getEvidenceSnapshots(workflowId: number): readonly EvidenceSnapshotResult[];
@@ -138,7 +136,7 @@ export async function openHeadlessWorkflowRuntime(
 	};
 	const store = new WorkflowStore({ ...options, policyBundle, artifactValidator, planValidator });
 
-	function completePlanningInternal(workflowId: number, attemptId: number, structuredResult: unknown): CompletePlanningResult {
+	function completePlanningInternal(workflowId: number, attemptId: number, structuredResult: unknown, templateMode = false): CompletePlanningResult {
 		if (store.isPlanningContextStale(workflowId, attemptId)) {
 			return store.supersedePlanningAttempt(workflowId, attemptId, "planning_context_changed");
 		}
@@ -151,7 +149,7 @@ export async function openHeadlessWorkflowRuntime(
 			planningContextDigest: store.getPlanningContextDigest(workflowId),
 			basePlanRevisionId: projection.workflow.currentPlanRevisionId,
 		};
-		const validation = validatePlanProposal(structuredResult, context, planValidator);
+		const validation = validatePlanProposal(structuredResult, context, planValidator, { templateMode });
 		if (validation.valid) {
 			return store.adoptPlan(workflowId, attemptId, structuredResult as PlanProposal);
 		}
@@ -212,28 +210,23 @@ export async function openHeadlessWorkflowRuntime(
 		completePlanning(workflowId, attemptId, structuredResult) {
 			return completePlanningInternal(workflowId, attemptId, structuredResult);
 		},
-		async planWorkflow(workflowId, modelDriver) {
-			const projection = store.getWorkflowProjection(workflowId);
-			const modelRoles = projection?.workflow.modelRoles;
+		async planWorkflow(workflowId, _modelDriver: ModelDriver | null) {
+			// #12 决议：Engine 直生成。plan-template/v1 确定性实例化模板计划，无 Orchestrator 模型调用；
+			// beginPlanning 持久化骨架（plan Task/attempt/run）保留，adoptPlan 校验器复用（templateMode 免限额）。
 			for (let iteration = 0; iteration < 10; iteration += 1) {
 				const begin = store.beginPlanning(workflowId);
 				if (begin.taskId === 0) {
 					return { outcome: "plan_budget_exhausted", planRevisionId: null, workflowVersion: begin.workflowVersion, lastEventSeq: begin.lastEventSeq };
 				}
-			store.appendRunEvent(begin.runId, "model_call_started", { role: "orchestrator", contextDigest: begin.planningContextDigest });
-			let result;
-			try {
-				result = await modelDriver.execute(
-					{ role: "orchestrator", contextDigest: begin.planningContextDigest, instruction: "Produce a complete PlanProposal DAG for the requirement.", modelRoles },
-					[],
-				);
-			} catch (error) {
-				store.appendRunEvent(begin.runId, "model_call_failed", { role: "orchestrator", error: error instanceof Error ? error.message : String(error) });
-				throw error;
-			}
-			store.appendRunEvent(begin.runId, "token", { role: "orchestrator", provider: result.modelUsage.provider, modelId: result.modelUsage.modelId, inputTokens: result.modelUsage.inputTokens, outputTokens: result.modelUsage.outputTokens });
-			store.appendRunEvent(begin.runId, "model_result", { role: "orchestrator", produced: "plan-proposal/v1" });
-			const complete = completePlanningInternal(workflowId, begin.attemptId, result.structuredResult);
+				store.appendRunEvent(begin.runId, "plan_template_instantiated", { role: "engine", contextDigest: begin.planningContextDigest });
+				const baseVersion = store.getAttemptBaseVersion(workflowId, begin.attemptId);
+				const proposal = instantiatePlanTemplate(contracts, {
+					workflowId,
+					workflowVersion: baseVersion ?? begin.workflowVersion,
+					planningContextDigest: begin.planningContextDigest,
+					basePlanRevisionId: store.getWorkflowProjection(workflowId)?.workflow.currentPlanRevisionId ?? null,
+				});
+				const complete = completePlanningInternal(workflowId, begin.attemptId, proposal, true);
 				if (complete.outcome === "adopted") {
 					return { outcome: "adopted", planRevisionId: complete.planRevisionId, workflowVersion: complete.workflowVersion, lastEventSeq: complete.lastEventSeq };
 				}
@@ -295,12 +288,7 @@ export async function openHeadlessWorkflowRuntime(
 		bindEvidenceSnapshot(workflowId, repoDigest, files) {
 			return store.bindEvidenceSnapshot(workflowId, repoDigest, files);
 		},
-		storeImpactProfile(workflowId, profile) {
-			return store.storeImpactProfile(workflowId, profile);
-		},
-		getRequiredArtifactSet(workflowId) {
-			return store.getRequiredArtifactSet(workflowId);
-		},
+
 		getTraceLinks(artifactRevisionId) {
 			return store.getTraceLinks(artifactRevisionId);
 		},

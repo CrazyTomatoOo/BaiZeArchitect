@@ -11,13 +11,13 @@ import {
 	createHashProvider,
 	createOutboxTransport,
 } from "./testing/deterministic-fixtures.ts";
-import { ScriptedModelDriver } from "./testing/scripted-model-driver.ts";
+
 import {
 	openHeadlessWorkflowRuntime,
 	type HeadlessWorkflowRuntime,
 } from "./workflow/headless-runtime.ts";
 import { BusyWorkspaceError } from "./persistence/workflow-store.ts";
-import type { PlanProposal, TaskProposal } from "./workflow/plan-types.ts";
+
 import type { RequirementBaseline } from "./workflow/requirement.ts";
 import type { CriticReport, RoleResult, TraceLinkProposal } from "./workflow/role-result.ts";
 
@@ -76,32 +76,12 @@ function createWorkflow(runtime: HeadlessWorkflowRuntime): { workspaceId: number
 	return { workspaceId, workflowId: created.workflowId, requirementId: projection.requirement.id };
 }
 
-function standardTasks(): TaskProposal[] {
-	return [
-		{ key: "analyze-req", kind: "analyze", role: "analyst", objective: "Produce analysis", dependsOn: [], inputs: [], expectedArtifactEffects: [{ kind: "analysis", operation: "create_or_revise" }], completionPolicyRef: "analysis/v1", maxAttempts: 3 },
-		{ key: "design-sol", kind: "design", role: "architect", objective: "Produce design", dependsOn: ["analyze-req"], inputs: [{ type: "task_output", taskKey: "analyze-req", artifactKind: "analysis", purpose: "design input" }], expectedArtifactEffects: [{ kind: "design", operation: "create_or_revise" }], completionPolicyRef: "design/v1", maxAttempts: 3 },
-		{ key: "review-all", kind: "review", role: "critic", objective: "Review artifacts", dependsOn: ["design-sol"], inputs: [{ type: "task_output", taskKey: "design-sol", artifactKind: "design", purpose: "review" }], expectedArtifactEffects: [], completionPolicyRef: "review/v1", maxAttempts: 3 },
-	];
+/** #19：模板规划 —— planWorkflow(workflowId, null) 确定性实例化 10-Task 模板（5 生产 + 5 Critic 复审），无 Orchestrator 模型调用。 */
+async function adoptTemplatePlan(runtime: HeadlessWorkflowRuntime, workflowId: number): Promise<void> {
+	const result = await runtime.planWorkflow(workflowId, null);
+	assert.equal(result.outcome, "adopted");
 }
 
-async function adoptPlan(runtime: HeadlessWorkflowRuntime, workflowId: number): Promise<void> {
-	const projection = runtime.getWorkflowProjection(workflowId);
-	assert.ok(projection);
-	const contextDigest = runtime.getPlanningContextDigest(workflowId);
-	const proposal: PlanProposal = {
-		schemaVersion: "plan-proposal/v1",
-		base: { workflowId, workflowVersion: projection.workflow.version, basePlanRevisionId: projection.workflow.currentPlanRevisionId, planningContextDigest: contextDigest },
-		objective: "Plan",
-		tasks: standardTasks(),
-		rationale: "rationale",
-	};
-	const driver = new ScriptedModelDriver([
-		{ role: "orchestrator", contextDigest, orderedToolCalls: [], structuredResult: proposal, modelUsage: { provider: "test", modelId: "test", inputTokens: 10, outputTokens: 20 } },
-	]);
-	const result = await runtime.planWorkflow(workflowId, driver);
-	assert.equal(result.outcome, "adopted");
-	driver.assertExhausted();
-}
 
 function analysisContent(): unknown {
 	const dimension = { status: "no", rationale: "rationale" };
@@ -119,21 +99,7 @@ function analysisContent(): unknown {
 	};
 }
 
-function designContent(): unknown {
-	return {
-		schemaVersion: "artifact/design/v1",
-		artifactKind: "design",
-		summary: "Design",
-		sourceRefs: [{ type: "requirement_revision", revisionId: 1 }],
-		changeUnits: [{ id: "cu1", area: "points", change: "Add expiry", rationale: "Business rule", sourceRefs: [{ type: "requirement_revision", revisionId: 1 }] }],
-		alternatives: ["Do nothing"],
-		failureHandling: ["Retry"],
-		testStrategy: ["Unit tests"],
-		implementationOrder: ["Sequential"],
-		rolloutStrategy: "Canary",
-		rollbackStrategy: "Revert",
-	};
-}
+
 
 function setupEvidence(runtime: HeadlessWorkflowRuntime, workflowId: number): TraceLinkProposal {
 	const snapshot = runtime.bindEvidenceSnapshot(workflowId, "sha256:repo-abc", { files: [] });
@@ -142,7 +108,7 @@ function setupEvidence(runtime: HeadlessWorkflowRuntime, workflowId: number): Tr
 
 function executeAnalystTask(runtime: HeadlessWorkflowRuntime, workflowId: number): void {
 	const begin = runtime.beginAttempt(workflowId);
-	assert.equal(begin.taskRole, "analyst");
+	assert.equal(begin.taskRole, "analysis-analyst");
 	const result: RoleResult = {
 		schemaVersion: "role-result/v1",
 		workflowId,
@@ -152,17 +118,7 @@ function executeAnalystTask(runtime: HeadlessWorkflowRuntime, workflowId: number
 	assert.equal(runtime.completeAttempt(workflowId, begin.attemptId, result).outcome, "published");
 }
 
-function executeArchitectTask(runtime: HeadlessWorkflowRuntime, workflowId: number): void {
-	const begin = runtime.beginAttempt(workflowId);
-	assert.equal(begin.taskRole, "architect");
-	const result: RoleResult = {
-		schemaVersion: "role-result/v1",
-		workflowId,
-		attemptId: begin.attemptId,
-		effects: [{ effectType: "artifact_revision", artifactKind: "design", logicalKey: "design", content: designContent(), baseRevisionId: null, traceLinks: [setupEvidence(runtime, workflowId)] }],
-	};
-	assert.equal(runtime.completeAttempt(workflowId, begin.attemptId, result).outcome, "published");
-}
+
 
 function getRevisionId(databasePath: string, kind: string): number {
 	const db = new Database(databasePath, { readonly: true });
@@ -183,10 +139,10 @@ function executeCriticTask(runtime: HeadlessWorkflowRuntime, databasePath: strin
 		workflowId,
 		attemptId: begin.attemptId,
 		coverageAttestation: {
-			reviewTargets: ["requirement", "analysis", "design"].map((kind) => ({ revisionId: getRevisionId(databasePath, kind), artifactKind: kind })),
+			reviewTargets: ["requirement", "analysis"].map((kind) => ({ revisionId: getRevisionId(databasePath, kind), artifactKind: kind })),
 			complete: true,
 		},
-		findings: [{ fingerprint: "f1", severity: "major", summary: "Missing edge case", targetRevisionId: getRevisionId(databasePath, "analysis"), targetArtifactKind: "analysis", sourceRef: "review-all" }],
+		findings: [{ fingerprint: "f1", severity: "major", summary: "Missing edge case", targetRevisionId: getRevisionId(databasePath, "analysis"), targetArtifactKind: "analysis", sourceRef: "review-analysis" }],
 	};
 	const result: RoleResult = { schemaVersion: "role-result/v1", workflowId, attemptId: begin.attemptId, effects: [], criticReport: report };
 	assert.equal(runtime.completeAttempt(workflowId, begin.attemptId, result).outcome, "published");
@@ -194,9 +150,8 @@ function executeCriticTask(runtime: HeadlessWorkflowRuntime, databasePath: strin
 
 async function buildDeepWorkflow(runtime: HeadlessWorkflowRuntime, databasePath: string): Promise<{ workspaceId: number; workflowId: number; requirementId: number }> {
 	const created = createWorkflow(runtime);
-	await adoptPlan(runtime, created.workflowId);
+	await adoptTemplatePlan(runtime, created.workflowId);
 	executeAnalystTask(runtime, created.workflowId);
-	executeArchitectTask(runtime, created.workflowId);
 	executeCriticTask(runtime, databasePath, created.workflowId);
 	return created;
 }
@@ -210,7 +165,7 @@ function seedNicheRows(databasePath: string, ids: { workspaceId: number; workflo
 		const timestamp = TIMESTAMP;
 		db.prepare("insert into run_events(run_id, seq, type, schema_version, payload, created_at) values (?, 1, 'agent_tool_call', 'run-event/v1', '{}', ?)").run(runId, timestamp);
 		db.prepare("insert into outbox_jobs(workflow_id, event_seq, delivery_type, payload, created_at) values (?, 1, 'workflow_event', '{}', ?)").run(ids.workflowId, timestamp);
-		db.prepare("insert into impact_profiles(workflow_id, profile_json, required_kinds_json, blocking_dimensions_json, complete, created_at) values (?, '{}', '[]', '[]', 1, ?)").run(ids.workflowId, timestamp);
+
 		db.prepare("insert into workflow_incidents(workflow_id, incident_type, failure_code, subject_type, subject_id, subject_version, status, created_at) values (?, 'outbox_exhausted', 'outbox_exhausted', 'outbox_job', 1, 0, 'open', ?)").run(ids.workflowId, timestamp);
 		db.prepare("insert into human_directives(workflow_id, directive_text, actor_snapshot_document_id, command_id, created_at) values (?, 'Focus on expiry', ?, 'cmd-steer', ?)").run(ids.workflowId, documentId, timestamp);
 		db.prepare("insert into human_gates(workflow_id, gate_type, subject_type, subject_id, status, opened_at) values (?, 'finding_disposition', 'finding', 999, 'open', ?)").run(ids.workflowId, timestamp);
@@ -247,9 +202,9 @@ test("deleteWorkspace returns false for an unknown workspace and deletes an empt
 test("deleteWorkspace refuses a workspace with a running run and an active claim", async () => {
 	await withCascadeRuntime(async ({ runtime }) => {
 		const { workspaceId, workflowId } = createWorkflow(runtime);
-		await adoptPlan(runtime, workflowId);
+		await adoptTemplatePlan(runtime, workflowId);
 		const begin = runtime.beginAttempt(workflowId);
-		assert.equal(begin.taskRole, "analyst");
+		assert.equal(begin.taskRole, "analysis-analyst");
 		assert.throws(
 			() => runtime.deleteWorkspace(workspaceId),
 			(error: unknown) => {
@@ -266,7 +221,7 @@ test("deleteWorkspace refuses a workspace with a running run and an active claim
 test("deleteWorkspace refuses a workspace with a queued run even after the claim is released", async () => {
 	await withCascadeRuntime(async ({ runtime, databasePath }) => {
 		const { workspaceId, workflowId } = createWorkflow(runtime);
-		await adoptPlan(runtime, workflowId);
+		await adoptTemplatePlan(runtime, workflowId);
 		runtime.beginAttempt(workflowId);
 		const db = new Database(databasePath);
 		try {
@@ -290,7 +245,7 @@ test("deleteWorkspace refuses a workspace with a queued run even after the claim
 test("deleteWorkspace succeeds once the in-flight attempt completes", async () => {
 	await withCascadeRuntime(async ({ runtime }) => {
 		const { workspaceId, workflowId } = createWorkflow(runtime);
-		await adoptPlan(runtime, workflowId);
+		await adoptTemplatePlan(runtime, workflowId);
 		executeAnalystTask(runtime, workflowId);
 		assert.equal(runtime.deleteWorkspace(workspaceId), true);
 		assert.deepEqual(runtime.listWorkspaces(), []);

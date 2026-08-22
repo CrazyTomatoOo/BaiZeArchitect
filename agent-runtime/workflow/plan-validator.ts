@@ -1,6 +1,15 @@
 import { ARTIFACT_OWNERSHIP, PLAN_TASK_LIMITS, type PlanProposal, type TaskProposal, type WritableArtifactKind } from "./plan-types.js";
 import type { WorkflowSchemaValidator } from "./contracts/schema.js";
 
+/**
+ * 模板实例化的计划免 PLAN_TASK_LIMITS（#12 决议：模板=10 Task 预置链、深度 10 > maxDepth 6）。
+ * templateMode 仅跳过 maxTasks/maxDepth 两项，其余规则（schema/依赖/环/所有权/binding）全保留，
+ * 与人工 replace-plan 共享同一验证面。
+ */
+export interface PlanValidationOptions {
+	templateMode?: boolean;
+}
+
 export interface PlanValidationContext {
 	workflowId: number;
 	workflowVersion: number;
@@ -88,6 +97,7 @@ export function validatePlanProposal(
 	proposal: unknown,
 	context: PlanValidationContext,
 	schemaValidator: WorkflowSchemaValidator,
+	options: PlanValidationOptions = {},
 ): PlanValidationResult {
 	const violations: PlanRuleViolation[] = [];
 
@@ -151,10 +161,18 @@ export function validatePlanProposal(
 	}
 
 	const depth = maxDepth(tasks);
-	if (depth > PLAN_TASK_LIMITS.maxDepth) {
+	if (!options.templateMode && depth > PLAN_TASK_LIMITS.maxDepth) {
 		violations.push({
 			rule: "max_depth_exceeded",
 			detail: `DAG depth ${depth} exceeds maximum ${PLAN_TASK_LIMITS.maxDepth}`,
+		});
+	}
+
+	const taskCount = tasks.length;
+	if (!options.templateMode && taskCount > PLAN_TASK_LIMITS.maxTasks) {
+		violations.push({
+			rule: "max_tasks_exceeded",
+			detail: `Plan has ${taskCount} tasks, exceeding maximum ${PLAN_TASK_LIMITS.maxTasks}`,
 		});
 	}
 

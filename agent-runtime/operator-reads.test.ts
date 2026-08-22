@@ -11,13 +11,12 @@ import {
 	createHashProvider,
 	createOutboxTransport,
 } from "./testing/deterministic-fixtures.js";
-import { ScriptedModelDriver } from "./testing/scripted-model-driver.js";
 import {
 	openHeadlessWorkflowRuntime,
 	type HeadlessWorkflowRuntime,
 } from "./workflow/headless-runtime.js";
 import { startOperatorServer, type OperatorServer } from "./workflow/operator-server.js";
-import type { PlanProposal, TaskProposal } from "./workflow/plan-types.js";
+import type { PlanProposal } from "./workflow/plan-types.js";
 import type { RequirementBaseline } from "./workflow/requirement.js";
 import type { CriticReport, RoleResult, TraceLinkProposal } from "./workflow/role-result.js";
 
@@ -137,31 +136,81 @@ function designContent(): unknown {
 	};
 }
 
-function standardTasks(): TaskProposal[] {
-	return [
-		{ key: "analyze-req", kind: "analyze", role: "analyst", objective: "Produce analysis", dependsOn: [], inputs: [], expectedArtifactEffects: [{ kind: "analysis", operation: "create_or_revise" }], completionPolicyRef: "analysis/v1", maxAttempts: 3 },
-		{ key: "design-sol", kind: "design", role: "architect", objective: "Produce design", dependsOn: ["analyze-req"], inputs: [{ type: "task_output", taskKey: "analyze-req", artifactKind: "analysis", purpose: "design input" }], expectedArtifactEffects: [{ kind: "design", operation: "create_or_revise" }], completionPolicyRef: "design/v1", maxAttempts: 3 },
-		{ key: "review-all", kind: "review", role: "critic", objective: "Review artifacts", dependsOn: ["design-sol"], inputs: [{ type: "task_output", taskKey: "design-sol", artifactKind: "design", purpose: "review" }], expectedArtifactEffects: [], completionPolicyRef: "review/v1", maxAttempts: 3 },
-	];
+function scenarioContent(): unknown {
+	return {
+		schemaVersion: "artifact/scenario/v1",
+		artifactKind: "scenario",
+		summary: "Scenarios for read model",
+		sourceRefs: [{ type: "requirement_revision", revisionId: 1 }],
+		scenarios: [{ id: "sc1", title: "Read a requirement", actors: ["Operator"], preconditions: ["Requirement exists"], trigger: "Requirement list opened", mainFlow: ["Open workspace", "Read requirement"], alternateFlows: [], expectedOutcome: "Requirement is read" }],
+	};
 }
 
-async function adoptPlan(runtime: HeadlessWorkflowRuntime, workflowId: number, tasks: TaskProposal[]): Promise<void> {
-	const projection = runtime.getWorkflowProjection(workflowId);
-	assert.ok(projection);
-	const contextDigest = runtime.getPlanningContextDigest(workflowId);
-	const proposal: PlanProposal = {
-		schemaVersion: "plan-proposal/v1",
-		base: { workflowId, workflowVersion: projection.workflow.version, basePlanRevisionId: projection.workflow.currentPlanRevisionId, planningContextDigest: contextDigest },
-		objective: "Plan",
-		tasks,
-		rationale: "rationale",
+function usecaseContent(): unknown {
+	return {
+		schemaVersion: "artifact/usecase/v1",
+		artifactKind: "usecase",
+		summary: "Use cases for read model",
+		sourceRefs: [{ type: "requirement_revision", revisionId: 1 }],
+		useCases: [{ id: "uc1", actor: "Operator", goal: "Read requirement summaries", preconditions: ["Session is authenticated"], mainFlow: ["Open list", "Pick requirement"], alternativeFlows: [], postconditions: ["Detail is shown"] }],
 	};
-	const driver = new ScriptedModelDriver([
-		{ role: "orchestrator", contextDigest, orderedToolCalls: [], structuredResult: proposal, modelUsage: { provider: "test", modelId: "test", inputTokens: 10, outputTokens: 20 } },
-	]);
-	const result = await runtime.planWorkflow(workflowId, driver);
+}
+
+function functionContent(): unknown {
+	return {
+		schemaVersion: "artifact/function/v1",
+		artifactKind: "function",
+		summary: "Functions for read model",
+		sourceRefs: [{ type: "requirement_revision", revisionId: 1 }],
+		functions: [{ id: "fn1", name: "Requirement listing", responsibility: "Return workflow summaries in stable order", inputs: ["workspaceId"], outputs: ["requirement summaries"], businessRules: ["Stable ordering by creation"], acceptanceCriteria: ["List returns newest workflows with state"] }],
+	};
+}
+
+function architectureContent(): unknown {
+	return {
+		schemaVersion: "artifact/architecture/v1",
+		artifactKind: "architecture",
+		summary: "Architecture of read model",
+		sourceRefs: [{ type: "requirement_revision", revisionId: 1 }],
+		components: [{ id: "c1", name: "Operator server", responsibility: "Serve bounded read projections" }],
+		relationships: [{ from: "c1", to: "Workflow store", interaction: "reads projections" }],
+		constraints: ["Reads never mutate state"],
+		nonFunctionalRequirements: ["Reads respond within the operator budget"],
+		decisions: [],
+	};
+}
+
+function dataContent(): unknown {
+	return {
+		schemaVersion: "artifact/data/v1",
+		artifactKind: "data",
+		summary: "Data model for read model",
+		sourceRefs: [{ type: "requirement_revision", revisionId: 1 }],
+		entities: [{ name: "requirements", purpose: "Store requirement baselines", fields: ["id", "workspace_id", "title"], lifecycle: "created with workflow, archived on approval" }],
+		relationships: ["requirements.workspace_id -> workspaces.id"],
+		migrationPlan: "No migration needed",
+		rollbackPlan: "No rollback needed",
+		privacyAndRetention: ["Operator data retained per policy"],
+	};
+}
+
+function apiContent(): unknown {
+	return {
+		schemaVersion: "artifact/api/v1",
+		artifactKind: "api",
+		summary: "API surface for read model",
+		sourceRefs: [{ type: "requirement_revision", revisionId: 1 }],
+		interfaces: [{ id: "api1", kind: "http", name: "GET /api/requirements", contract: "Returns requirement summaries", errors: ["404 unknown workspace"], compatibility: "Additive fields only" }],
+		security: ["Session cookie required"],
+		versioning: "URL path versioning",
+		testStrategy: ["Contract tests for read endpoints"],
+	};
+}
+
+
+async function adoptPlan(runtime: HeadlessWorkflowRuntime, workflowId: number): Promise<void> {
+	const result = await runtime.planWorkflow(workflowId, null);
 	assert.equal(result.outcome, "adopted");
-	driver.assertExhausted();
 }
 
 function setupEvidence(runtime: HeadlessWorkflowRuntime, workflowId: number): TraceLinkProposal {
@@ -171,7 +220,8 @@ function setupEvidence(runtime: HeadlessWorkflowRuntime, workflowId: number): Tr
 
 function executeAnalystTask(runtime: HeadlessWorkflowRuntime, workflowId: number): void {
 	const begin = runtime.beginAttempt(workflowId);
-	assert.equal(begin.taskRole, "analyst");
+	assert.equal(begin.taskKey, "analyze");
+	assert.equal(begin.taskRole, "analysis-analyst");
 	const result: RoleResult = {
 		schemaVersion: "role-result/v1",
 		workflowId,
@@ -181,14 +231,60 @@ function executeAnalystTask(runtime: HeadlessWorkflowRuntime, workflowId: number
 	assert.equal(runtime.completeAttempt(workflowId, begin.attemptId, result).outcome, "published");
 }
 
-function executeArchitectTask(runtime: HeadlessWorkflowRuntime, workflowId: number): void {
+function executeScenarioTask(runtime: HeadlessWorkflowRuntime, workflowId: number): void {
 	const begin = runtime.beginAttempt(workflowId);
-	assert.equal(begin.taskRole, "architect");
+	assert.equal(begin.taskKey, "scenario");
+	assert.equal(begin.taskRole, "scenario-analyst");
 	const result: RoleResult = {
 		schemaVersion: "role-result/v1",
 		workflowId,
 		attemptId: begin.attemptId,
-		effects: [{ effectType: "artifact_revision", artifactKind: "design", logicalKey: "design", content: designContent(), baseRevisionId: null, traceLinks: [setupEvidence(runtime, workflowId)] }],
+		effects: [{ effectType: "artifact_revision", artifactKind: "scenario", logicalKey: "scenario", content: scenarioContent(), baseRevisionId: null, traceLinks: [setupEvidence(runtime, workflowId)] }],
+	};
+	assert.equal(runtime.completeAttempt(workflowId, begin.attemptId, result).outcome, "published");
+}
+
+function executeUsecaseTask(runtime: HeadlessWorkflowRuntime, workflowId: number): void {
+	const begin = runtime.beginAttempt(workflowId);
+	assert.equal(begin.taskKey, "usecase");
+	assert.equal(begin.taskRole, "usecase-analyst");
+	const result: RoleResult = {
+		schemaVersion: "role-result/v1",
+		workflowId,
+		attemptId: begin.attemptId,
+		effects: [{ effectType: "artifact_revision", artifactKind: "usecase", logicalKey: "usecase", content: usecaseContent(), baseRevisionId: null, traceLinks: [setupEvidence(runtime, workflowId)] }],
+	};
+	assert.equal(runtime.completeAttempt(workflowId, begin.attemptId, result).outcome, "published");
+}
+
+function executeFunctionTask(runtime: HeadlessWorkflowRuntime, workflowId: number): void {
+	const begin = runtime.beginAttempt(workflowId);
+	assert.equal(begin.taskKey, "function");
+	assert.equal(begin.taskRole, "function-analyst");
+	const result: RoleResult = {
+		schemaVersion: "role-result/v1",
+		workflowId,
+		attemptId: begin.attemptId,
+		effects: [{ effectType: "artifact_revision", artifactKind: "function", logicalKey: "function", content: functionContent(), baseRevisionId: null, traceLinks: [setupEvidence(runtime, workflowId)] }],
+	};
+	assert.equal(runtime.completeAttempt(workflowId, begin.attemptId, result).outcome, "published");
+}
+
+function executeArchitectTask(runtime: HeadlessWorkflowRuntime, workflowId: number): void {
+	const begin = runtime.beginAttempt(workflowId);
+	assert.equal(begin.taskKey, "design");
+	assert.equal(begin.taskRole, "design-architect");
+	const links = [setupEvidence(runtime, workflowId)];
+	const result: RoleResult = {
+		schemaVersion: "role-result/v1",
+		workflowId,
+		attemptId: begin.attemptId,
+		effects: [
+			{ effectType: "artifact_revision", artifactKind: "design", logicalKey: "design", content: designContent(), baseRevisionId: null, traceLinks: links },
+			{ effectType: "artifact_revision", artifactKind: "architecture", logicalKey: "architecture", content: architectureContent(), baseRevisionId: null, traceLinks: links },
+			{ effectType: "artifact_revision", artifactKind: "data", logicalKey: "data", content: dataContent(), baseRevisionId: null, traceLinks: links },
+			{ effectType: "artifact_revision", artifactKind: "api", logicalKey: "api", content: apiContent(), baseRevisionId: null, traceLinks: links },
+		],
 	};
 	assert.equal(runtime.completeAttempt(workflowId, begin.attemptId, result).outcome, "published");
 }
@@ -204,7 +300,7 @@ function getRevisionId(databasePath: string, kind: string): number {
 	}
 }
 
-function executeCriticTask(runtime: HeadlessWorkflowRuntime, databasePath: string, workflowId: number): void {
+function executeCriticTask(runtime: HeadlessWorkflowRuntime, databasePath: string, workflowId: number, coverKinds: readonly string[]): void {
 	const begin = runtime.beginAttempt(workflowId);
 	assert.equal(begin.taskRole, "critic");
 	const report: CriticReport = {
@@ -212,7 +308,7 @@ function executeCriticTask(runtime: HeadlessWorkflowRuntime, databasePath: strin
 		workflowId,
 		attemptId: begin.attemptId,
 		coverageAttestation: {
-			reviewTargets: ["requirement", "analysis", "design"].map((kind) => ({ revisionId: getRevisionId(databasePath, kind), artifactKind: kind })),
+			reviewTargets: coverKinds.map((kind) => ({ revisionId: getRevisionId(databasePath, kind), artifactKind: kind })),
 			complete: true,
 		},
 		findings: [],
@@ -274,7 +370,7 @@ test("requirement detail returns the current baseline and workflow link", async 
 test("bounded projection embeds current state without events or snapshot content", async () => {
 	await withReadServer(async (context) => {
 		const { workflowId } = await createStartedWorkflow(context);
-		await adoptPlan(context.runtime, workflowId, standardTasks());
+		await adoptPlan(context.runtime, workflowId);
 		executeAnalystTask(context.runtime, workflowId);
 		const response = await get(context, `/api/workflows/${workflowId}`);
 		assert.equal(response.status, 200);
@@ -286,7 +382,7 @@ test("bounded projection embeds current state without events or snapshot content
 		assert.deepEqual(Object.keys(body.workflow.policyBundle).sort(), ["digest", "documentId"]);
 		assert.equal("events" in body, false, "bounded projection must not embed the event stream");
 		assert.equal(body.currentPlan.revisionNo, 1);
-		assert.deepEqual(body.tasks.map((task: { key: string }) => task.key), ["analyze-req", "design-sol", "review-all"]);
+		assert.deepEqual(body.tasks.map((task: { key: string }) => task.key), ["analyze", "review-analysis", "scenario", "review-scenario", "usecase", "review-usecase", "function", "review-function", "design", "review-design"]);
 		assert.equal(body.tasks[0].status, "completed");
 		assert.equal(body.tasks[0].latestAttempt.status, "succeeded");
 		assert.equal(body.tasks[1].latestAttempt, null);
@@ -305,7 +401,7 @@ test("bounded projection embeds current state without events or snapshot content
 test("projection stays bounded to the current plan after replanning", async () => {
 	await withReadServer(async (context) => {
 		const { workflowId } = await createStartedWorkflow(context);
-		await adoptPlan(context.runtime, workflowId, standardTasks());
+		await adoptPlan(context.runtime, workflowId);
 		executeAnalystTask(context.runtime, workflowId);
 		const projection = context.runtime.getWorkflowProjection(workflowId);
 		assert.ok(projection);
@@ -339,7 +435,7 @@ test("projection stays bounded to the current plan after replanning", async () =
 test("plan revision detail preserves the immutable proposal and provenance", async () => {
 	await withReadServer(async (context) => {
 		const { workflowId } = await createStartedWorkflow(context);
-		await adoptPlan(context.runtime, workflowId, standardTasks());
+		await adoptPlan(context.runtime, workflowId);
 		const projection = context.runtime.getWorkflowProjection(workflowId);
 		const planRevisionId = projection?.workflow.currentPlanRevisionId as number;
 		const response = await get(context, `/api/plan-revisions/${planRevisionId}`);
@@ -351,7 +447,7 @@ test("plan revision detail preserves the immutable proposal and provenance", asy
 		assert.equal(typeof body.proposalDocumentId, "number");
 		assert.equal(typeof body.proposalDigest, "string");
 		assert.equal(typeof body.planningAttemptId, "number");
-		assert.deepEqual(body.proposal.tasks.map((task: { key: string }) => task.key), ["analyze-req", "design-sol", "review-all"]);
+		assert.deepEqual(body.proposal.tasks.map((task: { key: string }) => task.key), ["analyze", "review-analysis", "scenario", "review-scenario", "usecase", "review-usecase", "function", "review-function", "design", "review-design"]);
 		const missing = await get(context, "/api/plan-revisions/9999");
 		assert.equal(missing.status, 404);
 	});
@@ -360,14 +456,14 @@ test("plan revision detail preserves the immutable proposal and provenance", asy
 test("task, attempts, attempt and run details link the execution chain", async () => {
 	await withReadServer(async (context) => {
 		const { workflowId } = await createStartedWorkflow(context);
-		await adoptPlan(context.runtime, workflowId, standardTasks());
+		await adoptPlan(context.runtime, workflowId);
 		executeAnalystTask(context.runtime, workflowId);
 		const projection = (await (await get(context, `/api/workflows/${workflowId}`)).json()) as Record<string, any>;
 		const taskId = projection.tasks[0].id as number;
 		const task = (await (await get(context, `/api/tasks/${taskId}`)).json()) as Record<string, any>;
-		assert.equal(task.key, "analyze-req");
+		assert.equal(task.key, "analyze");
 		assert.equal(task.kind, "analyze");
-		assert.equal(task.role, "analyst");
+		assert.equal(task.role, "analysis-analyst");
 		assert.equal(task.status, "completed");
 		assert.deepEqual(task.expectedArtifactEffects, [{ kind: "analysis", operation: "create_or_revise" }]);
 		const attempts = (await (await get(context, `/api/tasks/${taskId}/attempts`)).json()) as { attempts: Array<{ id: number; attemptNo: number; status: string }> };
@@ -421,10 +517,17 @@ test("projection versions feed directly into command expected versions", async (
 test("approval packet detail exposes content and current validity", async () => {
 	await withReadServer(async (context) => {
 		const { workflowId } = await createStartedWorkflow(context);
-		await adoptPlan(context.runtime, workflowId, standardTasks());
+		await adoptPlan(context.runtime, workflowId);
 		executeAnalystTask(context.runtime, workflowId);
+		executeCriticTask(context.runtime, context.databasePath, workflowId, ["requirement", "analysis"]);
+		executeScenarioTask(context.runtime, workflowId);
+		executeCriticTask(context.runtime, context.databasePath, workflowId, ["scenario"]);
+		executeUsecaseTask(context.runtime, workflowId);
+		executeCriticTask(context.runtime, context.databasePath, workflowId, ["usecase"]);
+		executeFunctionTask(context.runtime, workflowId);
+		executeCriticTask(context.runtime, context.databasePath, workflowId, ["function"]);
 		executeArchitectTask(context.runtime, workflowId);
-		executeCriticTask(context.runtime, context.databasePath, workflowId);
+		executeCriticTask(context.runtime, context.databasePath, workflowId, ["design", "architecture", "data", "api"]);
 		const built = context.runtime.buildApprovalPacket(workflowId);
 		assert.equal(built.ready, true);
 		const packetId = built.packetId as number;
@@ -450,10 +553,17 @@ test("approval packet detail exposes content and current validity", async () => 
 test("governed design package is created at packet approval and stays read-only", async () => {
 	await withReadServer(async (context) => {
 		const { workflowId, requirementId } = await createStartedWorkflow(context);
-		await adoptPlan(context.runtime, workflowId, standardTasks());
+		await adoptPlan(context.runtime, workflowId);
 		executeAnalystTask(context.runtime, workflowId);
+		executeCriticTask(context.runtime, context.databasePath, workflowId, ["requirement", "analysis"]);
+		executeScenarioTask(context.runtime, workflowId);
+		executeCriticTask(context.runtime, context.databasePath, workflowId, ["scenario"]);
+		executeUsecaseTask(context.runtime, workflowId);
+		executeCriticTask(context.runtime, context.databasePath, workflowId, ["usecase"]);
+		executeFunctionTask(context.runtime, workflowId);
+		executeCriticTask(context.runtime, context.databasePath, workflowId, ["function"]);
 		executeArchitectTask(context.runtime, workflowId);
-		executeCriticTask(context.runtime, context.databasePath, workflowId);
+		executeCriticTask(context.runtime, context.databasePath, workflowId, ["design", "architecture", "data", "api"]);
 		const built = context.runtime.buildApprovalPacket(workflowId);
 		assert.equal(built.ready, true);
 		const projection = context.runtime.getWorkflowProjection(workflowId);

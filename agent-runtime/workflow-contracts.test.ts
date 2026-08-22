@@ -25,7 +25,7 @@ async function copyContractAssets(): Promise<string> {
 test("loads every versioned Workflow contract through one validated catalog", async () => {
 	const contracts = await loadWorkflowContracts();
 
-	assert.equal(contracts.assets.length, 12);
+	assert.equal(contracts.assets.length, 13);
 	assert.deepEqual(
 		contracts.assets.map(({ identity }) => identity).sort(),
 		[
@@ -37,6 +37,7 @@ test("loads every versioned Workflow contract through one validated catalog", as
 			"operator-experience/v1",
 			"persistence-model/v1",
 			"plan-proposal/v1",
+			"plan-template/v1",
 			"readiness-policy/v1",
 			"recovery-policy/v1",
 			"workflow-api/v1",
@@ -224,14 +225,12 @@ test("rejects inconsistent references between contracts", async (t) => {
 			await rm(directory, { recursive: true, force: true });
 		}
 	});
-	await t.test("Readiness ImpactProfile schema", async () => {
+	await t.test("Readiness required-artifact source reference", async () => {
 		const directory = await copyContractAssets();
 		try {
 			const file = path.join(directory, "readiness-policy-v1.json");
-			const contract = JSON.parse(await readFile(file, "utf8")) as {
-				artifactRequirementPolicy: { impactProfileSchemaVersion: string };
-			};
-			contract.artifactRequirementPolicy.impactProfileSchemaVersion = "artifact/analysis/v2";
+			const contract = JSON.parse(await readFile(file, "utf8")) as { artifactRequirementPolicy: { source: string } };
+			contract.artifactRequirementPolicy.source = "plan-template/v2";
 			await writeFile(file, `${JSON.stringify(contract, null, 2)}\n`);
 			await assert.rejects(
 				loadWorkflowContracts(directory),
