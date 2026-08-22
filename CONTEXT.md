@@ -150,6 +150,22 @@ _Avoid_: Run token、完整事件溯源
 绑定 commandId、请求 digest、可信 Actor、expected/actual version 与首次结果的不可变幂等记录；业务拒绝同样保留。
 _Avoid_: HTTP 临时响应、只记录成功命令
 
+**Model Provider（模型提供方）**:
+pi-ai 注册表中的一个模型服务端点与认证实体（原生 38 个 + 配置覆盖注册）；以 provider id 标识，密钥走该 provider 专属环境变量，不落配置文件。
+_Avoid_: 模型、API 网关、bailian
+
+**Model Catalog（模型目录）**:
+配置声明的精选模型清单（provider × models 全量声明，配置即真相）；是用户可选模型与一切校验的唯一目录面，目录之外即非法。
+_Avoid_: pi-ai 全量注册表、模型库、可选一切模型
+
+**Model Profile（模型档）**:
+按角色 (provider, modelId) 的完整四角色映射；部署默认档固化在 ModelConfig，需求在创建时可携带需求级档（API 字段 modelRoles），创建后不可改。
+_Avoid_: 单模型设置、运行时切换、部分角色覆盖
+
+**Model Usage（模型用量）**:
+Run 记录中的 token 计数与所用 provider/model 身份（token run 事件），支持跨提供方对账。
+_Avoid_: 无身份 token 计数、usage 本地日志
+
 **Outbox Job（事务发件任务）**:
 与治理变化同事务创建、在提交后幂等执行 Run 派发、收尾、中止或再次调度的持久任务。
 _Avoid_: 进程内回调、SSE 消息

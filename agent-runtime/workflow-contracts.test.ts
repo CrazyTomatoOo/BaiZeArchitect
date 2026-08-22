@@ -25,7 +25,7 @@ async function copyContractAssets(): Promise<string> {
 test("loads every versioned Workflow contract through one validated catalog", async () => {
 	const contracts = await loadWorkflowContracts();
 
-	assert.equal(contracts.assets.length, 11);
+	assert.equal(contracts.assets.length, 12);
 	assert.deepEqual(
 		contracts.assets.map(({ identity }) => identity).sort(),
 		[
@@ -33,6 +33,7 @@ test("loads every versioned Workflow contract through one validated catalog", as
 			"concurrency-policy/v1",
 			"cutover-policy/v1",
 			"implementation-plan/v1",
+			"model-config/v1",
 			"operator-experience/v1",
 			"persistence-model/v1",
 			"plan-proposal/v1",
@@ -58,6 +59,7 @@ test("loads every versioned Workflow contract through one validated catalog", as
 			"recovery-policy/v1",
 			"operator-experience/v1",
 			"cutover-policy/v1",
+			"model-config/v1",
 		],
 	);
 });

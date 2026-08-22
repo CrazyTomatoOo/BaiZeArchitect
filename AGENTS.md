@@ -40,7 +40,7 @@ Single Node process hosting:
 - `workflow/plan-types.ts` — ArtifactKind/TaskKind, TaskProposal DAG with input bindings, ARTIFACT_OWNERSHIP map, PLAN_TASK_LIMITS (≤12 tasks, depth ≤6, ≤3 attempts/task)
 - `workflow/plan-validator.ts` — deterministic static PlanProposal validation (DFS cycle detection, DAG/depth budgets, ownership + output-binding rules)
 - `workflow/model-driver.ts` + `pi-model-driver.ts` — ModelDriver interface + PiModelExecutor adapter
-- `workflow/contracts/` — boot-loaded versioned JSON policy catalog (persistence-model-v1, plan-proposal schema, readiness/recovery/concurrency/cutover policies, workflow-api-v1, event catalog) compiled with typebox
+- `workflow/contracts/` — boot-loaded versioned JSON policy catalog (persistence-model-v1, plan-proposal schema, model-config-v1, readiness/recovery/concurrency/cutover policies, workflow-api-v1, event catalog) compiled with typebox
 
 **Frontend (`web/src/`):**
 - `baize-workflow.ts` — main Lit 3 SPA component (all surfaces live here)
@@ -122,7 +122,7 @@ docker compose run --rm test # container smoke test (network none, tmpfs-only)
 - `BAIZE_PORT` — HTTP port (default 18789)
 - `BAIZE_HOST` — HTTP host
 - `BAIZE_OPERATORS` — token=actorRef:cap,cap format
-- `BAIZE_MODEL_CONFIG_PATH` — model config JSON path
+- `BAIZE_MODEL_CONFIG_PATH` — ModelConfig v1 JSON path (schema: `model-config-v1.schema.json`); API keys live in per-provider env vars, never in the file
 
 ## Code Conventions & Common Patterns
 
@@ -285,7 +285,7 @@ npm run test:e2e          # Playwright E2E (3 viewports)
 ### Test Tiers
 
 1. **Unit + Integration** (agent-runtime) — node:test with real SQLite DBs in temp dirs, deterministic fixtures
-2. **Contract Tests** (agent-runtime) — dedicated `test:contracts` script asserting versioned JSON contract catalogs (11 assets, byte-identical to .wayfinder sources)
+2. **Contract Tests** (agent-runtime) — dedicated `test:contracts` script asserting versioned JSON contract catalogs (12 assets, byte-identical to .wayfinder sources)
 3. **Web Unit** (web) — Vitest with pure-function assertions + `?raw` source-text 'negative' checks
 4. **E2E** (web) — Playwright with route-level mocking, 3 viewport projects
 5. **Container Smoke** — `scripts/smoke-gateway.mjs` via `docker compose run --rm test` (network none, tmpfs-only, boots production main.ts end-to-end)

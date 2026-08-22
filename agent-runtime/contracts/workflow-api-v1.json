@@ -25,7 +25,7 @@
   },
   "creation": {
     "method": "POST",
-    "path": "/api/requirements",
+    "path": "/api/workspaces/:workspaceId/requirements",
     "successStatus": 201,
     "atomicCreates": ["Requirement", "requirement Artifact revision v1", "DesignSession", "Workflow pending", "PolicyBundle binding", "workflow_created event"],
     "responseFields": ["requirementId", "workflowId", "workflowState", "workflowVersion", "lastEventSeq"]
@@ -47,6 +47,7 @@
   "readEndpoints": [
     {"method": "GET", "path": "/api/requirements", "purpose": "Workspace-filtered Requirement list with Workflow summary"},
     {"method": "GET", "path": "/api/requirements/:requirementId", "purpose": "Requirement identity, current baseline and workflow link"},
+    {"method": "GET", "path": "/api/model-config", "purpose": "Curated model provider catalog and default role assignments for the SPA picker"},
     {"method": "GET", "path": "/api/legacy-imports/:requirementId", "purpose": "Read-only legacy classification, bundle, attestation and anomaly summary"},
     {"method": "GET", "path": "/api/design-packages/:designPackageId", "purpose": "Immutable governed or legacy-pre-policy Design Package"},
     {"method": "GET", "path": "/api/workflows/:workflowId", "purpose": "Complete current Workflow projection"},
@@ -123,7 +124,7 @@
   "httpStatuses": {
     "200": "Successful GET or exact replay whose original status was 200",
     "201": "First accepted command receipt or Requirement creation",
-    "400": "Malformed JSON or transport-level request shape",
+    "400": "Malformed JSON, transport-level request shape, or invalid requirement-level modelRoles (error: invalid_model_roles with per-entry detail)",
     "401": "Missing or invalid operator session",
     "403": "Capability denied; persisted as command receipt when envelope and Workflow are valid",
     "404": "Unknown resource; no domain command receipt",

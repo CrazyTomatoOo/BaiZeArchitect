@@ -26,7 +26,8 @@
     "workflow-event-catalog/v1",
     "recovery-policy/v1",
     "operator-experience/v1",
-    "cutover-policy/v1"
+    "cutover-policy/v1",
+    "model-config/v1"
   ],
   "slices": [
     {
@@ -48,7 +49,8 @@
         "Define ModelDriver and production PiModelDriver boundaries.",
         "Provide ScriptedModelDriver only through test entrypoints; production main cannot select it through environment or HTTP.",
         "Script fixtures declare expected role, context digest, ordered tool calls, structured result, and optional crash point.",
-        "Provide deterministic clock, IDs, digests, repository snapshots, operator identity, and model usage records."
+        "Provide deterministic clock, IDs, digests, repository snapshots, operator identity, and model usage records.",
+        "ModelConfig v1 governs deployment provider/model profiles (providers + defaultRoles); create-requirement modelRoles are validated at creation; token run events carry provider+modelId."
       ],
       "mandatoryTests": [
         "Every contract asset has a valid schemaVersion and cross-reference.",

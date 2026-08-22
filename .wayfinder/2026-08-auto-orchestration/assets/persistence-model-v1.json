@@ -140,6 +140,7 @@
         "current_approval_packet_id",
         "current_failure_code",
         "current_failure_subject_id",
+        "model_roles",
         "created_at",
         "updated_at",
         "archived_at"

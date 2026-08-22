@@ -8,6 +8,7 @@ export const CONTRACT_FILE_IDENTITIES = {
 	"concurrency-policy-v1.json": "concurrency-policy/v1",
 	"cutover-policy-v1.json": "cutover-policy/v1",
 	"implementation-plan-v1.json": "implementation-plan/v1",
+	"model-config-v1.schema.json": "model-config/v1",
 	"operator-experience-v1.json": "operator-experience/v1",
 	"persistence-model-v1.json": "persistence-model/v1",
 	"plan-proposal-v1.schema.json": "plan-proposal/v1",
@@ -81,6 +82,14 @@ const REQUIRED_TOP_LEVEL_SHAPES: Readonly<
 		slices: "array",
 		ci: "object",
 		release: "object",
+	},
+	"model-config/v1": {
+		$schema: "string",
+		$id: "string",
+		type: "string",
+		required: "array",
+		properties: "object",
+		$defs: "object",
 	},
 	"operator-experience/v1": {
 		prototype: "object",
@@ -159,6 +168,11 @@ function contractIdentity(fileName: string, content: Record<string, unknown>): s
 	if (fileName === "plan-proposal-v1.schema.json") {
 		return content.$id === "baize://schemas/plan-proposal/v1"
 			? "plan-proposal/v1"
+			: undefined;
+	}
+	if (fileName === "model-config-v1.schema.json") {
+		return content.$id === "baize://schemas/model-config/v1"
+			? "model-config/v1"
 			: undefined;
 	}
 	if (fileName === "artifact-content-v1.schema.json") {
@@ -320,6 +334,7 @@ function validateCrossReferences(byIdentity: ReadonlyMap<string, WorkflowContrac
 			"recovery-policy/v1",
 			"operator-experience/v1",
 			"cutover-policy/v1",
+			"model-config/v1",
 		],
 		"nonNegotiableContracts",
 	);
