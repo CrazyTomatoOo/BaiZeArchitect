@@ -84,6 +84,35 @@ interface MockOptions {
 	deleteBusy?: () => boolean;
 }
 
+function modelConfig() {
+	return {
+		defaultRoles: {
+			orchestrator: { provider: "qwen-token-plan-cn", modelId: "qwen-max" },
+			analyst: { provider: "qwen-token-plan-cn", modelId: "qwen-plus" },
+			architect: { provider: "glm", modelId: "glm-5.2" },
+			critic: { provider: "glm", modelId: "glm-4.2" },
+		},
+		providers: [
+			{
+				id: "qwen-token-plan-cn",
+				name: "通义千问",
+				models: [
+					{ id: "qwen-max", name: "Qwen Max", contextWindow: 1_048_576, maxTokens: 16_384, reasoning: true },
+					{ id: "qwen-plus", name: "Qwen Plus", contextWindow: 1_048_576, maxTokens: 8_192, reasoning: false },
+				],
+			},
+			{
+				id: "glm",
+				name: "智谱 GLM",
+				models: [
+					{ id: "glm-5.2", name: "GLM-5.2", contextWindow: 128_000, maxTokens: 8_192, reasoning: false },
+					{ id: "glm-4.2", name: "GLM-4.2", contextWindow: 128_000, maxTokens: 4_096, reasoning: false },
+				],
+			},
+		],
+	};
+}
+
 async function mockWorkspaceApi(page: Page, options: MockOptions): Promise<void> {
 	await installMockEventSource(page);
 	const workspaces: Workspace[] = [...options.workspaces];
@@ -100,6 +129,17 @@ async function mockWorkspaceApi(page: Page, options: MockOptions): Promise<void>
 			return;
 		}
 		await fulfillJson(route, { actorRef: "operator", capabilities: ["workflow:operate", "workflow:approve"] });
+	});
+
+	await page.route("**/api/model-config", (route) => fulfillJson(route, modelConfig()));
+
+	await page.route("**/api/workspaces/*/requirements", async (route) => {
+		const request = route.request();
+		if (request.method() !== "POST") {
+			await route.fallback();
+			return;
+		}
+		await fulfillJson(route, { requirementId: 42, workflowId: 742, workflowState: "pending" }, 201);
 	});
 
 	await page.route("**/api/workspaces/*", async (route) => {

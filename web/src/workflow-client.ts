@@ -13,6 +13,32 @@ export type WorkflowState =
 	| "ready_to_archive"
 	| "archived";
 
+export type ModelRoleKey = "orchestrator" | "analyst" | "architect" | "critic";
+
+export interface ModelProfile {
+	provider: string;
+	modelId: string;
+}
+
+export interface ModelInfo {
+	id: string;
+	name: string;
+	contextWindow: number;
+	maxTokens: number;
+	reasoning: boolean;
+}
+
+export interface ProviderCatalog {
+	id: string;
+	name: string;
+	models: ModelInfo[];
+}
+
+export interface ModelConfig {
+	defaultRoles: Record<ModelRoleKey, ModelProfile>;
+	providers: ProviderCatalog[];
+}
+
 export interface WorkflowProjection {
 	workflow: {
 		id: number;
@@ -122,8 +148,8 @@ export interface RequirementSummary {
 export interface CreatedRequirement {
 	requirementId: number;
 	workflowId: number;
-	state: string;
-	version: number;
+	workflowState: string;
+	workflowVersion: number;
 	lastEventSeq: number;
 }
 
@@ -150,12 +176,34 @@ export async function listRequirements(apiBase: string, workspaceId: number): Pr
 	return body.requirements;
 }
 
+export interface CreateRequirementBaseline {
+	schemaVersion: "artifact/requirement/v1";
+	artifactKind: "requirement";
+	title: string;
+	summary: string;
+	description: string;
+	sourceRefs: readonly unknown[];
+	goals?: string[];
+	nonGoals?: string[];
+	constraints?: string[];
+}
+
+export interface CreateRequirementInput {
+	title: string;
+	summary: string;
+	description: string;
+	goals?: string[];
+	nonGoals?: string[];
+	constraints?: string[];
+	modelRoles?: Record<ModelRoleKey, ModelProfile>;
+}
+
 export async function createRequirement(
 	apiBase: string,
 	workspaceId: number,
-	input: { title: string; summary: string; description: string; goals?: string[]; nonGoals?: string[]; constraints?: string[] },
+	input: CreateRequirementInput,
 ): Promise<CreatedRequirement> {
-	const baseline = {
+	const baseline: CreateRequirementBaseline = {
 		schemaVersion: "artifact/requirement/v1",
 		artifactKind: "requirement",
 		title: input.title,
@@ -166,15 +214,21 @@ export async function createRequirement(
 		...(input.nonGoals ? { nonGoals: input.nonGoals } : {}),
 		...(input.constraints ? { constraints: input.constraints } : {}),
 	};
+	const body: { baseline: CreateRequirementBaseline; modelRoles?: Record<ModelRoleKey, ModelProfile> } = { baseline };
+	if (input.modelRoles) body.modelRoles = input.modelRoles;
 	const response = await fetch(`${apiBase}/api/workspaces/${workspaceId}/requirements`, {
 		method: "POST",
 		headers: { "Content-Type": "application/json" },
-		body: JSON.stringify(baseline),
+		body: JSON.stringify(body),
 		credentials: "same-origin",
 	});
 	if (!response.ok) {
-		const body = await response.json().catch(() => null);
-		throw new Error(`create failed: ${response.status} ${body?.error ?? ""}`.trim());
+		const responseBody = await response.json().catch(() => null) as { error?: string; detail?: Array<{ role: string; provider: string; modelId: string; reason: string }> } | null;
+		if (response.status === 400 && responseBody?.error === "invalid_model_roles" && Array.isArray(responseBody.detail)) {
+			const details = responseBody.detail.map((entry) => `${entry.role}:${entry.reason}(${entry.provider}/${entry.modelId})`).join("; ");
+			throw new Error(`模型角色配置无效: ${details}`);
+		}
+		throw new Error(`create failed: ${response.status} ${responseBody?.error ?? ""}`.trim());
 	}
 	return (await response.json()) as CreatedRequirement;
 }
@@ -183,6 +237,10 @@ async function fetchJson<T>(apiBase: string, path: string): Promise<T> {
 	const response = await fetch(`${apiBase}${path}`, { credentials: "same-origin" });
 	if (!response.ok) throw new Error(`request failed: ${response.status} ${path}`);
 	return (await response.json()) as T;
+}
+
+export function getModelConfig(apiBase: string): Promise<ModelConfig> {
+	return fetchJson(apiBase, "/api/model-config");
 }
 
 export function getRequirement(apiBase: string, requirementId: number): Promise<RequirementDetail> {

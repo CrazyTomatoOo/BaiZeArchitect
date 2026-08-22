@@ -1,0 +1,21 @@
+<!doctype html>
+<html lang="zh-CN">
+	<head>
+		<meta charset="utf-8" />
+		<meta name="viewport" content="width=device-width, initial-scale=1" />
+		<title>Requirement create fixture</title>
+		<style>
+			body { margin: 0; padding: 16px; background: #f4f6fb; font-family: system-ui, sans-serif; }
+		</style>
+	</head>
+	<body>
+		<script type="module">
+			import "../src/baize-requirements.ts";
+			const element = document.createElement("baize-requirements");
+			element.id = "requirements";
+			element.workspaceId = 1;
+			element.createOpen = true;
+			document.body.append(element);
+		</script>
+	</body>
+</html>
