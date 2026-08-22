@@ -86,6 +86,26 @@ export interface ReadinessReport {
 	warnings: readonly string[];
 }
 
+export type ClientArtifactKind =
+	| "analysis"
+	| "scenario"
+	| "usecase"
+	| "function"
+	| "design"
+	| "architecture"
+	| "data"
+	| "api";
+
+export interface ArtifactRevisionDetail {
+	revisionId: number;
+	artifactId: number;
+	revisionNo: number;
+	status: string;
+	schemaRef: string;
+	contentDigest: string;
+	content: unknown;
+}
+
 export interface RequirementDetail {
 	id: number;
 	workspaceId: number;
@@ -245,6 +265,10 @@ export function getModelConfig(apiBase: string): Promise<ModelConfig> {
 
 export function getRequirement(apiBase: string, requirementId: number): Promise<RequirementDetail> {
 	return fetchJson(apiBase, `/api/requirements/${requirementId}`);
+}
+
+export function getArtifactRevision(apiBase: string, requirementId: number, kind: ClientArtifactKind): Promise<ArtifactRevisionDetail> {
+	return fetchJson(apiBase, `/api/requirements/${requirementId}/artifacts?kind=${encodeURIComponent(kind)}`);
 }
 
 export function getWorkflowProjection(apiBase: string, workflowId: number): Promise<WorkflowProjection> {

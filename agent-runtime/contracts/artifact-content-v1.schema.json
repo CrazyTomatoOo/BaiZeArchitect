@@ -93,6 +93,40 @@
           "type": "array",
           "items": { "$ref": "#/$defs/sourceRef" },
           "uniqueItems": true
+        },
+        "diagrams": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/diagramSpec" }
+        }
+      }
+    },
+    "diagramSpec": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "nodes", "edges"],
+      "properties": {
+        "type": { "const": "graph" },
+        "nodes": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["id", "label"],
+            "properties": {
+              "id": { "type": "string", "minLength": 1 },
+              "label": { "type": "string", "minLength": 1 }
+            }
+          }
+        },
+        "edges": {
+          "type": "array",
+          "items": {
+            "type": "array",
+            "minItems": 2,
+            "maxItems": 3,
+            "items": { "type": "string", "minLength": 1 }
+          }
         }
       }
     },

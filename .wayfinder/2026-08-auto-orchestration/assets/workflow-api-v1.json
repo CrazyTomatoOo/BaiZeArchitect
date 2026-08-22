@@ -47,6 +47,7 @@
   "readEndpoints": [
     {"method": "GET", "path": "/api/requirements", "purpose": "Workspace-filtered Requirement list with Workflow summary"},
     {"method": "GET", "path": "/api/requirements/:requirementId", "purpose": "Requirement identity, current baseline and workflow link"},
+    {"method": "GET", "path": "/api/requirements/:requirementId/artifacts", "purpose": "Current revision of one artifact kind (content snapshot incl. optional diagrams)"},
     {"method": "GET", "path": "/api/model-config", "purpose": "Curated model provider catalog and default role assignments for the SPA picker"},
     {"method": "GET", "path": "/api/legacy-imports/:requirementId", "purpose": "Read-only legacy classification, bundle, attestation and anomaly summary"},
     {"method": "GET", "path": "/api/design-packages/:designPackageId", "purpose": "Immutable governed or legacy-pre-policy Design Package"},

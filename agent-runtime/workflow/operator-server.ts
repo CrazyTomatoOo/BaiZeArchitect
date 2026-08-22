@@ -538,6 +538,16 @@ export async function startOperatorServer(
 			return;
 		}
 
+		if (request.method === "GET" && segments.length === 4 && segments[0] === "api" && segments[1] === "requirements" && segments[3] === "artifacts") {
+			const detail = options.runtime.getArtifactRevisionDetail(Number(segments[2]), String(url.searchParams.get("kind") ?? ""));
+			if (!detail) {
+				sendJson(response, 404, { error: "unknown_artifact" });
+				return;
+			}
+			sendJson(response, 200, detail);
+			return;
+		}
+
 		if (request.method === "GET" && segments.length === 3 && segments[0] === "api" && segments[1] === "plan-revisions") {
 			const detail = options.runtime.getPlanRevisionDetail(Number(segments[2]));
 			if (!detail) {

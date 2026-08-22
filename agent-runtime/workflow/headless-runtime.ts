@@ -1,6 +1,6 @@
 import type { ReusableAssetKind } from "../persistence/reusable-asset-kind.js";
 import type { CrashInjector, FixtureClock, FixtureOperator, FixtureOutboxTransport, HashProvider } from "../testing/deterministic-fixtures.js";
-import { WorkflowStore, type BeginPlanningResult, type CommandReceipt, type CompletePlanningResult, type ExecuteCommandInput, type ReconciliationReport, type WorkflowProjection, type EvidenceSnapshotResult, type RequiredArtifactSetResult, type TraceLinkResult, type FindingRecord, type FindingThreadRecord, type DecisionRecord, type ReadinessReport, type BuildApprovalPacketResult, type ApprovalPacketRecord, type HumanGateRecord, type ApprovalRecordEntry, type HumanDirectiveRecord, type DiagnosticRunRecord, type CommandReceiptDetail, type RequirementSummaryRecord, type RequirementDetailRecord, type BoundedWorkflowProjection, type PlanRevisionDetail, type TaskDetailRecord, type AttemptSummaryRecord, type AttemptDetailRecord, type RunDetailRecord, type ApprovalPacketDetailRecord, type DesignPackageRecord, type LegacyImportRecord, type ReusableAssetSummary, type ReusableAssetDetail, type WorkflowEventEnvelope, type WorkspaceSummary, type RunEventEnvelope } from "../persistence/workflow-store.js";
+import { WorkflowStore, type BeginPlanningResult, type CommandReceipt, type CompletePlanningResult, type ExecuteCommandInput, type ReconciliationReport, type WorkflowProjection, type EvidenceSnapshotResult, type RequiredArtifactSetResult, type TraceLinkResult, type FindingRecord, type FindingThreadRecord, type DecisionRecord, type ReadinessReport, type BuildApprovalPacketResult, type ApprovalPacketRecord, type HumanGateRecord, type ApprovalRecordEntry, type HumanDirectiveRecord, type DiagnosticRunRecord, type CommandReceiptDetail, type RequirementSummaryRecord, type RequirementDetailRecord, type ArtifactRevisionDetailRecord, type BoundedWorkflowProjection, type PlanRevisionDetail, type TaskDetailRecord, type AttemptSummaryRecord, type AttemptDetailRecord, type RunDetailRecord, type ApprovalPacketDetailRecord, type DesignPackageRecord, type LegacyImportRecord, type ReusableAssetSummary, type ReusableAssetDetail, type WorkflowEventEnvelope, type WorkspaceSummary, type RunEventEnvelope } from "../persistence/workflow-store.js";
 import type { BeginAttemptResult, CompleteAttemptResult, ExecuteTaskResult, RoleResult, TraceLinkProposal, CriticReport } from "./role-result.js";
 import { WORKFLOW_COMMAND_TYPES, type WorkflowCommandType } from "./command-types.js";
 import { loadWorkflowContracts } from "./contracts/loader.js";
@@ -92,6 +92,7 @@ export interface HeadlessWorkflowRuntime {
 	getDiagnosticRuns(workflowId: number): readonly DiagnosticRunRecord[];
 	listRequirementSummaries(workspaceId: number): readonly RequirementSummaryRecord[];
 	getRequirementDetail(requirementId: number): RequirementDetailRecord | undefined;
+	getArtifactRevisionDetail(requirementId: number, kind: string): ArtifactRevisionDetailRecord | undefined;
 	getBoundedProjection(workflowId: number): BoundedWorkflowProjection | undefined;
 	getPlanRevisionDetail(planRevisionId: number): PlanRevisionDetail | undefined;
 	getTaskDetail(taskId: number): TaskDetailRecord | undefined;
@@ -350,6 +351,9 @@ export async function openHeadlessWorkflowRuntime(
 	},
 	getRequirementDetail(requirementId) {
 		return store.getRequirementDetail(requirementId);
+	},
+	getArtifactRevisionDetail(requirementId, kind) {
+		return store.getArtifactRevisionDetail(requirementId, kind);
 	},
 	getBoundedProjection(workflowId) {
 		return store.getBoundedProjection(workflowId);

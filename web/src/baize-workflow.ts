@@ -9,6 +9,7 @@ import {
 	designStages,
 	gateQueue,
 	getApprovalPacket,
+	getArtifactRevision,
 	getDesignPackage,
 	getRequirement,
 	getWorkflowProjection,
@@ -27,6 +28,8 @@ import {
 	subscribeRunEvents,
 	subscribeWorkflowEvents,
 	type ApprovalPacketDetail,
+	type ArtifactRevisionDetail,
+	type ClientArtifactKind,
 	type CommandReceipt,
 	type DesignPackageDetail,
 	type GateQueueItem,
@@ -36,6 +39,7 @@ import {
 	type RequirementSummary,
 	type WorkflowProjection,
 } from "./workflow-client.js";
+import { graphToMermaid, isGraphDiagram, type GraphDiagram } from "./diagram-render.js";
 
 /**
  * baize-workflow — 自动优先的引导式 Requirement 页面(票15+票16)。
@@ -45,6 +49,25 @@ import {
  * 只调用新 Projection / detail / Command / SSE 契约;不做乐观状态变更。
  * 仅在测试装配中挂载,生产 shell 在 S7 前不引用本组件。
  */
+/** 产物内容查看器的可图 kind 列表（#18 决议：scenario/architecture/data 等 8 生产 kind）。 */
+const ARTIFACT_VIEW_KINDS: readonly ClientArtifactKind[] = [
+	"analysis", "scenario", "usecase", "function", "design", "architecture", "data", "api",
+];
+
+/** 从产物内容提取可选 diagrams（#11 决议：内容内嵌结构化图 JSON）。 */
+function extractDiagrams(content: unknown): readonly unknown[] {
+	if (typeof content !== "object" || content === null) return [];
+	const diagrams = (content as { diagrams?: unknown }).diagrams;
+	return Array.isArray(diagrams) ? diagrams : [];
+}
+
+interface ArtifactViewState {
+	kind: ClientArtifactKind;
+	detail: ArtifactRevisionDetail | null;
+	error: string | null;
+	loading: boolean;
+}
+
 class BaizeWorkflow extends LitElement {
 	static properties = {
 		requirementId: { type: Number, attribute: "requirement-id" },
@@ -80,6 +103,7 @@ class BaizeWorkflow extends LitElement {
 		navOpen: { state: true },
 		pendingGate: { type: String, attribute: "pending-gate" },
 		pendingApproval: { type: Boolean, attribute: "pending-approval" },
+		artifactView: { state: true },
 	};
 
 	declare requirementId: number;
@@ -115,9 +139,12 @@ class BaizeWorkflow extends LitElement {
 	declare navOpen: boolean;
 	declare pendingGate: string | null;
 	declare pendingApproval: boolean;
+	declare artifactView: ArtifactViewState | null;
 
 	/** 打开的 gate 表单上下文:commandId 在表单生命周期内固定(重复提交幂等),reload 才换新。 */
 	private formContext: { key: string; commandId: string; workflowVersion: number } | null = null;
+	/** mermaid 异步渲染竞态令牌：切换 kind 时作废旧渲染。 */
+	private diagramRenderToken: symbol | undefined = undefined;
 	private unsubscribeEvents: (() => void) | null = null;
 	private unsubscribeRunEvents: (() => void) | null = null;
 	private runStreamId: number | null = null;
@@ -158,6 +185,7 @@ class BaizeWorkflow extends LitElement {
 		this.navOpen = false;
 		this.pendingGate = null;
 		this.pendingApproval = false;
+		this.artifactView = null;
 	}
 
 	static styles = [sharedStyles, css`
@@ -235,6 +263,21 @@ class BaizeWorkflow extends LitElement {
 		.details h3 { margin: 12px 0 6px; font-size: var(--text-sm); color: var(--text-muted); letter-spacing: 0.06em; }
 		.details h3:first-child { margin-top: 0; }
 		.fact-block { font-size: var(--text-xs); color: var(--text-muted); line-height: 1.7; word-break: break-all; }
+
+		/* — 产物内容查看器 — */
+		.artifact-kind-row { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 10px; }
+		.chip {
+			background: var(--surface-2); border: 1px solid var(--border); border-radius: var(--radius-pill);
+			color: var(--text-muted); font-size: var(--text-xs); padding: 4px 12px; cursor: pointer;
+			font-family: var(--font-mono);
+		}
+		.chip:hover { border-color: var(--border-strong); color: var(--text); }
+		.chip.active { border-color: var(--accent); color: var(--accent); }
+		.fact-block-line { margin-bottom: 8px; }
+		.diagram-host { display: flex; flex-direction: column; gap: 12px; margin-top: 8px; }
+		.diagram-holder { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 12px; overflow-x: auto; }
+		.diagram-holder svg { display: block; margin: 0 auto; max-width: 100%; }
+		.artifact-json { font-size: var(--text-xs); overflow-x: auto; max-height: 360px; }
 
 		/* — 接管 — */
 		.takeover { margin-top: 12px; border-top: 1px dashed var(--border); padding-top: 10px; }
@@ -570,6 +613,16 @@ class BaizeWorkflow extends LitElement {
 					${projection.readiness.checks.map(
 						(check) => html`<div>${check.passed ? "✓" : "✗"} ${check.name} — ${check.detail}</div>`,
 					)}
+				</div>
+
+				<h3>产物内容</h3>
+				<div data-testid="artifact-viewer">
+					<div class="artifact-kind-row">
+						${ARTIFACT_VIEW_KINDS.map(
+							(kind) => html`<button class="${kind === this.artifactView?.kind ? "chip active" : "chip"}" @click=${() => this.openArtifactView(kind)}>${kind}</button>`,
+						)}
+					</div>
+					${this.renderArtifactContent()}
 				</div>
 
 				<h3>决策与发现</h3>
@@ -1187,6 +1240,73 @@ class BaizeWorkflow extends LitElement {
 		</div>`;
 	}
 
+
+	private async openArtifactView(kind: ClientArtifactKind): Promise<void> {
+		if (!this.requirement) return;
+		this.artifactView = { kind, detail: null, error: null, loading: true };
+		try {
+			const detail = await getArtifactRevision(this.apiBase, this.requirement.id, kind);
+			this.artifactView = { kind, detail, error: null, loading: false };
+			await this.renderArtifactDiagrams();
+		} catch (error) {
+			this.artifactView = { kind, detail: null, error: error instanceof Error ? error.message : String(error), loading: false };
+		}
+	}
+
+	/** 内容面板：无 diagrams 显示 JSON 摘要；有则先把 mermaid 源渲染进 DOM 再由 updated 钩子异步画图。 */
+	private renderArtifactContent() {
+		if (!this.artifactView) return nothing;
+		const view = this.artifactView;
+		if (view.loading) return html`<div class="fact-block" data-testid="artifact-loading">加载中…</div>`;
+		if (view.error) return html`<div class="error" data-testid="artifact-error">${view.error}</div>`;
+		if (!view.detail) return nothing;
+		const diagrams = extractDiagrams(view.detail.content);
+		return html`
+			<div class="fact-block" data-testid="artifact-content">
+				<div class="fact-block-line">r${view.detail.revisionNo} · ${statusLabel(view.detail.status)} · ${view.detail.schemaRef}</div>
+				${diagrams.length > 0
+					? html`<div class="diagram-host" data-testid="artifact-diagrams">${diagrams.map((_, index) => html`<div data-diagram-id=${index} class="diagram-holder"></div>`)}</div>`
+					: html`<pre class="artifact-json" data-testid="artifact-json">${JSON.stringify(view.detail.content, null, 2)}</pre>`}
+			</div>
+		`;
+	}
+
+	/** mermaid 异步渲染：图源由 graphToMermaid 生成后渲染进宿主 div。 */
+	private async renderArtifactDiagrams(): Promise<void> {
+		const view = this.artifactView;
+		if (!view?.detail || view.loading || view.error) return;
+		const diagrams = extractDiagrams(view.detail.content);
+		if (diagrams.length === 0 || this.diagramRenderToken !== undefined) return;
+		const token = Symbol("diagram-render");
+		this.diagramRenderToken = token;
+		await this.updateComplete;
+		try {
+			for (const [index, diagram] of diagrams.entries()) {
+				if (!isGraphDiagram(diagram)) continue;
+				const source = graphToMermaid(view.kind, diagram);
+				if (source === null) continue;
+				const holder = this.renderRoot.querySelector(`[data-diagram-id="${index}"]`);
+				if (!holder) continue;
+				holder.textContent = "渲染中…";
+				const mermaid = (await import("mermaid")).default;
+				mermaid.initialize({ startOnLoad: false, theme: "dark", securityLevel: "loose" });
+				const { svg } = await mermaid.render(`mermaid-${view.kind}-${index}-${token.description}`, source);
+				if (this.diagramRenderToken !== token) return;
+				holder.innerHTML = svg;
+			}
+		} catch {
+			// 渲染失败不阻塞内容查看器——保留宿主内错误占位
+		} finally {
+			if (this.diagramRenderToken === token) this.diagramRenderToken = undefined;
+		}
+	}
+
+	override updated(changed: Map<string, unknown>): void {
+		super.updated(changed);
+		if (changed.has("artifactView")) {
+			void this.renderArtifactDiagrams();
+		}
+	}
 
 	private renderWorkflowView() {
 		if (!this.projection) return html`<div data-testid="loading">加载中…</div>`;

@@ -2413,6 +2413,23 @@ deleteWorkspace(workspaceId: number): boolean {
 		};
 	}
 
+	/** 当前产物 revision 的只读详情（含内容快照），供 SPA 产物内容查看器消费。 */
+	getArtifactRevisionDetail(requirementId: number, kind: string): ArtifactRevisionDetailRecord | undefined {
+		const revision = this.database
+			.prepare("select ar.id, ar.artifact_id, ar.revision_no, ar.status, ar.schema_ref, ar.content_document_id, ar.content_digest, d.content from artifact_revisions ar join artifacts a on a.id = ar.artifact_id join snapshot_documents d on d.id = ar.content_document_id where a.requirement_id = ? and a.kind = ? order by ar.id desc limit 1")
+			.get(requirementId, kind) as { id: number; artifact_id: number; revision_no: number; status: string; schema_ref: string; content_document_id: number; content_digest: string; content: string } | undefined;
+		if (!revision) return undefined;
+		return {
+			revisionId: revision.id,
+			artifactId: revision.artifact_id,
+			revisionNo: revision.revision_no,
+			status: revision.status,
+			schemaRef: revision.schema_ref,
+			contentDigest: revision.content_digest,
+			content: parseJson<unknown>(revision.content),
+		};
+	}
+
 	getBoundedProjection(workflowId: number): BoundedWorkflowProjection | undefined {
 		const workflow = this.database
 			.prepare("select w.id, w.state, w.version, w.last_event_seq, w.current_plan_revision_id, w.current_approval_packet_id, w.current_failure_code, w.policy_bundle_document_id, w.requirement_id, w.model_roles from workflows w where w.id = ?")
@@ -3275,6 +3292,16 @@ export interface RequirementDetailRecord {
 		contentDigest: string;
 		content: RequirementBaseline;
 	};
+}
+
+export interface ArtifactRevisionDetailRecord {
+	revisionId: number;
+	artifactId: number;
+	revisionNo: number;
+	status: string;
+	schemaRef: string;
+	contentDigest: string;
+	content: unknown;
 }
 
 export interface BoundedWorkflowProjection {
