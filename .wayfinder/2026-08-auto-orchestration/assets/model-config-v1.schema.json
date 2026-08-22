@@ -135,8 +135,48 @@
     "roleAssignmentMap": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["orchestrator", "analyst", "architect", "critic"],
+      "required": [
+        "analysis-analyst",
+        "scenario-analyst",
+        "usecase-analyst",
+        "function-analyst",
+        "design-architect",
+        "architecture-architect",
+        "data-architect",
+        "api-architect",
+        "critic",
+        "orchestrator",
+        "analyst",
+        "architect"
+      ],
       "properties": {
+        "analysis-analyst": {
+          "$ref": "#/$defs/modelRef"
+        },
+        "scenario-analyst": {
+          "$ref": "#/$defs/modelRef"
+        },
+        "usecase-analyst": {
+          "$ref": "#/$defs/modelRef"
+        },
+        "function-analyst": {
+          "$ref": "#/$defs/modelRef"
+        },
+        "design-architect": {
+          "$ref": "#/$defs/modelRef"
+        },
+        "architecture-architect": {
+          "$ref": "#/$defs/modelRef"
+        },
+        "data-architect": {
+          "$ref": "#/$defs/modelRef"
+        },
+        "api-architect": {
+          "$ref": "#/$defs/modelRef"
+        },
+        "critic": {
+          "$ref": "#/$defs/modelRef"
+        },
         "orchestrator": {
           "$ref": "#/$defs/modelRef"
         },
@@ -144,9 +184,6 @@
           "$ref": "#/$defs/modelRef"
         },
         "architect": {
-          "$ref": "#/$defs/modelRef"
-        },
-        "critic": {
           "$ref": "#/$defs/modelRef"
         }
       }

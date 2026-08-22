@@ -1,6 +1,21 @@
 export type TaskKind = "analyze" | "design" | "review" | "rework" | "verify";
 
-export type TaskRole = "analyst" | "architect" | "critic";
+/** 生产角色（8，#15 决议：每生产环节一角色）+ critic。旧 analyst/architect 过渡保留（expand，#25 移除）。 */
+export type TaskRole =
+	| ProductionRole
+	| "critic"
+	| "analyst"
+	| "architect";
+
+export type ProductionRole =
+	| "analysis-analyst"
+	| "scenario-analyst"
+	| "usecase-analyst"
+	| "function-analyst"
+	| "design-architect"
+	| "architecture-architect"
+	| "data-architect"
+	| "api-architect";
 
 export type ArtifactKind =
 	| "requirement"
@@ -89,10 +104,22 @@ export interface PlanProposal {
 	rationale: string;
 }
 
+/** 写权按家族分域（#15 决议：写权不分家，仅模型分）。-analyst 系写分析类、-architect 系写架构类。旧角色过渡保留映射。 */
 export const ARTIFACT_OWNERSHIP: Readonly<Record<TaskRole, readonly WritableArtifactKind[]>> = {
+	// 分析系（8 个生产角色中 4 个 analysis/scenario/usecase/function-analyst）
+	"analysis-analyst": ["analysis", "scenario", "usecase", "function"],
+	"scenario-analyst": ["analysis", "scenario", "usecase", "function"],
+	"usecase-analyst": ["analysis", "scenario", "usecase", "function"],
+	"function-analyst": ["analysis", "scenario", "usecase", "function"],
+	// 架构系（design/architecture/data/api-architect）
+	"design-architect": ["design", "architecture", "data", "api"],
+	"architecture-architect": ["design", "architecture", "data", "api"],
+	"data-architect": ["design", "architecture", "data", "api"],
+	"api-architect": ["design", "architecture", "data", "api"],
+	// critic 与旧角色（过渡保留）
+	critic: [],
 	analyst: ["analysis", "scenario", "usecase", "function"],
 	architect: ["design", "architecture", "data", "api"],
-	critic: [],
 };
 
 export const PLAN_TASK_LIMITS = {

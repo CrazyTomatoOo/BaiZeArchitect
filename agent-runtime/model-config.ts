@@ -22,6 +22,7 @@ import { compileWorkflowSchema } from "./workflow/contracts/schema.js";
 import type {
 	ModelRef,
 	ModelRoles,
+	ModelRolesOverride,
 	WorkflowAgentRole,
 } from "./workflow/model-driver.js";
 
@@ -31,10 +32,19 @@ const QWEN_TOKEN_PLAN_CN_BASE =
 	"https://token-plan.cn-beijing.maas.aliyuncs.com/compatible-mode/v1";
 
 const WORKFLOW_AGENT_ROLES: readonly WorkflowAgentRole[] = [
+	"analysis-analyst",
+	"scenario-analyst",
+	"usecase-analyst",
+	"function-analyst",
+	"design-architect",
+	"architecture-architect",
+	"data-architect",
+	"api-architect",
+	"critic",
+	// 过渡保留（#17 expand 阶段）：orchestrator 在 #19 拆除规划调用面、旧角色在 #25 移除
 	"orchestrator",
 	"analyst",
 	"architect",
-	"critic",
 ];
 
 /** pi-ai 惰性 API 库: api id -> dist/api 模块与工厂导出。配置声明的模型 api 必须是其一（boot 校验）。 */
@@ -93,11 +103,20 @@ const qwenTokenPlanCnModels = [
 	},
 ] as unknown as readonly Model<Api>[];
 
+/** 部署默认档：全部角色默认同一模型（#15 决议：默认同模型，按需覆盖）。 */
 const builtinDefaultRoles: ModelRoles = {
+	"analysis-analyst": { provider: "qwen-token-plan-cn", modelId: "glm-5.2" },
+	"scenario-analyst": { provider: "qwen-token-plan-cn", modelId: "glm-5.2" },
+	"usecase-analyst": { provider: "qwen-token-plan-cn", modelId: "glm-5.2" },
+	"function-analyst": { provider: "qwen-token-plan-cn", modelId: "glm-5.2" },
+	"design-architect": { provider: "qwen-token-plan-cn", modelId: "glm-5.2" },
+	"architecture-architect": { provider: "qwen-token-plan-cn", modelId: "glm-5.2" },
+	"data-architect": { provider: "qwen-token-plan-cn", modelId: "glm-5.2" },
+	"api-architect": { provider: "qwen-token-plan-cn", modelId: "glm-5.2" },
+	critic: { provider: "qwen-token-plan-cn", modelId: "glm-5.2" },
 	orchestrator: { provider: "qwen-token-plan-cn", modelId: "glm-5.2" },
 	analyst: { provider: "qwen-token-plan-cn", modelId: "glm-5.2" },
 	architect: { provider: "qwen-token-plan-cn", modelId: "glm-5.2" },
-	critic: { provider: "qwen-token-plan-cn", modelId: "glm-5.2" },
 };
 
 const MODEL_CONFIG_PATH =
@@ -352,7 +371,7 @@ export function currentModelConfig(): ModelConfigV1 {
 
 export function resolveRoleModel(
 	role: WorkflowAgentRole,
-	modelRolesOverride?: ModelRoles,
+	modelRolesOverride?: ModelRolesOverride,
 ): Model<Api> {
 	const modelRef = modelRolesOverride?.[role] ?? activeConfig.defaultRoles[role];
 	if (!modelRef) {
@@ -442,18 +461,29 @@ function validateRoleEntry(
 	return undefined;
 }
 
+/**
+ * per-requirement modelRoles 部分覆盖校验（#15 决议）：任意角色子集 + 每条目 provider/model 于 catalog 成员；
+ * 未传角色回落部署默认档。空对象/undefined 视为合法（全回落默认）。未知角色键视为非法。
+ */
 export function validateModelRoles(roles: unknown): ValidationProblem[] {
 	const problems: ValidationProblem[] = [];
-	if (typeof roles !== "object" || roles === null || Array.isArray(roles)) {
+	if (roles === undefined || roles === null) {
+		return problems;
+	}
+	if (typeof roles !== "object" || Array.isArray(roles)) {
 		for (const role of WORKFLOW_AGENT_ROLES) {
 			problems.push({ role, provider: "", modelId: "", reason: "role_missing" });
 		}
 		return problems;
 	}
 	const rolesRecord = roles as Record<string, unknown>;
-	for (const role of WORKFLOW_AGENT_ROLES) {
-		const entry = role in rolesRecord ? rolesRecord[role] : undefined;
-		const problem = validateRoleEntry(role, entry);
+	const knownRoles = new Set<string>(WORKFLOW_AGENT_ROLES);
+	for (const role of Object.keys(rolesRecord)) {
+		if (!knownRoles.has(role)) {
+			problems.push({ role, provider: "", modelId: "", reason: "role_missing" });
+			continue;
+		}
+		const problem = validateRoleEntry(role, rolesRecord[role]);
 		if (problem) problems.push(problem);
 	}
 	return problems;

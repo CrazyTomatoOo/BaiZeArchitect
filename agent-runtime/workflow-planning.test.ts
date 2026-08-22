@@ -264,11 +264,9 @@ test("plan_adopted event is emitted with correct entity", async () => {
 test("planWorkflow passes workflow modelRoles to the ModelDriver", async () => {
 	await withPlanningRuntime(async ({ runtime }) => {
 		const workspaceId = runtime.createWorkspace({ repoPath: "/tmp/repo", name: "Repo" });
+		// 部分覆盖（#15 决议）：子集合法；规划时 Orchestrator 虽不在子集中也由部署默认回落解析
 		const modelRoles = {
-			orchestrator: { provider: "qwen-token-plan-cn", modelId: "qwen-max" },
-			analyst: { provider: "qwen-token-plan-cn", modelId: "glm-5.2" },
-			architect: { provider: "qwen-token-plan-cn", modelId: "glm-5.2" },
-			critic: { provider: "qwen-token-plan-cn", modelId: "glm-5.2" },
+			"analysis-analyst": { provider: "qwen-token-plan-cn", modelId: "qwen-max" },
 		};
 		const created = runtime.createRequirement({ workspaceId, baseline: BASELINE, modelRoles });
 		runtime.executeCommand({

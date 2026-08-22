@@ -31,6 +31,54 @@
     "maxWriterTasksPerKeyPerPlanRevision": 1,
     "duplicateWriteKeyError": "plan_write_set_conflict",
     "artifactOwnerPolicies": {
+      "analysis-analyst": [
+        "analysis",
+        "scenario",
+        "usecase",
+        "function"
+      ],
+      "scenario-analyst": [
+        "analysis",
+        "scenario",
+        "usecase",
+        "function"
+      ],
+      "usecase-analyst": [
+        "analysis",
+        "scenario",
+        "usecase",
+        "function"
+      ],
+      "function-analyst": [
+        "analysis",
+        "scenario",
+        "usecase",
+        "function"
+      ],
+      "design-architect": [
+        "design",
+        "architecture",
+        "data",
+        "api"
+      ],
+      "architecture-architect": [
+        "design",
+        "architecture",
+        "data",
+        "api"
+      ],
+      "data-architect": [
+        "design",
+        "architecture",
+        "data",
+        "api"
+      ],
+      "api-architect": [
+        "design",
+        "architecture",
+        "data",
+        "api"
+      ],
       "analyst": [
         "analysis",
         "scenario",

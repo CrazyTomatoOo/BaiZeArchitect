@@ -131,11 +131,10 @@ test("creates a Requirement with its complete pending governance projection atom
 test("persists per-workflow modelRoles and exposes them in projections and the created event", async () => {
 	await withRuntime(async ({ runtime }) => {
 		const workspaceId = runtime.createWorkspace({ repoPath: "/tmp/repo", name: "Repo" });
+		// 部分覆盖（#15 决议）：任意角色子集，未传回落部署默认
 		const modelRoles = {
-			orchestrator: { provider: "qwen-token-plan-cn", modelId: "qwen-max" },
-			analyst: { provider: "qwen-token-plan-cn", modelId: "glm-5.2" },
-			architect: { provider: "qwen-token-plan-cn", modelId: "glm-5.2" },
-			critic: { provider: "qwen-token-plan-cn", modelId: "glm-5.2" },
+			"analysis-analyst": { provider: "qwen-token-plan-cn", modelId: "qwen-max" },
+			"scenario-analyst": { provider: "qwen-token-plan-cn", modelId: "glm-5.2" },
 		};
 		const created = runtime.createRequirement({ workspaceId, baseline: BASELINE, modelRoles });
 
@@ -394,7 +393,7 @@ test("startup refuses an unknown newer Workflow schema migration", async () => {
 	try {
 		await assert.rejects(
 			openHeadlessWorkflowRuntime(runtimeOptions(databasePath)),
-			/Workflow database migration 99 is newer than supported version 14/,
+			/Workflow database migration 99 is newer than supported version 15/,
 		);
 	} finally {
 		await rm(directory, { recursive: true, force: true });

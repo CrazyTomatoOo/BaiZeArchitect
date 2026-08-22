@@ -6,7 +6,7 @@ import { WORKFLOW_COMMAND_TYPES, type WorkflowCommandType } from "./command-type
 import { loadWorkflowContracts } from "./contracts/loader.js";
 import { compileWorkflowSchema, type WorkflowSchemaValidator } from "./contracts/schema.js";
 import type { DoctorReport } from "./workflow-doctor.js";
-import type { ModelDriver, ModelRoles } from "./model-driver.js";
+import type { ModelDriver, ModelRoles, ModelRolesOverride } from "./model-driver.js";
 import { validatePlanProposal, type PlanValidationContext } from "./plan-validator.js";
 import type { TaskRole } from "./plan-types.js";
 import type { PlanProposal } from "./plan-types.js";
@@ -50,7 +50,7 @@ export interface HeadlessWorkflowRuntime {
 	workspaceExists(workspaceId: number): boolean;
 	listWorkspaces(): readonly WorkspaceSummary[];
 	deleteWorkspace(workspaceId: number): boolean;
-	createRequirement(input: { workspaceId: number; baseline: RequirementBaseline; modelRoles?: ModelRoles }): {
+	createRequirement(input: { workspaceId: number; baseline: RequirementBaseline; modelRoles?: ModelRolesOverride }): {
 		requirementId: number;
 		workflowId: number;
 		workflowState: "pending";

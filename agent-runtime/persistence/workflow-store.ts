@@ -23,6 +23,7 @@ import { READ_MODEL_GOVERNANCE_MIGRATION } from "./migrations/0011-read-model-go
 import { RUN_EVENT_STREAM_MIGRATION } from "./migrations/0012-run-event-stream.js";
 import { ACTOR_KIND_MIGRATION } from "./migrations/0013-actor-kind.js";
 import { MODEL_ROLES_MIGRATION } from "./migrations/0014-model-roles.js";
+import { PRODUCTION_ROLE_KIND_MIGRATION } from "./migrations/0015-production-role-kind.js";
 import type { ReusableAssetKind } from "./reusable-asset-kind.js";
 import { parseJson } from "./json.js";
 import { AssetStore } from "./asset-store.js";
@@ -42,9 +43,9 @@ import { type WorkflowCommandType } from "../workflow/command-types.js";
 import { ARTIFACT_OWNERSHIP, type InputBinding, type TaskOutputInput } from "../workflow/plan-types.js";
 import type { RoleResult, ContextManifest, RoleContract, BeginAttemptResult, CompleteAttemptResult, TraceLinkProposal, CriticReport, FindingProposal, FindingSeverity } from "../workflow/role-result.js";
 import { deriveRequiredArtifactSet, type ImpactProfile, type RequiredArtifactSet } from "../workflow/impact-profile.js";
-import type { ModelRoles } from "../workflow/model-driver.js";
+import type { ModelRolesOverride } from "../workflow/model-driver.js";
 
-const MIGRATIONS = [WORKFLOW_GOVERNANCE_MIGRATION, COMMAND_GOVERNANCE_MIGRATION, RECOVERY_GOVERNANCE_MIGRATION, PLANNING_GOVERNANCE_MIGRATION, ATTEMPT_EXECUTION_MIGRATION, DEPENDENT_TASK_SAFETY_MIGRATION, REQUIRED_ARTIFACTS_AND_EVIDENCE_MIGRATION, CRITIC_GOVERNANCE_MIGRATION, DECISIONS_AND_READINESS_MIGRATION, HUMAN_GOVERNANCE_MIGRATION, READ_MODEL_GOVERNANCE_MIGRATION, RUN_EVENT_STREAM_MIGRATION, ACTOR_KIND_MIGRATION, MODEL_ROLES_MIGRATION] as const;
+const MIGRATIONS = [WORKFLOW_GOVERNANCE_MIGRATION, COMMAND_GOVERNANCE_MIGRATION, RECOVERY_GOVERNANCE_MIGRATION, PLANNING_GOVERNANCE_MIGRATION, ATTEMPT_EXECUTION_MIGRATION, DEPENDENT_TASK_SAFETY_MIGRATION, REQUIRED_ARTIFACTS_AND_EVIDENCE_MIGRATION, CRITIC_GOVERNANCE_MIGRATION, DECISIONS_AND_READINESS_MIGRATION, HUMAN_GOVERNANCE_MIGRATION, READ_MODEL_GOVERNANCE_MIGRATION, RUN_EVENT_STREAM_MIGRATION, ACTOR_KIND_MIGRATION, MODEL_ROLES_MIGRATION, PRODUCTION_ROLE_KIND_MIGRATION] as const;
 export type CommandOutcome =
 	| "accepted"
 	| "capability_denied"
@@ -214,7 +215,7 @@ export interface PolicyBundleDocument {
 export interface CreateRequirementInput {
 	workspaceId: number;
 	baseline: RequirementBaseline;
-	modelRoles?: ModelRoles;
+	modelRoles?: ModelRolesOverride;
 }
 
 export interface CreationResult {
@@ -267,7 +268,7 @@ export interface WorkflowProjection {
 		currentPlanRevisionId: number | null;
 		currentApprovalPacketId: number | null;
 		currentFailureCode: string | null;
-		modelRoles?: ModelRoles;
+		modelRoles?: ModelRolesOverride;
 		policyBundle: SnapshotDocument & { content: PolicyBundleDocument; documentId: number };
 	};
 	events: Array<{
@@ -533,7 +534,7 @@ deleteWorkspace(workspaceId: number): boolean {
 				currentPlanRevisionId: row.current_plan_revision_id as number | null,
 				currentApprovalPacketId: row.current_approval_packet_id as number | null,
 				currentFailureCode: row.current_failure_code as string | null,
-				modelRoles: row.model_roles === null ? undefined : parseJson<ModelRoles>(row.model_roles as string),
+				modelRoles: row.model_roles === null ? undefined : parseJson<ModelRolesOverride>(row.model_roles as string),
 				policyBundle: {
 					documentId: row.policy_document_id as number,
 					id: row.policy_document_id as number,
@@ -2385,7 +2386,7 @@ deleteWorkspace(workspaceId: number): boolean {
 			version: row.version,
 			workflowId: row.workflow_id,
 			designPackageId: row.design_package_id,
-			modelRoles: row.model_roles === null ? undefined : parseJson<ModelRoles>(row.model_roles),
+			modelRoles: row.model_roles === null ? undefined : parseJson<ModelRolesOverride>(row.model_roles),
 			currentRevision: {
 				id: revision.id,
 				artifactId: revision.artifact_id,
@@ -2465,7 +2466,7 @@ deleteWorkspace(workspaceId: number): boolean {
 				lastEventSeq: workflow.last_event_seq,
 				currentFailureCode: workflow.current_failure_code,
 				policyBundle: { documentId: policyBundle.id, digest: policyBundle.digest },
-				modelRoles: workflow.model_roles === null ? undefined : parseJson<ModelRoles>(workflow.model_roles),
+				modelRoles: workflow.model_roles === null ? undefined : parseJson<ModelRolesOverride>(workflow.model_roles),
 			},
 			requirement: {
 				id: requirement.id,
@@ -3250,7 +3251,7 @@ export interface RequirementDetailRecord {
 	version: number;
 	workflowId: number;
 	designPackageId: number | null;
-	modelRoles?: ModelRoles;
+	modelRoles?: ModelRolesOverride;
 	currentRevision: {
 		id: number;
 		artifactId: number;
@@ -3271,7 +3272,7 @@ export interface BoundedWorkflowProjection {
 		lastEventSeq: number;
 		currentFailureCode: string | null;
 		policyBundle: { documentId: number; digest: string };
-		modelRoles?: ModelRoles;
+		modelRoles?: ModelRolesOverride;
 	};
 	requirement: {
 		id: number;

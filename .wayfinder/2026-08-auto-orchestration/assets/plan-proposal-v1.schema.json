@@ -237,7 +237,20 @@
           "enum": ["analyze", "design", "review", "rework", "verify"]
         },
         "role": {
-          "enum": ["analyst", "architect", "critic"]
+          "enum": [
+            "analysis-analyst",
+            "scenario-analyst",
+            "usecase-analyst",
+            "function-analyst",
+            "design-architect",
+            "architecture-architect",
+            "data-architect",
+            "api-architect",
+            "critic",
+            "orchestrator",
+            "analyst",
+            "architect"
+          ]
         },
         "objective": {
           "type": "string",
@@ -290,7 +303,13 @@
           "then": {
             "properties": {
               "role": {
-                "const": "analyst"
+                "enum": [
+                  "analysis-analyst",
+                  "scenario-analyst",
+                  "usecase-analyst",
+                  "function-analyst",
+                  "analyst"
+                ]
               }
             }
           }
@@ -307,7 +326,13 @@
           "then": {
             "properties": {
               "role": {
-                "const": "architect"
+                "enum": [
+                  "design-architect",
+                  "architecture-architect",
+                  "data-architect",
+                  "api-architect",
+                  "architect"
+                ]
               }
             }
           }
@@ -341,7 +366,18 @@
           "then": {
             "properties": {
               "role": {
-                "enum": ["analyst", "architect"]
+                "enum": [
+                  "analysis-analyst",
+                  "scenario-analyst",
+                  "usecase-analyst",
+                  "function-analyst",
+                  "design-architect",
+                  "architecture-architect",
+                  "data-architect",
+                  "api-architect",
+                  "analyst",
+                  "architect"
+                ]
               }
             }
           }
