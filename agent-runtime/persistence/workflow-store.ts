@@ -325,34 +325,47 @@ this.database.pragma("busy_timeout = 5000");
 		const existing = this.database
 			.prepare("select name from sqlite_master where type = 'table' and name = 'schema_migrations'")
 			.get();
-		if (!existing) {
-			const apply = this.database.transaction(() => {
-				for (const migration of MIGRATIONS) {
-					this.database.exec(migration.sql);
-					const digest = this.options.hashProvider.digest(migration.sql);
-					this.database
-						.prepare("insert into schema_migrations(version, name, checksum, applied_at) values (?, ?, ?, ?)")
-						.run(migration.version, migration.name, digest, this.options.clock.now().toISOString());
+		// 表重建迁移（0006/0010/0013/0015）需要 DROP 有 FK 子表引用的旧表；
+		// foreign_keys 是 connection 级 pragma，须在事务外关闭（事务内设置是 no-op），迁移事务后恢复。
+		// 迁移 SQL 内部声明的 REFERENCES 仍是 DDL 契约；关闭仅跳过重建期间的约束检查。
+		const fkWasOn = this.database.pragma("foreign_keys", { simple: true }) as boolean;
+		if (fkWasOn) {
+			this.database.pragma("foreign_keys = OFF");
+		}
+		try {
+			if (!existing) {
+				const apply = this.database.transaction(() => {
+					for (const migration of MIGRATIONS) {
+						this.database.exec(migration.sql);
+						const digest = this.options.hashProvider.digest(migration.sql);
+						this.database
+							.prepare("insert into schema_migrations(version, name, checksum, applied_at) values (?, ?, ?, ?)")
+							.run(migration.version, migration.name, digest, this.options.clock.now().toISOString());
+					}
+				}).immediate;
+				apply();
+				return;
+			}
+			const applied = this.database
+				.prepare("select version, name, checksum from schema_migrations order by version")
+				.all() as Array<{ version: number; name: string; checksum: string }>;
+			const maxKnown = MIGRATIONS[MIGRATIONS.length - 1].version;
+			const newer = applied.find((item) => item.version > maxKnown);
+			if (newer) {
+				throw new Error(
+					`Workflow database migration ${newer.version} is newer than supported version ${maxKnown}`,
+				);
+			}
+			for (const migration of MIGRATIONS) {
+				const row = applied.find((item) => item.version === migration.version);
+				const checksum = this.options.hashProvider.digest(migration.sql);
+				if (!row || row.name !== migration.name || row.checksum !== checksum) {
+					throw new Error(`Workflow migration ${migration.version} is missing or has a checksum mismatch`);
 				}
-			}).immediate;
-			apply();
-			return;
-		}
-		const applied = this.database
-			.prepare("select version, name, checksum from schema_migrations order by version")
-			.all() as Array<{ version: number; name: string; checksum: string }>;
-		const maxKnown = MIGRATIONS[MIGRATIONS.length - 1].version;
-		const newer = applied.find((item) => item.version > maxKnown);
-		if (newer) {
-			throw new Error(
-				`Workflow database migration ${newer.version} is newer than supported version ${maxKnown}`,
-			);
-		}
-		for (const migration of MIGRATIONS) {
-			const row = applied.find((item) => item.version === migration.version);
-			const checksum = this.options.hashProvider.digest(migration.sql);
-			if (!row || row.name !== migration.name || row.checksum !== checksum) {
-				throw new Error(`Workflow migration ${migration.version} is missing or has a checksum mismatch`);
+			}
+		} finally {
+			if (fkWasOn) {
+				this.database.pragma("foreign_keys = ON");
 			}
 		}
 	}

@@ -55,6 +55,42 @@ from runs;
 
 drop table runs;
 alter table runs_new rename to runs;
+
+-- 表重建连带 drop 了 0004/0005 定义的触发器，逐一重建以维持不可变契约
+create trigger task_content_immutable
+before update of workflow_id, plan_revision_id, key, kind, role, objective, depends_on_json, inputs_json, expected_artifact_effects_json, completion_policy_ref, max_attempts, created_at on tasks begin
+	select raise(abort, 'Task content is immutable');
+end;
+
+create trigger task_immutable_delete
+before delete on tasks begin
+	select raise(abort, 'Task is immutable');
+end;
+
+create trigger run_content_immutable
+before update of attempt_id, workflow_id, session_file, session_id, created_at on runs begin
+	select raise(abort, 'Run content is immutable');
+end;
+
+create trigger run_immutable_delete
+before delete on runs begin
+	select raise(abort, 'Run is immutable');
+end;
+
+create trigger run_result_document_valid
+before insert on runs
+when new.result_document_id is not null begin
+	select case when not exists (
+		select 1 from snapshot_documents document
+		where document.id = new.result_document_id
+		and document.kind = 'run_result'
+	) then raise(abort, 'Run result document is invalid') end;
+end;
+
+create trigger run_role_mode_immutable
+before update of attempt_id, workflow_id, session_file, session_id, model_ref, mode, role, created_at on runs begin
+	select raise(abort, 'Run content is immutable');
+end;
 `,
 	checksum: "production-role-kind-v1",
 } as const;
