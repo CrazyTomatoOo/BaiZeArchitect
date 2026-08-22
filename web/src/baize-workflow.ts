@@ -1,4 +1,5 @@
 import { LitElement, html, css, nothing } from "lit";
+import mermaid from "mermaid";
 import { sharedStyles } from "./baize-styles.js";
 
 import {
@@ -57,7 +58,8 @@ const ARTIFACT_VIEW_KINDS: readonly ClientArtifactKind[] = [
 /** 从产物内容提取可选 diagrams（#11 决议：内容内嵌结构化图 JSON）。 */
 function extractDiagrams(content: unknown): readonly unknown[] {
 	if (typeof content !== "object" || content === null) return [];
-	const diagrams = (content as { diagrams?: unknown }).diagrams;
+	if (!("diagrams" in content)) return [];
+	const diagrams = content.diagrams;
 	return Array.isArray(diagrams) ? diagrams : [];
 }
 
@@ -143,8 +145,8 @@ class BaizeWorkflow extends LitElement {
 
 	/** 打开的 gate 表单上下文:commandId 在表单生命周期内固定(重复提交幂等),reload 才换新。 */
 	private formContext: { key: string; commandId: string; workflowVersion: number } | null = null;
-	/** mermaid 异步渲染竞态令牌：切换 kind 时作废旧渲染。 */
-	private diagramRenderToken: symbol | undefined = undefined;
+	/** 产物内容查看器拉取/渲染序列号：切 kind 即递增，过期响应与渲染作废。 */
+	private artifactRequestSeq: number | undefined = undefined;
 	private unsubscribeEvents: (() => void) | null = null;
 	private unsubscribeRunEvents: (() => void) | null = null;
 	private runStreamId: number | null = null;
@@ -265,7 +267,7 @@ class BaizeWorkflow extends LitElement {
 		.fact-block { font-size: var(--text-xs); color: var(--text-muted); line-height: 1.7; word-break: break-all; }
 
 		/* — 产物内容查看器 — */
-		.artifact-kind-row { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 10px; }
+		.artifact-kind-row { display: flex; flex-wrap: wrap; gap: var(--space-2xs); margin-bottom: var(--space-sm); }
 		.chip {
 			background: var(--surface-2); border: 1px solid var(--border); border-radius: var(--radius-pill);
 			color: var(--text-muted); font-size: var(--text-xs); padding: 4px 12px; cursor: pointer;
@@ -273,9 +275,9 @@ class BaizeWorkflow extends LitElement {
 		}
 		.chip:hover { border-color: var(--border-strong); color: var(--text); }
 		.chip.active { border-color: var(--accent); color: var(--accent); }
-		.fact-block-line { margin-bottom: 8px; }
-		.diagram-host { display: flex; flex-direction: column; gap: 12px; margin-top: 8px; }
-		.diagram-holder { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 12px; overflow-x: auto; }
+		.fact-block-line { margin-bottom: var(--space-2xs); }
+		.diagram-host { display: flex; flex-direction: column; gap: var(--space-sm); margin-top: var(--space-2xs); }
+		.diagram-holder { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-card); padding: var(--space-sm); overflow-x: auto; }
 		.diagram-holder svg { display: block; margin: 0 auto; max-width: 100%; }
 		.artifact-json { font-size: var(--text-xs); overflow-x: auto; max-height: 360px; }
 
@@ -1243,12 +1245,17 @@ class BaizeWorkflow extends LitElement {
 
 	private async openArtifactView(kind: ClientArtifactKind): Promise<void> {
 		if (!this.requirement) return;
+		// 快速切换 kind 时作废进行中的拉取与渲染（Spec review #18：过期响应不得覆盖新选择）
+		const requestSeq = (this.artifactRequestSeq ?? 0) + 1;
+		this.artifactRequestSeq = requestSeq;
 		this.artifactView = { kind, detail: null, error: null, loading: true };
 		try {
 			const detail = await getArtifactRevision(this.apiBase, this.requirement.id, kind);
+			if (this.artifactRequestSeq !== requestSeq) return;
 			this.artifactView = { kind, detail, error: null, loading: false };
 			await this.renderArtifactDiagrams();
 		} catch (error) {
+			if (this.artifactRequestSeq !== requestSeq) return;
 			this.artifactView = { kind, detail: null, error: error instanceof Error ? error.message : String(error), loading: false };
 		}
 	}
@@ -1271,33 +1278,30 @@ class BaizeWorkflow extends LitElement {
 		`;
 	}
 
-	/** mermaid 异步渲染：图源由 graphToMermaid 生成后渲染进宿主 div。 */
+	/** mermaid 异步渲染：图源由 graphToMermaid 生成后渲染进宿主 div。渲染受 artifactRequestSeq 保护，切 kind 即作废。 */
 	private async renderArtifactDiagrams(): Promise<void> {
 		const view = this.artifactView;
 		if (!view?.detail || view.loading || view.error) return;
 		const diagrams = extractDiagrams(view.detail.content);
-		if (diagrams.length === 0 || this.diagramRenderToken !== undefined) return;
-		const token = Symbol("diagram-render");
-		this.diagramRenderToken = token;
+		if (diagrams.length === 0) return;
+		const requestSeq = this.artifactRequestSeq ?? 0;
 		await this.updateComplete;
 		try {
 			for (const [index, diagram] of diagrams.entries()) {
+				if (this.artifactRequestSeq !== requestSeq) return;
 				if (!isGraphDiagram(diagram)) continue;
 				const source = graphToMermaid(view.kind, diagram);
 				if (source === null) continue;
 				const holder = this.renderRoot.querySelector(`[data-diagram-id="${index}"]`);
 				if (!holder) continue;
 				holder.textContent = "渲染中…";
-				const mermaid = (await import("mermaid")).default;
-				mermaid.initialize({ startOnLoad: false, theme: "dark", securityLevel: "loose" });
-				const { svg } = await mermaid.render(`mermaid-${view.kind}-${index}-${token.description}`, source);
-				if (this.diagramRenderToken !== token) return;
+				mermaid.initialize({ startOnLoad: false, theme: "dark", securityLevel: "strict" });
+				const { svg } = await mermaid.render(`mermaid-${view.kind}-${index}-${requestSeq}`, source);
+				if (this.artifactRequestSeq !== requestSeq) return;
 				holder.innerHTML = svg;
 			}
 		} catch {
 			// 渲染失败不阻塞内容查看器——保留宿主内错误占位
-		} finally {
-			if (this.diagramRenderToken === token) this.diagramRenderToken = undefined;
 		}
 	}
 

@@ -50,29 +50,51 @@ export function isGraphDiagram(value: unknown): value is GraphDiagram {
 	return true;
 }
 
-/** mermaid 实体/节点名净化：括号与中文修饰词（原型实证 ER 实体会因括号/「可选」解析失败）。 */
+/**
+ * mermaid 实体/节点名净化（原型实证 ER 实体名括号/「可选」会解析失败）。
+ * 只删括号类字符与括号紧随的「可选」修饰词——绝不动正文里的独立「可」「选」字（如可用资源、选择器）。
+ */
 export function sanitizeMermaidName(value: string): string {
-	return value.replace(/[()（）「」【】可选]/g, "").replace(/\s+/g, "_");
+	return value
+		.replace(/[()（）「」【】]/g, "")
+		.replace(/\s*可选(?=\s|$)/g, "")
+		.replace(/\s+/g, "_");
+}
+
+/**
+ * mermaid 文本节点净化：引号/竖线/换行会破坏解析或注入 SVG；HTML 元字符（<>&）在 loose 模式下
+ * 会被 mermaid 当 HTML 渲染，实体化后成为字面文本，杜绝 operator SPA 注入面（Spec review #18）。
+ */
+export function sanitizeMermaidText(value: string): string {
+	return value
+		.replace(/&/g, "&amp;")
+		.replace(/</g, "&lt;")
+		.replace(/>/g, "&gt;")
+		.replace(/"/g, "&quot;")
+		.replace(/\|/g, "｜")
+		.replace(/[\r\n]+/g, " ");
 }
 
 function edgeLabel(edge: readonly [string, string, string?]): string {
-	return edge[2] === undefined ? "" : `|${edge[2]}|`;
+	return edge[2] === undefined ? "" : `|${sanitizeMermaidText(edge[2])}|`;
 }
 
 /** scenario/architecture 等 → flowchart（方向与图型由产物 kind 决定）。 */
 function graphToFlowchart(diagram: GraphDiagram, direction: "TD" | "LR"): string {
-	const nodes = diagram.nodes.map((node) => `  ${node.id}["${node.label}"]`).join("\n");
-	const edges = diagram.edges.map((edge) => `  ${edge[0]} -->${edgeLabel(edge)} ${edge[1]}`).join("\n");
+	const nodes = diagram.nodes
+		.map((node) => `  ${sanitizeMermaidText(node.id)}["${sanitizeMermaidText(node.label)}"]`)
+		.join("\n");
+	const edges = diagram.edges.map((edge) => `  ${sanitizeMermaidText(edge[0])} -->${edgeLabel(edge)} ${sanitizeMermaidText(edge[1])}`).join("\n");
 	return `flowchart ${direction}\n${nodes}\n${edges}`;
 }
 
 /** data 产物 → erDiagram（原型实证：实体名须净化，关系取 from/to + 标注）。 */
 function graphToEr(diagram: GraphDiagram): string {
 	const entities = diagram.nodes
-		.map((node) => `  ${sanitizeMermaidName(node.id)} {\n    string ${sanitizeMermaidName(node.label)}\n  }`)
+		.map((node) => `  ${sanitizeMermaidName(node.id)} {\n    string ${sanitizeMermaidText(sanitizeMermaidName(node.label))}\n  }`)
 		.join("\n");
 	const relationships = diagram.edges
-		.map((edge) => `  ${sanitizeMermaidName(edge[0])} ||--o{ ${sanitizeMermaidName(edge[1])} : "${edgeLabel(edge) ? edge[2] : ""}"`)
+		.map((edge) => `  ${sanitizeMermaidName(edge[0])} ||--o{ ${sanitizeMermaidName(edge[1])} : "${sanitizeMermaidText(edge[2] ?? "")}"`)
 		.join("\n");
 	return `erDiagram\n${entities}\n${relationships}`;
 }

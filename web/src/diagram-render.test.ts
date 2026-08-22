@@ -5,6 +5,7 @@ import {
 	graphToMermaid,
 	isGraphDiagram,
 	sanitizeMermaidName,
+	sanitizeMermaidText,
 	type GraphDiagram,
 } from "./diagram-render";
 
@@ -65,8 +66,9 @@ describe("graphToMermaid", () => {
 		};
 		const source = graphToMermaid("data", data);
 		expect(source).toContain("erDiagram");
-		expect(source).toContain("detail_ ");
+		expect(source).toContain("detail {");
 		expect(source).not.toContain("(");
+		expect(source).not.toContain("可选");
 		expect(source).toContain(': "1 — N"');
 	});
 
@@ -112,6 +114,21 @@ describe("sanitizeMermaidName", () => {
 
 	it("collapses whitespace to underscores", () => {
 		expect(sanitizeMermaidName("会员 账户")).toBe("会员_账户");
+	});
+
+	it("preserves standalone 可/选 characters in normal words", () => {
+		expect(sanitizeMermaidName("可用资源")).toBe("可用资源");
+		expect(sanitizeMermaidName("选择器")).toBe("选择器");
+		expect(sanitizeMermaidName("积分明细(可选)")).toBe("积分明细");
+		expect(sanitizeMermaidName("批量 可选")).toBe("批量");
+	});
+});
+
+describe("sanitizeMermaidText", () => {
+	it("escapes quotes, replaces pipe and collapses newlines", () => {
+		expect(sanitizeMermaidText('说"hi"')).toBe("说&quot;hi&quot;");
+		expect(sanitizeMermaidText("a|b")).toBe("a｜b");
+		expect(sanitizeMermaidText("line1\nline2")).toBe("line1 line2");
 	});
 });
 
