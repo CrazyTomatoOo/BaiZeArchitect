@@ -179,6 +179,7 @@ const COMMAND_TRANSITIONS: Record<WorkflowCommandType, readonly CommandTransitio
 	"revoke-approval": [
 		{ from: "running", to: "running", eventType: "approval_revoked" },
 		{ from: "waiting_for_human", to: "waiting_for_human", eventType: "approval_revoked" },
+		{ from: "paused", to: "paused", eventType: "approval_revoked" },
 		{ from: "archived", to: "archived", eventType: "approval_revoked" },
 	],
 	"approve-packet": [{ from: "ready_to_archive", to: "archived", eventType: "workflow_archived" }],
@@ -830,8 +831,13 @@ deleteWorkspace(workspaceId: number): boolean {
 			}
 			if (input.type === "approve-artifact") {
 				// 双闸前置校验（#13 决议）：环节尾 review 已完成（coverage 覆盖该 revision）且无 open critical/major finding
+				// coverage 必须来自已完成的本环节尾 review Task（kind=review role=critic）；verify 等其他 critic 任务不顶替
 				const covered = this.database
-					.prepare("select count(*) as count from critic_coverage_targets where workflow_id = ? and revision_id = ?")
+					.prepare(`select count(*) as count from critic_coverage_targets target
+						join task_attempts attempt on attempt.id = target.task_attempt_id
+						join tasks task on task.id = attempt.task_id
+						where target.workflow_id = ? and target.revision_id = ?
+						and task.kind = 'review' and task.role = 'critic' and task.status = 'completed' and attempt.status = 'succeeded'`)
 					.get(input.workflowId, revisionId) as { count: number };
 				const openFindings = this.database
 					.prepare("select count(*) as count from findings where workflow_id = ? and target_revision_id = ? and status = 'open' and severity in ('critical','major')")
@@ -888,11 +894,15 @@ deleteWorkspace(workspaceId: number): boolean {
 			if (!record || (record.record_type !== "packet_approval" && record.record_type !== "artifact_approval")) {
 				return this.persistRejection(input, timestamp, requestDigest, workflow, actorSnapshot.id, "business_rule_rejected", 422);
 			}
-			// 撤销 artifact_approval：产物 revision 回到 pending（环节不再可引用，返工路径 #21）
+			// 撤销 artifact_approval：产物 revision 回 pending（返工路径 #21）。幂等：重复撤销不再 reject；
+			// 防 stale：仅当该 revision 当前处于 approved 且本次撤销的正是当前 active approval 才回退——
+			// 若 revision 已被重新批准（新 approval record），旧 record revocation 只留痕不动状态。
 			if (record.record_type === "artifact_approval" && record.subject_type === "artifact_revision") {
-				const affected = this.database.prepare("update artifact_revisions set status = 'pending' where id = ? and status = 'approved'").run(record.subject_id);
-				if (affected.changes === 0) {
-					return this.persistRejection(input, timestamp, requestDigest, workflow, actorSnapshot.id, "business_rule_rejected", 422);
+				const current = this.database
+					.prepare("select ar.status as status, (select max(relevant.id) from approval_records relevant where relevant.workflow_id = ? and relevant.subject_type = 'artifact_revision' and relevant.subject_id = ar.id and relevant.record_type = 'artifact_approval') as latest_approval_id from artifact_revisions ar where ar.id = ?")
+					.get(input.workflowId, record.subject_id) as { status: string; latest_approval_id: number | null } | undefined;
+				if (current && current.status === "approved" && current.latest_approval_id === approvalRecordId) {
+					this.database.prepare("update artifact_revisions set status = 'pending' where id = ?").run(record.subject_id);
 				}
 			}
 			const reason = typeof input.payload?.reason === "string" ? input.payload.reason : null;
@@ -917,9 +927,15 @@ deleteWorkspace(workspaceId: number): boolean {
 			}
 			const content = parseJson<{ artifacts?: ReadonlyArray<{ revisionId: number; status: string }> }>(packet.content_json);
 			for (const artifact of content.artifacts ?? []) {
-				if (artifact.status === "pending") {
-					this.database.prepare("update artifact_revisions set status = 'approved' where id = ?").run(artifact.revisionId);
+				if (artifact.status !== "pending") continue;
+				// 逐环节门禁不可绕过：曾被撤销的 artifact_approval 不能经包审批重新批准
+				const revoked = this.database
+					.prepare("select count(*) as count from approval_records revocation where revocation.workflow_id = ? and revocation.record_type = 'approval_revocation' and revocation.subject_type = 'approval_record' and exists (select 1 from approval_records original where original.id = revocation.subject_id and original.record_type = 'artifact_approval' and original.subject_id = ?)")
+					.get(input.workflowId, artifact.revisionId) as { count: number };
+				if (revoked.count > 0) {
+					return this.persistRejection(input, timestamp, requestDigest, workflow, actorSnapshot.id, "business_rule_rejected", 422);
 				}
+				this.database.prepare("update artifact_revisions set status = 'approved' where id = ?").run(artifact.revisionId);
 			}
 			this.database
 				.prepare("update design_sessions set status = 'archived', archived_at = ?, updated_at = ? where requirement_id = ?")
@@ -958,7 +974,15 @@ deleteWorkspace(workspaceId: number): boolean {
 	this.database
 		.prepare("update workflows set state = ?, version = ?, consecutive_plan_revisions = 0, updated_at = ? where id = ?")
 		.run(toState, newVersion, timestamp, input.workflowId);
-		const seq = this.appendEvent(input.workflowId, transition.eventType, newVersion, "workflow", input.workflowId, newVersion, input.payload ?? {}, timestamp, actorSnapshot.id, input.commandId);
+		const eventPayload = input.type === "revoke-approval" && typeof input.payload?.approvalRecordId === "number"
+		? (() => {
+				const revoked = this.database
+					.prepare("select subject_type, subject_id from approval_records where id = ? and workflow_id = ?")
+					.get(input.payload.approvalRecordId as number, input.workflowId) as { subject_type: string; subject_id: number } | undefined;
+				return { ...(input.payload ?? {}), revokedSubjectType: revoked?.subject_type ?? null, revokedSubjectId: revoked?.subject_id ?? null };
+			})()
+		: (input.payload ?? {});
+	const seq = this.appendEvent(input.workflowId, transition.eventType, newVersion, "workflow", input.workflowId, newVersion, eventPayload, timestamp, actorSnapshot.id, input.commandId);
 		if (input.type !== "retry-recovery") {
 			this.database
 				.prepare("insert into outbox_jobs(workflow_id, event_seq, delivery_type, payload, created_at) values (?, ?, 'workflow_event', ?, ?)")
@@ -1571,7 +1595,8 @@ deleteWorkspace(workspaceId: number): boolean {
 				const isCritic = role === "critic";
 			const statusClause = isCritic
 				? "ar.status = 'pending'"
-				: "ar.status = 'approved' and exists (select 1 from approval_records approval where approval.subject_type = 'artifact_revision' and approval.subject_id = ar.id and approval.record_type = 'artifact_approval')";
+				: `ar.status = 'approved' and exists (select 1 from approval_records approval where approval.subject_type = 'artifact_revision' and approval.subject_id = ar.id and approval.record_type = 'artifact_approval')
+					and not exists (select 1 from findings open_finding where open_finding.workflow_id = ae.workflow_id and open_finding.target_revision_id = ar.id and open_finding.status = 'open' and open_finding.severity in ('critical','major'))`;
 			const revisions = this.database
 					.prepare(`select ar.id from artifact_revisions ar
 						join attempt_effects ae on ae.published_artifact_revision_id = ar.id
@@ -1973,6 +1998,13 @@ deleteWorkspace(workspaceId: number): boolean {
 		const isVerify = task.kind === "verify";
 
 		for (const target of report.coverageAttestation.reviewTargets) {
+			// 校验 coverage 目标属于本 workflow 的产物 revision（防止 critic 加持无关 revision 使 approve 门禁通过）
+			const owned = this.database
+				.prepare("select ar.id from artifact_revisions ar join artifacts a on a.id = ar.artifact_id join requirements r on r.id = a.requirement_id join workflows w on w.requirement_id = r.id where w.id = ? and ar.id = ? and a.kind = ?")
+				.get(workflowId, target.revisionId, target.artifactKind) as { id: number } | undefined;
+			if (!owned) {
+				return this.failAttemptRows(workflowId, attemptId, "coverage_target_not_owned", `Coverage target ${target.revisionId} (${target.artifactKind}) does not belong to this workflow`);
+			}
 			this.database
 				.prepare("insert into critic_coverage_targets(workflow_id, task_attempt_id, revision_id, artifact_kind, created_at) values (?, ?, ?, ?, ?)")
 				.run(workflowId, attemptId, target.revisionId, target.artifactKind, timestamp);

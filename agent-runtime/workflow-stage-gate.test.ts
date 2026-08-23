@@ -10,12 +10,12 @@ import {
 	createHashProvider,
 	createOutboxTransport,
 	type FixtureOperator,
-} from "./testing/deterministic-fixtures.js";
+} from "./testing/deterministic-fixtures.ts";
 import {
 	openHeadlessWorkflowRuntime,
 	type RequirementBaseline,
-} from "./workflow/headless-runtime.js";
-import type { RoleResult, ArtifactEffectProposal, CriticReport } from "./workflow/role-result.js";
+} from "./workflow/headless-runtime.ts";
+import type { RoleResult, ArtifactEffectProposal, CriticReport } from "./workflow/role-result.ts";
 
 /**
  * #20 逐环节双闸审核语义测试：
@@ -196,6 +196,94 @@ test("approve 前置：无 review coverage 或存在 open major finding 时拒�
 			payload: { artifactId: artifact.artifactId, revisionId: artifact.revisionId },
 		});
 		assert.equal(rejected.outcome, "business_rule_rejected");
+	});
+});
+
+test("被撤销的产物不能经包审批重新批准（逐环节门禁不可绕过）", async () => {
+	await withRuntime(async ({ runtime }) => {
+		const { workflowId } = await startAndPlan(runtime);
+		const begin = runtime.beginAttempt(workflowId);
+		assert.ok(begin.taskId > 0);
+		const projection = runtime.getWorkflowProjection(workflowId);
+		const reqRev = projection!.requirement.currentRevision.id;
+		const snapId = await bindSnapshot(runtime, workflowId);
+		const result = roleResult(workflowId, begin.attemptId, [effect("analysis", analysisContent(reqRev), snapId, reqRev)]);
+		runtime.completeAttempt(workflowId, begin.attemptId, result);
+		const review = runtime.beginAttempt(workflowId);
+		const artifact = runtime.getArtifactRevisionDetail(projection!.requirement.id, "analysis");
+		assert.ok(artifact);
+		const reviewResult: RoleResult = { schemaVersion: "role-result/v1", workflowId, attemptId: review.attemptId, effects: [], criticReport: criticReport([artifact.revisionId], workflowId, review.attemptId) };
+		runtime.completeAttempt(workflowId, review.attemptId, reviewResult);
+		const approve = runtime.executeCommand({
+			workflowId,
+			commandId: "cmd-approve-packet-guard",
+			expectedWorkflowVersion: runtime.getWorkflowProjection(workflowId)!.workflow.version,
+			type: "approve-artifact",
+			operator: OPERATOR,
+			payload: { artifactId: artifact.artifactId, revisionId: artifact.revisionId },
+		});
+		assert.equal(approve.outcome, "accepted");
+		const approvalRecords = runtime.getApprovalRecords(workflowId);
+		const artifactApproval = approvalRecords.find((r) => r.recordType === "artifact_approval");
+		assert.ok(artifactApproval);
+		const revoke = runtime.executeCommand({
+			workflowId,
+			commandId: "cmd-revoke-packet-guard",
+			expectedWorkflowVersion: runtime.getWorkflowProjection(workflowId)!.workflow.version,
+			type: "revoke-approval",
+			operator: OPERATOR,
+			payload: { approvalRecordId: artifactApproval.id, reason: "needs rework" },
+		});
+		assert.equal(revoke.outcome, "accepted");
+		const afterRevoke = runtime.getArtifactRevisionDetail(projection!.requirement.id, "analysis");
+		assert.ok(afterRevoke);
+		assert.equal(afterRevoke.status, "pending");
+		// 构造审批包（当前缺其余 7 类产物会 readiness 失败；这里验证 buildApprovalPacket 在 revoked 产物上将拒绝归档路径）
+		const built = runtime.buildApprovalPacket(workflowId);
+		assert.equal(built.ready, false, "被撤销产物后不应 ready");
+	});
+});
+
+test("有 open major finding 的产物即使有 coverage 也拒绝批准", async () => {
+	await withRuntime(async ({ runtime }) => {
+		const { workflowId } = await startAndPlan(runtime);
+		const begin = runtime.beginAttempt(workflowId);
+		assert.ok(begin.taskId > 0);
+		const projection = runtime.getWorkflowProjection(workflowId);
+		const reqRev = projection!.requirement.currentRevision.id;
+		const snapId = await bindSnapshot(runtime, workflowId);
+		const result = roleResult(workflowId, begin.attemptId, [effect("analysis", analysisContent(reqRev), snapId, reqRev)]);
+		runtime.completeAttempt(workflowId, begin.attemptId, result);
+		// review 完成（coverage 覆盖）但记录 open major finding
+		const review = runtime.beginAttempt(workflowId);
+		assert.ok(review.taskId > 0);
+		const artifact = runtime.getArtifactRevisionDetail(projection!.requirement.id, "analysis");
+		assert.ok(artifact);
+		const reviewResult: RoleResult = {
+			schemaVersion: "role-result/v1",
+			workflowId,
+			attemptId: review.attemptId,
+			effects: [],
+			criticReport: {
+				schemaVersion: "critic-report/v1",
+				workflowId,
+				attemptId: review.attemptId,
+				coverageAttestation: { complete: true, reviewTargets: [{ revisionId: artifact.revisionId, artifactKind: "analysis" }] },
+				findings: [{ fingerprint: "fp-major-1", severity: "major", summary: "Major defect", targetRevisionId: artifact.revisionId, targetArtifactKind: "analysis", sourceRef: "review" }],
+			},
+		};
+		const reviewDone = runtime.completeAttempt(workflowId, review.attemptId, reviewResult);
+		assert.equal(reviewDone.outcome, "published");
+		// coverage 已存在但有 open major finding → approve 仍被拒
+		const rejected = runtime.executeCommand({
+			workflowId,
+			commandId: "cmd-approve-with-major",
+			expectedWorkflowVersion: runtime.getWorkflowProjection(workflowId)!.workflow.version,
+			type: "approve-artifact",
+			operator: OPERATOR,
+			payload: { artifactId: artifact.artifactId, revisionId: artifact.revisionId },
+		});
+		assert.equal(rejected.outcome, "business_rule_rejected", "open major finding 应阻止批准");
 	});
 });
 

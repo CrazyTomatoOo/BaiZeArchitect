@@ -323,7 +323,12 @@ function approveStageArtifacts(
 			payload: { artifactId: target.artifactId, revisionId: target.revisionId },
 			operator: OPERATOR,
 		});
-		assert.equal(receipt.outcome, "accepted");
+		// 双闸门禁：#20 —— 存在 open critical/major finding 时 approve 被拒是预期行为
+		// （findings 场景 fixture 依赖此路径：有未处置发现的产物保持 pending，令 disposed_findings 检查失败）
+		assert.ok(
+			receipt.outcome === "accepted" || receipt.outcome === "business_rule_rejected",
+			`approve-artifact for revision ${target.revisionId} unexpected outcome: ${receipt.outcome}`,
+		);
 	}
 }
 
