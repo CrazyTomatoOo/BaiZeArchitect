@@ -293,6 +293,40 @@ function getRevisionId(databasePath: string, kind: string): number {
 	}
 }
 
+function approveStageArtifacts(
+	runtime: Runtime,
+	workflowId: number,
+	databasePath: string,
+	kinds: readonly string[],
+): void {
+	const db = new Database(databasePath, { readonly: true });
+	const targets: Array<{ artifactId: number; revisionId: number }> = [];
+	try {
+		for (const kind of kinds) {
+			const row = db
+				.prepare("select a.id as artifactId, ar.id as revisionId from artifact_revisions ar join artifacts a on a.id = ar.artifact_id where a.kind = ? order by ar.id desc limit 1")
+				.get(kind) as { artifactId: number; revisionId: number } | undefined;
+			assert.ok(row, `${kind} revision should exist`);
+			targets.push(row);
+		}
+	} finally {
+		db.close();
+	}
+	for (const target of targets) {
+		const projection = runtime.getWorkflowProjection(workflowId);
+		assert.ok(projection, "workflow projection should exist");
+		const receipt = runtime.executeCommand({
+			workflowId,
+			commandId: `cmd-approve-artifact-${target.revisionId}`,
+			expectedWorkflowVersion: projection.workflow.version,
+			type: "approve-artifact",
+			payload: { artifactId: target.artifactId, revisionId: target.revisionId },
+			operator: OPERATOR,
+		});
+		assert.equal(receipt.outcome, "accepted");
+	}
+}
+
 interface FindingScript {
 	fingerprint: string;
 	severity: "critical" | "major" | "minor" | "info";
@@ -404,17 +438,28 @@ async function createFullyReviewedWorkflow(
 	await adoptTemplatePlan(runtime, workflowId);
 	executeTemplateStage(runtime, workflowId, TEMPLATE_STAGES[0]!, { decisions: options?.decisions });
 	executeCriticTask(runtime, databasePath, workflowId, "review-analysis", { coverKinds: ["analysis"] });
+	approveStageArtifacts(runtime, workflowId, databasePath, ["analysis"]);
 	executeTemplateStage(runtime, workflowId, TEMPLATE_STAGES[1]!);
 	executeCriticTask(runtime, databasePath, workflowId, "review-scenario", { coverKinds: ["scenario"] });
+	approveStageArtifacts(runtime, workflowId, databasePath, ["scenario"]);
 	executeTemplateStage(runtime, workflowId, TEMPLATE_STAGES[2]!);
 	executeCriticTask(runtime, databasePath, workflowId, "review-usecase", { coverKinds: ["usecase"] });
+	approveStageArtifacts(runtime, workflowId, databasePath, ["usecase"]);
 	executeTemplateStage(runtime, workflowId, TEMPLATE_STAGES[3]!);
 	executeCriticTask(runtime, databasePath, workflowId, "review-function", { coverKinds: ["function"] });
+	approveStageArtifacts(runtime, workflowId, databasePath, ["function"]);
 	executeTemplateStage(runtime, workflowId, TEMPLATE_STAGES[4]!);
+	const designCoverKinds = options?.coverKinds ?? ["design", "architecture", "data", "api"];
 	executeCriticTask(runtime, databasePath, workflowId, "review-design", {
-		coverKinds: options?.coverKinds ?? ["design", "architecture", "data", "api"],
+		coverKinds: designCoverKinds,
 		findings: options?.findings,
 	});
+	approveStageArtifacts(
+		runtime,
+		workflowId,
+		databasePath,
+		TEMPLATE_STAGES[4]!.kinds.filter((kind) => designCoverKinds.includes(kind)),
+	);
 	return workflowId;
 }
 

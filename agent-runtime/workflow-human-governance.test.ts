@@ -282,6 +282,24 @@ function getArtifactId(databasePath: string, kind: string): number {
 	}
 }
 
+let approveCommandSeq = 0;
+
+/** #20 双闸：环节尾 review 完成后，人工 approve 该环节产物 revision，下一环节才可引用。 */
+function approveArtifact(runtime: Runtime, databasePath: string, workflowId: number, kind: string): void {
+	approveCommandSeq += 1;
+	const projection = runtime.getWorkflowProjection(workflowId);
+	assert.ok(projection);
+	const receipt = runtime.executeCommand({
+		workflowId,
+		commandId: `cmd-approve-${kind}-${approveCommandSeq}`,
+		expectedWorkflowVersion: projection.workflow.version,
+		type: "approve-artifact",
+		operator: OPERATOR,
+		payload: { artifactId: getArtifactId(databasePath, kind), revisionId: getRevisionId(databasePath, kind) },
+	});
+	assert.equal(receipt.outcome, "accepted");
+}
+
 function executeCriticTask(
 	runtime: Runtime,
 	databasePath: string,
@@ -310,14 +328,21 @@ async function createReadyWorkflow(runtime: Runtime, databasePath: string): Prom
 	await adoptPlan(runtime, workflowId);
 	executeAnalystTask(runtime, workflowId);
 	executeCriticTask(runtime, databasePath, workflowId, ["requirement", "analysis"]);
+	approveArtifact(runtime, databasePath, workflowId, "analysis");
 	executeScenarioTask(runtime, workflowId);
 	executeCriticTask(runtime, databasePath, workflowId, ["scenario"]);
+	approveArtifact(runtime, databasePath, workflowId, "scenario");
 	executeUsecaseTask(runtime, workflowId);
 	executeCriticTask(runtime, databasePath, workflowId, ["usecase"]);
+	approveArtifact(runtime, databasePath, workflowId, "usecase");
 	executeFunctionTask(runtime, workflowId);
 	executeCriticTask(runtime, databasePath, workflowId, ["function"]);
+	approveArtifact(runtime, databasePath, workflowId, "function");
 	executeArchitectTask(runtime, workflowId);
 	executeCriticTask(runtime, databasePath, workflowId, ["design", "architecture", "data", "api"]);
+	for (const kind of ["design", "architecture", "data", "api"]) {
+		approveArtifact(runtime, databasePath, workflowId, kind);
+	}
 	const built = runtime.buildApprovalPacket(workflowId);
 	assert.equal(built.ready, true);
 	assert.ok(built.digest);
@@ -531,7 +556,11 @@ test("approve-artifact and reject-artifact bind the exact current pending revisi
 		executeAnalystTask(runtime, workflowId);
 		const artifactId = getArtifactId(databasePath, "analysis");
 		const revisionId = getRevisionId(databasePath, "analysis");
-		const approved = command(runtime, workflowId, "approve-artifact", { artifactId, revisionId });
+		// #20 双闸前置：review 未完成（无 coverage）时 approve 被拒
+		const unreviewed = command(runtime, workflowId, "approve-artifact", { artifactId, revisionId });
+		assert.equal(unreviewed.outcome, "business_rule_rejected", "approve requires completed review coverage for the revision");
+		executeCriticTask(runtime, databasePath, workflowId, ["analysis"]);
+		const approved = command(runtime, workflowId, "approve-artifact", { artifactId, revisionId, reason: "stage gate" });
 		assert.equal(approved.outcome, "accepted");
 		const records = runtime.getApprovalRecords(workflowId);
 		assert.equal(records.length, 1);

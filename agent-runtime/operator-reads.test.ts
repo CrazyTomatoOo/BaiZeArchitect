@@ -324,6 +324,47 @@ function executeCriticTask(runtime: HeadlessWorkflowRuntime, databasePath: strin
 	assert.equal(runtime.completeAttempt(workflowId, begin.attemptId, result).outcome, "published");
 }
 
+let approveCommandSeq = 0;
+
+/** #20 双闸：环节尾 review 完成后，人工 approve 该环节产物 revision，下一环节才可引用。 */
+function approveStageArtifact(context: ReadContext, workflowId: number, kind: string): void {
+	approveCommandSeq += 1;
+	const projection = context.runtime.getWorkflowProjection(workflowId);
+	assert.ok(projection);
+	const detail = context.runtime.getArtifactRevisionDetail(projection.requirement.id, kind);
+	assert.ok(detail, `${kind} revision should exist`);
+	const receipt = context.runtime.executeCommand({
+		workflowId,
+		commandId: `cmd-approve-${kind}-${approveCommandSeq}`,
+		expectedWorkflowVersion: projection.workflow.version,
+		type: "approve-artifact",
+		operator: ADMIN,
+		payload: { artifactId: detail.artifactId, revisionId: detail.revisionId },
+	});
+	assert.equal(receipt.outcome, "accepted");
+}
+
+/** #20 双闸全链：5 生产 + 5 复审，每环节 review 后 approve，直至全模板完成。 */
+function executeReviewedTemplateChain(context: ReadContext, workflowId: number): void {
+	executeAnalystTask(context.runtime, workflowId);
+	executeCriticTask(context.runtime, context.databasePath, workflowId, ["requirement", "analysis"]);
+	approveStageArtifact(context, workflowId, "analysis");
+	executeScenarioTask(context.runtime, workflowId);
+	executeCriticTask(context.runtime, context.databasePath, workflowId, ["scenario"]);
+	approveStageArtifact(context, workflowId, "scenario");
+	executeUsecaseTask(context.runtime, workflowId);
+	executeCriticTask(context.runtime, context.databasePath, workflowId, ["usecase"]);
+	approveStageArtifact(context, workflowId, "usecase");
+	executeFunctionTask(context.runtime, workflowId);
+	executeCriticTask(context.runtime, context.databasePath, workflowId, ["function"]);
+	approveStageArtifact(context, workflowId, "function");
+	executeArchitectTask(context.runtime, workflowId);
+	executeCriticTask(context.runtime, context.databasePath, workflowId, ["design", "architecture", "data", "api"]);
+	for (const kind of ["design", "architecture", "data", "api"]) {
+		approveStageArtifact(context, workflowId, kind);
+	}
+}
+
 test("session read returns the server-registered operator identity", async () => {
 	await withReadServer(async (context) => {
 		const response = await get(context, "/api/session");
@@ -526,16 +567,7 @@ test("approval packet detail exposes content and current validity", async () => 
 	await withReadServer(async (context) => {
 		const { workflowId } = await createStartedWorkflow(context);
 		await adoptPlan(context.runtime, workflowId);
-		executeAnalystTask(context.runtime, workflowId);
-		executeCriticTask(context.runtime, context.databasePath, workflowId, ["requirement", "analysis"]);
-		executeScenarioTask(context.runtime, workflowId);
-		executeCriticTask(context.runtime, context.databasePath, workflowId, ["scenario"]);
-		executeUsecaseTask(context.runtime, workflowId);
-		executeCriticTask(context.runtime, context.databasePath, workflowId, ["usecase"]);
-		executeFunctionTask(context.runtime, workflowId);
-		executeCriticTask(context.runtime, context.databasePath, workflowId, ["function"]);
-		executeArchitectTask(context.runtime, workflowId);
-		executeCriticTask(context.runtime, context.databasePath, workflowId, ["design", "architecture", "data", "api"]);
+		executeReviewedTemplateChain(context, workflowId);
 		const built = context.runtime.buildApprovalPacket(workflowId);
 		assert.equal(built.ready, true);
 		const packetId = built.packetId as number;
@@ -562,16 +594,7 @@ test("governed design package is created at packet approval and stays read-only"
 	await withReadServer(async (context) => {
 		const { workflowId, requirementId } = await createStartedWorkflow(context);
 		await adoptPlan(context.runtime, workflowId);
-		executeAnalystTask(context.runtime, workflowId);
-		executeCriticTask(context.runtime, context.databasePath, workflowId, ["requirement", "analysis"]);
-		executeScenarioTask(context.runtime, workflowId);
-		executeCriticTask(context.runtime, context.databasePath, workflowId, ["scenario"]);
-		executeUsecaseTask(context.runtime, workflowId);
-		executeCriticTask(context.runtime, context.databasePath, workflowId, ["usecase"]);
-		executeFunctionTask(context.runtime, workflowId);
-		executeCriticTask(context.runtime, context.databasePath, workflowId, ["function"]);
-		executeArchitectTask(context.runtime, workflowId);
-		executeCriticTask(context.runtime, context.databasePath, workflowId, ["design", "architecture", "data", "api"]);
+		executeReviewedTemplateChain(context, workflowId);
 		const built = context.runtime.buildApprovalPacket(workflowId);
 		assert.equal(built.ready, true);
 		const projection = context.runtime.getWorkflowProjection(workflowId);

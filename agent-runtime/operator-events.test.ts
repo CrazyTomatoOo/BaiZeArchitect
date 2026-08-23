@@ -368,15 +368,39 @@ function publishCriticReview(runtime: HeadlessWorkflowRuntime, databasePath: str
 	assert.equal(runtime.completeAttempt(workflowId, begin.attemptId, result).outcome, "published");
 }
 
+let approveCommandSeq = 0;
+
+/** #20 双闸：环节尾 review 完成后，人工 approve 该环节产物 revision，下一环节才可引用。 */
+function approveStageArtifact(runtime: HeadlessWorkflowRuntime, workflowId: number, kind: string): void {
+	approveCommandSeq += 1;
+	const projection = runtime.getWorkflowProjection(workflowId);
+	assert.ok(projection);
+	const detail = runtime.getArtifactRevisionDetail(projection.requirement.id, kind);
+	assert.ok(detail, `${kind} revision should exist`);
+	const receipt = runtime.executeCommand({
+		workflowId,
+		commandId: `cmd-approve-${kind}-${approveCommandSeq}`,
+		expectedWorkflowVersion: projection.workflow.version,
+		type: "approve-artifact",
+		operator: ADMIN,
+		payload: { artifactId: detail.artifactId, revisionId: detail.revisionId },
+	});
+	assert.equal(receipt.outcome, "accepted");
+}
+
 function executeTemplateChain(runtime: HeadlessWorkflowRuntime, databasePath: string, workflowId: number): void {
 	publishTaskEffects(runtime, workflowId, "analyze", "analysis-analyst", [artifactEffect(runtime, workflowId, "analysis", analysisContent())]);
 	publishCriticReview(runtime, databasePath, workflowId, ["requirement", "analysis"]);
+	approveStageArtifact(runtime, workflowId, "analysis");
 	publishTaskEffects(runtime, workflowId, "scenario", "scenario-analyst", [artifactEffect(runtime, workflowId, "scenario", scenarioContent())]);
 	publishCriticReview(runtime, databasePath, workflowId, ["scenario"]);
+	approveStageArtifact(runtime, workflowId, "scenario");
 	publishTaskEffects(runtime, workflowId, "usecase", "usecase-analyst", [artifactEffect(runtime, workflowId, "usecase", usecaseContent())]);
 	publishCriticReview(runtime, databasePath, workflowId, ["usecase"]);
+	approveStageArtifact(runtime, workflowId, "usecase");
 	publishTaskEffects(runtime, workflowId, "function", "function-analyst", [artifactEffect(runtime, workflowId, "function", functionContent())]);
 	publishCriticReview(runtime, databasePath, workflowId, ["function"]);
+	approveStageArtifact(runtime, workflowId, "function");
 	const links = [traceLink(runtime, workflowId)];
 	publishTaskEffects(runtime, workflowId, "design", "design-architect", [
 		artifactEffect(runtime, workflowId, "design", designContent(), links),
@@ -385,6 +409,9 @@ function executeTemplateChain(runtime: HeadlessWorkflowRuntime, databasePath: st
 		artifactEffect(runtime, workflowId, "api", apiContent(), links),
 	]);
 	publishCriticReview(runtime, databasePath, workflowId, ["design", "architecture", "data", "api"]);
+	for (const kind of ["design", "architecture", "data", "api"]) {
+		approveStageArtifact(runtime, workflowId, kind);
+	}
 }
 
 function latestRunId(databasePath: string): number {

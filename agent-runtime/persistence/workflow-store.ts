@@ -176,7 +176,11 @@ const COMMAND_TRANSITIONS: Record<WorkflowCommandType, readonly CommandTransitio
 		{ from: "waiting_for_human", to: "running", eventType: "finding_risk_accepted" },
 		{ from: "running", to: "running", eventType: "finding_risk_accepted" },
 	],
-	"revoke-approval": [{ from: "archived", to: "archived", eventType: "approval_revoked" }],
+	"revoke-approval": [
+		{ from: "running", to: "running", eventType: "approval_revoked" },
+		{ from: "waiting_for_human", to: "waiting_for_human", eventType: "approval_revoked" },
+		{ from: "archived", to: "archived", eventType: "approval_revoked" },
+	],
 	"approve-packet": [{ from: "ready_to_archive", to: "archived", eventType: "workflow_archived" }],
 	"reject-packet": [{ from: "ready_to_archive", to: "running", eventType: "packet_rejected" }],
 };
@@ -824,6 +828,18 @@ deleteWorkspace(workspaceId: number): boolean {
 			if (!artifact || !revision || revision.status !== "pending" || !latest || latest.id !== revisionId) {
 				return this.persistRejection(input, timestamp, requestDigest, workflow, actorSnapshot.id, "business_rule_rejected", 422);
 			}
+			if (input.type === "approve-artifact") {
+				// 双闸前置校验（#13 决议）：环节尾 review 已完成（coverage 覆盖该 revision）且无 open critical/major finding
+				const covered = this.database
+					.prepare("select count(*) as count from critic_coverage_targets where workflow_id = ? and revision_id = ?")
+					.get(input.workflowId, revisionId) as { count: number };
+				const openFindings = this.database
+					.prepare("select count(*) as count from findings where workflow_id = ? and target_revision_id = ? and status = 'open' and severity in ('critical','major')")
+					.get(input.workflowId, revisionId) as { count: number };
+				if (covered.count === 0 || openFindings.count > 0) {
+					return this.persistRejection(input, timestamp, requestDigest, workflow, actorSnapshot.id, "business_rule_rejected", 422);
+				}
+			}
 			const newStatus = input.type === "approve-artifact" ? "approved" : "rejected";
 			this.database.prepare("update artifact_revisions set status = ? where id = ?").run(newStatus, revisionId);
 			if (input.type === "approve-artifact") {
@@ -867,10 +883,17 @@ deleteWorkspace(workspaceId: number): boolean {
 				return this.persistRejection(input, timestamp, requestDigest, workflow, actorSnapshot.id, "business_rule_rejected", 422);
 			}
 			const record = this.database
-				.prepare("select id, record_type from approval_records where id = ? and workflow_id = ?")
-				.get(approvalRecordId, input.workflowId) as { id: number; record_type: string } | undefined;
-			if (!record || record.record_type !== "packet_approval") {
+				.prepare("select id, record_type, subject_id, subject_type from approval_records where id = ? and workflow_id = ?")
+				.get(approvalRecordId, input.workflowId) as { id: number; record_type: string; subject_id: number; subject_type: string } | undefined;
+			if (!record || (record.record_type !== "packet_approval" && record.record_type !== "artifact_approval")) {
 				return this.persistRejection(input, timestamp, requestDigest, workflow, actorSnapshot.id, "business_rule_rejected", 422);
+			}
+			// 撤销 artifact_approval：产物 revision 回到 pending（环节不再可引用，返工路径 #21）
+			if (record.record_type === "artifact_approval" && record.subject_type === "artifact_revision") {
+				const affected = this.database.prepare("update artifact_revisions set status = 'pending' where id = ? and status = 'approved'").run(record.subject_id);
+				if (affected.changes === 0) {
+					return this.persistRejection(input, timestamp, requestDigest, workflow, actorSnapshot.id, "business_rule_rejected", 422);
+				}
 			}
 			const reason = typeof input.payload?.reason === "string" ? input.payload.reason : null;
 			this.database
@@ -1481,7 +1504,7 @@ deleteWorkspace(workspaceId: number): boolean {
 		return { taskId: 0, taskKey: "", taskRole: "", attemptId: 0, runId: 0, contextDigest: "", workflowVersion: workflow.version, lastEventSeq: this.currentLastEventSeq(workflowId) };
 		}
 
-		const resolvedInputs = this.resolveTaskOutputInputs(workflowId, task);
+		const resolvedInputs = this.resolveTaskOutputInputs(workflowId, task, task.role);
 		if (!resolvedInputs) {
 		return { taskId: 0, taskKey: "", taskRole: "", attemptId: 0, runId: 0, contextDigest: "", workflowVersion: workflow.version, lastEventSeq: this.currentLastEventSeq(workflowId) };
 		}
@@ -1535,7 +1558,7 @@ deleteWorkspace(workspaceId: number): boolean {
 		return null;
 	}
 
-	private resolveTaskOutputInputs(workflowId: number, task: { id: number; key: string; inputs_json: string; plan_revision_id: number }): Array<Record<string, unknown>> | null {
+	private resolveTaskOutputInputs(workflowId: number, task: { id: number; key: string; kind: string; role: string; inputs_json: string; plan_revision_id: number }, role: string): Array<Record<string, unknown>> | null {
 		const inputs = parseJson<InputBinding[]>(task.inputs_json);
 		const resolved: Array<Record<string, unknown>> = [];
 		for (const input of inputs) {
@@ -1545,11 +1568,15 @@ deleteWorkspace(workspaceId: number): boolean {
 					.prepare("select id from tasks where workflow_id = ? and key = ? and plan_revision_id = ?")
 					.get(workflowId, taskOutput.taskKey, task.plan_revision_id) as { id: number } | undefined;
 				if (!ancestorTask) return null;
-				const revisions = this.database
+				const isCritic = role === "critic";
+			const statusClause = isCritic
+				? "ar.status = 'pending'"
+				: "ar.status = 'approved' and exists (select 1 from approval_records approval where approval.subject_type = 'artifact_revision' and approval.subject_id = ar.id and approval.record_type = 'artifact_approval')";
+			const revisions = this.database
 					.prepare(`select ar.id from artifact_revisions ar
 						join attempt_effects ae on ae.published_artifact_revision_id = ar.id
 						join task_attempts ta on ta.id = ae.attempt_id
-						where ae.workflow_id = ? and ae.artifact_kind = ? and ta.task_id = ? and ar.status = 'pending'
+						where ae.workflow_id = ? and ae.artifact_kind = ? and ta.task_id = ? and ${statusClause}
 						order by ar.id desc`)
 					.all(workflowId, taskOutput.artifactKind, ancestorTask.id) as Array<{ id: number }>;
 				if (revisions.length !== 1) return null;
