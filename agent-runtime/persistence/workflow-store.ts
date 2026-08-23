@@ -24,6 +24,7 @@ import { RUN_EVENT_STREAM_MIGRATION } from "./migrations/0012-run-event-stream.j
 import { ACTOR_KIND_MIGRATION } from "./migrations/0013-actor-kind.js";
 import { MODEL_ROLES_MIGRATION } from "./migrations/0014-model-roles.js";
 import { PRODUCTION_ROLE_KIND_MIGRATION } from "./migrations/0015-production-role-kind.js";
+import { REUSABLE_ASSET_WORKFLOW_MIGRATION } from "./migrations/0016-reusable-asset-workflow.js";
 import type { ReusableAssetKind } from "./reusable-asset-kind.js";
 import { parseJson } from "./json.js";
 import { AssetStore } from "./asset-store.js";
@@ -44,7 +45,7 @@ import { ARTIFACT_OWNERSHIP, type InputBinding, type TaskOutputInput } from "../
 import type { RoleResult, ContextManifest, RoleContract, BeginAttemptResult, CompleteAttemptResult, TraceLinkProposal, CriticReport, FindingProposal, FindingSeverity } from "../workflow/role-result.js";
 import type { ModelRolesOverride } from "../workflow/model-driver.js";
 
-const MIGRATIONS = [WORKFLOW_GOVERNANCE_MIGRATION, COMMAND_GOVERNANCE_MIGRATION, RECOVERY_GOVERNANCE_MIGRATION, PLANNING_GOVERNANCE_MIGRATION, ATTEMPT_EXECUTION_MIGRATION, DEPENDENT_TASK_SAFETY_MIGRATION, REQUIRED_ARTIFACTS_AND_EVIDENCE_MIGRATION, CRITIC_GOVERNANCE_MIGRATION, DECISIONS_AND_READINESS_MIGRATION, HUMAN_GOVERNANCE_MIGRATION, READ_MODEL_GOVERNANCE_MIGRATION, RUN_EVENT_STREAM_MIGRATION, ACTOR_KIND_MIGRATION, MODEL_ROLES_MIGRATION, PRODUCTION_ROLE_KIND_MIGRATION] as const;
+const MIGRATIONS = [WORKFLOW_GOVERNANCE_MIGRATION, COMMAND_GOVERNANCE_MIGRATION, RECOVERY_GOVERNANCE_MIGRATION, PLANNING_GOVERNANCE_MIGRATION, ATTEMPT_EXECUTION_MIGRATION, DEPENDENT_TASK_SAFETY_MIGRATION, REQUIRED_ARTIFACTS_AND_EVIDENCE_MIGRATION, CRITIC_GOVERNANCE_MIGRATION, DECISIONS_AND_READINESS_MIGRATION, HUMAN_GOVERNANCE_MIGRATION, READ_MODEL_GOVERNANCE_MIGRATION, RUN_EVENT_STREAM_MIGRATION, ACTOR_KIND_MIGRATION, MODEL_ROLES_MIGRATION, PRODUCTION_ROLE_KIND_MIGRATION, REUSABLE_ASSET_WORKFLOW_MIGRATION] as const;
 export type CommandOutcome =
 	| "accepted"
 	| "capability_denied"
@@ -2860,9 +2861,125 @@ deleteWorkspace(workspaceId: number): boolean {
 	}
 
 	createReusableAsset(input: { workspaceId: number; kind: ReusableAssetKind; title: string; content: unknown; source?: "manual" | "import" | "migration"; legacyOriginRequirementId?: number | null; actorSnapshotDocumentId?: number | null; migrationAttestationDocumentId?: number | null }): { assetId: number; revisionId: number; revisionNo: number } {
+
 		// workspace 存在性前置归门面（ADR-006）：AssetStore 不依赖 WorkspaceStore。
 		if (!this.workspaceStore.workspaceExists(input.workspaceId)) throw new Error("Workspace not found");
 		return this.assetStore.createReusableAsset(input);
+	}
+
+	/** #22 promote：按 kind 条目拆细入库（幂等、可批选）。返回每 kind 入资产条数。 */
+	promoteRequirementArtifacts(workflowId: number, kinds: readonly string[]): Record<string, number> {
+		const projection = this.getWorkflowProjection(workflowId);
+		if (!projection) throw new Error("Workflow not found");
+		const requirementId = projection.requirement.id;
+		const workspaceId = projection.requirement.workspaceId;
+		const counts: Record<string, number> = {};
+		for (const kind of kinds) {
+			const artifact = this.database
+				.prepare("select id from artifacts where requirement_id = ? and kind = ?")
+				.get(requirementId, kind) as { id: number } | undefined;
+			if (!artifact) {
+				counts[kind] = 0;
+				continue;
+			}
+			const revision = this.database
+				.prepare(`select ar.id, ar.content_digest, d.content from artifact_revisions ar
+					join snapshot_documents d on d.id = ar.content_document_id
+					where ar.artifact_id = ? and ar.status = 'approved'
+					and exists (select 1 from approval_records approval where approval.workflow_id = ? and approval.record_type = 'artifact_approval' and approval.subject_type = 'artifact_revision' and approval.subject_id = ar.id)
+					order by ar.id desc limit 1`)
+				.get(artifact.id, workflowId) as { id: number; content_digest: string; content: string } | undefined;
+			if (!revision) {
+				counts[kind] = 0;
+				continue;
+			}
+			const approval = this.database
+				.prepare("select id from approval_records where workflow_id = ? and record_type = 'artifact_approval' and subject_type = 'artifact_revision' and subject_id = ? order by id desc limit 1")
+				.get(workflowId, revision.id) as { id: number } | undefined;
+			const items = this.extractAssetItems(kind, revision.content);
+			for (const item of items) {
+				this.assetStore.upsertReusableAssetByTitle({
+					workspaceId,
+					kind: kind as ReusableAssetKind,
+					title: item.title,
+					content: item.content,
+					originRequirementId: requirementId,
+					originArtifactId: artifact.id,
+					originApprovalId: approval?.id ?? null,
+				});
+			}
+			counts[kind] = items.length;
+		}
+		return counts;
+	}
+
+	/** 条目级拆解（#14 决议）：按 kind 结构抽条目（标题 + 内容对象）。 */
+	private extractAssetItems(kind: string, contentJson: string): Array<{ title: string; content: unknown }> {
+		const content = parseJson<Record<string, unknown>>(contentJson);
+		const items: Array<{ title: string; content: unknown }> = [];
+		switch (kind) {
+			case "scenario": {
+				const scenarios = content.scenarios as ReadonlyArray<{ title?: unknown }> | undefined;
+				for (const scenario of scenarios ?? []) {
+					if (typeof scenario.title !== "string" || scenario.title.length === 0) continue;
+					items.push({ title: scenario.title, content: scenario });
+				}
+				break;
+			}
+			case "usecase": {
+				const useCases = content.useCases as ReadonlyArray<{ goal?: unknown }> | undefined;
+				for (const useCase of useCases ?? []) {
+					if (typeof useCase.goal !== "string" || useCase.goal.length === 0) continue;
+					items.push({ title: useCase.goal, content: useCase });
+				}
+				break;
+			}
+			case "function": {
+				const functions = content.functions as ReadonlyArray<{ name?: unknown }> | undefined;
+				for (const fn of functions ?? []) {
+					if (typeof fn.name !== "string" || fn.name.length === 0) continue;
+					items.push({ title: fn.name, content: fn });
+				}
+				break;
+			}
+			case "design": {
+				const units = content.changeUnits as ReadonlyArray<{ area?: unknown; change?: unknown }> | undefined;
+				for (const unit of units ?? []) {
+					const area = typeof unit.area === "string" ? unit.area : "";
+					const change = typeof unit.change === "string" ? unit.change : "";
+					if (area.length === 0 && change.length === 0) continue;
+					items.push({ title: `${area}${change ? `: ${change}` : ""}`, content: unit });
+				}
+				break;
+			}
+			case "architecture": {
+				const components = content.components as ReadonlyArray<{ name?: unknown }> | undefined;
+				for (const component of components ?? []) {
+					if (typeof component.name !== "string" || component.name.length === 0) continue;
+					items.push({ title: component.name, content: component });
+				}
+				break;
+			}
+			case "data": {
+				const entities = content.entities as ReadonlyArray<{ name?: unknown }> | undefined;
+				for (const entity of entities ?? []) {
+					if (typeof entity.name !== "string" || entity.name.length === 0) continue;
+					items.push({ title: entity.name, content: entity });
+				}
+				break;
+			}
+			case "api": {
+				const interfaces = content.interfaces as ReadonlyArray<{ name?: unknown }> | undefined;
+				for (const iface of interfaces ?? []) {
+					if (typeof iface.name !== "string" || iface.name.length === 0) continue;
+					items.push({ title: iface.name, content: iface });
+				}
+				break;
+			}
+			default:
+				break;
+		}
+		return items;
 	}
 
 	updateActorReusableAsset(assetId: number, patch: unknown): { revisionId: number; revisionNo: number } | undefined {

@@ -694,6 +694,9 @@
         "title",
         "current_revision_id",
         "legacy_origin_requirement_id",
+        "origin_requirement_id",
+        "origin_artifact_id",
+        "origin_approval_id",
         "created_at",
         "updated_at"
       ],
@@ -703,7 +706,12 @@
       "kindEnum": [
         "scenario",
         "usecase",
-        "function"
+        "function",
+        "design",
+        "architecture",
+        "data",
+        "api",
+        "actor"
       ]
     },
     "reusable_asset_revisions": {
@@ -731,7 +739,8 @@
       "sourceEnum": [
         "manual",
         "import",
-        "migration"
+        "migration",
+        "workflow"
       ]
     },
     "artifacts": {

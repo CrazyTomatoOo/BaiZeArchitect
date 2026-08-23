@@ -679,6 +679,33 @@ export async function startOperatorServer(
 			return;
 		}
 
+		if (request.method === "POST" && segments.length === 4 && segments[0] === "api" && segments[1] === "requirements" && segments[3] === "promote") {
+			let body: unknown;
+			try {
+				body = JSON.parse(await readBody(request));
+			} catch {
+				sendJson(response, 400, { error: "malformed_body" });
+				return;
+			}
+			if (typeof body !== "object" || body === null || Array.isArray(body)) {
+				sendJson(response, 400, { error: "malformed_body" });
+				return;
+			}
+			const kinds = (body as { kinds?: unknown }).kinds;
+			if (!Array.isArray(kinds) || kinds.some((kind) => typeof kind !== "string")) {
+				sendJson(response, 400, { error: "malformed_body" });
+				return;
+			}
+			const workflowId = Number(segments[2]);
+			if (!options.runtime.getWorkflowProjection(workflowId)) {
+				sendJson(response, 404, { error: "unknown_workflow" });
+				return;
+			}
+			const counts = options.runtime.promoteRequirementArtifacts(workflowId, kinds as string[]);
+			sendJson(response, 201, { promoted: counts });
+			return;
+		}
+
 		if (request.method === "POST" && url.pathname === "/api/assets") {
 			let body: unknown;
 			try {

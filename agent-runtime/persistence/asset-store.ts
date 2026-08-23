@@ -107,6 +107,50 @@ export class AssetStore {
 		return transaction();
 	}
 
+	/**
+	 * #22 promote 入库：按 (workspace, kind, 标题) 归一 —— 存在则追加 revision，不存在新建。
+	 * 带 workflow 溯源（来源需求/产物/批准记录）；source=workflow。幂等：重复 promote 同一产物
+	 * （同 kind+标题）追加 revision 而不重复建资产。
+	 */
+	upsertReusableAssetByTitle(input: {
+		workspaceId: number;
+		kind: ReusableAssetKind;
+		title: string;
+		content: unknown;
+		originRequirementId?: number | null;
+		originArtifactId?: number | null;
+		originApprovalId?: number | null;
+	}): { assetId: number; revisionId: number; revisionNo: number; created: boolean } {
+		const timestamp = this.clock.now().toISOString();
+		if (input.kind === "actor") throw new ReusableAssetMalformedBodyError();
+		const transaction = this.database.transaction(() => {
+			const existing = this.database
+				.prepare("select id, current_revision_id from reusable_assets where workspace_id = ? and kind = ? and title = ? order by id desc limit 1")
+				.get(input.workspaceId, input.kind, input.title) as { id: number; current_revision_id: number | null } | undefined;
+			const document = this.snapshotStore.insertSnapshot("reusable_asset_content", `artifact/${input.kind}/v1`, input.content, timestamp);
+			if (existing) {
+				const currentNo = existing.current_revision_id === null
+					? 0
+					: (this.database.prepare("select revision_no from reusable_asset_revisions where id = ?").get(existing.current_revision_id) as { revision_no: number }).revision_no;
+				const revisionNo = currentNo + 1;
+				const revisionId = Number(this.database
+					.prepare("insert into reusable_asset_revisions(reusable_asset_id, revision_no, content_document_id, content_digest, source, actor_snapshot_document_id, migration_attestation_document_id, created_at) values (?, ?, ?, ?, 'workflow', null, null, ?)")
+					.run(existing.id, revisionNo, document.id, document.digest, timestamp).lastInsertRowid);
+				this.database.prepare("update reusable_assets set current_revision_id = ?, updated_at = ? where id = ?").run(revisionId, timestamp, existing.id);
+				return { assetId: existing.id, revisionId, revisionNo, created: false };
+			}
+			const assetId = Number(this.database
+				.prepare("insert into reusable_assets(workspace_id, kind, title, current_revision_id, legacy_origin_requirement_id, origin_requirement_id, origin_artifact_id, origin_approval_id, created_at, updated_at) values (?, ?, ?, null, null, ?, ?, ?, ?, ?)")
+				.run(input.workspaceId, input.kind, input.title, input.originRequirementId ?? null, input.originArtifactId ?? null, input.originApprovalId ?? null, timestamp, timestamp).lastInsertRowid);
+			const revisionId = Number(this.database
+				.prepare("insert into reusable_asset_revisions(reusable_asset_id, revision_no, content_document_id, content_digest, source, actor_snapshot_document_id, migration_attestation_document_id, created_at) values (?, 1, ?, ?, 'workflow', null, null, ?)")
+				.run(assetId, document.id, document.digest, timestamp).lastInsertRowid);
+			this.database.prepare("update reusable_assets set current_revision_id = ? where id = ?").run(revisionId, assetId);
+			return { assetId, revisionId, revisionNo: 1, created: true };
+		}).immediate;
+		return transaction();
+	}
+
 	updateActorReusableAsset(assetId: number, patch: unknown): { revisionId: number; revisionNo: number } | undefined {
 		if (typeof patch !== "object" || patch === null || Array.isArray(patch)) throw new ReusableAssetMalformedBodyError();
 		const record = patch as { name?: unknown; description?: unknown };
@@ -195,6 +239,7 @@ export class AssetStore {
 		const transaction = this.database.transaction(() => {
 			const asset = this.database.prepare("select id from reusable_assets where id = ?").get(assetId) as { id: number } | undefined;
 			if (!asset) return false;
+			this.database.prepare("delete from reusable_asset_revisions where reusable_asset_id = ?").run(assetId);
 			this.database.prepare("delete from reusable_assets where id = ?").run(assetId);
 			return true;
 		}).immediate;

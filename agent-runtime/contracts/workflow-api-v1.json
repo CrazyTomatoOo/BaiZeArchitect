@@ -21,44 +21,164 @@
       "method": "GET",
       "path": "/api/session"
     },
-    "capabilities": ["workflow:operate", "workflow:approve"]
+    "capabilities": [
+      "workflow:operate",
+      "workflow:approve"
+    ]
   },
   "creation": {
     "method": "POST",
     "path": "/api/workspaces/:workspaceId/requirements",
     "successStatus": 201,
-    "atomicCreates": ["Requirement", "requirement Artifact revision v1", "DesignSession", "Workflow pending", "PolicyBundle binding", "workflow_created event"],
-    "responseFields": ["requirementId", "workflowId", "workflowState", "workflowVersion", "lastEventSeq"]
+    "atomicCreates": [
+      "Requirement",
+      "requirement Artifact revision v1",
+      "DesignSession",
+      "Workflow pending",
+      "PolicyBundle binding",
+      "workflow_created event"
+    ],
+    "responseFields": [
+      "requirementId",
+      "workflowId",
+      "workflowState",
+      "workflowVersion",
+      "lastEventSeq"
+    ]
   },
   "reusableAssets": {
-    "list": {"method": "GET", "path": "/api/assets", "purpose": "List workspace-level ReusableAssets"},
-    "create": {"method": "POST", "path": "/api/assets", "purpose": "Create ReusableAsset and first immutable revision without Requirement or Run"},
-    "detail": {"method": "GET", "path": "/api/assets/:assetId", "purpose": "Read identity and revision history"},
-    "delete": {"method": "DELETE", "path": "/api/assets/:assetId", "purpose": "Delete from active library under asset-domain guards"},
-    "export": {"method": "GET", "path": "/api/assets/export", "purpose": "Export ReusableAsset revisions"},
-    "import": {"method": "POST", "path": "/api/assets/import", "purpose": "Import ReusableAsset revisions with provenance"},
-    "forbiddenSideEffects": ["Requirement", "Workflow", "Task", "Attempt", "Run", "Approval"]
+    "list": {
+      "method": "GET",
+      "path": "/api/assets",
+      "purpose": "List workspace-level ReusableAssets"
+    },
+    "create": {
+      "method": "POST",
+      "path": "/api/assets",
+      "purpose": "Create ReusableAsset and first immutable revision without Requirement or Run"
+    },
+    "detail": {
+      "method": "GET",
+      "path": "/api/assets/:assetId",
+      "purpose": "Read identity and revision history"
+    },
+    "delete": {
+      "method": "DELETE",
+      "path": "/api/assets/:assetId",
+      "purpose": "Delete from active library under asset-domain guards"
+    },
+    "export": {
+      "method": "GET",
+      "path": "/api/assets/export",
+      "purpose": "Export ReusableAsset revisions"
+    },
+    "import": {
+      "method": "POST",
+      "path": "/api/assets/import",
+      "purpose": "Import ReusableAsset revisions with provenance"
+    },
+    "forbiddenSideEffects": [
+      "Requirement",
+      "Workflow",
+      "Task",
+      "Attempt",
+      "Run",
+      "Approval"
+    ]
   },
   "workspaces": {
-    "list": {"method": "GET", "path": "/api/workspaces", "purpose": "List all workspaces ordered by id"},
-    "create": {"method": "POST", "path": "/api/workspaces", "purpose": "Create a workspace; repo_path is the unique identity, name is a label"},
-    "delete": {"method": "DELETE", "path": "/api/workspaces/:workspaceId", "purpose": "Cascade-delete a workspace and its full governance subtree in one transaction"}
+    "list": {
+      "method": "GET",
+      "path": "/api/workspaces",
+      "purpose": "List all workspaces ordered by id"
+    },
+    "create": {
+      "method": "POST",
+      "path": "/api/workspaces",
+      "purpose": "Create a workspace; repo_path is the unique identity, name is a label"
+    },
+    "delete": {
+      "method": "DELETE",
+      "path": "/api/workspaces/:workspaceId",
+      "purpose": "Cascade-delete a workspace and its full governance subtree in one transaction"
+    }
   },
   "readEndpoints": [
-    {"method": "GET", "path": "/api/requirements", "purpose": "Workspace-filtered Requirement list with Workflow summary"},
-    {"method": "GET", "path": "/api/requirements/:requirementId", "purpose": "Requirement identity, current baseline and workflow link"},
-    {"method": "GET", "path": "/api/requirements/:requirementId/artifacts", "purpose": "Current revision of one artifact kind (content snapshot incl. optional diagrams)"},
-    {"method": "GET", "path": "/api/model-config", "purpose": "Curated model provider catalog and default role assignments for the SPA picker"},
-    {"method": "GET", "path": "/api/legacy-imports/:requirementId", "purpose": "Read-only legacy classification, bundle, attestation and anomaly summary"},
-    {"method": "GET", "path": "/api/design-packages/:designPackageId", "purpose": "Immutable governed or legacy-pre-policy Design Package"},
-    {"method": "GET", "path": "/api/workflows/:workflowId", "purpose": "Complete current Workflow projection"},
-    {"method": "GET", "path": "/api/plan-revisions/:planRevisionId", "purpose": "Immutable Plan proposal, policy/contract refs and provenance"},
-    {"method": "GET", "path": "/api/tasks/:taskId", "purpose": "Task state and immutable Task spec"},
-    {"method": "GET", "path": "/api/tasks/:taskId/attempts", "purpose": "Attempt summaries ordered by attempt number"},
-    {"method": "GET", "path": "/api/attempts/:attemptId", "purpose": "Attempt, ContextManifest, publication token, effects, result and Run link"},
-    {"method": "GET", "path": "/api/runs/:runId", "purpose": "Run process state and isolated session metadata"},
-    {"method": "GET", "path": "/api/approval-packets/:packetId", "purpose": "Full immutable ApprovalPacket and current validity"},
-    {"method": "GET", "path": "/api/workflows/:workflowId/commands/:commandId", "purpose": "Immutable command receipt"}
+    {
+      "method": "GET",
+      "path": "/api/requirements",
+      "purpose": "Workspace-filtered Requirement list with Workflow summary"
+    },
+    {
+      "method": "GET",
+      "path": "/api/requirements/:requirementId",
+      "purpose": "Requirement identity, current baseline and workflow link"
+    },
+    {
+      "method": "GET",
+      "path": "/api/requirements/:requirementId/artifacts",
+      "purpose": "Current revision of one artifact kind (content snapshot incl. optional diagrams)"
+    },
+    {
+      "method": "GET",
+      "path": "/api/model-config",
+      "purpose": "Curated model provider catalog and default role assignments for the SPA picker"
+    },
+    {
+      "method": "GET",
+      "path": "/api/legacy-imports/:requirementId",
+      "purpose": "Read-only legacy classification, bundle, attestation and anomaly summary"
+    },
+    {
+      "method": "GET",
+      "path": "/api/design-packages/:designPackageId",
+      "purpose": "Immutable governed or legacy-pre-policy Design Package"
+    },
+    {
+      "method": "GET",
+      "path": "/api/workflows/:workflowId",
+      "purpose": "Complete current Workflow projection"
+    },
+    {
+      "method": "GET",
+      "path": "/api/plan-revisions/:planRevisionId",
+      "purpose": "Immutable Plan proposal, policy/contract refs and provenance"
+    },
+    {
+      "method": "GET",
+      "path": "/api/tasks/:taskId",
+      "purpose": "Task state and immutable Task spec"
+    },
+    {
+      "method": "GET",
+      "path": "/api/tasks/:taskId/attempts",
+      "purpose": "Attempt summaries ordered by attempt number"
+    },
+    {
+      "method": "GET",
+      "path": "/api/attempts/:attemptId",
+      "purpose": "Attempt, ContextManifest, publication token, effects, result and Run link"
+    },
+    {
+      "method": "GET",
+      "path": "/api/runs/:runId",
+      "purpose": "Run process state and isolated session metadata"
+    },
+    {
+      "method": "GET",
+      "path": "/api/approval-packets/:packetId",
+      "purpose": "Full immutable ApprovalPacket and current validity"
+    },
+    {
+      "method": "GET",
+      "path": "/api/workflows/:workflowId/commands/:commandId",
+      "purpose": "Immutable command receipt"
+    },
+    {
+      "method": "POST",
+      "path": "/api/requirements/:requirementId/promote",
+      "purpose": "Promote approved requirement artifacts into the workspace asset library (item-level split)"
+    }
   ],
   "workflowProjection": {
     "path": "/api/workflows/:workflowId",
@@ -82,7 +202,12 @@
     "method": "PUT",
     "path": "/api/workflows/:workflowId/commands/:commandId",
     "requestEnvelope": {
-      "required": ["schemaVersion", "expectedWorkflowVersion", "type", "payload"],
+      "required": [
+        "schemaVersion",
+        "expectedWorkflowVersion",
+        "type",
+        "payload"
+      ],
       "properties": {
         "schemaVersion": "workflow-command/v1",
         "expectedWorkflowVersion": "non-negative integer",
@@ -95,32 +220,257 @@
       "actor": "resolved from trusted operator session; forbidden in request body"
     },
     "receipt": {
-      "persistedFor": ["accepted", "capability_denied", "version_conflict", "state_conflict", "subject_conflict", "business_rule_rejected"],
-      "notPersistedFor": ["malformed_json", "invalid_envelope_schema", "unknown_workflow", "unauthenticated_transport"],
+      "persistedFor": [
+        "accepted",
+        "capability_denied",
+        "version_conflict",
+        "state_conflict",
+        "subject_conflict",
+        "business_rule_rejected"
+      ],
+      "notPersistedFor": [
+        "malformed_json",
+        "invalid_envelope_schema",
+        "unknown_workflow",
+        "unauthenticated_transport"
+      ],
       "sameIdSameDigest": "replay exact first outcome and HTTP status",
       "sameIdDifferentDigest": "409 idempotency_conflict plus deduplicated audit event"
     }
   },
   "commands": {
-    "start": {"capability": "workflow:operate", "allowedStates": ["pending"], "payloadRequired": []},
-    "steer": {"capability": "workflow:operate", "allowedStates": ["running", "waiting_for_human", "paused", "failed", "ready_to_archive"], "payloadRequired": ["directive"]},
-    "pause": {"capability": "workflow:operate", "allowedStates": ["running", "waiting_for_human", "ready_to_archive"], "payloadRequired": []},
-    "resume": {"capability": "workflow:operate", "allowedStates": ["paused"], "payloadRequired": []},
-    "cancel-run": {"capability": "workflow:operate", "allowedStates": ["running", "waiting_for_human", "paused"], "expectedSubjectType": "run", "payloadRequired": ["runId"]},
-    "retry-task": {"capability": "workflow:operate", "allowedStates": ["failed"], "expectedSubjectType": "task", "payloadRequired": ["taskId"]},
-    "retry-planning": {"capability": "workflow:operate", "allowedStates": ["failed"], "payloadRequired": []},
-    "retry-recovery": {"capability": "workflow:operate", "allowedStates": ["failed"], "expectedSubjectType": "workflow_incident", "payloadRequired": ["incidentId"], "effect": "requeue the exact deterministic recovery/outbox operation without creating a Task, Attempt or Run"},
-    "replace-plan": {"capability": "workflow:operate", "allowedStates": ["running", "waiting_for_human", "paused", "failed", "ready_to_archive"], "payloadRequired": ["replacementProposal", "reason"], "proposalSchema": "plan-proposal/v1"},
-    "diagnostic-run": {"capability": "workflow:operate", "allowedStates": ["pending", "running", "waiting_for_human", "paused", "failed", "ready_to_archive"], "payloadRequired": ["role", "objective", "inputRefs"]},
-    "provide-human-input": {"capability": "workflow:operate", "allowedStates": ["waiting_for_human", "paused"], "expectedSubjectType": "blocking_gate", "payloadRequired": ["gateId", "response"]},
-    "revise-requirement": {"capability": "workflow:operate", "allowedStates": ["running", "waiting_for_human", "paused", "failed", "ready_to_archive"], "expectedSubjectType": "artifact_revision", "payloadRequired": ["content", "reason"]},
-    "dispose-decision": {"capability": "severity-dependent", "allowedStates": ["running", "waiting_for_human", "paused", "failed", "ready_to_archive"], "expectedSubjectType": "decision", "payloadRequired": ["decisionId", "outcome", "reason"]},
-    "approve-artifact": {"capability": "workflow:approve", "allowedStates": ["running", "waiting_for_human", "paused", "failed", "ready_to_archive"], "expectedSubjectType": "artifact_revision", "payloadRequired": ["artifactRevisionId"]},
-    "reject-artifact": {"capability": "workflow:operate", "allowedStates": ["running", "waiting_for_human", "paused", "failed", "ready_to_archive"], "expectedSubjectType": "artifact_revision", "payloadRequired": ["artifactRevisionId", "reason", "targets"]},
-    "accept-finding-risk": {"capability": "workflow:approve", "allowedStates": ["waiting_for_human", "paused", "ready_to_archive"], "expectedSubjectType": "finding_thread", "payloadRequired": ["findingThreadId", "impact", "reason"]},
-    "revoke-approval": {"capability": "workflow:approve", "allowedStates": ["running", "waiting_for_human", "paused", "failed", "ready_to_archive"], "expectedSubjectType": "approval", "payloadRequired": ["approvalId", "reason"]},
-    "approve-packet": {"capability": "workflow:approve", "allowedStates": ["ready_to_archive"], "expectedSubjectType": "approval_packet", "payloadRequired": ["packetId"]},
-    "reject-packet": {"capability": "workflow:operate", "allowedStates": ["ready_to_archive", "paused"], "expectedSubjectType": "approval_packet", "payloadRequired": ["packetId", "reason", "targets"]}
+    "start": {
+      "capability": "workflow:operate",
+      "allowedStates": [
+        "pending"
+      ],
+      "payloadRequired": []
+    },
+    "steer": {
+      "capability": "workflow:operate",
+      "allowedStates": [
+        "running",
+        "waiting_for_human",
+        "paused",
+        "failed",
+        "ready_to_archive"
+      ],
+      "payloadRequired": [
+        "directive"
+      ]
+    },
+    "pause": {
+      "capability": "workflow:operate",
+      "allowedStates": [
+        "running",
+        "waiting_for_human",
+        "ready_to_archive"
+      ],
+      "payloadRequired": []
+    },
+    "resume": {
+      "capability": "workflow:operate",
+      "allowedStates": [
+        "paused"
+      ],
+      "payloadRequired": []
+    },
+    "cancel-run": {
+      "capability": "workflow:operate",
+      "allowedStates": [
+        "running",
+        "waiting_for_human",
+        "paused"
+      ],
+      "expectedSubjectType": "run",
+      "payloadRequired": [
+        "runId"
+      ]
+    },
+    "retry-task": {
+      "capability": "workflow:operate",
+      "allowedStates": [
+        "failed"
+      ],
+      "expectedSubjectType": "task",
+      "payloadRequired": [
+        "taskId"
+      ]
+    },
+    "retry-planning": {
+      "capability": "workflow:operate",
+      "allowedStates": [
+        "failed"
+      ],
+      "payloadRequired": []
+    },
+    "retry-recovery": {
+      "capability": "workflow:operate",
+      "allowedStates": [
+        "failed"
+      ],
+      "expectedSubjectType": "workflow_incident",
+      "payloadRequired": [
+        "incidentId"
+      ],
+      "effect": "requeue the exact deterministic recovery/outbox operation without creating a Task, Attempt or Run"
+    },
+    "replace-plan": {
+      "capability": "workflow:operate",
+      "allowedStates": [
+        "running",
+        "waiting_for_human",
+        "paused",
+        "failed",
+        "ready_to_archive"
+      ],
+      "payloadRequired": [
+        "replacementProposal",
+        "reason"
+      ],
+      "proposalSchema": "plan-proposal/v1"
+    },
+    "diagnostic-run": {
+      "capability": "workflow:operate",
+      "allowedStates": [
+        "pending",
+        "running",
+        "waiting_for_human",
+        "paused",
+        "failed",
+        "ready_to_archive"
+      ],
+      "payloadRequired": [
+        "role",
+        "objective",
+        "inputRefs"
+      ]
+    },
+    "provide-human-input": {
+      "capability": "workflow:operate",
+      "allowedStates": [
+        "waiting_for_human",
+        "paused"
+      ],
+      "expectedSubjectType": "blocking_gate",
+      "payloadRequired": [
+        "gateId",
+        "response"
+      ]
+    },
+    "revise-requirement": {
+      "capability": "workflow:operate",
+      "allowedStates": [
+        "running",
+        "waiting_for_human",
+        "paused",
+        "failed",
+        "ready_to_archive"
+      ],
+      "expectedSubjectType": "artifact_revision",
+      "payloadRequired": [
+        "content",
+        "reason"
+      ]
+    },
+    "dispose-decision": {
+      "capability": "severity-dependent",
+      "allowedStates": [
+        "running",
+        "waiting_for_human",
+        "paused",
+        "failed",
+        "ready_to_archive"
+      ],
+      "expectedSubjectType": "decision",
+      "payloadRequired": [
+        "decisionId",
+        "outcome",
+        "reason"
+      ]
+    },
+    "approve-artifact": {
+      "capability": "workflow:approve",
+      "allowedStates": [
+        "running",
+        "waiting_for_human",
+        "paused",
+        "failed",
+        "ready_to_archive"
+      ],
+      "expectedSubjectType": "artifact_revision",
+      "payloadRequired": [
+        "artifactRevisionId"
+      ]
+    },
+    "reject-artifact": {
+      "capability": "workflow:operate",
+      "allowedStates": [
+        "running",
+        "waiting_for_human",
+        "paused",
+        "failed",
+        "ready_to_archive"
+      ],
+      "expectedSubjectType": "artifact_revision",
+      "payloadRequired": [
+        "artifactRevisionId",
+        "reason",
+        "targets"
+      ]
+    },
+    "accept-finding-risk": {
+      "capability": "workflow:approve",
+      "allowedStates": [
+        "waiting_for_human",
+        "paused",
+        "ready_to_archive"
+      ],
+      "expectedSubjectType": "finding_thread",
+      "payloadRequired": [
+        "findingThreadId",
+        "impact",
+        "reason"
+      ]
+    },
+    "revoke-approval": {
+      "capability": "workflow:approve",
+      "allowedStates": [
+        "running",
+        "waiting_for_human",
+        "paused",
+        "failed",
+        "ready_to_archive"
+      ],
+      "expectedSubjectType": "approval",
+      "payloadRequired": [
+        "approvalId",
+        "reason"
+      ]
+    },
+    "approve-packet": {
+      "capability": "workflow:approve",
+      "allowedStates": [
+        "ready_to_archive"
+      ],
+      "expectedSubjectType": "approval_packet",
+      "payloadRequired": [
+        "packetId"
+      ]
+    },
+    "reject-packet": {
+      "capability": "workflow:operate",
+      "allowedStates": [
+        "ready_to_archive",
+        "paused"
+      ],
+      "expectedSubjectType": "approval_packet",
+      "payloadRequired": [
+        "packetId",
+        "reason",
+        "targets"
+      ]
+    }
   },
   "httpStatuses": {
     "200": "Successful GET or exact replay whose original status was 200",
@@ -134,13 +484,29 @@
     "500": "Transaction or internal failure before a durable command outcome; caller may retry the same commandId"
   },
   "eventReads": {
-    "workflowSse": {"method": "GET", "path": "/api/workflows/:workflowId/events/stream", "query": {"after": "initial sequence only"}},
-    "runSse": {"method": "GET", "path": "/api/runs/:runId/events/stream", "query": {"after": "initial sequence only"}}
+    "workflowSse": {
+      "method": "GET",
+      "path": "/api/workflows/:workflowId/events/stream",
+      "query": {
+        "after": "initial sequence only"
+      }
+    },
+    "runSse": {
+      "method": "GET",
+      "path": "/api/runs/:runId/events/stream",
+      "query": {
+        "after": "initial sequence only"
+      }
+    }
   },
   "sse": {
     "workflowAndRunStreamsSeparate": true,
     "workflowStreamIncludesTokens": false,
-    "cursorPrecedence": ["Last-Event-ID header on reconnect", "after query on initial connect", "0"],
+    "cursorPrecedence": [
+      "Last-Event-ID header on reconnect",
+      "after query on initial connect",
+      "0"
+    ],
     "id": "stream-local integer seq",
     "eventField": "workflow-event or run-event",
     "data": "versioned event envelope",

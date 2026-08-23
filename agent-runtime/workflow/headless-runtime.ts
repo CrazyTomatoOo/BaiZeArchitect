@@ -107,6 +107,7 @@ export interface HeadlessWorkflowRuntime {
 	deleteReusableAsset(assetId: number): boolean;
 	exportReusableAssets(workspaceId: number): readonly ReusableAssetDetail[];
 	importReusableAssets(workspaceId: number, assets: readonly { kind: ReusableAssetKind; title: string; content: unknown }[]): readonly number[];
+	promoteRequirementArtifacts(workflowId: number, kinds: readonly string[]): Record<string, number>;
 	appendRunEvent(runId: number, type: string, payload: Record<string, unknown>): number;
 	runExists(runId: number): boolean;
 	getRunEventWatermark(runId: number): number;
@@ -390,6 +391,9 @@ export async function openHeadlessWorkflowRuntime(
 	},
 	importReusableAssets(workspaceId, assets) {
 		return store.importReusableAssets(workspaceId, assets);
+	},
+	promoteRequirementArtifacts(workflowId, kinds) {
+		return store.promoteRequirementArtifacts(workflowId, kinds);
 	},
 		appendRunEvent(runId, type, payload) {
 			return store.appendRunEvent(runId, type, payload);

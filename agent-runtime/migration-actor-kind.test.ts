@@ -128,7 +128,7 @@ test("actor kind survives the 0011-era table rebuild (rows preserved, CHECK expa
 
 test("the shared kind predicate classifies actor and rejects unknown kinds", async () => {
 	const { REUSABLE_ASSET_KINDS, isReusableAssetKind } = await import("./persistence/reusable-asset-kind.js");
-	assert.deepEqual([...REUSABLE_ASSET_KINDS], ["scenario", "usecase", "function", "actor"]);
+	assert.deepEqual([...REUSABLE_ASSET_KINDS], ["scenario", "usecase", "function", "design", "architecture", "data", "api", "actor"]);
 	assert.equal(isReusableAssetKind("actor"), true);
 	assert.equal(isReusableAssetKind("bogus"), false);
 	assert.equal(isReusableAssetKind(undefined), false);
