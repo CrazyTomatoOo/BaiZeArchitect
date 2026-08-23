@@ -393,7 +393,7 @@ test("startup refuses an unknown newer Workflow schema migration", async () => {
 	try {
 		await assert.rejects(
 			openHeadlessWorkflowRuntime(runtimeOptions(databasePath)),
-			/Workflow database migration 99 is newer than supported version 16/,
+			/Workflow database migration 99 is newer than supported version 17/,
 		);
 	} finally {
 		await rm(directory, { recursive: true, force: true });

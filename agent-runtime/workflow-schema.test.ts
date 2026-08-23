@@ -16,7 +16,7 @@ const validPlan = {
 		{
 			key: "analyze-core",
 			kind: "analyze",
-			role: "analyst",
+			role: "analysis-analyst",
 			objective: "Derive the impact profile",
 			dependsOn: [],
 			inputs: [],

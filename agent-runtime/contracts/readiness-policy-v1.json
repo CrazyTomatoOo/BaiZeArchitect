@@ -39,31 +39,6 @@
     "rejectedRevisionCanBeCurrent": false
   },
   "completionPolicies": {
-    "analyst-task/v1": {
-      "allowedRoles": [
-        "analyst"
-      ],
-      "validators": [
-        "expected_effects_present",
-        "owned_artifact_kinds_only",
-        "artifact_content_schema_valid",
-        "source_refs_resolve",
-        "local_evidence_requirements_pass",
-        "open_questions_have_governed_disposition"
-      ]
-    },
-    "architect-task/v1": {
-      "allowedRoles": [
-        "architect"
-      ],
-      "validators": [
-        "expected_effects_present",
-        "owned_artifact_kinds_only",
-        "artifact_content_schema_valid",
-        "source_refs_resolve",
-        "local_evidence_requirements_pass"
-      ]
-    },
     "critic-review/v1": {
       "allowedRoles": [
         "critic"
@@ -76,10 +51,7 @@
       ]
     },
     "rework-task/v1": {
-      "allowedRoles": [
-        "analyst",
-        "architect"
-      ],
+      "allowedRoles": [],
       "validators": [
         "expected_effects_present",
         "owned_artifact_kinds_only",

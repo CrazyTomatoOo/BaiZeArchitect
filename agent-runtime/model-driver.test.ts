@@ -16,7 +16,7 @@ import {
 import { createCrashInjector } from "./testing/deterministic-fixtures.ts";
 
 const input: ModelDriverInput = {
-	role: "analyst",
+	role: "analysis-analyst",
 	contextDigest: `sha256:${"a".repeat(64)}`,
 	instruction: "Derive the impact profile.",
 };
@@ -36,14 +36,14 @@ function tools(calls: Array<{ name: string; arguments: unknown }>): ModelTool[] 
 }
 
 const fixture = {
-	role: "analyst" as const,
+	role: "analysis-analyst" as const,
 	contextDigest: input.contextDigest,
 	orderedToolCalls: [
 		{ name: "get_artifact", arguments: { artifactId: 7, revision: 3 } },
 		{ name: "record_finding", arguments: { severity: "minor", summary: "Gap" } },
 	],
 	structuredResult: {
-		role: "analyst",
+		role: "analysis-analyst",
 		outcome: "completed",
 		effectRefs: ["finding:9"],
 	},
@@ -68,7 +68,7 @@ test("ScriptedModelDriver rejects role, digest, tool, argument, and extra execut
 	await t.test("role", async () => {
 		const driver = new ScriptedModelDriver([fixture]);
 		await assert.rejects(
-			driver.execute({ ...input, role: "architect" }, tools([])),
+			driver.execute({ ...input, role: "design-architect" }, tools([])),
 			(error: unknown) => error instanceof ScriptMismatchError && error.code === "role_mismatch",
 		);
 	});

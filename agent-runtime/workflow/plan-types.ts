@@ -1,11 +1,9 @@
 export type TaskKind = "analyze" | "design" | "review" | "rework" | "verify";
 
-/** 生产角色（8，#15 决议：每生产环节一角色）+ critic。旧 analyst/architect 过渡保留（expand，#25 移除）。 */
+/** 生产角色（8，#15 决议：每生产环节一角色）+ critic。（#25：旧 analyst/architect 已移除。） */
 export type TaskRole =
 	| ProductionRole
-	| "critic"
-	| "analyst"
-	| "architect";
+	| "critic";
 
 export type ProductionRole =
 	| "analysis-analyst"
@@ -116,10 +114,7 @@ export const ARTIFACT_OWNERSHIP: Readonly<Record<TaskRole, readonly WritableArti
 	"architecture-architect": ["design", "architecture", "data", "api"],
 	"data-architect": ["design", "architecture", "data", "api"],
 	"api-architect": ["design", "architecture", "data", "api"],
-	// critic 与旧角色（过渡保留）
 	critic: [],
-	analyst: ["analysis", "scenario", "usecase", "function"],
-	architect: ["design", "architecture", "data", "api"],
 };
 
 export const PLAN_TASK_LIMITS = {

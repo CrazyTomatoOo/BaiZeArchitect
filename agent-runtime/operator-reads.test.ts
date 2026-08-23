@@ -459,7 +459,7 @@ test("projection stays bounded to the current plan after replanning", async () =
 			base: { workflowId, workflowVersion: projection.workflow.version, basePlanRevisionId: projection.workflow.currentPlanRevisionId, planningContextDigest: context.runtime.getPlanningContextDigest(workflowId) },
 			objective: "Replacement",
 			tasks: [
-				{ key: "analyze-2", kind: "analyze", role: "analyst", objective: "Re-analyze", dependsOn: [], inputs: [], expectedArtifactEffects: [{ kind: "analysis", operation: "create_or_revise" }], completionPolicyRef: "analysis/v1", maxAttempts: 3 },
+				{ key: "analyze-2", kind: "analyze", role: "analysis-analyst", objective: "Re-analyze", dependsOn: [], inputs: [], expectedArtifactEffects: [{ kind: "analysis", operation: "create_or_revise" }], completionPolicyRef: "analysis/v1", maxAttempts: 3 },
 			],
 			rationale: "replan",
 		};

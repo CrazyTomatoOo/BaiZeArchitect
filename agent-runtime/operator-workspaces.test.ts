@@ -256,8 +256,8 @@ test("DELETE /api/workspaces/:id refuses a busy workspace with 409 workspace_bus
 		assert.ok(projection);
 		const contextDigest = context.runtime.getPlanningContextDigest(created.workflowId);
 		const tasks: TaskProposal[] = [
-			{ key: "analyze-req", kind: "analyze", role: "analyst", objective: "Analyze", dependsOn: [], inputs: [], expectedArtifactEffects: [{ kind: "analysis", operation: "create_or_revise" }], completionPolicyRef: "analysis/v1", maxAttempts: 3 },
-			{ key: "design-sol", kind: "design", role: "architect", objective: "Design", dependsOn: ["analyze-req"], inputs: [{ type: "task_output", taskKey: "analyze-req", artifactKind: "analysis", purpose: "input" }], expectedArtifactEffects: [{ kind: "design", operation: "create_or_revise" }], completionPolicyRef: "design/v1", maxAttempts: 3 },
+			{ key: "analyze-req", kind: "analyze", role: "analysis-analyst", objective: "Analyze", dependsOn: [], inputs: [], expectedArtifactEffects: [{ kind: "analysis", operation: "create_or_revise" }], completionPolicyRef: "analysis/v1", maxAttempts: 3 },
+			{ key: "design-sol", kind: "design", role: "design-architect", objective: "Design", dependsOn: ["analyze-req"], inputs: [{ type: "task_output", taskKey: "analyze-req", artifactKind: "analysis", purpose: "input" }], expectedArtifactEffects: [{ kind: "design", operation: "create_or_revise" }], completionPolicyRef: "design/v1", maxAttempts: 3 },
 		];
 		const proposal: PlanProposal = {
 			schemaVersion: "plan-proposal/v1",

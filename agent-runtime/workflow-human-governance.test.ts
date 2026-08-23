@@ -389,7 +389,7 @@ test("replace-plan validates and adopts a complete Proposal and supersedes non-t
 			base: { workflowId, workflowVersion: projection.workflow.version, basePlanRevisionId: oldPlanRevisionId, planningContextDigest: runtime.getPlanningContextDigest(workflowId) },
 			objective: "Replacement plan",
 			tasks: [
-				{ key: "analyze-v2", kind: "analyze", role: "analyst", objective: "Re-analyze", dependsOn: [], inputs: [], expectedArtifactEffects: [{ kind: "analysis", operation: "create_or_revise" }], completionPolicyRef: "analysis/v1", maxAttempts: 3 },
+				{ key: "analyze-v2", kind: "analyze", role: "analysis-analyst", objective: "Re-analyze", dependsOn: [], inputs: [], expectedArtifactEffects: [{ kind: "analysis", operation: "create_or_revise" }], completionPolicyRef: "analysis/v1", maxAttempts: 3 },
 			],
 			rationale: "operator requested a smaller scope",
 		};
@@ -422,7 +422,7 @@ test("replace-plan rejects a Proposal bound to a stale base", async () => {
 			schemaVersion: "plan-proposal/v1",
 			base: { workflowId, workflowVersion: projection.workflow.version - 1, basePlanRevisionId: projection.workflow.currentPlanRevisionId, planningContextDigest: runtime.getPlanningContextDigest(workflowId) },
 			objective: "Stale",
-			tasks: [{ key: "analyze-v2", kind: "analyze", role: "analyst", objective: "Re-analyze", dependsOn: [], inputs: [], expectedArtifactEffects: [{ kind: "analysis", operation: "create_or_revise" }], completionPolicyRef: "analysis/v1", maxAttempts: 3 }],
+			tasks: [{ key: "analyze-v2", kind: "analyze", role: "analysis-analyst", objective: "Re-analyze", dependsOn: [], inputs: [], expectedArtifactEffects: [{ kind: "analysis", operation: "create_or_revise" }], completionPolicyRef: "analysis/v1", maxAttempts: 3 }],
 			rationale: "stale base",
 		};
 		const receipt = command(runtime, workflowId, "replace-plan", { proposal: stale });

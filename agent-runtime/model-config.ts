@@ -41,10 +41,7 @@ const WORKFLOW_AGENT_ROLES: readonly WorkflowAgentRole[] = [
 	"data-architect",
 	"api-architect",
 	"critic",
-	// 过渡保留（#17 expand 阶段）：orchestrator 在 #19 拆除规划调用面、旧角色在 #25 移除
 	"orchestrator",
-	"analyst",
-	"architect",
 ];
 
 /** pi-ai 惰性 API 库: api id -> dist/api 模块与工厂导出。配置声明的模型 api 必须是其一（boot 校验）。 */
@@ -115,8 +112,6 @@ const builtinDefaultRoles: ModelRoles = {
 	"api-architect": { provider: "qwen-token-plan-cn", modelId: "glm-5.2" },
 	critic: { provider: "qwen-token-plan-cn", modelId: "glm-5.2" },
 	orchestrator: { provider: "qwen-token-plan-cn", modelId: "glm-5.2" },
-	analyst: { provider: "qwen-token-plan-cn", modelId: "glm-5.2" },
-	architect: { provider: "qwen-token-plan-cn", modelId: "glm-5.2" },
 };
 
 const MODEL_CONFIG_PATH =

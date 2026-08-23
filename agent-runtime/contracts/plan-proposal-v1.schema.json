@@ -4,7 +4,13 @@
   "title": "BaiZe PlanProposal v1",
   "type": "object",
   "additionalProperties": false,
-  "required": ["schemaVersion", "base", "objective", "tasks", "rationale"],
+  "required": [
+    "schemaVersion",
+    "base",
+    "objective",
+    "tasks",
+    "rationale"
+  ],
   "properties": {
     "schemaVersion": {
       "const": "plan-proposal/v1"
@@ -28,7 +34,10 @@
           "minimum": 0
         },
         "basePlanRevisionId": {
-          "type": ["integer", "null"],
+          "type": [
+            "integer",
+            "null"
+          ],
           "minimum": 1
         },
         "planningContextDigest": {
@@ -91,7 +100,13 @@
         {
           "type": "object",
           "additionalProperties": false,
-          "required": ["type", "artifactId", "revisionId", "artifactKind", "purpose"],
+          "required": [
+            "type",
+            "artifactId",
+            "revisionId",
+            "artifactKind",
+            "purpose"
+          ],
           "properties": {
             "type": {
               "const": "artifact_revision"
@@ -117,7 +132,12 @@
         {
           "type": "object",
           "additionalProperties": false,
-          "required": ["type", "taskKey", "artifactKind", "purpose"],
+          "required": [
+            "type",
+            "taskKey",
+            "artifactKind",
+            "purpose"
+          ],
           "properties": {
             "type": {
               "const": "task_output"
@@ -138,7 +158,12 @@
         {
           "type": "object",
           "additionalProperties": false,
-          "required": ["type", "decisionId", "version", "purpose"],
+          "required": [
+            "type",
+            "decisionId",
+            "version",
+            "purpose"
+          ],
           "properties": {
             "type": {
               "const": "decision"
@@ -161,7 +186,12 @@
         {
           "type": "object",
           "additionalProperties": false,
-          "required": ["type", "findingId", "targetRevisionId", "purpose"],
+          "required": [
+            "type",
+            "findingId",
+            "targetRevisionId",
+            "purpose"
+          ],
           "properties": {
             "type": {
               "const": "finding"
@@ -184,7 +214,11 @@
         {
           "type": "object",
           "additionalProperties": false,
-          "required": ["type", "directiveId", "purpose"],
+          "required": [
+            "type",
+            "directiveId",
+            "purpose"
+          ],
           "properties": {
             "type": {
               "const": "human_directive"
@@ -205,7 +239,10 @@
     "artifactEffectExpectation": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["kind", "operation"],
+      "required": [
+        "kind",
+        "operation"
+      ],
       "properties": {
         "kind": {
           "$ref": "#/$defs/writableArtifactKind"
@@ -234,7 +271,13 @@
           "$ref": "#/$defs/taskKey"
         },
         "kind": {
-          "enum": ["analyze", "design", "review", "rework", "verify"]
+          "enum": [
+            "analyze",
+            "design",
+            "review",
+            "rework",
+            "verify"
+          ]
         },
         "role": {
           "enum": [
@@ -247,9 +290,7 @@
             "data-architect",
             "api-architect",
             "critic",
-            "orchestrator",
-            "analyst",
-            "architect"
+            "orchestrator"
           ]
         },
         "objective": {
@@ -298,7 +339,9 @@
                 "const": "analyze"
               }
             },
-            "required": ["kind"]
+            "required": [
+              "kind"
+            ]
           },
           "then": {
             "properties": {
@@ -307,8 +350,7 @@
                   "analysis-analyst",
                   "scenario-analyst",
                   "usecase-analyst",
-                  "function-analyst",
-                  "analyst"
+                  "function-analyst"
                 ]
               }
             }
@@ -321,7 +363,9 @@
                 "const": "design"
               }
             },
-            "required": ["kind"]
+            "required": [
+              "kind"
+            ]
           },
           "then": {
             "properties": {
@@ -330,8 +374,7 @@
                   "design-architect",
                   "architecture-architect",
                   "data-architect",
-                  "api-architect",
-                  "architect"
+                  "api-architect"
                 ]
               }
             }
@@ -341,10 +384,15 @@
           "if": {
             "properties": {
               "kind": {
-                "enum": ["review", "verify"]
+                "enum": [
+                  "review",
+                  "verify"
+                ]
               }
             },
-            "required": ["kind"]
+            "required": [
+              "kind"
+            ]
           },
           "then": {
             "properties": {
@@ -361,7 +409,9 @@
                 "const": "rework"
               }
             },
-            "required": ["kind"]
+            "required": [
+              "kind"
+            ]
           },
           "then": {
             "properties": {
@@ -374,9 +424,7 @@
                   "design-architect",
                   "architecture-architect",
                   "data-architect",
-                  "api-architect",
-                  "analyst",
-                  "architect"
+                  "api-architect"
                 ]
               }
             }

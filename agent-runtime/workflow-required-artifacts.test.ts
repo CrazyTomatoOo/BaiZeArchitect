@@ -91,7 +91,7 @@ async function createPlannedWorkflow(runtime: Runtime): Promise<{ workflowId: nu
 			{
 				key: "analyze-req",
 				kind: "analyze",
-				role: "analyst",
+				role: "analysis-analyst",
 				objective: "Analyze the requirement",
 				dependsOn: [],
 				inputs: [],

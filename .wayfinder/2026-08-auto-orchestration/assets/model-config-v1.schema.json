@@ -4,7 +4,11 @@
   "title": "BaiZe ModelConfig v1",
   "type": "object",
   "additionalProperties": false,
-  "required": ["schemaVersion", "providers", "defaultRoles"],
+  "required": [
+    "schemaVersion",
+    "providers",
+    "defaultRoles"
+  ],
   "properties": {
     "schemaVersion": {
       "const": "model-config/v1"
@@ -24,7 +28,10 @@
     "providerEntry": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["id", "models"],
+      "required": [
+        "id",
+        "models"
+      ],
       "properties": {
         "id": {
           "type": "string",
@@ -54,7 +61,16 @@
     "modelEntry": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["id", "name", "api", "provider", "input", "cost", "contextWindow", "maxTokens"],
+      "required": [
+        "id",
+        "name",
+        "api",
+        "provider",
+        "input",
+        "cost",
+        "contextWindow",
+        "maxTokens"
+      ],
       "properties": {
         "id": {
           "type": "string",
@@ -100,7 +116,10 @@
         "thinkingLevelMap": {
           "type": "object",
           "additionalProperties": {
-            "type": ["string", "null"]
+            "type": [
+              "string",
+              "null"
+            ]
           }
         },
         "compat": {
@@ -112,7 +131,12 @@
     "cost": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["input", "output", "cacheRead", "cacheWrite"],
+      "required": [
+        "input",
+        "output",
+        "cacheRead",
+        "cacheWrite"
+      ],
       "properties": {
         "input": {
           "type": "number",
@@ -145,9 +169,7 @@
         "data-architect",
         "api-architect",
         "critic",
-        "orchestrator",
-        "analyst",
-        "architect"
+        "orchestrator"
       ],
       "properties": {
         "analysis-analyst": {
@@ -179,19 +201,16 @@
         },
         "orchestrator": {
           "$ref": "#/$defs/modelRef"
-        },
-        "analyst": {
-          "$ref": "#/$defs/modelRef"
-        },
-        "architect": {
-          "$ref": "#/$defs/modelRef"
         }
       }
     },
     "modelRef": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["provider", "modelId"],
+      "required": [
+        "provider",
+        "modelId"
+      ],
       "properties": {
         "provider": {
           "type": "string",

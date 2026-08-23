@@ -372,7 +372,7 @@ function executeTemplateStage(
 function executeAnalysisReworkTask(runtime: Runtime, workflowId: number, taskKey: string, baseRevisionId: number | null): void {
 	const begin = runtime.beginAttempt(workflowId);
 	assert.equal(begin.taskKey, taskKey);
-	assert.equal(begin.taskRole, "analyst");
+	assert.equal(begin.taskRole, "analysis-analyst");
 	const result: RoleResult = {
 		schemaVersion: "role-result/v1",
 		workflowId,
@@ -511,7 +511,7 @@ test("terminal_current_work blocks readiness when a plan task is still pending",
 			{
 				key: "analyze-2",
 				kind: "analyze",
-				role: "analyst",
+				role: "analysis-analyst",
 				objective: "Revise analysis",
 				dependsOn: [],
 				inputs: [],
@@ -565,7 +565,7 @@ test("no_gate blocks readiness when a Finding Thread escalates to human gate aft
 			{
 				key: "analyze-2",
 				kind: "analyze",
-				role: "analyst",
+				role: "analysis-analyst",
 				objective: "Revise analysis",
 				dependsOn: [],
 				inputs: [],
@@ -617,7 +617,7 @@ test("complete_required_artifacts blocks readiness when a required kind is missi
 			{
 				key: "analyze-only",
 				kind: "analyze",
-				role: "analyst",
+				role: "analysis-analyst",
 				objective: "Produce analysis",
 				dependsOn: [],
 				inputs: [],
@@ -740,7 +740,7 @@ test("major Finding with fresh risk acceptance passes; stale risk acceptance blo
 			{
 				key: "analyze-2",
 				kind: "analyze",
-				role: "analyst",
+				role: "analysis-analyst",
 				objective: "Revise analysis",
 				dependsOn: [],
 				inputs: [],

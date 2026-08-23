@@ -86,7 +86,7 @@ function validProposal(workflowId: number, contextDigest: string, workflowVersio
 			{
 				key: "analyze-req",
 				kind: "analyze",
-				role: "analyst",
+				role: "analysis-analyst",
 				objective: "Analyze the requirement",
 				dependsOn: [],
 				inputs: [],
@@ -97,7 +97,7 @@ function validProposal(workflowId: number, contextDigest: string, workflowVersio
 			{
 				key: "design-sol",
 				kind: "design",
-				role: "architect",
+				role: "design-architect",
 				objective: "Design the solution",
 				dependsOn: ["analyze-req"],
 				inputs: [{ type: "task_output", taskKey: "analyze-req", artifactKind: "analysis", purpose: "Analysis as design input" }],

@@ -1,5 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { loadWorkflowContracts } from "./workflow/contracts/loader.js";
 import { compileWorkflowSchema, type WorkflowSchemaValidator } from "./workflow/contracts/schema.js";
 import { validatePlanProposal, type PlanValidationContext, type PlanRuleViolation } from "./workflow/plan-validator.js";
@@ -26,7 +28,7 @@ function validProposal(): PlanProposal {
 			{
 				key: "analyze-req",
 				kind: "analyze",
-				role: "analyst",
+				role: "analysis-analyst",
 				objective: "Analyze the requirement",
 				dependsOn: [],
 				inputs: [],
@@ -37,7 +39,7 @@ function validProposal(): PlanProposal {
 			{
 				key: "design-sol",
 				kind: "design",
-				role: "architect",
+				role: "design-architect",
 				objective: "Design the solution",
 				dependsOn: ["analyze-req"],
 				inputs: [
@@ -131,7 +133,7 @@ test("depth exceeding 6 is rejected", () => {
 		tasks.push({
 			key: `task-${i}`,
 			kind: "analyze",
-			role: "analyst",
+			role: "analysis-analyst",
 			objective: `Step ${i}`,
 			dependsOn: i === 0 ? [] : [`task-${i - 1}`],
 			inputs: [],
@@ -205,7 +207,7 @@ test("more than 12 tasks is rejected", () => {
 		tasks.push({
 			key: `t${i}`,
 			kind: "analyze",
-			role: "analyst",
+			role: "analysis-analyst",
 			objective: `Task ${i}`,
 			dependsOn: [],
 			inputs: [],
@@ -233,3 +235,33 @@ test("base plan revision mismatch is rejected", () => {
 	proposal.base.basePlanRevisionId = 999;
 	expectViolation(proposal, "base_plan_revision_mismatch");
 });
+
+// #25 负向扫描：旧角色 analyst/architect 已从 TaskRole/契约角色闭集移除，任何引用必须校验失败。
+test("legacy role analyst is rejected by plan validation (negative scan)", () => {
+	const proposal = validProposal();
+	proposal.tasks[0]!.role = "analyst" as TaskRole;
+	expectViolation(proposal, "schema");
+});
+
+test("legacy role architect is rejected by plan validation (negative scan)", () => {
+	const proposal = validProposal();
+	proposal.tasks[0]!.role = "architect" as TaskRole;
+	expectViolation(proposal, "schema");
+});
+
+test("contract role enums no longer contain legacy analyst/architect roles", () => {
+	// 直接读契约文件做负向扫描：独立 "analyst"/"architect" 键/枚举值已不允许出现
+	// （生产角色如 "analysis-analyst"/"design-architect" 含子串但非独立键，正则不受影响）。
+	const contractFiles = [
+		"plan-proposal-v1.schema.json",
+		"model-config-v1.schema.json",
+		"concurrency-policy-v1.json",
+		"readiness-policy-v1.json",
+	] as const;
+	for (const file of contractFiles) {
+		const raw = readFileSync(join(import.meta.dirname, "contracts", file), "utf8");
+		assert.doesNotMatch(raw, /"analyst"\s*[,}]/, `${file} must not reference bare "analyst"`);
+		assert.doesNotMatch(raw, /"architect"\s*[,}]/, `${file} must not reference bare "architect"`);
+	}
+});
+

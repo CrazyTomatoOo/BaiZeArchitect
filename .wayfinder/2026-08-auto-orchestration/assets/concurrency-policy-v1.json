@@ -79,18 +79,6 @@
         "data",
         "api"
       ],
-      "analyst": [
-        "analysis",
-        "scenario",
-        "usecase",
-        "function"
-      ],
-      "architect": [
-        "design",
-        "architecture",
-        "data",
-        "api"
-      ],
       "critic": [],
       "orchestrator": [],
       "diagnostic": []
