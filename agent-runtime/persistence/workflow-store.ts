@@ -3,7 +3,7 @@ import { mkdirSync } from "node:fs";
 import path from "node:path";
 import type { CrashInjector, FixtureClock, FixtureOutboxTransport, HashProvider } from "../testing/deterministic-fixtures.js";
 import { WorkflowDoctor, type DoctorReport } from "../workflow/workflow-doctor.js";
-import { PLAN_TASK_LIMITS, type PlanProposal, type TaskProposal } from "../workflow/plan-types.js";
+import { PLAN_TASK_LIMITS, type PlanProposal, type TaskProposal, type WritableArtifactKind } from "../workflow/plan-types.js";
 import { validatePlanProposal } from "../workflow/plan-validator.js";
 import type { RequirementBaseline } from "../workflow/requirement.js";
 import type { CutoverReport, RequirementClassification } from "../cutover/cutover-types.js";
@@ -854,6 +854,16 @@ deleteWorkspace(workspaceId: number): boolean {
 			this.database
 				.prepare("insert into approval_records(workflow_id, record_type, subject_type, subject_id, subject_digest, reason, targets_json, actor_snapshot_document_id, command_id, created_at) values (?, ?, 'artifact_revision', ?, ?, ?, null, ?, ?, ?)")
 				.run(input.workflowId, input.type === "approve-artifact" ? "artifact_approval" : "artifact_rejection", revisionId, revision.content_digest, typeof reason === "string" ? reason : null, actorSnapshot.id, input.commandId, timestamp);
+			// #21 返工闭环：批准的返工产物若来自 rework 计划，恢复 base（原模板）计划活性
+			if (input.type === "approve-artifact") {
+				this.restoreBasePlanAfterRework(input.workflowId, revisionId);
+			}
+			// #21 引擎自动返工：reject 后生成新 PlanRevision（rework Task 同 kind + 环节尾 review Task）；预算耗尽升门禁
+			if (input.type === "reject-artifact") {
+				const kind = (this.database.prepare("select kind from artifacts where id = ?").get(artifactId) as { kind: string }).kind;
+				const escalated = this.scheduleRework(input.workflowId, kind, artifactId, revisionId, typeof reason === "string" ? reason : "", actorSnapshot.id, input.commandId, timestamp);
+				if (escalated) toState = "waiting_for_human";
+			}
 		}
 		if (input.type === "accept-finding-risk") {
 			const findingId = input.payload?.findingId;
@@ -1384,6 +1394,124 @@ deleteWorkspace(workspaceId: number): boolean {
 		return result;
 	}
 
+	/** #21 引擎自动返工：reject 后生成新 PlanRevision（rework Task 同 kind + 环节尾 review Task），旧计划 supersede 留档。 */
+	adoptReworkPlan(workflowId: number, tasks: readonly TaskProposal[]): number | null {
+		const tx = this.database.transaction(() => this.adoptReworkPlanRows(workflowId, tasks)).immediate;
+		return tx();
+	}
+
+	private adoptReworkPlanRows(workflowId: number, tasks: readonly TaskProposal[]): number | null {
+		const timestamp = this.options.clock.now().toISOString();
+		const workflow = this.database
+			.prepare("select version, current_plan_revision_id from workflows where id = ?")
+			.get(workflowId) as { version: number; current_plan_revision_id: number | null };
+		if (workflow.current_plan_revision_id === null) return null;
+		const proposalSnapshot = this.snapshotStore.insertSnapshot("plan_proposal", "plan-proposal/v1", {
+			schemaVersion: "plan-proposal/v1",
+			base: {
+				workflowId,
+				workflowVersion: workflow.version,
+				planningContextDigest: this.computePlanningContextDigest(workflowId),
+				basePlanRevisionId: workflow.current_plan_revision_id,
+			},
+			objective: "Rework rejected artifact",
+			tasks: [...tasks],
+			rationale: "engine-instantiated rework plan",
+		}, timestamp);
+		const revisionNo = (this.database.prepare("select coalesce(max(revision_no), 0) + 1 as next from plan_revisions where workflow_id = ?").get(workflowId) as { next: number }).next;
+		const newVersion = workflow.version + 1;
+		this.database.prepare("update plan_revisions set status = 'superseded' where id = ?").run(workflow.current_plan_revision_id);
+		const planRevisionId = Number(this.database
+			.prepare("insert into plan_revisions(workflow_id, revision_no, proposal_document_id, proposal_digest, base_plan_revision_id, planning_context_digest, status, created_at) values (?, ?, ?, ?, ?, ?, 'active', ?)")
+			.run(workflowId, revisionNo, proposalSnapshot.id, proposalSnapshot.digest, workflow.current_plan_revision_id, proposalSnapshot.digest, timestamp).lastInsertRowid);
+		for (const task of tasks) {
+			const taskId = Number(this.database
+				.prepare("insert into tasks(workflow_id, plan_revision_id, key, kind, role, objective, depends_on_json, inputs_json, expected_artifact_effects_json, completion_policy_ref, max_attempts, status, created_at) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?)")
+				.run(workflowId, planRevisionId, task.key, task.kind, task.role, task.objective, JSON.stringify(task.dependsOn), JSON.stringify(task.inputs), JSON.stringify(task.expectedArtifactEffects), task.completionPolicyRef, task.maxAttempts, timestamp).lastInsertRowid);
+			this.appendEvent(workflowId, "task_created", newVersion, "task", taskId, 0, { planRevisionId, key: task.key, kind: task.kind, role: task.role }, timestamp);
+		}
+		this.database.prepare("update workflows set version = ?, current_plan_revision_id = ?, updated_at = ? where id = ?").run(newVersion, planRevisionId, timestamp, workflowId);
+		this.appendEvent(workflowId, "rework_plan_adopted", newVersion, "plan_revision", planRevisionId, revisionNo, { proposalDigest: proposalSnapshot.digest, revisionNo, basePlanRevisionId: workflow.current_plan_revision_id, reworkTaskKey: tasks[0]?.key ?? null }, timestamp);
+		this.options.crashInjector.reach("adopt_rework_plan.before_commit");
+		return planRevisionId;
+	}
+
+	/** #21 返工闭环：产物 revision 来自 rework 计划且已批准 → 将 base（原模板）计划恢复为 active，rework 计划 supersede。 */
+	private restoreBasePlanAfterRework(workflowId: number, revisionId: number): void {
+		// 找到该 revision 的 source task 及其所在 plan
+		const row = this.database
+			.prepare(`select plan.id as rework_plan_id, plan.base_plan_revision_id as base_plan_id, revision.source_attempt_id as source_attempt_id
+				from artifact_revisions revision
+				left join task_attempts attempt on attempt.id = revision.source_attempt_id
+				left join tasks task on task.id = attempt.task_id
+				left join plan_revisions plan on plan.id = task.plan_revision_id
+				where revision.id = ? and revision.artifact_id is not null`)
+			.get(revisionId) as { rework_plan_id: number | null; base_plan_id: number | null; source_attempt_id: number | null } | undefined;
+		if (!row || row.base_plan_id === null || row.rework_plan_id === null) return;
+		const now = this.options.clock.now().toISOString();
+		const workflow = this.database.prepare("select version, current_plan_revision_id from workflows where id = ?").get(workflowId) as { version: number; current_plan_revision_id: number | null };
+		if (workflow.current_plan_revision_id !== row.rework_plan_id) return;
+		this.database.prepare("update plan_revisions set status = 'superseded' where id = ?").run(row.rework_plan_id);
+		this.database.prepare("update plan_revisions set status = 'active' where id = ?").run(row.base_plan_id);
+		this.database.prepare("update workflows set current_plan_revision_id = ?, version = ? where id = ?").run(row.base_plan_id, workflow.version + 1, workflowId);
+		this.appendEvent(workflowId, "rework_plan_completed", workflow.version + 1, "plan_revision", row.rework_plan_id, 0, { basePlanRevisionId: row.base_plan_id, revisionId }, now);
+	}
+
+	/** #21 返工预算 + 计划生成：同 kind 累计 reject≥2 升 finding_disposition 人工门禁（不再自动返工）；否则生成 rework+review 新计划。 */
+	private scheduleRework(workflowId: number, kind: string, artifactId: number, rejectedRevisionId: number, reason: string, actorSnapshotDocumentId: number, commandId: string, timestamp: string): boolean {
+		const fingerprint = `reject:${kind}:${artifactId}`;
+		const thread = this.database
+			.prepare("select id, rework_count from finding_threads where workflow_id = ? and fingerprint = ?")
+			.get(workflowId, fingerprint) as { id: number; rework_count: number } | undefined;
+		const newCount = (thread?.rework_count ?? 0) + 1;
+		if (thread) {
+			this.database.prepare("update finding_threads set rework_count = ?, updated_at = ? where id = ?").run(newCount, timestamp, thread.id);
+		} else {
+			this.database
+				.prepare("insert into finding_threads(workflow_id, fingerprint, rework_count, status, created_at, updated_at) values (?, ?, 1, 'open', ?, ?)")
+				.run(workflowId, fingerprint, timestamp, timestamp);
+		}
+		const newVersion = (this.database.prepare("select version from workflows where id = ?").get(workflowId) as { version: number }).version + 1;
+		if (newCount >= 2) {
+			// 预算耗尽：升 finding_disposition 门禁，人工接管（不自动返工）
+			const id = (this.database.prepare("select id from finding_threads where workflow_id = ? and fingerprint = ?").get(workflowId, fingerprint) as { id: number }).id;
+			this.database.prepare("update finding_threads set status = 'human_gate', updated_at = ? where id = ?").run(timestamp, id);
+			this.database.prepare("update workflows set state = 'waiting_for_human', version = ?, updated_at = ? where id = ?").run(newVersion, timestamp, workflowId);
+			this.database
+				.prepare("insert into human_gates(workflow_id, gate_type, subject_type, subject_id, status, opened_at) values (?, 'finding_disposition', 'finding_thread', ?, 'open', ?)")
+				.run(workflowId, id, timestamp);
+			this.appendEvent(workflowId, "finding_thread_escalated", newVersion, "finding_thread", id, 0, { fingerprint, reworkCount: newCount, reason }, timestamp, actorSnapshotDocumentId, commandId);
+			return true;
+		}
+		// 预算内：生成 rework + review 新计划
+		const role = ["analysis", "scenario", "usecase", "function"].includes(kind) ? `${kind}-analyst` : `${kind}-architect`;
+		const completionPolicy = `${kind}/v1`;
+		const reworkTask: TaskProposal = {
+			key: `rework-${kind}`,
+			kind: "rework",
+			role: role as TaskProposal["role"],
+			objective: `Rework rejected ${kind} artifact`,
+			dependsOn: [],
+			inputs: [],
+			expectedArtifactEffects: [{ kind: kind as TaskProposal["expectedArtifactEffects"][number]["kind"], operation: "create_or_revise" }],
+			completionPolicyRef: completionPolicy,
+			maxAttempts: 3,
+		};
+		const reviewTask: TaskProposal = {
+			key: `review-${kind}-rework`,
+			kind: "review",
+			role: "critic",
+			objective: `Review reworked ${kind} artifact`,
+			dependsOn: [reworkTask.key],
+			inputs: [{ type: "task_output", taskKey: reworkTask.key, artifactKind: kind as WritableArtifactKind, purpose: "review rework" }],
+			expectedArtifactEffects: [],
+			completionPolicyRef: "critic-review/v1",
+			maxAttempts: 3,
+		};
+		this.adoptReworkPlan(workflowId, [reworkTask, reviewTask]);
+		return false;
+	}
+
 	private adoptPlanRows(workflowId: number, attemptId: number, proposal: PlanProposal): CompletePlanningResult {
 		const timestamp = this.options.clock.now().toISOString();
 		const workflow = this.database
@@ -1566,8 +1694,9 @@ deleteWorkspace(workspaceId: number): boolean {
 				(select count(*) from task_attempts ta where ta.task_id = t.id and ta.status = 'failed') as failed_attempt_count
 				from tasks t
 				where t.workflow_id = ? and t.kind != 'plan' and t.status = 'pending'
+				and t.plan_revision_id = (select current_plan_revision_id from workflows where id = ?)
 				order by failed_attempt_count desc, t.id`)
-			.all(workflowId) as Array<{ id: number; key: string; kind: string; role: string; objective: string; plan_revision_id: number; depends_on_json: string; inputs_json: string; expected_artifact_effects_json: string; completion_policy_ref: string | null; max_attempts: number; status: string; failed_attempt_count: number }>;
+			.all(workflowId, workflowId) as Array<{ id: number; key: string; kind: string; role: string; objective: string; plan_revision_id: number; depends_on_json: string; inputs_json: string; expected_artifact_effects_json: string; completion_policy_ref: string | null; max_attempts: number; status: string; failed_attempt_count: number }>;
 		for (const task of tasks) {
 			const deps = parseJson<string[]>(task.depends_on_json);
 			if (deps.length === 0) return task;
@@ -1593,17 +1722,16 @@ deleteWorkspace(workspaceId: number): boolean {
 					.get(workflowId, taskOutput.taskKey, task.plan_revision_id) as { id: number } | undefined;
 				if (!ancestorTask) return null;
 				const isCritic = role === "critic";
-			const statusClause = isCritic
-				? "ar.status = 'pending'"
-				: `ar.status = 'approved' and exists (select 1 from approval_records approval where approval.subject_type = 'artifact_revision' and approval.subject_id = ar.id and approval.record_type = 'artifact_approval')
-					and not exists (select 1 from findings open_finding where open_finding.workflow_id = ae.workflow_id and open_finding.target_revision_id = ar.id and open_finding.status = 'open' and open_finding.severity in ('critical','major'))`;
-			const revisions = this.database
+				const revisions = this.database
 					.prepare(`select ar.id from artifact_revisions ar
 						join attempt_effects ae on ae.published_artifact_revision_id = ar.id
-						join task_attempts ta on ta.id = ae.attempt_id
-						where ae.workflow_id = ? and ae.artifact_kind = ? and ta.task_id = ? and ${statusClause}
+						where ae.workflow_id = ? and ae.artifact_kind = ?
+						and ${isCritic
+							? "ar.status = 'pending'"
+							: `ar.status = 'approved' and exists (select 1 from approval_records approval where approval.subject_type = 'artifact_revision' and approval.subject_id = ar.id and approval.record_type = 'artifact_approval')
+								and not exists (select 1 from findings open_finding where open_finding.workflow_id = ae.workflow_id and open_finding.target_revision_id = ar.id and open_finding.status = 'open' and open_finding.severity in ('critical','major'))`}
 						order by ar.id desc`)
-					.all(workflowId, taskOutput.artifactKind, ancestorTask.id) as Array<{ id: number }>;
+					.all(workflowId, taskOutput.artifactKind) as Array<{ id: number }>;
 				if (revisions.length !== 1) return null;
 				resolved.push({ ...taskOutput, resolvedRevisionId: revisions[0].id });
 			} else {
