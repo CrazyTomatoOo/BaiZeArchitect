@@ -179,8 +179,9 @@ test("reject 触发引擎生成 rework 新计划（rework+review Task、旧计�
 		const keys = plan.proposal.tasks.map((t) => t.key).sort();
 		assert.deepEqual(keys, ["review-analysis-rework", "rework-analysis"]);
 		// 旧计划 superseded 留档
-		const revisions = runtime.getWorkflowProjection(workflowId)!;
-		void revisions;
+		const oldPlan = runtime.getPlanRevisionDetail(beforePlan!);
+		assert.ok(oldPlan);
+		assert.equal(oldPlan.status, "superseded", "旧计划应 superseded 留档");
 		// 新计划第一个任务 = rework（role analysis-analyst）
 		const first = runtime.beginAttempt(workflowId);
 		assert.ok(first.taskId > 0);
@@ -229,6 +230,49 @@ test("返工产物重新批准后，后续环节引用最新 approved revision",
 		// 下一环节（scenario）应可激活 —— 绑定解析最新 approved revision
 		const scenario = runtime.beginAttempt(workflowId);
 		assert.ok(scenario.taskId > 0, "scenario 应引用返工后已批准的 analysis");
+	});
+});
+
+test("升级的 finding_disposition 门禁可经 accept-finding-risk 关闭", async () => {
+	await withRuntime(async ({ runtime }) => {
+		const workflowId = await startAndPlan(runtime);
+		// 两次 reject 触发预算耗尽
+		const first = await produceAndReviewAnalysis(runtime, workflowId);
+		await rejectAnalysis(runtime, workflowId, first.artifactId, first.revisionId, "cmd-reject-1", "first reject");
+		const rework = runtime.beginAttempt(workflowId);
+		assert.ok(rework.taskId > 0);
+		const projection = runtime.getWorkflowProjection(workflowId)!;
+		const snapId = await bindSnapshot(runtime, workflowId);
+		runtime.completeAttempt(workflowId, rework.attemptId, roleResult(workflowId, rework.attemptId, [analysisEffect(snapId, projection.requirement.currentRevision.id, first.revisionId)]));
+		const reworked = runtime.getArtifactRevisionDetail(projection.requirement.id, "analysis");
+		assert.ok(reworked);
+		const review = runtime.beginAttempt(workflowId);
+		runtime.completeAttempt(workflowId, review.attemptId, {
+			schemaVersion: "role-result/v1",
+			workflowId,
+			attemptId: review.attemptId,
+			effects: [],
+			criticReport: criticReport([reworked.revisionId], workflowId, review.attemptId),
+		});
+		await rejectAnalysis(runtime, workflowId, reworked.artifactId, reworked.revisionId, "cmd-reject-2", "second reject");
+		// 门禁已开：有 open major finding 指向被拒 revision
+		const after = runtime.getWorkflowProjection(workflowId)!;
+		assert.equal(after.workflow.state, "waiting_for_human");
+		const escalated = runtime.getFindings(workflowId).find((f) => f.fingerprint === `reject:analysis:${first.artifactId}`);
+		assert.ok(escalated, "escalation 应创建 major finding");
+		assert.equal(escalated.severity, "major");
+		// accept-finding-risk（命令路径）关闭门禁，gate resolve
+		const accept = runtime.executeCommand({
+			workflowId,
+			commandId: "cmd-accept-risk",
+			expectedWorkflowVersion: currentVersion(runtime, workflowId),
+			type: "accept-finding-risk",
+			operator: OPERATOR,
+			payload: { findingId: escalated.id, targetRevisionId: escalated.targetRevisionId, impact: "major", reason: "Accept rework risk" },
+		});
+		assert.equal(accept.outcome, "accepted", `accept result: ${JSON.stringify(accept)}`);
+		const gates = runtime.getHumanGates(workflowId);
+		assert.equal(gates.filter((g) => g.status === "open").length, 0, "accept-finding-risk 应 resolve human gate");
 	});
 });
 

@@ -3,7 +3,7 @@ import { mkdirSync } from "node:fs";
 import path from "node:path";
 import type { CrashInjector, FixtureClock, FixtureOutboxTransport, HashProvider } from "../testing/deterministic-fixtures.js";
 import { WorkflowDoctor, type DoctorReport } from "../workflow/workflow-doctor.js";
-import { PLAN_TASK_LIMITS, type PlanProposal, type TaskProposal, type WritableArtifactKind } from "../workflow/plan-types.js";
+import { PLAN_TASK_LIMITS, type ArtifactKind, type PlanProposal, type TaskProposal, type WritableArtifactKind } from "../workflow/plan-types.js";
 import { validatePlanProposal } from "../workflow/plan-validator.js";
 import type { RequirementBaseline } from "../workflow/requirement.js";
 import type { CutoverReport, RequirementClassification } from "../cutover/cutover-types.js";
@@ -1406,12 +1406,13 @@ deleteWorkspace(workspaceId: number): boolean {
 			.prepare("select version, current_plan_revision_id from workflows where id = ?")
 			.get(workflowId) as { version: number; current_plan_revision_id: number | null };
 		if (workflow.current_plan_revision_id === null) return null;
+		const planningContext = this.computePlanningContextDigest(workflowId);
 		const proposalSnapshot = this.snapshotStore.insertSnapshot("plan_proposal", "plan-proposal/v1", {
 			schemaVersion: "plan-proposal/v1",
 			base: {
 				workflowId,
 				workflowVersion: workflow.version,
-				planningContextDigest: this.computePlanningContextDigest(workflowId),
+				planningContextDigest: planningContext,
 				basePlanRevisionId: workflow.current_plan_revision_id,
 			},
 			objective: "Rework rejected artifact",
@@ -1423,7 +1424,7 @@ deleteWorkspace(workspaceId: number): boolean {
 		this.database.prepare("update plan_revisions set status = 'superseded' where id = ?").run(workflow.current_plan_revision_id);
 		const planRevisionId = Number(this.database
 			.prepare("insert into plan_revisions(workflow_id, revision_no, proposal_document_id, proposal_digest, base_plan_revision_id, planning_context_digest, status, created_at) values (?, ?, ?, ?, ?, ?, 'active', ?)")
-			.run(workflowId, revisionNo, proposalSnapshot.id, proposalSnapshot.digest, workflow.current_plan_revision_id, proposalSnapshot.digest, timestamp).lastInsertRowid);
+			.run(workflowId, revisionNo, proposalSnapshot.id, proposalSnapshot.digest, workflow.current_plan_revision_id, planningContext, timestamp).lastInsertRowid);
 		for (const task of tasks) {
 			const taskId = Number(this.database
 				.prepare("insert into tasks(workflow_id, plan_revision_id, key, kind, role, objective, depends_on_json, inputs_json, expected_artifact_effects_json, completion_policy_ref, max_attempts, status, created_at) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?)")
@@ -1457,6 +1458,18 @@ deleteWorkspace(workspaceId: number): boolean {
 		this.appendEvent(workflowId, "rework_plan_completed", workflow.version + 1, "plan_revision", row.rework_plan_id, 0, { basePlanRevisionId: row.base_plan_id, revisionId }, now);
 	}
 
+	/** #21 rework 角色映射：生产 kind → 对应生产角色（#15 决议 8 角色）。 */
+	private static readonly REWORK_ROLE_BY_KIND: Readonly<Record<string, string>> = {
+		analysis: "analysis-analyst",
+		scenario: "scenario-analyst",
+		usecase: "usecase-analyst",
+		function: "function-analyst",
+		design: "design-architect",
+		architecture: "architecture-architect",
+		data: "data-architect",
+		api: "api-architect",
+	};
+
 	/** #21 返工预算 + 计划生成：同 kind 累计 reject≥2 升 finding_disposition 人工门禁（不再自动返工）；否则生成 rework+review 新计划。 */
 	private scheduleRework(workflowId: number, kind: string, artifactId: number, rejectedRevisionId: number, reason: string, actorSnapshotDocumentId: number, commandId: string, timestamp: string): boolean {
 		const fingerprint = `reject:${kind}:${artifactId}`;
@@ -1473,9 +1486,24 @@ deleteWorkspace(workspaceId: number): boolean {
 		}
 		const newVersion = (this.database.prepare("select version from workflows where id = ?").get(workflowId) as { version: number }).version + 1;
 		if (newCount >= 2) {
-			// 预算耗尽：升 finding_disposition 门禁，人工接管（不自动返工）
+			// 预算耗尽：升 finding_disposition 门禁，人工接管（不自动返工）。创建 major Finding 供 accept-finding-risk 解析。
 			const id = (this.database.prepare("select id from finding_threads where workflow_id = ? and fingerprint = ?").get(workflowId, fingerprint) as { id: number }).id;
 			this.database.prepare("update finding_threads set status = 'human_gate', updated_at = ? where id = ?").run(timestamp, id);
+			const sourceAttempt = (this.database.prepare("select source_attempt_id from artifact_revisions where id = ?").get(rejectedRevisionId) as { source_attempt_id: number | null }).source_attempt_id;
+			// 兜底：取本 workflow 内任一 attempt（必须是本 workflow 的合法 FK）；无则拒绝升级（避免跨 workflow 魔数）
+			let attemptIdForFinding = sourceAttempt;
+			if (attemptIdForFinding === null) {
+				const anyAttempt = this.database
+					.prepare("select id from task_attempts where workflow_id = ? order by id desc limit 1")
+					.get(workflowId) as { id: number } | undefined;
+				if (!anyAttempt) {
+					return false;
+				}
+				attemptIdForFinding = anyAttempt.id;
+			}
+			const findingId = Number(this.database
+				.prepare("insert into findings(workflow_id, task_attempt_id, thread_id, fingerprint, severity, status, summary, target_revision_id, target_artifact_kind, source_ref, evidence_json, created_at) values (?, ?, ?, ?, 'major', 'open', ?, ?, ?, 'reject-rework', null, ?)")
+				.run(workflowId, attemptIdForFinding, id, fingerprint, `Rework budget exhausted after repeated rejection of ${kind}: ${reason}`, rejectedRevisionId, kind, timestamp).lastInsertRowid);
 			this.database.prepare("update workflows set state = 'waiting_for_human', version = ?, updated_at = ? where id = ?").run(newVersion, timestamp, workflowId);
 			this.database
 				.prepare("insert into human_gates(workflow_id, gate_type, subject_type, subject_id, status, opened_at) values (?, 'finding_disposition', 'finding_thread', ?, 'open', ?)")
@@ -1484,7 +1512,10 @@ deleteWorkspace(workspaceId: number): boolean {
 			return true;
 		}
 		// 预算内：生成 rework + review 新计划
-		const role = ["analysis", "scenario", "usecase", "function"].includes(kind) ? `${kind}-analyst` : `${kind}-architect`;
+		const role = WorkflowStore.REWORK_ROLE_BY_KIND[kind];
+		if (!role) {
+			return true; // 未知 kind 不自动返工，交由人工处置
+		}
 		const completionPolicy = `${kind}/v1`;
 		const reworkTask: TaskProposal = {
 			key: `rework-${kind}`,
@@ -1492,7 +1523,7 @@ deleteWorkspace(workspaceId: number): boolean {
 			role: role as TaskProposal["role"],
 			objective: `Rework rejected ${kind} artifact`,
 			dependsOn: [],
-			inputs: [],
+			inputs: [{ type: "artifact_revision", artifactId, revisionId: rejectedRevisionId, artifactKind: kind as ArtifactKind, purpose: "rejected base" }],
 			expectedArtifactEffects: [{ kind: kind as TaskProposal["expectedArtifactEffects"][number]["kind"], operation: "create_or_revise" }],
 			completionPolicyRef: completionPolicy,
 			maxAttempts: 3,
@@ -1722,7 +1753,9 @@ deleteWorkspace(workspaceId: number): boolean {
 					.get(workflowId, taskOutput.taskKey, task.plan_revision_id) as { id: number } | undefined;
 				if (!ancestorTask) return null;
 				const isCritic = role === "critic";
-				const revisions = this.database
+				// 该 kind 全 workflow 最新已发布 revision：生产用 approved（rework 后新 revision 胜出），critic 用 pending
+				// order by id desc limit 1 保证唯一——返工后的新 revision（r2）自然取代旧 approved（r1）
+				const latest = this.database
 					.prepare(`select ar.id from artifact_revisions ar
 						join attempt_effects ae on ae.published_artifact_revision_id = ar.id
 						where ae.workflow_id = ? and ae.artifact_kind = ?
@@ -1730,10 +1763,11 @@ deleteWorkspace(workspaceId: number): boolean {
 							? "ar.status = 'pending'"
 							: `ar.status = 'approved' and exists (select 1 from approval_records approval where approval.subject_type = 'artifact_revision' and approval.subject_id = ar.id and approval.record_type = 'artifact_approval')
 								and not exists (select 1 from findings open_finding where open_finding.workflow_id = ae.workflow_id and open_finding.target_revision_id = ar.id and open_finding.status = 'open' and open_finding.severity in ('critical','major'))`}
-						order by ar.id desc`)
-					.all(workflowId, taskOutput.artifactKind) as Array<{ id: number }>;
-				if (revisions.length !== 1) return null;
-				resolved.push({ ...taskOutput, resolvedRevisionId: revisions[0].id });
+						order by ar.id desc limit 1`)
+					.get(workflowId, taskOutput.artifactKind) as { id: number } | undefined;
+				const revisionList: Array<{ id: number }> = latest ? [latest] : [];
+				if (revisionList.length !== 1) return null;
+				resolved.push({ ...taskOutput, resolvedRevisionId: revisionList[0]!.id });
 			} else {
 				resolved.push(input as unknown as Record<string, unknown>);
 			}
