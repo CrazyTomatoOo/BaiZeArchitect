@@ -63,6 +63,35 @@
       "type": "string",
       "minLength": 1,
       "maxLength": 4000
+    },
+    "assetReferences": {
+      "type": "array",
+      "maxItems": 3,
+      "items": {
+        "type": "object",
+        "required": [
+          "assetId",
+          "kind",
+          "title",
+          "excerpt"
+        ],
+        "properties": {
+          "assetId": {
+            "type": "integer"
+          },
+          "kind": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          },
+          "excerpt": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false
+      },
+      "description": "#24 planning-phase feedback injection: top-N historical asset references (id+title+excerpt), frozen in plan revision snapshot"
     }
   },
   "$defs": {

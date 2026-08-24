@@ -30,6 +30,14 @@ export interface RoleResult {
 	decisionProposals?: readonly DecisionProposal[];
 }
 
+/** #24 回授注入引用：检索命中的历史资产引用 + 摘要（预算内 top-N 截断）。 */
+export interface AssetReference {
+	assetId: number;
+	kind: string;
+	title: string;
+	excerpt: string;
+}
+
 export interface ContextManifest {
 	schemaVersion: "context-manifest/v1";
 	workflowId: number;
@@ -41,6 +49,8 @@ export interface ContextManifest {
 	policyBundleDigest: string;
 	inputs: readonly unknown[];
 	inputDigest: string;
+	/** #24 历史资产引用（critic 不注入；缺失 = 无注入）。 */
+	relevantAssets?: readonly AssetReference[];
 }
 
 export interface RoleContract {

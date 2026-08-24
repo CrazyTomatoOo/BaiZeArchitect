@@ -2,13 +2,14 @@ import type { ReusableAssetKind } from "../persistence/reusable-asset-kind.js";
 import type { CrashInjector, FixtureClock, FixtureOperator, FixtureOutboxTransport, HashProvider } from "../testing/deterministic-fixtures.js";
 import { WorkflowStore, type BeginPlanningResult, type CommandReceipt, type CompletePlanningResult, type ExecuteCommandInput, type ReconciliationReport, type WorkflowProjection, type EvidenceSnapshotResult, type TraceLinkResult, type FindingRecord, type FindingThreadRecord, type DecisionRecord, type ReadinessReport, type BuildApprovalPacketResult, type ApprovalPacketRecord, type HumanGateRecord, type ApprovalRecordEntry, type HumanDirectiveRecord, type DiagnosticRunRecord, type CommandReceiptDetail, type RequirementSummaryRecord, type RequirementDetailRecord, type ArtifactRevisionDetailRecord, type BoundedWorkflowProjection, type PlanRevisionDetail, type TaskDetailRecord, type AttemptSummaryRecord, type AttemptDetailRecord, type RunDetailRecord, type ApprovalPacketDetailRecord, type DesignPackageRecord, type LegacyImportRecord, type ReusableAssetSummary, type ReusableAssetDetail,
 	type SearchHit, type WorkflowEventEnvelope, type WorkspaceSummary, type RunEventEnvelope } from "../persistence/workflow-store.js";
-import type { BeginAttemptResult, CompleteAttemptResult, ExecuteTaskResult, RoleResult, TraceLinkProposal, CriticReport } from "./role-result.js";
+import type { BeginAttemptResult, CompleteAttemptResult, ExecuteTaskResult, RoleResult, TraceLinkProposal, CriticReport, AssetReference } from "./role-result.js";
 import { WORKFLOW_COMMAND_TYPES, type WorkflowCommandType } from "./command-types.js";
 import { loadWorkflowContracts } from "./contracts/loader.js";
 import { compileWorkflowSchema, type WorkflowSchemaValidator } from "./contracts/schema.js";
 import type { DoctorReport } from "./workflow-doctor.js";
 import type { ModelDriver, ModelRoles, ModelRolesOverride } from "./model-driver.js";
 import { validatePlanProposal, type PlanValidationContext } from "./plan-validator.js";
+import { FEEDBACK_REFERENCE_BUDGET } from "../persistence/workflow-store.js";
 import { instantiatePlanTemplate } from "./plan-template.js";
 import type { TaskRole } from "./plan-types.js";
 import type { PlanProposal } from "./plan-types.js";
@@ -109,6 +110,7 @@ export interface HeadlessWorkflowRuntime {
 	exportReusableAssets(workspaceId: number): readonly ReusableAssetDetail[];
 	importReusableAssets(workspaceId: number, assets: readonly { kind: ReusableAssetKind; title: string; content: unknown }[]): readonly number[];
 	searchWorkspaceContent(workspaceId: number, query: string): readonly SearchHit[];
+	getFeedbackAssetReferences(workflowId: number, query: string, budget: number): readonly AssetReference[];
 	promoteRequirementArtifacts(workflowId: number, kinds: readonly string[]): Record<string, number>;
 	appendRunEvent(runId: number, type: string, payload: Record<string, unknown>): number;
 	runExists(runId: number): boolean;
@@ -229,6 +231,14 @@ export async function openHeadlessWorkflowRuntime(
 					planningContextDigest: begin.planningContextDigest,
 					basePlanRevisionId: store.getWorkflowProjection(workflowId)?.workflow.currentPlanRevisionId ?? null,
 				});
+				// #24 规划期注入：需求标题检索历史资产引用（预算内），冻结进 plan revision
+				{
+					const projection = store.getWorkflowProjection(workflowId);
+					if (projection) {
+						const references = store.getFeedbackAssetReferences(workflowId, projection.requirement.title, FEEDBACK_REFERENCE_BUDGET);
+						if (references.length > 0) proposal.assetReferences = references;
+					}
+				}
 				const complete = completePlanningInternal(workflowId, begin.attemptId, proposal, true);
 				if (complete.outcome === "adopted") {
 					return { outcome: "adopted", planRevisionId: complete.planRevisionId, workflowVersion: complete.workflowVersion, lastEventSeq: complete.lastEventSeq };
@@ -396,6 +406,9 @@ export async function openHeadlessWorkflowRuntime(
 	},
 		searchWorkspaceContent(workspaceId, query) {
 			return store.searchWorkspaceContent(workspaceId, query);
+		},
+		getFeedbackAssetReferences(workflowId, query, budget) {
+			return store.getFeedbackAssetReferences(workflowId, query, budget);
 		},
 	promoteRequirementArtifacts(workflowId, kinds) {
 		return store.promoteRequirementArtifacts(workflowId, kinds);

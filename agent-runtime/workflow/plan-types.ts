@@ -100,6 +100,8 @@ export interface PlanProposal {
 	objective: string;
 	tasks: readonly TaskProposal[];
 	rationale: string;
+	/** #24 规划期回授注入：相关性 top-N 历史资产引用（模板实例化时捕获，冻结于 plan revision 快照）。 */
+	assetReferences?: readonly { assetId: number; kind: string; title: string; excerpt: string }[];
 }
 
 /** 写权按家族分域（#15 决议：写权不分家，仅模型分）。-analyst 系写分析类、-architect 系写架构类。旧角色过渡保留映射。 */

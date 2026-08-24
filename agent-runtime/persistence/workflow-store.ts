@@ -44,7 +44,7 @@ export { ReusableAssetMalformedBodyError, ReusableAssetNameConflictError } from 
 export type { ReusableAssetDetail, ReusableAssetSummary } from "./asset-store.js";
 import { type WorkflowCommandType } from "../workflow/command-types.js";
 import { ARTIFACT_OWNERSHIP, type InputBinding, type TaskOutputInput } from "../workflow/plan-types.js";
-import type { RoleResult, ContextManifest, RoleContract, BeginAttemptResult, CompleteAttemptResult, TraceLinkProposal, CriticReport, FindingProposal, FindingSeverity } from "../workflow/role-result.js";
+import type { RoleResult, ContextManifest, RoleContract, BeginAttemptResult, CompleteAttemptResult, TraceLinkProposal, CriticReport, FindingProposal, FindingSeverity, AssetReference } from "../workflow/role-result.js";
 import type { ModelRolesOverride } from "../workflow/model-driver.js";
 
 const MIGRATIONS = [WORKFLOW_GOVERNANCE_MIGRATION, COMMAND_GOVERNANCE_MIGRATION, RECOVERY_GOVERNANCE_MIGRATION, PLANNING_GOVERNANCE_MIGRATION, ATTEMPT_EXECUTION_MIGRATION, DEPENDENT_TASK_SAFETY_MIGRATION, REQUIRED_ARTIFACTS_AND_EVIDENCE_MIGRATION, CRITIC_GOVERNANCE_MIGRATION, DECISIONS_AND_READINESS_MIGRATION, HUMAN_GOVERNANCE_MIGRATION, READ_MODEL_GOVERNANCE_MIGRATION, RUN_EVENT_STREAM_MIGRATION, ACTOR_KIND_MIGRATION, MODEL_ROLES_MIGRATION, PRODUCTION_ROLE_KIND_MIGRATION, REUSABLE_ASSET_WORKFLOW_MIGRATION, FINALIZE_ROLE_SET_MIGRATION, FTS_ASSET_SEARCH_MIGRATION] as const;
@@ -1795,7 +1795,7 @@ deleteWorkspace(workspaceId: number): boolean {
 		if (!projection) throw new Error("Workflow not found");
 		const policyBundleDigest = projection.workflow.policyBundle.digest;
 		const inputDigest = this.options.hashProvider.digest(resolvedInputs);
-		return {
+		const manifest: ContextManifest = {
 			schemaVersion: "context-manifest/v1",
 			workflowId,
 			workflowVersion,
@@ -1807,6 +1807,11 @@ deleteWorkspace(workspaceId: number): boolean {
 			inputs: resolvedInputs,
 			inputDigest,
 		};
+		// #24 生产角色注入：critic 不收历史资产（复核输入边界干净）；注入 query = 需求标题（高信号借鉴键）。
+		if (task.role !== "critic") {
+			manifest.relevantAssets = this.getFeedbackAssetReferences(workflowId, projection.requirement.title, FEEDBACK_REFERENCE_BUDGET);
+		}
+		return manifest;
 	}
 
 	publishAttemptResult(workflowId: number, attemptId: number, structuredResult: unknown): CompleteAttemptResult {
@@ -2569,26 +2574,34 @@ deleteWorkspace(workspaceId: number): boolean {
 	}
 
 
-	/** #23 FTS5 检索（#23）：增量回填 + workspace 限定 trigram 检索。 */
+	/** #23 FTS5 检索（#23）：增量回填 + workspace 限定 trigram 检索（公开面 excerpt-only，泄漏原始内容到 API 属过度暴露）。 */
 	searchWorkspaceContent(workspaceId: number, query: string): SearchHit[] {
+		return this.searchWorkspaceContentRows(workspaceId, query).map(({ content: _content, ...hit }) => hit);
+	}
+
+	/** 内部检索行（带 content）：#24 注入按命中窗口重算摘要。 */
+	private searchWorkspaceContentRows(workspaceId: number, query: string): SearchHitRow[] {
 		this.ensureSearchBackfilled();
 		const tokens = Array.from(query.trim());
 		if (tokens.length === 0) return [];
 		// trigram 边界：<3 unicode 字符无法构成 trigram，零命中（API 契约文档记录）
 		if (tokens.length < 3) return [];
-		// 用户关键词按字面短语匹配（双引号转义），保证 excerpt 窗口可按索引定位
-		const phrase = `"${query.trim().replaceAll('"', '""')}"`;
-		const hits: SearchHit[] = [];
+		// 用户关键词按字面短语匹配（双引号转义），保证 excerpt 窗口可按索引定位；
+		// 已含引号的查询（#24 滑窗 OR 注入查询）按原样传递
+		const trimmedQuery = query.trim();
+		const phrase = trimmedQuery.includes('"') ? trimmedQuery : `"${trimmedQuery.replaceAll('"', '""')}"`;
+		const hits: SearchHitRow[] = [];
 		const assetRows = this.database
 			.prepare(`select f.asset_id as sourceId, f.kind, f.title, f.content
 				from reusable_asset_search f
 				join reusable_assets ra on ra.id = f.asset_id
 				where ra.workspace_id = ? and f.workspace_id = ?
 					and f.snapshot_id = (select rar.content_document_id from reusable_asset_revisions rar where rar.id = ra.current_revision_id)
-					and reusable_asset_search match ?`)
+					and reusable_asset_search match ?
+				order by bm25(reusable_asset_search)`)
 			.all(workspaceId, workspaceId, phrase) as Array<{ sourceId: number; kind: string; title: string; content: string }>;
 		for (const row of assetRows) {
-			hits.push({ corpus: "reusable_asset", sourceId: row.sourceId, kind: row.kind, title: row.title, excerpt: this.excerptWindow(row.content, query.trim()) });
+			hits.push({ corpus: "reusable_asset", sourceId: row.sourceId, kind: row.kind, title: row.title, excerpt: this.excerptWindow(row.content, query.trim()), content: row.content });
 		}
 		const artifactRows = this.database
 			.prepare(`select f.artifact_id as sourceId, f.kind, f.title, f.content
@@ -2597,12 +2610,64 @@ deleteWorkspace(workspaceId: number): boolean {
 				join requirements r on r.id = a.requirement_id
 				where r.workspace_id = ? and f.workspace_id = ?
 					and f.snapshot_id = (select ar.content_document_id from artifact_revisions ar where ar.id = a.current_revision_id and ar.status = 'approved')
-					and artifact_search match ?`)
+					and artifact_search match ?
+				order by bm25(artifact_search)`)
 			.all(workspaceId, workspaceId, phrase) as Array<{ sourceId: number; kind: string; title: string; content: string }>;
 		for (const row of artifactRows) {
-			hits.push({ corpus: "artifact", sourceId: row.sourceId, kind: row.kind, title: row.title, excerpt: this.excerptWindow(row.content, query.trim()) });
+			hits.push({ corpus: "artifact", sourceId: row.sourceId, kind: row.kind, title: row.title, excerpt: this.excerptWindow(row.content, query.trim()), content: row.content });
 		}
 		return hits;
+	}
+
+	/** #24 回授注入：按检索相关性取 top-N 历史资产引用（排除本需求 promote 的资产），预算内截断。 */
+	getFeedbackAssetReferences(workflowId: number, query: string, budget: number): readonly AssetReference[] {
+		const projection = this.getWorkflowProjection(workflowId);
+		if (!projection) throw new Error("Workflow not found");
+		const workspaceId = projection.requirement.workspaceId;
+		const requirementId = projection.requirement.id;
+		// 标题级滑窗 OR（trigram 短语要求字面连续，完整标题在历史资产中往往不存在；
+		// 3 字符重叠窗口覆盖子串信号，bm25 排序保相关性）
+		const windows = this.feedbackQueryWindows(query);
+		const hits = this.searchWorkspaceContentRows(workspaceId, this.feedbackQueryText(windows));
+		// 仅注入资产语料（历史沉淀）；本需求 promote 的资产自噬排除
+		const ownAssetIds = new Set(
+			(this.database.prepare("select id from reusable_assets where origin_requirement_id = ?").all(requirementId) as Array<{ id: number }>).map((r) => r.id),
+		);
+		const references: AssetReference[] = [];
+		for (const hit of hits) {
+			if (references.length >= budget) break;
+			if (hit.corpus !== "reusable_asset") continue;
+			if (ownAssetIds.has(hit.sourceId)) continue;
+			references.push({ assetId: hit.sourceId, kind: hit.kind, title: hit.title, excerpt: this.windowedExcerpt(hit.content, windows) });
+		}
+		return references;
+	}
+
+	/** #24 注入检索 query 的 3 字符重叠窗口（trigram 短语字面连续约束的放宽）。 */
+	private feedbackQueryWindows(query: string): readonly string[] {
+		const chars = Array.from(query.trim());
+		if (chars.length < 3) return [query.trim()];
+		const windows = new Set<string>();
+		for (let i = 0; i + 3 <= chars.length; i += 1) {
+			windows.add(chars.slice(i, i + 3).join(""));
+		}
+		return [...windows];
+	}
+
+	/** 窗口列表 → OR 短语查询文本（引号转义）。 */
+	private feedbackQueryText(windows: readonly string[]): string {
+		return windows.map((w) => `"${w.replaceAll('"', '""')}"`).join(" OR ");
+	}
+
+	/** 按首个命中的 3 字符窗口定位摘要（OR 查询无法整串定位）。 */
+	private windowedExcerpt(content: string, windows: readonly string[]): string {
+		for (const window of windows) {
+			const idx = content.indexOf(window);
+			if (idx < 0) continue;
+			const start = Math.max(0, idx - 30);
+			return content.slice(start, start + 120);
+		}
+		return content.slice(0, 120);
 	}
 
 	/** FTS 增量回填（insert-only）：账本驱动，只插 (doc, source) 未记录的达标对；同一事务原子。 */
@@ -3655,6 +3720,9 @@ deleteWorkspace(workspaceId: number): boolean {
 	}
 }
 
+/** #24 回授注入预算：单次注入最多引用条数（检索按 bm25 相关性截断）。 */
+export const FEEDBACK_REFERENCE_BUDGET = 3;
+
 export type SearchCorpus = "reusable_asset" | "artifact";
 
 export interface SearchHit {
@@ -3664,6 +3732,9 @@ export interface SearchHit {
 	title: string;
 	excerpt: string;
 }
+
+/** 内部检索行：带原始内容供 #24 注入按窗口重算摘要（不出现在公开 API 面）。 */
+export type SearchHitRow = SearchHit & { content: string };
 
 export interface CommandReceiptDetail extends CommandReceipt {
 	actorRef: string;
