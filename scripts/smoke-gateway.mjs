@@ -30,7 +30,7 @@ const mainEnv = {
 	BAIZE_SESSION_DIR: join(root, "sessions"),
 	BAIZE_PORT: String(PORT),
 	BAIZE_HOST: "127.0.0.1",
-	BAIZE_OPERATORS: "smoke-token=operator:smoke:workflow:operate,workflow:approve",
+	BAIZE_OPERATORS: "smoke-token=smoke-operator:workflow:operate,workflow:approve",
 };
 
 const tsx = join(APP_ROOT, "agent-runtime", "node_modules", ".bin", "tsx");
@@ -49,9 +49,10 @@ const check = (name, condition) => {
 	if (!condition) failed++;
 };
 
-async function api(path, method = "GET", body, cookie) {
+async function api(path, method = "GET", body, cookie, bearer) {
 	const headers = { "content-type": "application/json" };
 	if (cookie) headers["cookie"] = cookie;
+	if (bearer) headers["authorization"] = `Bearer ${bearer}`;
 	const response = await fetch(BASE + path, {
 		method,
 		headers,
@@ -110,15 +111,8 @@ try {
 			web.headers.get("content-type")?.startsWith("text/html"),
 	);
 
-	// 旧路由不存在
-	const oldRoute = await api("/api/requirements/1/runs", "POST", {
-		prompt: "test",
-		role: "orchestrator",
-	});
-	check("旧 Run 创建路由已下线 (404)", oldRoute.status === 404);
-
-	// Operator Session bootstrap
-	const session = await api("/api/session", "POST", undefined, undefined);
+	// Operator Session bootstrap（Bearer token → cookie）
+	const session = await api("/api/session", "POST", undefined, undefined, "smoke-token");
 	const authResponse = session.headers.get("set-cookie") ?? "";
 	const cookie = authResponse.split(";")[0];
 	check(
@@ -127,6 +121,13 @@ try {
 	);
 
 	if (cookie) {
+		// 旧路由不存在（认证后）
+		const oldRoute = await api("/api/requirements/1/runs", "POST", {
+			prompt: "test",
+			role: "orchestrator",
+		}, cookie);
+		check("旧 Run 创建路由已下线 (404)", oldRoute.status === 404);
+
 		// 创建 Workspace + Requirement
 		const workspace = await api("/api/workspaces", "POST", {
 			repoPath: "/tmp/baize/repos/test-repo",
@@ -144,19 +145,19 @@ try {
 		const me = await api("/api/session", "GET", undefined, cookie);
 		check(
 			"Session introspection 返回 actorRef",
-			me.status === 200 && me.body?.actorRef === "operator:smoke",
+			me.status === 200 && me.body?.actorRef === "smoke-operator",
 		);
 
 		// Unauthenticated request rejected
 		const unauth = await api("/api/session", "GET", undefined, undefined);
 		check("无 session 返回 401", unauth.status === 401);
-	}
 
-	// Negative: old /api/runs/stream, /api/overview, /api/decisions gone
-	const oldStream = await api("/api/runs/stream", "GET", undefined, cookie ?? "");
-	const oldOverview = await api("/api/overview", "GET", undefined, cookie ?? "");
-	check("旧 /api/runs/stream 已下线", oldStream.status === 404);
-	check("旧 /api/overview 已下线", oldOverview.status === 404);
+		// Negative: old /api/runs/stream, /api/overview, /api/decisions gone
+		const oldStream = await api("/api/runs/stream", "GET", undefined, cookie);
+		const oldOverview = await api("/api/overview", "GET", undefined, cookie);
+		check("旧 /api/runs/stream 已下线", oldStream.status === 404);
+		check("旧 /api/overview 已下线", oldOverview.status === 404);
+	}
 } catch (error) {
 	failed++;
 	console.error(error);
