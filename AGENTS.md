@@ -1,10 +1,17 @@
 # Repository Guidelines
 
-## Project Overview
+- After user start, the Engine directly instantiates a **fixed template pipeline** (plan-template-v1: analysis → scenario → usecase → function → design, each stage tailed by a Critic review Task; the design Task emits design/architecture/data/api four artifacts) — no Orchestrator model call
+- Roles run in isolated Attempt Sessions, handing off only via versioned Context Manifests, Artifact revisions, Decisions, Findings and evidence
+- Stage tail reviewers gate on closed Findings + human approves each artifact revision (double gate); rejection triggers engine-generated rework plans; approval revocable with audit trail
+- Approved revisions can be promoted into a workspace asset library (item-level, kind+title dedupe, provenance); FTS5 trigram search over assets + approved artifacts feeds planning-phase and producer-attempt feedback injection (critic exempt)
+- The Engine exclusively owns state transitions, plan adoption, task scheduling, side-effect publication, quality judgment and archiving
 
-BaiZe Architect (白泽架构师) is an automation-first requirement design orchestration system for AI-assisted requirement → architecture design governance with human gates. The system implements a deterministic workflow engine where:
+**Nine Fixed Roles (model layer):**
+- **analysis-analyst / scenario-analyst / usecase-analyst / function-analyst**: analysis-family artifacts
+- **design-architect / architecture-architect / data-architect / api-architect**: architecture-family artifacts (model per role)
+- **critic**: writes Findings against a frozen Review Bundle; receives no historical-asset injection
 
-- Each Requirement creation atomically creates a unique `pending` Workflow
+The Orchestrator role was retired when the Engine took over plan generation; the Reviewer role was removed, not renamed.
 - After user start, the Workflow Engine creates a Planning Task
 - A zero-tool Orchestrator proposes a complete finite immutable Task DAG (PlanProposal)
 - The Engine validates/adopts it as a PlanRevision, then executes Analyst → Architect → Critic tasks sequentially
