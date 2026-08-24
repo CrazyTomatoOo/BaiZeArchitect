@@ -79,12 +79,12 @@ function edgeLabel(edge: readonly [string, string, string?]): string {
 	return edge[2] === undefined ? "" : `|${sanitizeMermaidText(edge[2])}|`;
 }
 
-/** scenario/architecture 等 → flowchart（方向与图型由产物 kind 决定）。 */
+/** scenario/architecture 等 → flowchart（方向与图型由产物 kind 决定；id 用标识符净化、文本用文本净化）。 */
 function graphToFlowchart(diagram: GraphDiagram, direction: "TD" | "LR"): string {
 	const nodes = diagram.nodes
-		.map((node) => `  ${sanitizeMermaidText(node.id)}["${sanitizeMermaidText(node.label)}"]`)
+		.map((node) => `  ${sanitizeMermaidName(node.id)}["${sanitizeMermaidText(node.label)}"]`)
 		.join("\n");
-	const edges = diagram.edges.map((edge) => `  ${sanitizeMermaidText(edge[0])} -->${edgeLabel(edge)} ${sanitizeMermaidText(edge[1])}`).join("\n");
+	const edges = diagram.edges.map((edge) => `  ${sanitizeMermaidName(edge[0])} -->${edgeLabel(edge)} ${sanitizeMermaidName(edge[1])}`).join("\n");
 	return `flowchart ${direction}\n${nodes}\n${edges}`;
 }
 
@@ -102,8 +102,8 @@ function graphToEr(diagram: GraphDiagram): string {
 export type DiagramKind = "flowchart" | "erDiagram";
 
 /**
- * 图型映射（#11 原型已验证）：scenario/usecase/function→流程 flowchart(TD)，
- * architecture→组件流 flowchart(LR)，data→ER，其余 kind 无默认图型。
+ * 图型映射（#11 原型 + #27 补全）：scenario/usecase/function/analysis/design→流程 flowchart(TD)，
+ * architecture/api→组件/接口流 flowchart(LR)，data→ER，requirement 无默认图型（主体为需求正文）。
  */
 export function diagramKindFor(artifactKind: ArtifactKind): DiagramKind | null {
 	if (artifactKind === "data") return "erDiagram";
@@ -111,7 +111,10 @@ export function diagramKindFor(artifactKind: ArtifactKind): DiagramKind | null {
 		artifactKind === "scenario" ||
 		artifactKind === "usecase" ||
 		artifactKind === "function" ||
-		artifactKind === "architecture"
+		artifactKind === "analysis" ||
+		artifactKind === "design" ||
+		artifactKind === "architecture" ||
+		artifactKind === "api"
 	) {
 		return "flowchart";
 	}
@@ -130,5 +133,5 @@ export function graphToMermaid(
 	const kind = diagramKindFor(artifactKind);
 	if (kind === null) return null;
 	if (kind === "erDiagram") return graphToEr(diagram);
-	return graphToFlowchart(diagram, artifactKind === "architecture" ? "LR" : "TD");
+	return graphToFlowchart(diagram, artifactKind === "architecture" || artifactKind === "api" ? "LR" : "TD");
 }

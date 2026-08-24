@@ -72,9 +72,31 @@ describe("graphToMermaid", () => {
 		expect(source).toContain(': "1 — N"');
 	});
 
+	it("renders analysis/design as TD flowcharts and api as LR flowchart", () => {
+		const expectedTd = [
+			"flowchart TD",
+			'  trigger["到达有效期末日"]',
+			'  s0["扫描到期积分"]',
+			'  s1["冻结到期积分"]',
+			'  final["到期积分不可再使用"]',
+			"  trigger --> s0",
+			"  s0 --> s1",
+			"  s1 --> final",
+		].join("\n");
+		expect(graphToMermaid("analysis", flow)).toBe(expectedTd);
+		expect(graphToMermaid("design", flow)).toBe(expectedTd);
+		const apiDiagram: GraphDiagram = {
+			type: "graph",
+			nodes: [
+				{ id: "get", label: "GET /points/balance" },
+				{ id: "svc", label: "积分服务" },
+			],
+			edges: [["get", "svc", "RPC"]],
+		};
+		expect(graphToMermaid("api", apiDiagram)).toBe('flowchart LR\n  get["GET /points/balance"]\n  svc["积分服务"]\n  get -->|RPC| svc');
+	});
+
 	it("returns null for kinds without a default diagram type", () => {
-		expect(graphToMermaid("analysis", flow)).toBeNull();
-		expect(graphToMermaid("design", flow)).toBeNull();
 		expect(graphToMermaid("requirement", flow)).toBeNull();
 	});
 
@@ -91,18 +113,19 @@ describe("graphToMermaid", () => {
 });
 
 describe("diagramKindFor", () => {
-	it("maps scenario/usecase/function/architecture to flowchart and data to erDiagram", () => {
+	it("maps 7 kinds to flowchart (analysis/design TD, api LR) and data to erDiagram", () => {
 		expect(diagramKindFor("scenario")).toBe("flowchart");
 		expect(diagramKindFor("usecase")).toBe("flowchart");
 		expect(diagramKindFor("function")).toBe("flowchart");
+		expect(diagramKindFor("analysis")).toBe("flowchart");
+		expect(diagramKindFor("design")).toBe("flowchart");
 		expect(diagramKindFor("architecture")).toBe("flowchart");
+		expect(diagramKindFor("api")).toBe("flowchart");
 		expect(diagramKindFor("data")).toBe("erDiagram");
 	});
 
-	it("returns null for kinds without a default diagram type", () => {
-		expect(diagramKindFor("analysis")).toBeNull();
-		expect(diagramKindFor("design")).toBeNull();
-		expect(diagramKindFor("api")).toBeNull();
+	it("returns null only for requirement", () => {
+		expect(diagramKindFor("requirement")).toBeNull();
 	});
 });
 
@@ -147,5 +170,23 @@ describe("isGraphDiagram", () => {
 		expect(isGraphDiagram({ type: "graph", nodes: [], edges: [] })).toBe(false);
 		expect(isGraphDiagram({ type: "graph", nodes: [{ id: "a", label: "" }], edges: [] })).toBe(false);
 		expect(isGraphDiagram({ type: "graph", nodes: [{ id: "a", label: "A" }], edges: [["a"]] })).toBe(false);
+	});
+});
+
+describe("flowchart identifier sanitization", () => {
+	it("strips parens/whitespace from ids while keeping edges intact", () => {
+		const tricky: GraphDiagram = {
+			type: "graph",
+			nodes: [
+				{ id: "svc (可选)", label: "积分服务" },
+				{ id: "gw", label: "网关" },
+			],
+			edges: [["svc (可选)", "gw"]],
+		};
+		const source = graphToMermaid("api", tricky);
+		expect(source).not.toContain("(");
+		expect(source).not.toContain("可选");
+		expect(source).toContain('svc["积分服务"]');
+		expect(source).toContain("svc --> gw");
 	});
 });
