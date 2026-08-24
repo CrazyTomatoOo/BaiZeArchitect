@@ -200,7 +200,7 @@ test("plan_adopted event is emitted with correct entity", async () => {
 		const { workflowId } = await createStartedWorkflow(runtime);
 		const contextDigest = runtime.getPlanningContextDigest(workflowId);
 		const driver = new ScriptedModelDriver([
-			{ role: "orchestrator", contextDigest, orderedToolCalls: [], structuredResult: validProposal(workflowId, contextDigest), modelUsage: { provider: "test", modelId: "test", inputTokens: 0, outputTokens: 0 } },
+			{ role: "analysis-analyst", contextDigest, orderedToolCalls: [], structuredResult: validProposal(workflowId, contextDigest), modelUsage: { provider: "test", modelId: "test", inputTokens: 0, outputTokens: 0 } },
 		]);
 		await runtime.planWorkflow(workflowId, driver);
 		const projection = runtime.getWorkflowProjection(workflowId);
@@ -228,7 +228,7 @@ test("planWorkflow never invokes the ModelDriver (orchestrator retired)", async 
 		const events: string[] = [];
 		const driver = new ScriptedModelDriver([
 			{
-				role: "orchestrator",
+				role: "analysis-analyst",
 				contextDigest: runtime.getPlanningContextDigest(created.workflowId),
 				orderedToolCalls: [],
 				structuredResult: null,

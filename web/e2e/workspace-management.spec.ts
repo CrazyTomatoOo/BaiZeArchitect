@@ -87,7 +87,6 @@ interface MockOptions {
 function modelConfig() {
 	return {
 		defaultRoles: {
-			orchestrator: { provider: "qwen-token-plan-cn", modelId: "qwen-max" },
 			"analysis-analyst": { provider: "qwen-token-plan-cn", modelId: "qwen-plus" },
 			"scenario-analyst": { provider: "qwen-token-plan-cn", modelId: "qwen-plus" },
 			"usecase-analyst": { provider: "qwen-token-plan-cn", modelId: "qwen-plus" },

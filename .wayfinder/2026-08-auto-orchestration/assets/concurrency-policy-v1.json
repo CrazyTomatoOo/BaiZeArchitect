@@ -80,7 +80,6 @@
         "api"
       ],
       "critic": [],
-      "orchestrator": [],
       "diagnostic": []
     },
     "sameKindReworkRequiresNewPlanRevision": true

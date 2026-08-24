@@ -168,8 +168,7 @@
         "architecture-architect",
         "data-architect",
         "api-architect",
-        "critic",
-        "orchestrator"
+        "critic"
       ],
       "properties": {
         "analysis-analyst": {
@@ -197,9 +196,6 @@
           "$ref": "#/$defs/modelRef"
         },
         "critic": {
-          "$ref": "#/$defs/modelRef"
-        },
-        "orchestrator": {
           "$ref": "#/$defs/modelRef"
         }
       }

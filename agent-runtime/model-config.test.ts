@@ -21,10 +21,9 @@ const validRoles: ModelRoles = {
 	"data-architect": { provider: "qwen-token-plan-cn", modelId: "glm-5.2" },
 	"api-architect": { provider: "qwen-token-plan-cn", modelId: "glm-5.2" },
 	critic: { provider: "qwen-token-plan-cn", modelId: "glm-5.2" },
-	orchestrator: { provider: "qwen-token-plan-cn", modelId: "glm-5.2" },
 };
 
-test("validateModelRoles accepts the full 12-role map from the builtin catalog", () => {
+test("validateModelRoles accepts the full 9-role map from the builtin catalog", () => {
 	const problems = validateModelRoles(validRoles);
 	assert.deepEqual(problems, []);
 });
@@ -46,7 +45,7 @@ test("validateModelRoles accepts undefined/null as empty override (all fall back
 
 test("validateModelRoles returns role_missing for non-object input", () => {
 	const problems = validateModelRoles("not-an-object");
-	assert.equal(problems.length, 10);
+	assert.equal(problems.length, 9);
 	for (const problem of problems) {
 		assert.equal(problem.reason, "role_missing");
 	}
@@ -216,7 +215,6 @@ test("boot rejects a config with a missing default role", () => {
 				"architecture-architect": { provider: "qwen-token-plan-cn", modelId: "glm-5.2" },
 				"data-architect": { provider: "qwen-token-plan-cn", modelId: "glm-5.2" },
 				"api-architect": { provider: "qwen-token-plan-cn", modelId: "glm-5.2" },
-				orchestrator: { provider: "qwen-token-plan-cn", modelId: "glm-5.2" },
 			},
 		}),
 	);
@@ -265,8 +263,7 @@ test("boot rejects a config with an unknown provider in defaultRoles", () => {
 				"architecture-architect": { provider: "qwen-token-plan-cn", modelId: "glm-5.2" },
 				"data-architect": { provider: "qwen-token-plan-cn", modelId: "glm-5.2" },
 				"api-architect": { provider: "qwen-token-plan-cn", modelId: "glm-5.2" },
-				orchestrator: { provider: "missing", modelId: "x" },
-				critic: { provider: "qwen-token-plan-cn", modelId: "glm-5.2" },
+				critic: { provider: "missing", modelId: "x" },
 			},
 		}),
 	);
@@ -315,7 +312,6 @@ test("boot rejects a config with an unknown model in defaultRoles", () => {
 				"architecture-architect": { provider: "qwen-token-plan-cn", modelId: "glm-5.2" },
 				"data-architect": { provider: "qwen-token-plan-cn", modelId: "glm-5.2" },
 				"api-architect": { provider: "qwen-token-plan-cn", modelId: "glm-5.2" },
-				orchestrator: { provider: "qwen-token-plan-cn", modelId: "glm-5.2" },
 				critic: { provider: "qwen-token-plan-cn", modelId: "missing-model" },
 			},
 		}),

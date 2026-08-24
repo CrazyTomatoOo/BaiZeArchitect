@@ -14,7 +14,6 @@ export type WorkflowState =
 	| "archived";
 
 export type ModelRoleKey =
-	| "orchestrator"
 	| "analysis-analyst"
 	| "scenario-analyst"
 	| "usecase-analyst"

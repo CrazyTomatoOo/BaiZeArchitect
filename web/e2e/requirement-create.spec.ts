@@ -19,7 +19,6 @@ function parseBody(raw: string | null): Record<string, unknown> {
 function modelConfigFixture() {
 	return {
 		defaultRoles: {
-			orchestrator: { provider: "qwen-token-plan-cn", modelId: "qwen-max" },
 			"analysis-analyst": { provider: "qwen-token-plan-cn", modelId: "qwen-plus" },
 			"scenario-analyst": { provider: "qwen-token-plan-cn", modelId: "qwen-plus" },
 			"usecase-analyst": { provider: "qwen-token-plan-cn", modelId: "qwen-plus" },
@@ -67,7 +66,7 @@ test.describe("requirement creation model profile", () => {
 		});
 		await openFixture(page);
 
-		await expect(page.getByTestId("model-custom-count")).toHaveText("有效模型档 · 0/10 自定义");
+		await expect(page.getByTestId("model-custom-count")).toHaveText("有效模型档 · 0/9 自定义");
 
 		await page.getByPlaceholder("标题").fill("新建需求");
 		await page.getByPlaceholder("一句话摘要").fill("一句话摘要");
@@ -85,7 +84,7 @@ test.describe("requirement creation model profile", () => {
 		expect(body).not.toHaveProperty("modelRoles");
 	});
 
-	test("自定义: 任一角色改动即 materialize 完整 10 角色 map", async ({ page }) => {
+	test("自定义: 任一角色改动即 materialize 完整 9 角色 map", async ({ page }) => {
 		const requests: Request[] = [];
 		await page.route("**/api/model-config", (route) => fulfillJson(route, modelConfigFixture()));
 		await page.route("**/api/requirements?workspaceId=1", (route) => fulfillJson(route, { requirements: [] }));
@@ -103,7 +102,7 @@ test.describe("requirement creation model profile", () => {
 		await analystRow.getByTestId("model-provider-analysis-analyst").selectOption("glm");
 		await analystRow.getByTestId("model-select-analysis-analyst").selectOption("glm-5.2");
 
-		await expect(page.getByTestId("model-custom-count")).toHaveText("有效模型档 · 1/10 自定义");
+		await expect(page.getByTestId("model-custom-count")).toHaveText("有效模型档 · 1/9 自定义");
 		await expect(page.getByTestId("model-row-analysis-analyst")).toHaveAttribute("data-custom", "true");
 
 		await page.getByRole("button", { name: "创建需求并开始设计" }).click();
@@ -112,7 +111,6 @@ test.describe("requirement creation model profile", () => {
 		const body = parseBody(requests[0]!.postData());
 		expect(body).toHaveProperty("modelRoles");
 		const modelRoles = body.modelRoles as Record<string, { provider: string; modelId: string }>;
-		expect(modelRoles.orchestrator).toEqual({ provider: "qwen-token-plan-cn", modelId: "qwen-max" });
 		expect(modelRoles["analysis-analyst"]).toEqual({ provider: "glm", modelId: "glm-5.2" });
 		expect(modelRoles["scenario-analyst"]).toEqual({ provider: "qwen-token-plan-cn", modelId: "qwen-plus" });
 		expect(modelRoles["usecase-analyst"]).toEqual({ provider: "qwen-token-plan-cn", modelId: "qwen-plus" });
@@ -135,10 +133,10 @@ test.describe("requirement creation model profile", () => {
 		const analystRow = page.getByTestId("model-row-analysis-analyst");
 		await analystRow.getByTestId("model-provider-analysis-analyst").selectOption("glm");
 		await analystRow.getByTestId("model-select-analysis-analyst").selectOption("glm-5.2");
-		await expect(page.getByTestId("model-custom-count")).toHaveText("有效模型档 · 1/10 自定义");
+		await expect(page.getByTestId("model-custom-count")).toHaveText("有效模型档 · 1/9 自定义");
 
 		await page.getByRole("button", { name: "恢复默认档" }).click();
-		await expect(page.getByTestId("model-custom-count")).toHaveText("有效模型档 · 0/10 自定义");
+		await expect(page.getByTestId("model-custom-count")).toHaveText("有效模型档 · 0/9 自定义");
 		await expect(page.getByTestId("model-row-analysis-analyst")).toHaveAttribute("data-custom", "false");
 	});
 

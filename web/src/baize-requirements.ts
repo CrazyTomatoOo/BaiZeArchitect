@@ -11,7 +11,6 @@ import {
 } from "./workflow-client.js";
 
 const ROLE_KEYS: readonly ModelRoleKey[] = [
-	"orchestrator",
 	"analysis-analyst",
 	"scenario-analyst",
 	"usecase-analyst",
@@ -23,8 +22,10 @@ const ROLE_KEYS: readonly ModelRoleKey[] = [
 	"critic",
 ];
 
+const INITIAL_ROLE_PROFILES = Object.fromEntries(ROLE_KEYS.map((role) => [role, { provider: "", modelId: "" }])) as Record<ModelRoleKey, ModelProfile>;
+const INITIAL_CUSTOMIZED = Object.fromEntries(ROLE_KEYS.map((role) => [role, false])) as Record<ModelRoleKey, boolean>;
+
 const ROLE_LABELS: Record<ModelRoleKey, string> = {
-	orchestrator: "编排者",
 	"analysis-analyst": "需求分析",
 	"scenario-analyst": "场景分析",
 	"usecase-analyst": "用例分析",
@@ -151,7 +152,6 @@ class BaizeRequirements extends LitElement {
 		this.modelConfigLoading = false;
 		this.modelConfigError = null;
 		this.modelRoles = {
-			orchestrator: { provider: "", modelId: "" },
 			"analysis-analyst": { provider: "", modelId: "" },
 			"scenario-analyst": { provider: "", modelId: "" },
 			"usecase-analyst": { provider: "", modelId: "" },
@@ -163,7 +163,6 @@ class BaizeRequirements extends LitElement {
 			critic: { provider: "", modelId: "" },
 		};
 		this.customized = {
-			orchestrator: false,
 			"analysis-analyst": false,
 			"scenario-analyst": false,
 			"usecase-analyst": false,
@@ -201,7 +200,7 @@ class BaizeRequirements extends LitElement {
 			const config = await getModelConfig(this.apiBase);
 			this.modelConfig = config;
 			this.modelRoles = { ...config.defaultRoles };
-			this.customized = { orchestrator: false, "analysis-analyst": false, "scenario-analyst": false, "usecase-analyst": false, "function-analyst": false, "design-architect": false, "architecture-architect": false, "data-architect": false, "api-architect": false, critic: false };
+			this.customized = { ...INITIAL_CUSTOMIZED };
 		} catch (e) {
 			this.modelConfigError = e instanceof Error ? e.message : String(e);
 		} finally {
@@ -230,7 +229,7 @@ class BaizeRequirements extends LitElement {
 	private restoreDefaults(): void {
 		if (!this.modelConfig) return;
 		this.modelRoles = { ...this.modelConfig.defaultRoles };
-		this.customized = { orchestrator: false, "analysis-analyst": false, "scenario-analyst": false, "usecase-analyst": false, "function-analyst": false, "design-architect": false, "architecture-architect": false, "data-architect": false, "api-architect": false, critic: false };
+		this.customized = { ...INITIAL_CUSTOMIZED };
 	}
 
 	private anyCustomized(): boolean {
@@ -256,7 +255,7 @@ class BaizeRequirements extends LitElement {
 			this.description = "";
 			if (this.modelConfig) {
 				this.modelRoles = { ...this.modelConfig.defaultRoles };
-				this.customized = { orchestrator: false, "analysis-analyst": false, "scenario-analyst": false, "usecase-analyst": false, "function-analyst": false, "design-architect": false, "architecture-architect": false, "data-architect": false, "api-architect": false, critic: false };
+				this.customized = { ...INITIAL_CUSTOMIZED };
 			}
 			this.createOpen = false;
 			this.dispatchEvent(new CustomEvent("baize-open-requirement", { detail: { id: created.requirementId }, bubbles: true, composed: true }));
@@ -281,7 +280,7 @@ class BaizeRequirements extends LitElement {
 					<span class="title">执行模型档</span>
 					<span class="status">
 						<span class="count" data-testid="model-custom-count">有效模型档 · ${count}/${ROLE_KEYS.length} 自定义</span>
-						<span class="default-profile mono">默认档 ${defaults.orchestrator.provider} / ${defaults.orchestrator.modelId}</span>
+						<span class="default-profile mono">默认档 ${defaults["analysis-analyst"]?.provider ?? "—"} / ${defaults["analysis-analyst"]?.modelId ?? "—"}</span>
 					</span>
 					<span class="spacer"></span>
 					<button type="button" ?disabled=${count === 0} @click=${() => this.restoreDefaults()}>恢复默认档</button>

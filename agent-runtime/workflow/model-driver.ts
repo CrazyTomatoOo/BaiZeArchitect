@@ -13,13 +13,11 @@ export type ProductionRole =
 	| "api-architect";
 
 /**
- * 模型解析角色闭集：8 生产角色 + critic + orchestrator。
- * #25：旧角色 analyst/architect 已移除（旧契约/测试面已迁移）。
+ * 模型解析角色闭集：8 生产角色 + critic（#26：orchestrator 已移除——规划由 Engine 直生成，无模型档）。
  */
 export type WorkflowAgentRole =
 	| ProductionRole
-	| "critic"
-	| "orchestrator";
+	| "critic";
 
 export interface ModelRef {
 	provider: string;
@@ -39,7 +37,6 @@ export interface ModelRoles {
 	["data-architect"]: ModelRef;
 	["api-architect"]: ModelRef;
 	critic: ModelRef;
-	orchestrator: ModelRef;
 }
 
 /** per-requirement 部分覆盖：任意角色子集（#15 决议），未传回落部署默认档。 */

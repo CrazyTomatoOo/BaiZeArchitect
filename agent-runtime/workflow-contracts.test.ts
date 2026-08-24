@@ -265,3 +265,15 @@ test("rejects inconsistent references between contracts", async (t) => {
 		}
 	});
 });
+
+
+
+// #26 负向扫描：模型层契约无 orchestrator 角色键（已收敛 9 键；readiness policy 名等非角色引用属历史命名，不在此列）。
+test("#26 model-layer contracts carry no orchestrator role key", async () => {
+	const { readFileSync } = await import("node:fs");
+	for (const file of ["model-config-v1.schema.json", "plan-proposal-v1.schema.json", "concurrency-policy-v1.json"]) {
+		const raw = readFileSync(new URL(`./contracts/${file}`, import.meta.url), "utf8");
+		assert.doesNotMatch(raw, /"orchestrator"\s*[,:}[\]]/, `${file} must not carry bare "orchestrator"`);
+	}
+});
+

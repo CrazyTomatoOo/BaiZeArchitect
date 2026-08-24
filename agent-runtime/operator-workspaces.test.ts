@@ -267,7 +267,7 @@ test("DELETE /api/workspaces/:id refuses a busy workspace with 409 workspace_bus
 			rationale: "rationale",
 		};
 		const driver = new ScriptedModelDriver([
-			{ role: "orchestrator", contextDigest, orderedToolCalls: [], structuredResult: proposal, modelUsage: { provider: "test", modelId: "test", inputTokens: 0, outputTokens: 0 } },
+			{ role: "analysis-analyst", contextDigest, orderedToolCalls: [], structuredResult: proposal, modelUsage: { provider: "test", modelId: "test", inputTokens: 0, outputTokens: 0 } },
 		]);
 		const planned = await context.runtime.planWorkflow(created.workflowId, driver);
 		assert.equal(planned.outcome, "adopted");
