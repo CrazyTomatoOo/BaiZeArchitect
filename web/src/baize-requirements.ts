@@ -10,12 +10,29 @@ import {
 	type ModelRoleKey,
 } from "./workflow-client.js";
 
-const ROLE_KEYS: readonly ModelRoleKey[] = ["orchestrator", "analyst", "architect", "critic"];
+const ROLE_KEYS: readonly ModelRoleKey[] = [
+	"orchestrator",
+	"analysis-analyst",
+	"scenario-analyst",
+	"usecase-analyst",
+	"function-analyst",
+	"design-architect",
+	"architecture-architect",
+	"data-architect",
+	"api-architect",
+	"critic",
+];
 
 const ROLE_LABELS: Record<ModelRoleKey, string> = {
 	orchestrator: "编排者",
-	analyst: "分析者",
-	architect: "架构者",
+	"analysis-analyst": "需求分析",
+	"scenario-analyst": "场景分析",
+	"usecase-analyst": "用例分析",
+	"function-analyst": "功能分析",
+	"design-architect": "设计架构",
+	"architecture-architect": "架构设计",
+	"data-architect": "数据设计",
+	"api-architect": "API 设计",
 	critic: "评审者",
 };
 
@@ -135,14 +152,26 @@ class BaizeRequirements extends LitElement {
 		this.modelConfigError = null;
 		this.modelRoles = {
 			orchestrator: { provider: "", modelId: "" },
-			analyst: { provider: "", modelId: "" },
-			architect: { provider: "", modelId: "" },
+			"analysis-analyst": { provider: "", modelId: "" },
+			"scenario-analyst": { provider: "", modelId: "" },
+			"usecase-analyst": { provider: "", modelId: "" },
+			"function-analyst": { provider: "", modelId: "" },
+			"design-architect": { provider: "", modelId: "" },
+			"architecture-architect": { provider: "", modelId: "" },
+			"data-architect": { provider: "", modelId: "" },
+			"api-architect": { provider: "", modelId: "" },
 			critic: { provider: "", modelId: "" },
 		};
 		this.customized = {
 			orchestrator: false,
-			analyst: false,
-			architect: false,
+			"analysis-analyst": false,
+			"scenario-analyst": false,
+			"usecase-analyst": false,
+			"function-analyst": false,
+			"design-architect": false,
+			"architecture-architect": false,
+			"data-architect": false,
+			"api-architect": false,
 			critic: false,
 		};
 	}
@@ -172,7 +201,7 @@ class BaizeRequirements extends LitElement {
 			const config = await getModelConfig(this.apiBase);
 			this.modelConfig = config;
 			this.modelRoles = { ...config.defaultRoles };
-			this.customized = { orchestrator: false, analyst: false, architect: false, critic: false };
+			this.customized = { orchestrator: false, "analysis-analyst": false, "scenario-analyst": false, "usecase-analyst": false, "function-analyst": false, "design-architect": false, "architecture-architect": false, "data-architect": false, "api-architect": false, critic: false };
 		} catch (e) {
 			this.modelConfigError = e instanceof Error ? e.message : String(e);
 		} finally {
@@ -201,7 +230,7 @@ class BaizeRequirements extends LitElement {
 	private restoreDefaults(): void {
 		if (!this.modelConfig) return;
 		this.modelRoles = { ...this.modelConfig.defaultRoles };
-		this.customized = { orchestrator: false, analyst: false, architect: false, critic: false };
+		this.customized = { orchestrator: false, "analysis-analyst": false, "scenario-analyst": false, "usecase-analyst": false, "function-analyst": false, "design-architect": false, "architecture-architect": false, "data-architect": false, "api-architect": false, critic: false };
 	}
 
 	private anyCustomized(): boolean {
@@ -227,7 +256,7 @@ class BaizeRequirements extends LitElement {
 			this.description = "";
 			if (this.modelConfig) {
 				this.modelRoles = { ...this.modelConfig.defaultRoles };
-				this.customized = { orchestrator: false, analyst: false, architect: false, critic: false };
+				this.customized = { orchestrator: false, "analysis-analyst": false, "scenario-analyst": false, "usecase-analyst": false, "function-analyst": false, "design-architect": false, "architecture-architect": false, "data-architect": false, "api-architect": false, critic: false };
 			}
 			this.createOpen = false;
 			this.dispatchEvent(new CustomEvent("baize-open-requirement", { detail: { id: created.requirementId }, bubbles: true, composed: true }));
@@ -251,7 +280,7 @@ class BaizeRequirements extends LitElement {
 				<div class="picker-header">
 					<span class="title">执行模型档</span>
 					<span class="status">
-						<span class="count" data-testid="model-custom-count">有效模型档 · ${count}/4 自定义</span>
+						<span class="count" data-testid="model-custom-count">有效模型档 · ${count}/${ROLE_KEYS.length} 自定义</span>
 						<span class="default-profile mono">默认档 ${defaults.orchestrator.provider} / ${defaults.orchestrator.modelId}</span>
 					</span>
 					<span class="spacer"></span>

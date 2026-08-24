@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { loadWorkflowContracts } from "./workflow/contracts/loader.js";
 import { compileWorkflowSchema, type WorkflowSchemaValidator } from "./workflow/contracts/schema.js";
 import { validatePlanProposal, type PlanValidationContext, type PlanRuleViolation } from "./workflow/plan-validator.js";
-import type { PlanProposal, TaskProposal } from "./workflow/plan-types.js";
+import type { PlanProposal, TaskProposal, TaskRole } from "./workflow/plan-types.js";
 
 const CONTEXT: PlanValidationContext = {
 	workflowId: 1,
@@ -239,13 +239,13 @@ test("base plan revision mismatch is rejected", () => {
 // #25 负向扫描：旧角色 analyst/architect 已从 TaskRole/契约角色闭集移除，任何引用必须校验失败。
 test("legacy role analyst is rejected by plan validation (negative scan)", () => {
 	const proposal = validProposal();
-	proposal.tasks[0]!.role = "analyst" as TaskRole;
+	proposal.tasks[0]!.role = "analyst" as string as TaskRole;
 	expectViolation(proposal, "schema");
 });
 
 test("legacy role architect is rejected by plan validation (negative scan)", () => {
 	const proposal = validProposal();
-	proposal.tasks[0]!.role = "architect" as TaskRole;
+	proposal.tasks[0]!.role = "architect" as string as TaskRole;
 	expectViolation(proposal, "schema");
 });
 

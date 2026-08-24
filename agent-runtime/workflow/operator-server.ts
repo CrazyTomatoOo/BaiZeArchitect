@@ -692,16 +692,17 @@ export async function startOperatorServer(
 				return;
 			}
 			const kinds = (body as { kinds?: unknown }).kinds;
-			if (!Array.isArray(kinds) || kinds.some((kind) => typeof kind !== "string")) {
-				sendJson(response, 400, { error: "malformed_body" });
+			if (!Array.isArray(kinds) || kinds.some((kind) => typeof kind !== "string") || kinds.some((kind) => !isReusableAssetKind(kind))) {
+				sendJson(response, 400, { error: "unknown_asset_kind" });
 				return;
 			}
-			const workflowId = Number(segments[2]);
-			if (!options.runtime.getWorkflowProjection(workflowId)) {
-				sendJson(response, 404, { error: "unknown_workflow" });
+			const requirementId = Number(segments[2]);
+			const detail = options.runtime.getRequirementDetail(requirementId);
+			if (!detail) {
+				sendJson(response, 404, { error: "unknown_requirement" });
 				return;
 			}
-			const counts = options.runtime.promoteRequirementArtifacts(workflowId, kinds as string[]);
+			const counts = options.runtime.promoteRequirementArtifacts(detail.workflowId, kinds as string[]);
 			sendJson(response, 201, { promoted: counts });
 			return;
 		}

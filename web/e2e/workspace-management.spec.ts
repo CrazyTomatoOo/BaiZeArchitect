@@ -88,8 +88,14 @@ function modelConfig() {
 	return {
 		defaultRoles: {
 			orchestrator: { provider: "qwen-token-plan-cn", modelId: "qwen-max" },
-			analyst: { provider: "qwen-token-plan-cn", modelId: "qwen-plus" },
-			architect: { provider: "glm", modelId: "glm-5.2" },
+			"analysis-analyst": { provider: "qwen-token-plan-cn", modelId: "qwen-plus" },
+			"scenario-analyst": { provider: "qwen-token-plan-cn", modelId: "qwen-plus" },
+			"usecase-analyst": { provider: "qwen-token-plan-cn", modelId: "qwen-plus" },
+			"function-analyst": { provider: "qwen-token-plan-cn", modelId: "qwen-plus" },
+			"design-architect": { provider: "glm", modelId: "glm-5.2" },
+			"architecture-architect": { provider: "glm", modelId: "glm-5.2" },
+			"data-architect": { provider: "glm", modelId: "glm-5.2" },
+			"api-architect": { provider: "glm", modelId: "glm-5.2" },
 			critic: { provider: "glm", modelId: "glm-4.2" },
 		},
 		providers: [

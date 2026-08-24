@@ -133,3 +133,43 @@ test("the shared kind predicate classifies actor and rejects unknown kinds", asy
 	assert.equal(isReusableAssetKind("bogus"), false);
 	assert.equal(isReusableAssetKind(undefined), false);
 });
+
+
+// #22 review（S1/S3/S4）：0016 重建后不可变触发器/工作区索引/cascade FK/8 kinds/workflow source 全部保留。
+test("0016 asset-workflow rebuild preserves trigger, index, cascade FK, 8 kinds, workflow source", async () => {
+	await withRuntime(async ({ databasePath, runtime }) => {
+		const db = new Database(databasePath);
+		try {
+			const workspaceId = runtime.createWorkspace({ repoPath: "/r", name: "R" });
+			const triggers = db.prepare("select name from sqlite_master where type='trigger' and name='reusable_asset_revision_content_immutable'").all();
+			assert.equal(triggers.length, 1, "immutability trigger recreated after 0016 rebuild");
+			const indexes = db.prepare("select name from sqlite_master where type='index' and name='reusable_assets_workspace'").all();
+			assert.equal(indexes.length, 1, "workspace index recreated after 0016 rebuild");
+			const fkSql = db.prepare("select sql from sqlite_master where type='table' and name='reusable_asset_revisions'").get() as { sql: string };
+			assert.match(fkSql.sql, /on delete cascade/, "revision FK keeps 0011 cascade semantics");
+			const assetSql = db.prepare("select sql from sqlite_master where type='table' and name='reusable_assets'").get() as { sql: string };
+			assert.match(assetSql.sql, /'scenario','usecase','function','design','architecture','data','api','actor'/);
+			const revisionSql = db.prepare("select sql from sqlite_master where type='table' and name='reusable_asset_revisions'").get() as { sql: string };
+			assert.match(revisionSql.sql, /'manual','import','migration','workflow'/);
+			// 走完整 store 路径建 asset + workflow-source revision（触发器必须放行合法插入）
+			const created = runtime.createReusableAsset({
+				workspaceId,
+				kind: "scenario",
+				title: "S",
+				content: { steps: ["a"] },
+				source: "workflow",
+			});
+			// 不可变触发器拦截 revision 修改
+			assert.throws(
+				() => db.prepare("update reusable_asset_revisions set revision_no = revision_no + 100 where id = ?").run(created.revisionId),
+				/ReusableAssetRevision content is immutable/,
+			);
+			// cascade：删 asset 连带删 revisions
+			runtime.deleteReusableAsset(created.assetId);
+			const remaining = db.prepare("select count(*) as n from reusable_asset_revisions").get() as { n: number };
+			assert.equal(remaining.n, 0, "revisions cascade-deleted with asset");
+		} finally {
+			db.close();
+		}
+	});
+});

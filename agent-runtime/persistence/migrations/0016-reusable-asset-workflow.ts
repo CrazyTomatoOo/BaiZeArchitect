@@ -5,6 +5,8 @@
  * - reusable_assets 新增溯源列（origin_requirement_id/origin_artifact_id/origin_approval_id，审计元数据无 FK）
  * - reusable_asset_revisions.source 扩 workflow（并行 manual/import/migration）
  * SQLite 不能 ALTER CHECK，按 0013 重建配方：建新表 → 拷贝 → drop → rename。
+ * 重建连带：reusable_asset_revision_content_immutable 触发器与 reusable_assets_workspace 索引
+ * 一并重建（沿用 0011 原定义）；reusable_asset_revisions 的 FK 保持 0011 的 on delete cascade 语义。
  */
 export const REUSABLE_ASSET_WORKFLOW_MIGRATION = {
 	version: 16,
@@ -31,9 +33,11 @@ from reusable_assets;
 drop table reusable_assets;
 alter table reusable_assets_new rename to reusable_assets;
 
+create index reusable_assets_workspace on reusable_assets(workspace_id, id);
+
 create table reusable_asset_revisions_new (
 	id integer primary key,
-	reusable_asset_id integer not null references reusable_assets(id) on delete restrict,
+	reusable_asset_id integer not null references reusable_assets(id) on delete cascade,
 	revision_no integer not null,
 	content_document_id integer not null references snapshot_documents(id) on delete restrict,
 	content_digest text not null,
@@ -50,6 +54,18 @@ from reusable_asset_revisions;
 
 drop table reusable_asset_revisions;
 alter table reusable_asset_revisions_new rename to reusable_asset_revisions;
+
+create trigger reusable_asset_revision_content_immutable
+before update on reusable_asset_revisions
+when old.reusable_asset_id != new.reusable_asset_id
+	or old.revision_no != new.revision_no
+	or old.content_document_id != new.content_document_id
+	or old.content_digest != new.content_digest
+	or old.source != new.source
+	or old.created_at != new.created_at
+begin
+	select raise(abort, 'ReusableAssetRevision content is immutable');
+end;
 `,
 	checksum: "reusable-asset-workflow-v1",
 } as const;

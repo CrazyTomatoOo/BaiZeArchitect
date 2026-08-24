@@ -39,7 +39,7 @@ export interface ReusableAssetDetail {
 		revisionNo: number;
 		contentDocumentId: number;
 		digest: string;
-		source: "manual" | "import" | "migration";
+		source: "manual" | "import" | "migration" | "workflow";
 		content: unknown;
 		createdAt: string;
 	}[];
@@ -84,7 +84,7 @@ export class AssetStore {
 		private readonly snapshotStore: SnapshotStore,
 	) {}
 
-	createReusableAsset(input: { workspaceId: number; kind: ReusableAssetKind; title: string; content: unknown; source?: "manual" | "import" | "migration"; legacyOriginRequirementId?: number | null; actorSnapshotDocumentId?: number | null; migrationAttestationDocumentId?: number | null }): { assetId: number; revisionId: number; revisionNo: number } {
+	createReusableAsset(input: { workspaceId: number; kind: ReusableAssetKind; title: string; content: unknown; source?: "manual" | "import" | "migration" | "workflow"; legacyOriginRequirementId?: number | null; actorSnapshotDocumentId?: number | null; migrationAttestationDocumentId?: number | null }): { assetId: number; revisionId: number; revisionNo: number } {
 		const timestamp = this.clock.now().toISOString();
 		const content = input.kind === "actor" ? normalizeActorContent(input.content) : input.content;
 		if (input.kind === "actor" && !content) throw new ReusableAssetMalformedBodyError();
@@ -136,7 +136,9 @@ export class AssetStore {
 				const revisionId = Number(this.database
 					.prepare("insert into reusable_asset_revisions(reusable_asset_id, revision_no, content_document_id, content_digest, source, actor_snapshot_document_id, migration_attestation_document_id, created_at) values (?, ?, ?, ?, 'workflow', null, null, ?)")
 					.run(existing.id, revisionNo, document.id, document.digest, timestamp).lastInsertRowid);
-				this.database.prepare("update reusable_assets set current_revision_id = ?, updated_at = ? where id = ?").run(revisionId, timestamp, existing.id);
+				// 溯源：追加 revision 后资产溯源更新为该 workflow promote 源（最新批准覆盖）
+				this.database.prepare("update reusable_assets set current_revision_id = ?, origin_requirement_id = ?, origin_artifact_id = ?, origin_approval_id = ?, updated_at = ? where id = ?")
+					.run(revisionId, input.originRequirementId ?? null, input.originArtifactId ?? null, input.originApprovalId ?? null, timestamp, existing.id);
 				return { assetId: existing.id, revisionId, revisionNo, created: false };
 			}
 			const assetId = Number(this.database
@@ -239,7 +241,7 @@ export class AssetStore {
 		const transaction = this.database.transaction(() => {
 			const asset = this.database.prepare("select id from reusable_assets where id = ?").get(assetId) as { id: number } | undefined;
 			if (!asset) return false;
-			this.database.prepare("delete from reusable_asset_revisions where reusable_asset_id = ?").run(assetId);
+			// revisions 由 reusable_asset_revisions.reusable_asset_id 的 on delete cascade 连带删除（0011 语义）
 			this.database.prepare("delete from reusable_assets where id = ?").run(assetId);
 			return true;
 		}).immediate;

@@ -13,7 +13,17 @@ export type WorkflowState =
 	| "ready_to_archive"
 	| "archived";
 
-export type ModelRoleKey = "orchestrator" | "analyst" | "architect" | "critic";
+export type ModelRoleKey =
+	| "orchestrator"
+	| "analysis-analyst"
+	| "scenario-analyst"
+	| "usecase-analyst"
+	| "function-analyst"
+	| "design-architect"
+	| "architecture-architect"
+	| "data-architect"
+	| "api-architect"
+	| "critic";
 
 export interface ModelProfile {
 	provider: string;

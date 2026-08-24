@@ -100,7 +100,7 @@ export interface HeadlessWorkflowRuntime {
 	getApprovalPacketDetail(packetId: number): ApprovalPacketDetailRecord | undefined;
 	getDesignPackage(designPackageId: number): DesignPackageRecord | undefined;
 	getLegacyImport(requirementId: number): LegacyImportRecord | undefined;
-	createReusableAsset(input: { workspaceId: number; kind: ReusableAssetKind; title: string; content: unknown }): { assetId: number; revisionId: number; revisionNo: number };
+	createReusableAsset(input: { workspaceId: number; kind: ReusableAssetKind; title: string; content: unknown; source?: "manual" | "import" | "migration" | "workflow" }): { assetId: number; revisionId: number; revisionNo: number };
 	updateActorReusableAsset(assetId: number, patch: unknown): { revisionId: number; revisionNo: number } | undefined;
 	listReusableAssets(workspaceId: number): readonly ReusableAssetSummary[];
 	getReusableAsset(assetId: number): ReusableAssetDetail | undefined;

@@ -20,8 +20,14 @@ function modelConfigFixture() {
 	return {
 		defaultRoles: {
 			orchestrator: { provider: "qwen-token-plan-cn", modelId: "qwen-max" },
-			analyst: { provider: "qwen-token-plan-cn", modelId: "qwen-plus" },
-			architect: { provider: "glm", modelId: "glm-5.2" },
+			"analysis-analyst": { provider: "qwen-token-plan-cn", modelId: "qwen-plus" },
+			"scenario-analyst": { provider: "qwen-token-plan-cn", modelId: "qwen-plus" },
+			"usecase-analyst": { provider: "qwen-token-plan-cn", modelId: "qwen-plus" },
+			"function-analyst": { provider: "qwen-token-plan-cn", modelId: "qwen-plus" },
+			"design-architect": { provider: "glm", modelId: "glm-5.2" },
+			"architecture-architect": { provider: "glm", modelId: "glm-5.2" },
+			"data-architect": { provider: "glm", modelId: "glm-5.2" },
+			"api-architect": { provider: "glm", modelId: "glm-5.2" },
 			critic: { provider: "glm", modelId: "glm-4.2" },
 		},
 		providers: [
@@ -61,7 +67,7 @@ test.describe("requirement creation model profile", () => {
 		});
 		await openFixture(page);
 
-		await expect(page.getByTestId("model-custom-count")).toHaveText("有效模型档 · 0/4 自定义");
+		await expect(page.getByTestId("model-custom-count")).toHaveText("有效模型档 · 0/10 自定义");
 
 		await page.getByPlaceholder("标题").fill("新建需求");
 		await page.getByPlaceholder("一句话摘要").fill("一句话摘要");
@@ -79,7 +85,7 @@ test.describe("requirement creation model profile", () => {
 		expect(body).not.toHaveProperty("modelRoles");
 	});
 
-	test("自定义: 任一角色改动即 materialize 完整 4 角色 map", async ({ page }) => {
+	test("自定义: 任一角色改动即 materialize 完整 10 角色 map", async ({ page }) => {
 		const requests: Request[] = [];
 		await page.route("**/api/model-config", (route) => fulfillJson(route, modelConfigFixture()));
 		await page.route("**/api/requirements?workspaceId=1", (route) => fulfillJson(route, { requirements: [] }));
@@ -93,12 +99,12 @@ test.describe("requirement creation model profile", () => {
 		await page.getByPlaceholder("一句话摘要").fill("摘要");
 		await page.getByPlaceholder("详细描述:目标、边界、约束").fill("描述");
 
-		const analystRow = page.getByTestId("model-row-analyst");
-		await analystRow.getByTestId("model-provider-analyst").selectOption("glm");
-		await analystRow.getByTestId("model-select-analyst").selectOption("glm-5.2");
+		const analystRow = page.getByTestId("model-row-analysis-analyst");
+		await analystRow.getByTestId("model-provider-analysis-analyst").selectOption("glm");
+		await analystRow.getByTestId("model-select-analysis-analyst").selectOption("glm-5.2");
 
-		await expect(page.getByTestId("model-custom-count")).toHaveText("有效模型档 · 1/4 自定义");
-		await expect(page.getByTestId("model-row-analyst")).toHaveAttribute("data-custom", "true");
+		await expect(page.getByTestId("model-custom-count")).toHaveText("有效模型档 · 1/10 自定义");
+		await expect(page.getByTestId("model-row-analysis-analyst")).toHaveAttribute("data-custom", "true");
 
 		await page.getByRole("button", { name: "创建需求并开始设计" }).click();
 
@@ -107,8 +113,14 @@ test.describe("requirement creation model profile", () => {
 		expect(body).toHaveProperty("modelRoles");
 		const modelRoles = body.modelRoles as Record<string, { provider: string; modelId: string }>;
 		expect(modelRoles.orchestrator).toEqual({ provider: "qwen-token-plan-cn", modelId: "qwen-max" });
-		expect(modelRoles.analyst).toEqual({ provider: "glm", modelId: "glm-5.2" });
-		expect(modelRoles.architect).toEqual({ provider: "glm", modelId: "glm-5.2" });
+		expect(modelRoles["analysis-analyst"]).toEqual({ provider: "glm", modelId: "glm-5.2" });
+		expect(modelRoles["scenario-analyst"]).toEqual({ provider: "qwen-token-plan-cn", modelId: "qwen-plus" });
+		expect(modelRoles["usecase-analyst"]).toEqual({ provider: "qwen-token-plan-cn", modelId: "qwen-plus" });
+		expect(modelRoles["function-analyst"]).toEqual({ provider: "qwen-token-plan-cn", modelId: "qwen-plus" });
+		expect(modelRoles["design-architect"]).toEqual({ provider: "glm", modelId: "glm-5.2" });
+		expect(modelRoles["architecture-architect"]).toEqual({ provider: "glm", modelId: "glm-5.2" });
+		expect(modelRoles["data-architect"]).toEqual({ provider: "glm", modelId: "glm-5.2" });
+		expect(modelRoles["api-architect"]).toEqual({ provider: "glm", modelId: "glm-5.2" });
 		expect(modelRoles.critic).toEqual({ provider: "glm", modelId: "glm-4.2" });
 	});
 
@@ -120,14 +132,14 @@ test.describe("requirement creation model profile", () => {
 		);
 		await openFixture(page);
 
-		const analystRow = page.getByTestId("model-row-analyst");
-		await analystRow.getByTestId("model-provider-analyst").selectOption("glm");
-		await analystRow.getByTestId("model-select-analyst").selectOption("glm-5.2");
-		await expect(page.getByTestId("model-custom-count")).toHaveText("有效模型档 · 1/4 自定义");
+		const analystRow = page.getByTestId("model-row-analysis-analyst");
+		await analystRow.getByTestId("model-provider-analysis-analyst").selectOption("glm");
+		await analystRow.getByTestId("model-select-analysis-analyst").selectOption("glm-5.2");
+		await expect(page.getByTestId("model-custom-count")).toHaveText("有效模型档 · 1/10 自定义");
 
 		await page.getByRole("button", { name: "恢复默认档" }).click();
-		await expect(page.getByTestId("model-custom-count")).toHaveText("有效模型档 · 0/4 自定义");
-		await expect(page.getByTestId("model-row-analyst")).toHaveAttribute("data-custom", "false");
+		await expect(page.getByTestId("model-custom-count")).toHaveText("有效模型档 · 0/10 自定义");
+		await expect(page.getByTestId("model-row-analysis-analyst")).toHaveAttribute("data-custom", "false");
 	});
 
 	test("invalid_model_roles 400 错误展示在创建表单内", async ({ page }) => {
@@ -148,9 +160,9 @@ test.describe("requirement creation model profile", () => {
 		await page.getByPlaceholder("标题").fill("错误场景");
 		await page.getByPlaceholder("一句话摘要").fill("摘要");
 		await page.getByPlaceholder("详细描述:目标、边界、约束").fill("描述");
-		const analystRow = page.getByTestId("model-row-analyst");
-		await analystRow.getByTestId("model-provider-analyst").selectOption("glm");
-		await analystRow.getByTestId("model-select-analyst").selectOption("glm-5.2");
+		const analystRow = page.getByTestId("model-row-analysis-analyst");
+		await analystRow.getByTestId("model-provider-analysis-analyst").selectOption("glm");
+		await analystRow.getByTestId("model-select-analysis-analyst").selectOption("glm-5.2");
 		await page.getByRole("button", { name: "创建需求并开始设计" }).click();
 
 		await expect(page.getByTestId("create-error")).toContainText("模型角色配置无效");

@@ -733,3 +733,35 @@ test("reusable assets support list, create, detail, delete, export and import wi
 		assert.equal(badKind.status, 400, "asset kinds are restricted to scenario/usecase/function");
 	});
 });
+
+
+// #22 review（P3/P4）：promote 路由边界 —— unknown kinds → 400、unknown requirement → 404、
+// requirementId 路径正确解析（无需走 approve 链即可验证路由前置校验）。
+test("promote route rejects unknown kinds and unknown requirement at HTTP boundary", async () => {
+	await withReadServer(async ({ runtime, server, cookie, workspaceId }) => {
+		const created = runtime.createRequirement({ workspaceId, baseline: baseline("Promote boundary") });
+		// unknown kind → 400 unknown_asset_kind
+		const badKind = await fetch(`${server.url}/api/requirements/${created.requirementId}/promote`, {
+			method: "POST",
+			headers: { "content-type": "application/json", cookie },
+			body: JSON.stringify({ kinds: ["scneario"] }),
+		});
+		assert.equal(badKind.status, 400);
+		const badKindBody = (await badKind.json()) as { error: string };
+		assert.equal(badKindBody.error, "unknown_asset_kind");
+		// unknown requirement → 404
+		const badReq = await fetch(`${server.url}/api/requirements/999999/promote`, {
+			method: "POST",
+			headers: { "content-type": "application/json", cookie },
+			body: JSON.stringify({ kinds: ["scenario"] }),
+		});
+		assert.equal(badReq.status, 404);
+		// 缺 kinds → 400 malformed
+		const missing = await fetch(`${server.url}/api/requirements/${created.requirementId}/promote`, {
+			method: "POST",
+			headers: { "content-type": "application/json", cookie },
+			body: JSON.stringify({}),
+		});
+		assert.equal(missing.status, 400);
+	});
+});

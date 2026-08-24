@@ -2861,7 +2861,7 @@ deleteWorkspace(workspaceId: number): boolean {
 		};
 	}
 
-	createReusableAsset(input: { workspaceId: number; kind: ReusableAssetKind; title: string; content: unknown; source?: "manual" | "import" | "migration"; legacyOriginRequirementId?: number | null; actorSnapshotDocumentId?: number | null; migrationAttestationDocumentId?: number | null }): { assetId: number; revisionId: number; revisionNo: number } {
+	createReusableAsset(input: { workspaceId: number; kind: ReusableAssetKind; title: string; content: unknown; source?: "manual" | "import" | "migration" | "workflow"; legacyOriginRequirementId?: number | null; actorSnapshotDocumentId?: number | null; migrationAttestationDocumentId?: number | null }): { assetId: number; revisionId: number; revisionNo: number } {
 
 		// workspace 存在性前置归门面（ADR-006）：AssetStore 不依赖 WorkspaceStore。
 		if (!this.workspaceStore.workspaceExists(input.workspaceId)) throw new Error("Workspace not found");
