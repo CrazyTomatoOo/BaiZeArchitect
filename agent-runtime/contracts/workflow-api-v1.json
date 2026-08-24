@@ -178,6 +178,11 @@
       "method": "POST",
       "path": "/api/requirements/:requirementId/promote",
       "purpose": "Promote approved requirement artifacts into the workspace asset library (item-level split)"
+    },
+    {
+      "method": "GET",
+      "path": "/api/search?workspaceId=:workspaceId&q=:query",
+      "purpose": "FTS5 trigram search across reusable assets and approved artifact revisions (Chinese substring)"
     }
   ],
   "workflowProjection": {

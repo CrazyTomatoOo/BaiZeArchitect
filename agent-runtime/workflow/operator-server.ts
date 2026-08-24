@@ -669,6 +669,17 @@ export async function startOperatorServer(
 			return;
 		}
 
+		if (request.method === "GET" && url.pathname === "/api/search") {
+			const workspaceId = Number(url.searchParams.get("workspaceId"));
+			const query = url.searchParams.get("q") ?? "";
+			if (!Number.isInteger(workspaceId) || !options.runtime.workspaceExists(workspaceId)) {
+				sendJson(response, 404, { error: "unknown_workspace" });
+				return;
+			}
+			sendJson(response, 200, { query, hits: options.runtime.searchWorkspaceContent(workspaceId, query) });
+			return;
+		}
+
 		if (request.method === "GET" && url.pathname === "/api/assets") {
 			const workspaceId = Number(url.searchParams.get("workspaceId"));
 			if (!Number.isInteger(workspaceId) || !options.runtime.workspaceExists(workspaceId)) {

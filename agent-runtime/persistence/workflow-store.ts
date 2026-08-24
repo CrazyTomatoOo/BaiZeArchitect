@@ -26,6 +26,7 @@ import { MODEL_ROLES_MIGRATION } from "./migrations/0014-model-roles.js";
 import { PRODUCTION_ROLE_KIND_MIGRATION } from "./migrations/0015-production-role-kind.js";
 import { REUSABLE_ASSET_WORKFLOW_MIGRATION } from "./migrations/0016-reusable-asset-workflow.js";
 import { FINALIZE_ROLE_SET_MIGRATION } from "./migrations/0017-finalize-role-set.js";
+import { FTS_ASSET_SEARCH_MIGRATION } from "./migrations/0018-fts-asset-search.js";
 import type { ReusableAssetKind } from "./reusable-asset-kind.js";
 import { parseJson } from "./json.js";
 import { AssetStore } from "./asset-store.js";
@@ -46,7 +47,7 @@ import { ARTIFACT_OWNERSHIP, type InputBinding, type TaskOutputInput } from "../
 import type { RoleResult, ContextManifest, RoleContract, BeginAttemptResult, CompleteAttemptResult, TraceLinkProposal, CriticReport, FindingProposal, FindingSeverity } from "../workflow/role-result.js";
 import type { ModelRolesOverride } from "../workflow/model-driver.js";
 
-const MIGRATIONS = [WORKFLOW_GOVERNANCE_MIGRATION, COMMAND_GOVERNANCE_MIGRATION, RECOVERY_GOVERNANCE_MIGRATION, PLANNING_GOVERNANCE_MIGRATION, ATTEMPT_EXECUTION_MIGRATION, DEPENDENT_TASK_SAFETY_MIGRATION, REQUIRED_ARTIFACTS_AND_EVIDENCE_MIGRATION, CRITIC_GOVERNANCE_MIGRATION, DECISIONS_AND_READINESS_MIGRATION, HUMAN_GOVERNANCE_MIGRATION, READ_MODEL_GOVERNANCE_MIGRATION, RUN_EVENT_STREAM_MIGRATION, ACTOR_KIND_MIGRATION, MODEL_ROLES_MIGRATION, PRODUCTION_ROLE_KIND_MIGRATION, REUSABLE_ASSET_WORKFLOW_MIGRATION, FINALIZE_ROLE_SET_MIGRATION] as const;
+const MIGRATIONS = [WORKFLOW_GOVERNANCE_MIGRATION, COMMAND_GOVERNANCE_MIGRATION, RECOVERY_GOVERNANCE_MIGRATION, PLANNING_GOVERNANCE_MIGRATION, ATTEMPT_EXECUTION_MIGRATION, DEPENDENT_TASK_SAFETY_MIGRATION, REQUIRED_ARTIFACTS_AND_EVIDENCE_MIGRATION, CRITIC_GOVERNANCE_MIGRATION, DECISIONS_AND_READINESS_MIGRATION, HUMAN_GOVERNANCE_MIGRATION, READ_MODEL_GOVERNANCE_MIGRATION, RUN_EVENT_STREAM_MIGRATION, ACTOR_KIND_MIGRATION, MODEL_ROLES_MIGRATION, PRODUCTION_ROLE_KIND_MIGRATION, REUSABLE_ASSET_WORKFLOW_MIGRATION, FINALIZE_ROLE_SET_MIGRATION, FTS_ASSET_SEARCH_MIGRATION] as const;
 export type CommandOutcome =
 	| "accepted"
 	| "capability_denied"
@@ -2567,6 +2568,98 @@ deleteWorkspace(workspaceId: number): boolean {
 		}));
 	}
 
+
+	/** #23 FTS5 检索（#23）：增量回填 + workspace 限定 trigram 检索。 */
+	searchWorkspaceContent(workspaceId: number, query: string): SearchHit[] {
+		this.ensureSearchBackfilled();
+		const tokens = Array.from(query.trim());
+		if (tokens.length === 0) return [];
+		// trigram 边界：<3 unicode 字符无法构成 trigram，零命中（API 契约文档记录）
+		if (tokens.length < 3) return [];
+		// 用户关键词按字面短语匹配（双引号转义），保证 excerpt 窗口可按索引定位
+		const phrase = `"${query.trim().replaceAll('"', '""')}"`;
+		const hits: SearchHit[] = [];
+		const assetRows = this.database
+			.prepare(`select f.asset_id as sourceId, f.kind, f.title, f.content
+				from reusable_asset_search f
+				join reusable_assets ra on ra.id = f.asset_id
+				where ra.workspace_id = ? and f.workspace_id = ?
+					and f.snapshot_id = (select rar.content_document_id from reusable_asset_revisions rar where rar.id = ra.current_revision_id)
+					and reusable_asset_search match ?`)
+			.all(workspaceId, workspaceId, phrase) as Array<{ sourceId: number; kind: string; title: string; content: string }>;
+		for (const row of assetRows) {
+			hits.push({ corpus: "reusable_asset", sourceId: row.sourceId, kind: row.kind, title: row.title, excerpt: this.excerptWindow(row.content, query.trim()) });
+		}
+		const artifactRows = this.database
+			.prepare(`select f.artifact_id as sourceId, f.kind, f.title, f.content
+				from artifact_search f
+				join artifacts a on a.id = f.artifact_id
+				join requirements r on r.id = a.requirement_id
+				where r.workspace_id = ? and f.workspace_id = ?
+					and f.snapshot_id = (select ar.content_document_id from artifact_revisions ar where ar.id = a.current_revision_id and ar.status = 'approved')
+					and artifact_search match ?`)
+			.all(workspaceId, workspaceId, phrase) as Array<{ sourceId: number; kind: string; title: string; content: string }>;
+		for (const row of artifactRows) {
+			hits.push({ corpus: "artifact", sourceId: row.sourceId, kind: row.kind, title: row.title, excerpt: this.excerptWindow(row.content, query.trim()) });
+		}
+		return hits;
+	}
+
+	/** FTS 增量回填（insert-only）：账本驱动，只插 (doc, source) 未记录的达标对；同一事务原子。 */
+	private ensureSearchBackfilled(): void {
+		const transaction = this.database.transaction(() => {
+			// 资产语料：被资产 current_revision 引用的 reusable_asset_content 快照（账本去重）
+			this.database
+				.prepare(`insert into reusable_asset_search(snapshot_id, workspace_id, asset_id, kind, title, content)
+					select d.id, ra.workspace_id, ra.id, ra.kind, ra.title, d.content
+					from snapshot_documents d
+					join reusable_asset_revisions rar on rar.content_document_id = d.id
+					join reusable_assets ra on ra.id = rar.reusable_asset_id and ra.current_revision_id = rar.id
+					left join asset_search_index idx on idx.doc_id = d.id and idx.asset_id = ra.id
+					where d.kind = 'reusable_asset_content' and idx.doc_id is null`)
+				.run();
+			this.database
+				.prepare(`insert into asset_search_index(doc_id, asset_id, indexed_at)
+					select d.id, ra.id, ?
+					from snapshot_documents d
+					join reusable_asset_revisions rar on rar.content_document_id = d.id
+					join reusable_assets ra on ra.id = rar.reusable_asset_id and ra.current_revision_id = rar.id
+					left join asset_search_index idx on idx.doc_id = d.id and idx.asset_id = ra.id
+					where d.kind = 'reusable_asset_content' and idx.doc_id is null`)
+				.run(this.options.clock.now().toISOString());
+			// 产物语料：被 artifact 已批准 + current revision 引用的 artifact_content 快照
+			this.database
+				.prepare(`insert into artifact_search(snapshot_id, workspace_id, requirement_id, artifact_id, kind, title, content)
+					select d.id, r.workspace_id, r.id, a.id, a.kind, a.title, d.content
+					from snapshot_documents d
+					join artifact_revisions ar on ar.content_document_id = d.id and ar.status = 'approved'
+					join artifacts a on a.id = ar.artifact_id and a.current_revision_id = ar.id
+					join requirements r on r.id = a.requirement_id
+					left join artifact_search_index idx on idx.doc_id = d.id and idx.artifact_id = a.id
+					where d.kind = 'artifact_content' and idx.doc_id is null`)
+				.run();
+			this.database
+				.prepare(`insert into artifact_search_index(doc_id, artifact_id, indexed_at)
+					select d.id, a.id, ?
+					from snapshot_documents d
+					join artifact_revisions ar on ar.content_document_id = d.id and ar.status = 'approved'
+					join artifacts a on a.id = ar.artifact_id and a.current_revision_id = ar.id
+					join requirements r on r.id = a.requirement_id
+					left join artifact_search_index idx on idx.doc_id = d.id and idx.artifact_id = a.id
+					where d.kind = 'artifact_content' and idx.doc_id is null`)
+				.run(this.options.clock.now().toISOString());
+		}).immediate;
+		transaction();
+	}
+
+	/** 命中摘要窗口：查词首现位置前后截断（trigram 不支持 snippet()；slice 按 UTF-16 码元截断，BMP 外字符边界近似）。 */
+	private excerptWindow(content: string, query: string): string {
+		const idx = content.indexOf(query);
+		if (idx < 0) return content.slice(0, 120);
+		const start = Math.max(0, idx - 30);
+		return content.slice(start, start + 120);
+	}
+
 	getRequirementDetail(requirementId: number): RequirementDetailRecord | undefined {
 		const row = this.database
 			.prepare("select r.id, r.workspace_id, r.title, r.version, w.id as workflow_id, w.model_roles, (select dp.id from design_packages dp where dp.requirement_id = r.id) as design_package_id from requirements r join workflows w on w.requirement_id = r.id where r.id = ?")
@@ -3560,6 +3653,16 @@ deleteWorkspace(workspaceId: number): boolean {
 		this.pendingWorkflowEventKeys.push(`${workflowId}:${seq}`);
 		this.scheduleEventNotification();
 	}
+}
+
+export type SearchCorpus = "reusable_asset" | "artifact";
+
+export interface SearchHit {
+	corpus: SearchCorpus;
+	sourceId: number;
+	kind: string;
+	title: string;
+	excerpt: string;
 }
 
 export interface CommandReceiptDetail extends CommandReceipt {

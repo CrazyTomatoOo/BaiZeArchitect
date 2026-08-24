@@ -765,3 +765,19 @@ test("promote route rejects unknown kinds and unknown requirement at HTTP bounda
 		assert.equal(missing.status, 400);
 	});
 });
+
+
+// #23 FTS5 检索 HTTP 边界：GET /api/search 200 命中 + unknown workspace 404。
+test("search route returns hits for workspace query and 404 for unknown workspace", async () => {
+	await withReadServer(async ({ runtime, server, cookie, workspaceId }) => {
+		runtime.createReusableAsset({ workspaceId, kind: "scenario", title: "支付网关回调", content: { steps: ["支付网关回调签名验证"] } });
+		const ok = await fetch(`${server.url}/api/search?workspaceId=${workspaceId}&q=${encodeURIComponent("回调签名")}`, { headers: { cookie } });
+		assert.equal(ok.status, 200);
+		const body = (await ok.json()) as { query: string; hits: Array<{ corpus: string; title: string }> };
+		assert.equal(body.query, "回调签名");
+		assert.ok(body.hits.length >= 1, "search returns asset hit");
+		assert.equal(body.hits[0]!.corpus, "reusable_asset");
+		const missing = await fetch(`${server.url}/api/search?workspaceId=999999&q=回调`, { headers: { cookie } });
+		assert.equal(missing.status, 404);
+	});
+});

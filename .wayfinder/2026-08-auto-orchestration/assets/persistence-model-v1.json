@@ -1064,6 +1064,61 @@
         "immutable update and delete",
         "complete is 0 or 1"
       ]
+    },
+    "reusable_asset_search": {
+      "purpose": "FTS5 trigram projection over reusable_asset_content snapshots referenced by an asset current_revision (rowid auto, snapshot_id filter column, insert-only via asset_search_index ledger)",
+      "key": [
+        "rowid"
+      ],
+      "fields": [
+        "snapshot_id",
+        "workspace_id",
+        "asset_id",
+        "kind",
+        "title",
+        "content"
+      ],
+      "kind": "fts5"
+    },
+    "artifact_search": {
+      "purpose": "FTS5 trigram projection over approved artifact_content snapshots (rowid auto, snapshot_id filter column, insert-only via artifact_search_index ledger)",
+      "key": [
+        "rowid"
+      ],
+      "fields": [
+        "snapshot_id",
+        "workspace_id",
+        "requirement_id",
+        "artifact_id",
+        "kind",
+        "title",
+        "content"
+      ],
+      "kind": "fts5"
+    },
+    "asset_search_index": {
+      "purpose": "Backfill ledger: indexed (snapshot_documents.id, reusable_assets.id) pairs, primary key dedupe",
+      "key": [
+        "doc_id",
+        "asset_id"
+      ],
+      "fields": [
+        "doc_id",
+        "asset_id",
+        "indexed_at"
+      ]
+    },
+    "artifact_search_index": {
+      "purpose": "Backfill ledger: indexed (snapshot_documents.id, artifacts.id) pairs, primary key dedupe",
+      "key": [
+        "doc_id",
+        "artifact_id"
+      ],
+      "fields": [
+        "doc_id",
+        "artifact_id",
+        "indexed_at"
+      ]
     }
   },
   "atomicCreation": {

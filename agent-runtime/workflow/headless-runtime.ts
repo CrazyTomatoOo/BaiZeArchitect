@@ -1,6 +1,7 @@
 import type { ReusableAssetKind } from "../persistence/reusable-asset-kind.js";
 import type { CrashInjector, FixtureClock, FixtureOperator, FixtureOutboxTransport, HashProvider } from "../testing/deterministic-fixtures.js";
-import { WorkflowStore, type BeginPlanningResult, type CommandReceipt, type CompletePlanningResult, type ExecuteCommandInput, type ReconciliationReport, type WorkflowProjection, type EvidenceSnapshotResult, type TraceLinkResult, type FindingRecord, type FindingThreadRecord, type DecisionRecord, type ReadinessReport, type BuildApprovalPacketResult, type ApprovalPacketRecord, type HumanGateRecord, type ApprovalRecordEntry, type HumanDirectiveRecord, type DiagnosticRunRecord, type CommandReceiptDetail, type RequirementSummaryRecord, type RequirementDetailRecord, type ArtifactRevisionDetailRecord, type BoundedWorkflowProjection, type PlanRevisionDetail, type TaskDetailRecord, type AttemptSummaryRecord, type AttemptDetailRecord, type RunDetailRecord, type ApprovalPacketDetailRecord, type DesignPackageRecord, type LegacyImportRecord, type ReusableAssetSummary, type ReusableAssetDetail, type WorkflowEventEnvelope, type WorkspaceSummary, type RunEventEnvelope } from "../persistence/workflow-store.js";
+import { WorkflowStore, type BeginPlanningResult, type CommandReceipt, type CompletePlanningResult, type ExecuteCommandInput, type ReconciliationReport, type WorkflowProjection, type EvidenceSnapshotResult, type TraceLinkResult, type FindingRecord, type FindingThreadRecord, type DecisionRecord, type ReadinessReport, type BuildApprovalPacketResult, type ApprovalPacketRecord, type HumanGateRecord, type ApprovalRecordEntry, type HumanDirectiveRecord, type DiagnosticRunRecord, type CommandReceiptDetail, type RequirementSummaryRecord, type RequirementDetailRecord, type ArtifactRevisionDetailRecord, type BoundedWorkflowProjection, type PlanRevisionDetail, type TaskDetailRecord, type AttemptSummaryRecord, type AttemptDetailRecord, type RunDetailRecord, type ApprovalPacketDetailRecord, type DesignPackageRecord, type LegacyImportRecord, type ReusableAssetSummary, type ReusableAssetDetail,
+	type SearchHit, type WorkflowEventEnvelope, type WorkspaceSummary, type RunEventEnvelope } from "../persistence/workflow-store.js";
 import type { BeginAttemptResult, CompleteAttemptResult, ExecuteTaskResult, RoleResult, TraceLinkProposal, CriticReport } from "./role-result.js";
 import { WORKFLOW_COMMAND_TYPES, type WorkflowCommandType } from "./command-types.js";
 import { loadWorkflowContracts } from "./contracts/loader.js";
@@ -107,6 +108,7 @@ export interface HeadlessWorkflowRuntime {
 	deleteReusableAsset(assetId: number): boolean;
 	exportReusableAssets(workspaceId: number): readonly ReusableAssetDetail[];
 	importReusableAssets(workspaceId: number, assets: readonly { kind: ReusableAssetKind; title: string; content: unknown }[]): readonly number[];
+	searchWorkspaceContent(workspaceId: number, query: string): readonly SearchHit[];
 	promoteRequirementArtifacts(workflowId: number, kinds: readonly string[]): Record<string, number>;
 	appendRunEvent(runId: number, type: string, payload: Record<string, unknown>): number;
 	runExists(runId: number): boolean;
@@ -392,6 +394,9 @@ export async function openHeadlessWorkflowRuntime(
 	importReusableAssets(workspaceId, assets) {
 		return store.importReusableAssets(workspaceId, assets);
 	},
+		searchWorkspaceContent(workspaceId, query) {
+			return store.searchWorkspaceContent(workspaceId, query);
+		},
 	promoteRequirementArtifacts(workflowId, kinds) {
 		return store.promoteRequirementArtifacts(workflowId, kinds);
 	},
