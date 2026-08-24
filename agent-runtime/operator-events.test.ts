@@ -507,7 +507,8 @@ test("heartbeat frames do not consume sequence and Last-Event-ID takes precedenc
 		const payloads = allEvents.map((frame) => JSON.parse(frame.data ?? "{}") as { seq: number; type: string });
 		const seqs = payloads.map((event) => event.seq);
 		assert.deepEqual(seqs, Array.from({ length: seqs.length }, (_, index) => index + 2), "workflow seq must be contiguous after last-event-id 1");
-		assert.equal(payloads.at(-1)?.type, "workflow_paused");
+		// pause 的副作用事件（claim release）可能紧随其后到达——断言存在而非流末（时序无关）
+		assert.ok(payloads.some((event) => event.type === "workflow_paused"), "pause event present in stream");
 		assert.ok(frames.some((frame) => frame.comment), "heartbeat comment frame expected");
 	});
 });
