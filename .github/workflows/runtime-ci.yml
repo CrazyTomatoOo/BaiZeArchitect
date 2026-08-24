@@ -70,15 +70,16 @@ jobs:
       - run: npm test
         name: vitest unit tests
         working-directory: web
+      - run: npm run build
+        name: web bundle build
+        working-directory: web
       - run: npx playwright install --with-deps chromium
         name: install playwright browsers
         working-directory: web
       - run: npx playwright test --reporter=line
         name: three-viewport e2e
         working-directory: web
-      - run: npx playwright test --reporter=line
-        name: three-viewport e2e
-        working-directory: web
+
   compose:
     runs-on: ubuntu-latest
     timeout-minutes: 15
