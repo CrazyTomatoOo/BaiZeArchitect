@@ -44,6 +44,7 @@ jobs:
           cache: npm
           cache-dependency-path: agent-runtime/package-lock.json
       - run: npm ci
+        working-directory: agent-runtime
       - run: npm test
         working-directory: agent-runtime
       - run: npm run typecheck
