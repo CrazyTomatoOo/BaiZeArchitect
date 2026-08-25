@@ -710,3 +710,91 @@ test("invalid asset relations return aggregated errors without creating the sour
 		assert.deepEqual((await list.json() as { assets: Array<{ title: string }> }).assets, []);
 	});
 });
+test("asset export and import preserve portable relationship edges", async () => {
+	await withServer(async ({ server, runtime, workspaceId }) => {
+		const cookie = await bootstrap(server.url);
+		const stakeholder = await createAsset(server.url, cookie, {
+			workspaceId,
+			kind: "stakeholder",
+			content: { name: "Customer" },
+		});
+		const stakeholderBody = (await stakeholder.json()) as { assetId: number };
+		const scenario = await createAsset(server.url, cookie, {
+			workspaceId,
+			kind: "scenario",
+			title: "Checkout",
+			content: { title: "Checkout" },
+			relations: [{ toAssetId: stakeholderBody.assetId, type: "involves" }],
+		});
+		assert.equal(scenario.status, 201);
+
+		const exported = await fetch(`${server.url}/api/assets/export?workspaceId=${workspaceId}`, { headers: { cookie } });
+		assert.equal(exported.status, 200);
+		const bundle = await exported.json() as {
+			assets: Array<{ kind: string; title: string; revisions: Array<{ content: unknown }> }>;
+			relations: Array<{ fromTitle: string; fromKind: string; toTitle: string; toKind: string; type: string }>;
+		};
+		assert.deepEqual(bundle.relations, [{ fromTitle: "Checkout", fromKind: "scenario", toTitle: "Customer", toKind: "stakeholder", type: "involves" }]);
+		assert.equal("assetId" in bundle.relations[0], false);
+
+		const destinationWorkspaceId = runtime.createWorkspace({ repoPath: "/destination", name: "destination" });
+		const imported = await importAssets(server.url, cookie, {
+			workspaceId: destinationWorkspaceId,
+			assets: bundle.assets.map((asset) => ({ kind: asset.kind, title: asset.title, content: asset.revisions.at(-1)?.content })),
+			relations: bundle.relations,
+		});
+		assert.equal(imported.status, 201);
+		const importedBody = (await imported.json()) as { assetIds: number[] };
+		assert.equal(importedBody.assetIds.length, 2);
+
+		const graph = await fetch(`${server.url}/api/assets/graph?workspaceId=${destinationWorkspaceId}`, { headers: { cookie } });
+		assert.deepEqual((await graph.json() as { edges: unknown[] }).edges, [{ fromAssetId: importedBody.assetIds[1], toAssetId: importedBody.assetIds[0], type: "involves" }]);
+	});
+});
+
+test("relation import reuses title-kind assets and rolls back malformed edges", async () => {
+	await withServer(async ({ server, runtime, workspaceId }) => {
+		const cookie = await bootstrap(server.url);
+		const destinationWorkspaceId = runtime.createWorkspace({ repoPath: "/destination", name: "destination" });
+		const first = await importAssets(server.url, cookie, {
+			workspaceId: destinationWorkspaceId,
+			assets: [
+				{ kind: "stakeholder", title: "Customer", content: { name: "Customer" } },
+				{ kind: "scenario", title: "Checkout", content: { title: "Checkout" } },
+			],
+			relations: [{ fromTitle: "Checkout", fromKind: "scenario", toTitle: "Customer", toKind: "stakeholder", type: "involves" }],
+		});
+		assert.equal(first.status, 201);
+		const firstIds = (await first.json() as { assetIds: number[] }).assetIds;
+		const repeated = await importAssets(server.url, cookie, {
+			workspaceId: destinationWorkspaceId,
+			assets: [
+				{ kind: "stakeholder", title: "Customer", content: { name: "Customer", description: "Ignored" } },
+				{ kind: "scenario", title: "Checkout", content: { title: "Checkout", changed: true } },
+			],
+			relations: [{ fromTitle: "Checkout", fromKind: "scenario", toTitle: "Customer", toKind: "stakeholder", type: "involves" }],
+		});
+		assert.equal(repeated.status, 201);
+		assert.deepEqual((await repeated.json() as { assetIds: number[] }).assetIds, firstIds);
+
+		const malformed = await importAssets(server.url, cookie, {
+			workspaceId,
+			assets: [{ kind: "scenario", title: "Broken", content: { title: "Broken" } }],
+			relations: [{ fromTitle: "Broken", fromKind: "scenario", toTitle: "Missing", toKind: "stakeholder", type: "involves" }],
+		});
+		assert.equal(malformed.status, 400);
+		const list = await fetch(`${server.url}/api/assets?workspaceId=${workspaceId}`, { headers: { cookie } });
+		const replaced = await importAssets(server.url, cookie, {
+			workspaceId: destinationWorkspaceId,
+			assets: [
+				{ kind: "stakeholder", title: "Customer", content: { name: "Customer" } },
+				{ kind: "scenario", title: "Checkout", content: { title: "Checkout" } },
+			],
+			relations: [],
+		});
+		assert.equal(replaced.status, 201);
+		const graph = await fetch(`${server.url}/api/assets/graph?workspaceId=${destinationWorkspaceId}`, { headers: { cookie } });
+		assert.deepEqual((await graph.json() as { edges: unknown[] }).edges, []);
+		assert.deepEqual((await list.json() as { assets: Array<{ title: string }> }).assets, []);
+	});
+});

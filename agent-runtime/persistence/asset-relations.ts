@@ -1,3 +1,4 @@
+import type { ReusableAssetDetail } from "./asset-store.js";
 import type { ReusableAssetKind } from "./reusable-asset-kind.js";
 
 export const ASSET_RELATION_TYPES = ["contains", "involves"] as const;
@@ -31,10 +32,21 @@ export interface ResolvedAssetGraph {
 	incoming: readonly ResolvedAssetRelation[];
 	outgoing: readonly ResolvedAssetRelation[];
 }
-
 export interface AssetGraph {
 	nodes: readonly { assetId: number; kind: ReusableAssetKind; title: string }[];
 	edges: readonly { fromAssetId: number; toAssetId: number; type: AssetRelationType }[];
+}
+export interface AssetRelationExport {
+	fromTitle: string;
+	fromKind: ReusableAssetKind;
+	toTitle: string;
+	toKind: ReusableAssetKind;
+	type: AssetRelationType;
+}
+
+export interface ReusableAssetExportBundle {
+	assets: readonly ReusableAssetDetail[];
+	relations: readonly AssetRelationExport[];
 }
 export class AssetRelationValidationError extends Error {
 	constructor(readonly issues: readonly { toAssetId?: number; type?: string; reason: string }[]) {

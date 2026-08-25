@@ -31,7 +31,7 @@ import { ASSET_RELATIONS_MIGRATION } from "./migrations/0019-asset-relations.js"
 import type { ReusableAssetKind } from "./reusable-asset-kind.js";
 import { parseJson } from "./json.js";
 import { AssetStore } from "./asset-store.js";
-import type { AssetGraph, AssetRelationInput, AssetRelationRecord } from "./asset-relations.js";
+import type { AssetGraph, AssetRelationExport, AssetRelationInput, AssetRelationRecord, ReusableAssetExportBundle } from "./asset-relations.js";
 import type { ReusableAssetDetail, ReusableAssetSummary } from "./asset-store.js";
 import { SnapshotStore } from "./snapshot-store.js";
 import type { SnapshotDocument } from "./snapshot-store.js";
@@ -43,8 +43,8 @@ import type { WorkspaceSummary } from "./workspace-store.js";
 export { BusyWorkspaceError } from "./workspace-store.js";
 export type { WorkspaceSummary } from "./workspace-store.js";
 export { ReusableAssetMalformedBodyError, ReusableAssetNameConflictError } from "./asset-store.js";
-export type { AssetGraph, AssetRelationInput, AssetRelationRecord } from "./asset-relations.js";
 export { AssetRelationValidationError } from "./asset-relations.js";
+export type { AssetGraph, AssetRelationExport, AssetRelationInput, AssetRelationRecord, ReusableAssetExportBundle } from "./asset-relations.js";
 export type { ReusableAssetDetail, ReusableAssetSummary } from "./asset-store.js";
 import { type WorkflowCommandType } from "../workflow/command-types.js";
 import { ARTIFACT_OWNERSHIP, type InputBinding, type TaskOutputInput } from "../workflow/plan-types.js";
@@ -3229,6 +3229,19 @@ deleteWorkspace(workspaceId: number): boolean {
 
 	exportReusableAssets(workspaceId: number): readonly ReusableAssetDetail[] {
 		return this.assetStore.exportReusableAssets(workspaceId);
+	}
+	exportReusableAssetBundle(workspaceId: number): ReusableAssetExportBundle {
+		if (!this.workspaceStore.workspaceExists(workspaceId)) throw new Error("Workspace not found");
+		return this.assetStore.exportReusableAssetBundle(workspaceId);
+	}
+
+	importReusableAssetBundle(
+		workspaceId: number,
+		assets: readonly { kind: ReusableAssetKind; title: string; content: unknown }[],
+		relations?: readonly AssetRelationExport[],
+	): readonly number[] {
+		if (!this.workspaceStore.workspaceExists(workspaceId)) throw new Error("Workspace not found");
+		return this.assetStore.importReusableAssetBundle(workspaceId, assets, relations);
 	}
 
 	importReusableAssets(workspaceId: number, assets: readonly { kind: ReusableAssetKind; title: string; content: unknown; provenanceDigest?: string }[]): readonly number[] {

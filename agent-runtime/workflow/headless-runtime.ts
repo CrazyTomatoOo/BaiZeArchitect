@@ -13,7 +13,7 @@ import { FEEDBACK_REFERENCE_BUDGET } from "../persistence/workflow-store.js";
 import { instantiatePlanTemplate } from "./plan-template.js";
 import type { TaskRole } from "./plan-types.js";
 import type { PlanProposal } from "./plan-types.js";
-import type { AssetGraph, AssetRelationInput, AssetRelationRecord } from "../persistence/workflow-store.js";
+import type { AssetGraph, AssetRelationExport, AssetRelationInput, AssetRelationRecord, ReusableAssetExportBundle } from "../persistence/workflow-store.js";
 import type { RequirementBaseline } from "./requirement.js";
 
 export type { RequirementBaseline } from "./requirement.js";
@@ -116,6 +116,8 @@ export interface HeadlessWorkflowRuntime {
 	deleteReusableAsset(assetId: number): boolean;
 	exportReusableAssets(workspaceId: number): readonly ReusableAssetDetail[];
 	importReusableAssets(workspaceId: number, assets: readonly { kind: ReusableAssetKind; title: string; content: unknown }[]): readonly number[];
+	exportReusableAssetBundle(workspaceId: number): ReusableAssetExportBundle;
+	importReusableAssetBundle(workspaceId: number, assets: readonly { kind: ReusableAssetKind; title: string; content: unknown }[], relations?: readonly AssetRelationExport[]): readonly number[];
 	searchWorkspaceContent(workspaceId: number, query: string): readonly SearchHit[];
 	getFeedbackAssetReferences(workflowId: number, query: string, budget: number): readonly AssetReference[];
 	promoteRequirementArtifacts(workflowId: number, kinds: readonly string[]): Record<string, number>;
@@ -494,6 +496,12 @@ function buildTaskInstruction(role: string, objective: string, baseline: Require
 	},
 	exportReusableAssets(workspaceId) {
 		return store.exportReusableAssets(workspaceId);
+	},
+	exportReusableAssetBundle(workspaceId) {
+		return store.exportReusableAssetBundle(workspaceId);
+	},
+	importReusableAssetBundle(workspaceId, assets, relations) {
+		return store.importReusableAssetBundle(workspaceId, assets, relations);
 	},
 	importReusableAssets(workspaceId, assets) {
 		return store.importReusableAssets(workspaceId, assets);

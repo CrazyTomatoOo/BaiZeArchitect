@@ -1,6 +1,6 @@
 import type Database from "better-sqlite3";
 import type { FixtureClock } from "../testing/deterministic-fixtures.js";
-import type { AssetRelationInput, AssetRelationRecord, AssetGraph, ResolvedAssetGraph, ResolvedAssetRelation } from "./asset-relations.js";
+import type { AssetGraph, AssetRelationExport, AssetRelationInput, AssetRelationRecord, ResolvedAssetGraph, ResolvedAssetRelation, ReusableAssetExportBundle } from "./asset-relations.js";
 import { AssetRelationValidationError, isAssetRelationType, isValidAssetRelation } from "./asset-relations.js";
 import type { ReusableAssetKind } from "./reusable-asset-kind.js";
 import { parseJson } from "./json.js";
@@ -404,6 +404,29 @@ export class AssetStore {
 			.map((summary) => this.getReusableAsset(summary.id))
 			.filter((detail): detail is ReusableAssetDetail => detail !== undefined);
 	}
+	exportReusableAssetBundle(workspaceId: number): ReusableAssetExportBundle {
+		const assets = this.exportReusableAssets(workspaceId);
+		const relations = this.database
+			.prepare(`select from_asset.title as from_title, from_asset.kind as from_kind,
+				to_asset.title as to_title, to_asset.kind as to_kind, ar.relationship_type
+				from asset_relations ar
+				join reusable_assets from_asset on from_asset.id = ar.from_asset_id
+				join reusable_assets to_asset on to_asset.id = ar.to_asset_id
+				where from_asset.workspace_id = ? and to_asset.workspace_id = ?
+				order by ar.id`)
+			.all(workspaceId, workspaceId) as Array<{ from_title: string; from_kind: ReusableAssetKind; to_title: string; to_kind: ReusableAssetKind; relationship_type: string }>;
+		return {
+			assets,
+			relations: relations.map((relation): AssetRelationExport => ({
+				fromTitle: relation.from_title,
+				fromKind: relation.from_kind,
+				toTitle: relation.to_title,
+				toKind: relation.to_kind,
+				type: relation.relationship_type as AssetRelationExport["type"],
+			})),
+		};
+	}
+
 
 	importReusableAssets(workspaceId: number, assets: readonly { kind: ReusableAssetKind; title: string; content: unknown; provenanceDigest?: string }[]): readonly number[] {
 		const ids: number[] = [];
@@ -415,5 +438,70 @@ export class AssetStore {
 		}).immediate;
 		transaction();
 		return ids;
+	}
+	importReusableAssetBundle(
+		workspaceId: number,
+		assets: readonly { kind: ReusableAssetKind; title: string; content: unknown }[],
+		relations?: readonly AssetRelationExport[],
+	): readonly number[] {
+		const ids: number[] = [];
+		const relationRows = relations ?? [];
+		const transaction = this.database.transaction(() => {
+			const assetsByKey = new Map<string, { assetId: number; revisionId: number; kind: ReusableAssetKind }>();
+			for (const asset of assets) {
+				const key = `${asset.kind}\u0000${asset.title}`;
+				const existing = this.database
+					.prepare("select id, current_revision_id from reusable_assets where workspace_id = ? and kind = ? and title = ? order by id desc limit 1")
+					.get(workspaceId, asset.kind, asset.title) as { id: number; current_revision_id: number | null } | undefined;
+				let assetId: number;
+				let revisionId: number;
+				if (existing?.current_revision_id !== null && existing !== undefined) {
+					assetId = existing.id;
+					revisionId = existing.current_revision_id;
+				} else {
+					const created = this.createReusableAsset({ workspaceId, kind: asset.kind, title: asset.title, content: asset.content, source: "import" });
+					assetId = created.assetId;
+					revisionId = created.revisionId;
+				}
+				assetsByKey.set(key, { assetId, revisionId, kind: asset.kind });
+				ids.push(assetId);
+			}
+			const issues: Array<{ reason: string; type?: string }> = [];
+			const relationGroups = new Map<number, { fromRevisionId: number; relations: AssetRelationInput[] }>();
+			for (const relation of relationRows) {
+				const from = assetsByKey.get(`${relation.fromKind}\u0000${relation.fromTitle}`);
+				const to = assetsByKey.get(`${relation.toKind}\u0000${relation.toTitle}`);
+				if (!from || !to) {
+					issues.push({ reason: "unknown_import_asset", type: relation.type });
+					continue;
+				}
+				if (from.assetId === to.assetId) {
+					issues.push({ reason: "self_loop", type: relation.type });
+					continue;
+				}
+				if (!isAssetRelationType(relation.type)) {
+					issues.push({ reason: "unknown_relation_type", type: relation.type });
+					continue;
+				}
+				if (!isValidAssetRelation(from.kind, to.kind, relation.type)) {
+					issues.push({ reason: "invalid_kind_pair", type: relation.type });
+					continue;
+				}
+				const group = relationGroups.get(from.assetId) ?? { fromRevisionId: from.revisionId, relations: [] };
+				group.relations.push({ toAssetId: to.assetId, type: relation.type });
+				relationGroups.set(from.assetId, group);
+			}
+			if (issues.length > 0) throw new AssetRelationValidationError(issues);
+			if (relations !== undefined) {
+				for (const assetId of new Set([...assetsByKey.values()].map((asset) => asset.assetId))) {
+					this.database.prepare("delete from asset_relations where from_asset_id = ?").run(assetId);
+				}
+			}
+			for (const [fromAssetId, group] of relationGroups) {
+				this.writeRelations({ workspaceId, fromAssetId, fromRevisionId: group.fromRevisionId, relations: group.relations });
+			}
+			return ids;
+		}).immediate;
+		return transaction();
 	}
 }

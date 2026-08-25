@@ -789,24 +789,43 @@ export function journeySteps(projection: WorkflowProjection): readonly JourneySt
 // 资产库 API(场景/用例/功能复用池)
 // ---------------------------------------------------------------------------
 
+export type AssetKind = "scenario" | "usecase" | "function" | "stakeholder";
+
 export interface AssetSummary {
 	id: number;
 	workspaceId: number;
-	kind: "scenario" | "usecase" | "function" | "stakeholder";
+	kind: AssetKind;
 	title: string;
 	currentRevision: { id: number; revisionNo: number; digest: string } | null;
 	legacyOriginRequirementId: number | null;
 	createdAt: string;
 }
 
+export interface AssetRelationExport {
+	fromTitle: string;
+	fromKind: AssetKind;
+	toTitle: string;
+	toKind: AssetKind;
+	type: "contains" | "involves";
+}
+
+export interface AssetResolvedRelation {
+	assetId: number;
+	revisionId: number;
+	type: "contains" | "involves";
+	title: string;
+	kind: AssetKind;
+}
+
 export interface AssetDetail {
 	id: number;
 	workspaceId: number;
-	kind: "scenario" | "usecase" | "function" | "stakeholder";
+	kind: AssetKind;
 	title: string;
 	currentRevisionId: number | null;
 	legacyOriginRequirementId: number | null;
 	createdAt: string;
+	resolvedGraph: { incoming: readonly AssetResolvedRelation[]; outgoing: readonly AssetResolvedRelation[] };
 	revisions: readonly {
 		id: number;
 		revisionNo: number;
@@ -827,7 +846,7 @@ export function getAsset(apiBase: string, assetId: number): Promise<AssetDetail>
 	return fetchJson(apiBase, `/api/assets/${assetId}`);
 }
 
-export async function createAsset(apiBase: string, workspaceId: number, input: { kind: "scenario" | "usecase" | "function" | "stakeholder"; title: string; content: unknown }): Promise<{ id: number }> {
+export async function createAsset(apiBase: string, workspaceId: number, input: { kind: AssetKind; title: string; content: unknown }): Promise<{ id: number }> {
 	const response = await fetch(`${apiBase}/api/assets`, {
 		method: "POST",
 		headers: { "Content-Type": "application/json" },
@@ -843,17 +862,17 @@ export async function deleteAsset(apiBase: string, assetId: number): Promise<voi
 	if (!response.ok) throw new Error(`delete asset failed: ${response.status}`);
 }
 
-export async function exportAssets(apiBase: string, workspaceId: number): Promise<readonly AssetDetail[]> {
-	const body = await fetchJson<{ assets: AssetDetail[] }>(apiBase, `/api/assets/export?workspaceId=${workspaceId}`);
-	return body.assets;
+export async function exportAssets(apiBase: string, workspaceId: number): Promise<{ assets: readonly AssetDetail[]; relations: readonly AssetRelationExport[] }> {
+	const body = await fetchJson<{ assets: AssetDetail[]; relations: AssetRelationExport[] }>(apiBase, `/api/assets/export?workspaceId=${workspaceId}`);
+	return body;
 }
 
-export async function importAssets(apiBase: string, workspaceId: number, assets: readonly { kind: "scenario" | "usecase" | "function" | "stakeholder"; title: string; content: unknown }[]): Promise<readonly number[]> {
+export async function importAssets(apiBase: string, workspaceId: number, assets: readonly { kind: AssetKind; title: string; content: unknown }[], relations?: readonly AssetRelationExport[]): Promise<readonly number[]> {
 	const response = await fetch(`${apiBase}/api/assets/import`, {
 		method: "POST",
 		headers: { "Content-Type": "application/json" },
 		credentials: "same-origin",
-		body: JSON.stringify({ workspaceId, assets }),
+		body: JSON.stringify({ workspaceId, assets, ...(relations === undefined ? {} : { relations }) }),
 	});
 	if (!response.ok) throw new Error(`import assets failed: ${response.status}`);
 	const body = (await response.json()) as { assetIds: number[] };

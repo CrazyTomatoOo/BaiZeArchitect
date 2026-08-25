@@ -16,7 +16,7 @@ import { readFile } from "node:fs/promises";
 import type { AddressInfo } from "node:net";
 import type { HeadlessWorkflowRuntime } from "./headless-runtime.js";
 import { AssetRelationValidationError, BusyWorkspaceError, ReusableAssetMalformedBodyError, ReusableAssetNameConflictError } from "../persistence/workflow-store.js";
-import type { AssetRelationInput } from "../persistence/workflow-store.js";
+import type { AssetRelationExport, AssetRelationInput } from "../persistence/workflow-store.js";
 import { WORKFLOW_COMMAND_TYPES, type WorkflowCommandType } from "./command-types.js";
 import type { RequirementBaseline } from "./requirement.js";
 import { isReusableAssetKind, type ReusableAssetKind } from "../persistence/reusable-asset-kind.js";
@@ -61,6 +61,29 @@ function parseOutgoingRelations(value: unknown): readonly AssetRelationInput[] |
 		const record = item as { toAssetId?: unknown; type?: unknown };
 		if (!Number.isInteger(record.toAssetId) || typeof record.type !== "string") return undefined;
 		relations.push({ toAssetId: record.toAssetId as number, type: record.type as AssetRelationInput["type"] });
+	}
+	return relations;
+}
+function parseImportedRelations(value: unknown): readonly AssetRelationExport[] | undefined {
+	if (!Array.isArray(value)) return undefined;
+	const relations: AssetRelationExport[] = [];
+	for (const item of value) {
+		if (typeof item !== "object" || item === null || Array.isArray(item)) return undefined;
+		const record = item as { fromTitle?: unknown; fromKind?: unknown; toTitle?: unknown; toKind?: unknown; type?: unknown };
+		if (
+			typeof record.fromTitle !== "string"
+			|| !isReusableAssetKind(record.fromKind)
+			|| typeof record.toTitle !== "string"
+			|| !isReusableAssetKind(record.toKind)
+			|| typeof record.type !== "string"
+		) return undefined;
+		relations.push({
+			fromTitle: record.fromTitle,
+			fromKind: record.fromKind,
+			toTitle: record.toTitle,
+			toKind: record.toKind,
+			type: record.type as AssetRelationExport["type"],
+		});
 	}
 	return relations;
 }
@@ -712,7 +735,7 @@ export async function startOperatorServer(
 				sendJson(response, 404, { error: "unknown_workspace" });
 				return;
 			}
-			sendJson(response, 200, { assets: options.runtime.exportReusableAssets(workspaceId) });
+			sendJson(response, 200, options.runtime.exportReusableAssetBundle(workspaceId));
 			return;
 		}
 
@@ -728,7 +751,7 @@ export async function startOperatorServer(
 				sendJson(response, 400, { error: "malformed_body" });
 				return;
 			}
-			const importBody = body as { workspaceId?: unknown; assets?: unknown };
+			const importBody = body as { workspaceId?: unknown; assets?: unknown; relations?: unknown };
 			const workspaceId = Number(importBody.workspaceId);
 			if (!Number.isInteger(workspaceId) || !options.runtime.workspaceExists(workspaceId)) {
 				sendJson(response, 404, { error: "unknown_workspace" });
@@ -744,10 +767,23 @@ export async function startOperatorServer(
 					return;
 				}
 			}
+			const relations = importBody.relations === undefined ? undefined : parseImportedRelations(importBody.relations);
+			if (importBody.relations !== undefined && relations === undefined) {
+				sendJson(response, 400, { error: "malformed_body" });
+				return;
+			}
 			try {
-				const ids = options.runtime.importReusableAssets(workspaceId, importBody.assets as { kind: ReusableAssetKind; title: string; content: unknown }[]);
+				const ids = options.runtime.importReusableAssetBundle(
+					workspaceId,
+					importBody.assets as { kind: ReusableAssetKind; title: string; content: unknown }[],
+					relations,
+				);
 				sendJson(response, 201, { assetIds: ids });
 			} catch (error) {
+				if (error instanceof AssetRelationValidationError) {
+					sendJson(response, 400, { error: "invalid_relations", invalidRelations: error.issues });
+					return;
+				}
 				if (error instanceof ReusableAssetMalformedBodyError) {
 					sendJson(response, 400, { error: "malformed_body" });
 					return;
