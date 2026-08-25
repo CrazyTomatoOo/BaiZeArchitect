@@ -766,7 +766,7 @@ export function gateCategoryLabel(category: GateCategory): string {
 
 /** 资产类别中文标签。 */
 export function assetKindLabel(kind: string): string {
-	const map: Record<string, string> = { scenario: "场景", usecase: "用例", function: "功能", actor: "参与者" };
+	const map: Record<string, string> = { scenario: "场景", usecase: "用例", function: "功能", stakeholder: "干系人" };
 	return map[kind] ?? kind;
 }
 
@@ -792,7 +792,7 @@ export function journeySteps(projection: WorkflowProjection): readonly JourneySt
 export interface AssetSummary {
 	id: number;
 	workspaceId: number;
-	kind: "scenario" | "usecase" | "function" | "actor";
+	kind: "scenario" | "usecase" | "function" | "stakeholder";
 	title: string;
 	currentRevision: { id: number; revisionNo: number; digest: string } | null;
 	legacyOriginRequirementId: number | null;
@@ -802,7 +802,7 @@ export interface AssetSummary {
 export interface AssetDetail {
 	id: number;
 	workspaceId: number;
-	kind: "scenario" | "usecase" | "function" | "actor";
+	kind: "scenario" | "usecase" | "function" | "stakeholder";
 	title: string;
 	currentRevisionId: number | null;
 	legacyOriginRequirementId: number | null;
@@ -827,7 +827,7 @@ export function getAsset(apiBase: string, assetId: number): Promise<AssetDetail>
 	return fetchJson(apiBase, `/api/assets/${assetId}`);
 }
 
-export async function createAsset(apiBase: string, workspaceId: number, input: { kind: "scenario" | "usecase" | "function" | "actor"; title: string; content: unknown }): Promise<{ id: number }> {
+export async function createAsset(apiBase: string, workspaceId: number, input: { kind: "scenario" | "usecase" | "function" | "stakeholder"; title: string; content: unknown }): Promise<{ id: number }> {
 	const response = await fetch(`${apiBase}/api/assets`, {
 		method: "POST",
 		headers: { "Content-Type": "application/json" },
@@ -848,7 +848,7 @@ export async function exportAssets(apiBase: string, workspaceId: number): Promis
 	return body.assets;
 }
 
-export async function importAssets(apiBase: string, workspaceId: number, assets: readonly { kind: "scenario" | "usecase" | "function" | "actor"; title: string; content: unknown }[]): Promise<readonly number[]> {
+export async function importAssets(apiBase: string, workspaceId: number, assets: readonly { kind: "scenario" | "usecase" | "function" | "stakeholder"; title: string; content: unknown }[]): Promise<readonly number[]> {
 	const response = await fetch(`${apiBase}/api/assets/import`, {
 		method: "POST",
 		headers: { "Content-Type": "application/json" },

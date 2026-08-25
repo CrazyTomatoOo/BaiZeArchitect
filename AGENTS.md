@@ -43,7 +43,7 @@ Single Node process hosting:
 - `workflow/operator-server.ts` — 847-line HTTP transport (node:http)
 - `workflow/headless-runtime.ts` — ~425-line domain API with 19 command types
 - `persistence/workflow-store.ts` — 198KB/3830-line SQLite governance kernel with prepared statements, transactions, immutability triggers, digest checks, event append, outbox jobs, claims, staged-effect publication
-- `persistence/migrations/` — 13 numbered forward SQL migrations (0001-workflow-governance .. 0013-actor-kind)
+- `persistence/migrations/` — 13 numbered forward SQL migrations (0001-workflow-governance .. 0013-stakeholder-kind)
 - `workflow/plan-types.ts` — ArtifactKind/TaskKind, TaskProposal DAG with input bindings, ARTIFACT_OWNERSHIP map, PLAN_TASK_LIMITS (≤12 tasks, depth ≤6, ≤3 attempts/task)
 - `workflow/plan-validator.ts` — deterministic static PlanProposal validation (DFS cycle detection, DAG/depth budgets, ownership + output-binding rules)
 - `workflow/model-driver.ts` + `pi-model-driver.ts` — ModelDriver interface + PiModelExecutor adapter
@@ -169,7 +169,7 @@ docker compose run --rm test # container smoke test (network none, tmpfs-only)
 - **Files**: kebab-case (`operator-server.ts`, `plan-validator.ts`, `baize-workflow.ts`)
 - **Components**: PascalCase Lit classes (`BaizeWorkflow`)
 - **Custom events**: `baize-` prefix (`baize-open-requirement`, `baize-goto`)
-- **Migrations**: numbered prefix (`0001-workflow-governance`, `0013-actor-kind`)
+- **Migrations**: numbered prefix (`0001-workflow-governance`, `0013-stakeholder-kind`)
 - **Test files**: `*.test.ts` suffix
 - **E2E specs**: `*.spec.ts` suffix
 - **Domain terms**: see CONTEXT.md / CONTEXT-MAP.md glossaries

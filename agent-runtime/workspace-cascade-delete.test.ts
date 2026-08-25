@@ -255,7 +255,7 @@ test("deleteWorkspace succeeds once the in-flight attempt completes", async () =
 test("full cascade delete: deep subtree and sibling workspace isolation, Store FK-clean on reopen", async () => {
 	await withCascadeRuntime(async ({ runtime, databasePath }) => {
 		const deep = await buildDeepWorkflow(runtime, databasePath);
-		runtime.createReusableAsset({ workspaceId: deep.workspaceId, kind: "actor", title: "operator", content: { name: "Operator", description: "System operator" } });
+		runtime.createReusableAsset({ workspaceId: deep.workspaceId, kind: "stakeholder", title: "operator", content: { name: "Operator", description: "System operator" } });
 		runtime.createReusableAsset({ workspaceId: deep.workspaceId, kind: "scenario", title: "happy path", content: { title: "happy path", steps: [] } });
 		seedNicheRows(databasePath, deep);
 

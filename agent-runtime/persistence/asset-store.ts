@@ -12,7 +12,7 @@ export class ReusableAssetMalformedBodyError extends Error {
 
 export class ReusableAssetNameConflictError extends Error {
 	constructor() {
-		super("Reusable Asset actor name conflicts within the workspace");
+		super("Reusable Asset stakeholder name conflicts within the workspace");
 	}
 }
 
@@ -45,27 +45,27 @@ export interface ReusableAssetDetail {
 	}[];
 }
 
-function normalizeActorName(value: unknown): string | undefined {
+function normalizeStakeholderName(value: unknown): string | undefined {
 	if (typeof value !== "string") return undefined;
 	const trimmed = value.trim();
 	return trimmed.length > 0 ? trimmed : undefined;
 }
 
-function normalizeActorDescription(value: unknown): string | undefined {
+function normalizeStakeholderDescription(value: unknown): string | undefined {
 	if (value === undefined || value === null) return "";
 	return typeof value === "string" ? value : undefined;
 }
 
-function normalizeActorContent(content: unknown): { name: string; description: string } | undefined {
+function normalizeStakeholderContent(content: unknown): { name: string; description: string } | undefined {
 	if (typeof content !== "object" || content === null || Array.isArray(content)) return undefined;
 	const record = content as { name?: unknown; description?: unknown };
-	const name = normalizeActorName(record.name);
-	const description = normalizeActorDescription(record.description);
+	const name = normalizeStakeholderName(record.name);
+	const description = normalizeStakeholderDescription(record.description);
 	if (!name || description === undefined) return undefined;
 	return { name, description };
 }
 
-function actorNameKey(name: string): string {
+function stakeholderNameKey(name: string): string {
 	return name.trim().toLowerCase();
 }
 
@@ -74,7 +74,7 @@ function actorNameKey(name: string): string {
  *
  * 不依赖 WorkspaceStore：workspace 存在性前置由 WorkflowStore 门面执行；
  * 资产内容文档经 SnapshotStore 内容寻址写入。浮引用语义（仅存 assetId），
- * workspace 内 actor name 唯一（trim + 大小写不敏感）。
+ * workspace 内 stakeholder name 唯一（trim + 大小写不敏感）。
  * 子域边界见 docs/adr/ADR-006-store-subdomain-boundary.md。
  */
 export class AssetStore {
@@ -86,12 +86,12 @@ export class AssetStore {
 
 	createReusableAsset(input: { workspaceId: number; kind: ReusableAssetKind; title: string; content: unknown; source?: "manual" | "import" | "migration" | "workflow"; legacyOriginRequirementId?: number | null; actorSnapshotDocumentId?: number | null; migrationAttestationDocumentId?: number | null }): { assetId: number; revisionId: number; revisionNo: number } {
 		const timestamp = this.clock.now().toISOString();
-		const content = input.kind === "actor" ? normalizeActorContent(input.content) : input.content;
-		if (input.kind === "actor" && !content) throw new ReusableAssetMalformedBodyError();
-		const title = input.kind === "actor" ? (content as { name: string }).name : input.title;
-		const schemaRef = input.kind === "actor" ? "asset/actor/v1" : `artifact/${input.kind}/v1`;
+		const content = input.kind === "stakeholder" ? normalizeStakeholderContent(input.content) : input.content;
+		if (input.kind === "stakeholder" && !content) throw new ReusableAssetMalformedBodyError();
+		const title = input.kind === "stakeholder" ? (content as { name: string }).name : input.title;
+		const schemaRef = input.kind === "stakeholder" ? "asset/stakeholder/v1" : `artifact/${input.kind}/v1`;
 		const transaction = this.database.transaction(() => {
-			if (input.kind === "actor" && this.actorNameExists(input.workspaceId, (content as { name: string }).name)) {
+			if (input.kind === "stakeholder" && this.stakeholderNameExists(input.workspaceId, (content as { name: string }).name)) {
 				throw new ReusableAssetNameConflictError();
 			}
 			const document = this.snapshotStore.insertSnapshot("reusable_asset_content", schemaRef, content, timestamp);
@@ -122,7 +122,7 @@ export class AssetStore {
 		originApprovalId?: number | null;
 	}): { assetId: number; revisionId: number; revisionNo: number; created: boolean } {
 		const timestamp = this.clock.now().toISOString();
-		if (input.kind === "actor") throw new ReusableAssetMalformedBodyError();
+		if (input.kind === "stakeholder") throw new ReusableAssetMalformedBodyError();
 		const transaction = this.database.transaction(() => {
 			const existing = this.database
 				.prepare("select id, current_revision_id from reusable_assets where workspace_id = ? and kind = ? and title = ? order by id desc limit 1")
@@ -153,29 +153,29 @@ export class AssetStore {
 		return transaction();
 	}
 
-	updateActorReusableAsset(assetId: number, patch: unknown): { revisionId: number; revisionNo: number } | undefined {
+	updateStakeholderReusableAsset(assetId: number, patch: unknown): { revisionId: number; revisionNo: number } | undefined {
 		if (typeof patch !== "object" || patch === null || Array.isArray(patch)) throw new ReusableAssetMalformedBodyError();
 		const record = patch as { name?: unknown; description?: unknown };
 		if (!("name" in record) && !("description" in record)) throw new ReusableAssetMalformedBodyError();
 		const hasName = "name" in record;
 		const hasDescription = "description" in record;
-		const patchName = hasName ? normalizeActorName(record.name) : undefined;
-		const patchDescription = hasDescription ? normalizeActorDescription(record.description) : undefined;
+		const patchName = hasName ? normalizeStakeholderName(record.name) : undefined;
+		const patchDescription = hasDescription ? normalizeStakeholderDescription(record.description) : undefined;
 		if ((hasName && !patchName) || (hasDescription && patchDescription === undefined)) throw new ReusableAssetMalformedBodyError();
 		const timestamp = this.clock.now().toISOString();
 		const transaction = this.database.transaction(() => {
 			const asset = this.database
 				.prepare("select a.id, a.workspace_id, a.kind, a.current_revision_id, r.revision_no, d.content from reusable_assets a join reusable_asset_revisions r on r.id = a.current_revision_id join snapshot_documents d on d.id = r.content_document_id where a.id = ?")
 				.get(assetId) as { id: number; workspace_id: number; kind: string; current_revision_id: number; revision_no: number; content: string } | undefined;
-			if (!asset || asset.kind !== "actor") return undefined;
-			const current = normalizeActorContent(parseJson<unknown>(asset.content));
+			if (!asset || asset.kind !== "stakeholder") return undefined;
+			const current = normalizeStakeholderContent(parseJson<unknown>(asset.content));
 			if (!current) throw new ReusableAssetMalformedBodyError();
 			const next = {
 				name: patchName ?? current.name,
 				description: patchDescription ?? current.description,
 			};
-			if (this.actorNameExists(asset.workspace_id, next.name, asset.id)) throw new ReusableAssetNameConflictError();
-			const document = this.snapshotStore.insertSnapshot("reusable_asset_content", "asset/actor/v1", next, timestamp);
+			if (this.stakeholderNameExists(asset.workspace_id, next.name, asset.id)) throw new ReusableAssetNameConflictError();
+			const document = this.snapshotStore.insertSnapshot("reusable_asset_content", "asset/stakeholder/v1", next, timestamp);
 			const revisionNo = asset.revision_no + 1;
 			const revisionId = Number(this.database
 				.prepare("insert into reusable_asset_revisions(reusable_asset_id, revision_no, content_document_id, content_digest, source, actor_snapshot_document_id, migration_attestation_document_id, created_at) values (?, ?, ?, ?, 'manual', null, null, ?)")
@@ -186,13 +186,14 @@ export class AssetStore {
 		return transaction();
 	}
 
-	private actorNameExists(workspaceId: number, name: string, excludeAssetId?: number): boolean {
+	private stakeholderNameExists(workspaceId: number, name: string, excludeAssetId?: number): boolean {
 		const rows = this.database
-			.prepare("select a.id, d.content from reusable_assets a join reusable_asset_revisions r on r.id = a.current_revision_id join snapshot_documents d on d.id = r.content_document_id where a.workspace_id = ? and a.kind = 'actor'")
+			.prepare("select a.id, d.content from reusable_assets a join reusable_asset_revisions r on r.id = a.current_revision_id join snapshot_documents d on d.id = r.content_document_id where a.workspace_id = ? and a.kind = 'stakeholder'")
 			.all(workspaceId) as Array<{ id: number; content: string }>;
-		const key = actorNameKey(name);
-		return rows.some((row) => row.id !== excludeAssetId && actorNameKey(normalizeActorContent(parseJson<unknown>(row.content))?.name ?? "") === key);
+		const key = stakeholderNameKey(name);
+		return rows.some((row) => row.id !== excludeAssetId && stakeholderNameKey(normalizeStakeholderContent(parseJson<unknown>(row.content))?.name ?? "") === key);
 	}
+
 
 	listReusableAssets(workspaceId: number): readonly ReusableAssetSummary[] {
 		const rows = this.database

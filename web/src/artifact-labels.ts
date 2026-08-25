@@ -63,7 +63,7 @@ export const FIELD_TITLES: Record<string, string> = {
 	rationale: "理由",
 	// impactProfile dimensions
 	process: "流程",
-	actors: "参与者",
+	actors: "干系人",
 	behavior: "行为",
 	architecture: "架构",
 	data: "数据",
@@ -87,7 +87,7 @@ export const FIELD_TITLES: Record<string, string> = {
 	expectedOutcome: "预期结果",
 	// usecase
 	useCases: "用例",
-	actor: "参与者",
+	actor: "干系人",
 	goal: "目标",
 	alternativeFlows: "备选流程",
 	postconditions: "后置条件",

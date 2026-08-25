@@ -150,36 +150,36 @@ async function importAssets(
 	});
 }
 
-test("actor asset import maps actor validation errors to public responses", async () => {
+test("stakeholder asset import maps stakeholder validation errors to public responses", async () => {
 	await withServer(async ({ server, workspaceId }) => {
 		const cookie = await bootstrap(server.url);
 		const malformed = await importAssets(server.url, cookie, {
 			workspaceId,
-			assets: [{ kind: "actor", title: "Ignored", content: { name: "   " } }],
+			assets: [{ kind: "stakeholder", title: "Ignored", content: { name: "   " } }],
 		});
 		assert.equal(malformed.status, 400);
 		assert.deepEqual(await malformed.json(), { error: "malformed_body" });
 
 		const seeded = await createAsset(server.url, cookie, {
 			workspaceId,
-			kind: "actor",
+			kind: "stakeholder",
 			content: { name: "Admin" },
 		});
 		assert.equal(seeded.status, 201);
 		const conflict = await importAssets(server.url, cookie, {
 			workspaceId,
-			assets: [{ kind: "actor", title: "Ignored", content: { name: " admin " } }],
+			assets: [{ kind: "stakeholder", title: "Ignored", content: { name: " admin " } }],
 		});
 		assert.equal(conflict.status, 409);
 		assert.deepEqual(await conflict.json(), { error: "name_conflict" });
 	});
 });
-test("actor assets create with normalized content, mirrored title, and name uniqueness", async () => {
+test("stakeholder assets create with normalized content, mirrored title, and name uniqueness", async () => {
 	await withServer(async ({ server, workspaceId }) => {
 		const cookie = await bootstrap(server.url);
 		const created = await createAsset(server.url, cookie, {
 			workspaceId,
-			kind: "actor",
+			kind: "stakeholder",
 			content: { name: " Admin ", description: "Runs the system" },
 		});
 		assert.equal(created.status, 201);
@@ -196,15 +196,15 @@ test("actor assets create with normalized content, mirrored title, and name uniq
 
 		const duplicate = await createAsset(server.url, cookie, {
 			workspaceId,
-			kind: "actor",
+			kind: "stakeholder",
 			content: { name: "admin" },
 		});
 		assert.equal(duplicate.status, 409);
 		assert.deepEqual(await duplicate.json(), { error: "name_conflict" });
 
 		for (const body of [
-			{ workspaceId, kind: "actor" },
-			{ workspaceId, kind: "actor", content: { name: "   " } },
+			{ workspaceId, kind: "stakeholder" },
+			{ workspaceId, kind: "stakeholder", content: { name: "   " } },
 		]) {
 			const malformed = await createAsset(server.url, cookie, body);
 			assert.equal(malformed.status, 400, JSON.stringify(body));
@@ -213,18 +213,18 @@ test("actor assets create with normalized content, mirrored title, and name uniq
 	});
 });
 
-test("PATCH appends actor revisions and rejects malformed, conflicting, and non-actor assets", async () => {
+test("PATCH appends stakeholder revisions and rejects malformed, conflicting, and non-stakeholder assets", async () => {
 	await withServer(async ({ server, workspaceId }) => {
 		const cookie = await bootstrap(server.url);
 		const actor = await createAsset(server.url, cookie, {
 			workspaceId,
-			kind: "actor",
+			kind: "stakeholder",
 			content: { name: "Operator", description: "Old" },
 		});
 		const actorBody = (await actor.json()) as { assetId: number; revisionId: number };
 		const other = await createAsset(server.url, cookie, {
 			workspaceId,
-			kind: "actor",
+			kind: "stakeholder",
 			content: { name: "Reviewer" },
 		});
 		assert.equal(other.status, 201);

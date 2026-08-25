@@ -21,7 +21,7 @@ import { DECISIONS_AND_READINESS_MIGRATION } from "./migrations/0009-decisions-a
 import { HUMAN_GOVERNANCE_MIGRATION } from "./migrations/0010-human-governance.js";
 import { READ_MODEL_GOVERNANCE_MIGRATION } from "./migrations/0011-read-model-governance.js";
 import { RUN_EVENT_STREAM_MIGRATION } from "./migrations/0012-run-event-stream.js";
-import { ACTOR_KIND_MIGRATION } from "./migrations/0013-actor-kind.js";
+import { STAKEHOLDER_KIND_MIGRATION } from "./migrations/0013-stakeholder-kind.js";
 import { MODEL_ROLES_MIGRATION } from "./migrations/0014-model-roles.js";
 import { PRODUCTION_ROLE_KIND_MIGRATION } from "./migrations/0015-production-role-kind.js";
 import { REUSABLE_ASSET_WORKFLOW_MIGRATION } from "./migrations/0016-reusable-asset-workflow.js";
@@ -47,7 +47,7 @@ import { ARTIFACT_OWNERSHIP, type InputBinding, type TaskOutputInput } from "../
 import type { RoleResult, ContextManifest, RoleContract, BeginAttemptResult, CompleteAttemptResult, TraceLinkProposal, CriticReport, FindingProposal, FindingSeverity, AssetReference } from "../workflow/role-result.js";
 import type { ModelRolesOverride } from "../workflow/model-driver.js";
 
-const MIGRATIONS = [WORKFLOW_GOVERNANCE_MIGRATION, COMMAND_GOVERNANCE_MIGRATION, RECOVERY_GOVERNANCE_MIGRATION, PLANNING_GOVERNANCE_MIGRATION, ATTEMPT_EXECUTION_MIGRATION, DEPENDENT_TASK_SAFETY_MIGRATION, REQUIRED_ARTIFACTS_AND_EVIDENCE_MIGRATION, CRITIC_GOVERNANCE_MIGRATION, DECISIONS_AND_READINESS_MIGRATION, HUMAN_GOVERNANCE_MIGRATION, READ_MODEL_GOVERNANCE_MIGRATION, RUN_EVENT_STREAM_MIGRATION, ACTOR_KIND_MIGRATION, MODEL_ROLES_MIGRATION, PRODUCTION_ROLE_KIND_MIGRATION, REUSABLE_ASSET_WORKFLOW_MIGRATION, FINALIZE_ROLE_SET_MIGRATION, FTS_ASSET_SEARCH_MIGRATION] as const;
+const MIGRATIONS = [WORKFLOW_GOVERNANCE_MIGRATION, COMMAND_GOVERNANCE_MIGRATION, RECOVERY_GOVERNANCE_MIGRATION, PLANNING_GOVERNANCE_MIGRATION, ATTEMPT_EXECUTION_MIGRATION, DEPENDENT_TASK_SAFETY_MIGRATION, REQUIRED_ARTIFACTS_AND_EVIDENCE_MIGRATION, CRITIC_GOVERNANCE_MIGRATION, DECISIONS_AND_READINESS_MIGRATION, HUMAN_GOVERNANCE_MIGRATION, READ_MODEL_GOVERNANCE_MIGRATION, RUN_EVENT_STREAM_MIGRATION, STAKEHOLDER_KIND_MIGRATION, MODEL_ROLES_MIGRATION, PRODUCTION_ROLE_KIND_MIGRATION, REUSABLE_ASSET_WORKFLOW_MIGRATION, FINALIZE_ROLE_SET_MIGRATION, FTS_ASSET_SEARCH_MIGRATION] as const;
 export type CommandOutcome =
 	| "accepted"
 	| "capability_denied"
@@ -3191,8 +3191,8 @@ deleteWorkspace(workspaceId: number): boolean {
 		return items;
 	}
 
-	updateActorReusableAsset(assetId: number, patch: unknown): { revisionId: number; revisionNo: number } | undefined {
-		return this.assetStore.updateActorReusableAsset(assetId, patch);
+	updateStakeholderReusableAsset(assetId: number, patch: unknown): { revisionId: number; revisionNo: number } | undefined {
+		return this.assetStore.updateStakeholderReusableAsset(assetId, patch);
 	}
 
 	listReusableAssets(workspaceId: number): readonly ReusableAssetSummary[] {

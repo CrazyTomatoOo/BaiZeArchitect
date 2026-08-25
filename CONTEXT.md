@@ -226,4 +226,4 @@ _Avoid_: 修复命令、常驻指标服务
 首次新业务写入后的一段加强告警和值守窗口；发现零容忍不变量时停止新写并前向修复，不回退或启用旧路径。
 _Avoid_: 灰度双轨、rollback window
 
-> **Actor 消歧**：治理域的「Actor」指操作者身份（可信 Actor / ActorRef / actor snapshot，中文「操作员」）；Store 子域的 Actor（业务参与者，kind=actor，中文「参与者」）词条见 [agent-runtime/persistence/CONTEXT.md](agent-runtime/persistence/CONTEXT.md)。两者领域隔离，英文同名、中文不同词。
+> **Actor / Stakeholder 消歧**：治理域的「Actor」指操作者身份（可信 Actor / ActorRef / actor snapshot，中文「操作员」）；Store 子域的 **Stakeholder** 指业务干系人（kind=stakeholder，中文「干系人」）。两者领域隔离，英文不再同名。

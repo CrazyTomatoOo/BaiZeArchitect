@@ -815,7 +815,7 @@ export async function startOperatorServer(
 				sendJson(response, 400, { error: "malformed_body" });
 				return;
 			}
-			if (createBody.kind !== "actor" && typeof createBody.title !== "string") {
+			if (createBody.kind !== "stakeholder" && typeof createBody.title !== "string") {
 				sendJson(response, 400, { error: "malformed_body" });
 				return;
 			}
@@ -850,7 +850,7 @@ export async function startOperatorServer(
 				return;
 			}
 			try {
-				const updated = options.runtime.updateActorReusableAsset(Number(segments[2]), body);
+				const updated = options.runtime.updateStakeholderReusableAsset(Number(segments[2]), body);
 				if (!updated) {
 					sendJson(response, 404, { error: "unknown_asset" });
 					return;

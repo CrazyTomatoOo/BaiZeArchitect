@@ -11,7 +11,7 @@ import {
 	createOutboxTransport,
 } from "./testing/deterministic-fixtures.ts";
 import { openHeadlessWorkflowRuntime } from "./workflow/headless-runtime.js";
-import { ACTOR_KIND_MIGRATION } from "./persistence/migrations/0013-actor-kind.js";
+import { STAKEHOLDER_KIND_MIGRATION } from "./persistence/migrations/0013-stakeholder-kind.js";
 
 function runtimeOptions(databasePath: string) {
 	return {
@@ -29,7 +29,7 @@ async function withRuntime(
 		runtime: Awaited<ReturnType<typeof openHeadlessWorkflowRuntime>>;
 	}) => Promise<void> | void,
 ): Promise<void> {
-	const directory = await mkdtemp(path.join(tmpdir(), "baize-migration-actor-kind-"));
+	const directory = await mkdtemp(path.join(tmpdir(), "baize-migration-stakeholder-kind-"));
 	const databasePath = path.join(directory, "workflow.db");
 	const runtime = await openHeadlessWorkflowRuntime(runtimeOptions(databasePath));
 	try {
@@ -40,7 +40,7 @@ async function withRuntime(
 	}
 }
 
-// 0011-era table shape for reusable_assets (kind CHECK without 'actor').
+// 0011-era table shape for reusable_assets (kind CHECK without 'stakeholder').
 const V11_REUSABLE_ASSETS_SQL = `
 create table reusable_assets (
 	id integer primary key,
@@ -54,12 +54,12 @@ create table reusable_assets (
 );
 `;
 
-test("fresh database accepts kind=actor and round-trips it", async () => {
+test("fresh database accepts kind=stakeholder and round-trips it", async () => {
 	await withRuntime(async ({ runtime }) => {
 		const workspaceId = runtime.createWorkspace({ repoPath: "/repo", name: "repo" });
 		const created = runtime.createReusableAsset({
 			workspaceId,
-			kind: "actor",
+			kind: "stakeholder",
 			title: "管理员",
 			content: { name: "管理员", description: "负责用户与权限配置" },
 		});
@@ -67,10 +67,10 @@ test("fresh database accepts kind=actor and round-trips it", async () => {
 		const listed = runtime.listReusableAssets(workspaceId);
 		assert.deepEqual(
 			listed.map((a) => ({ kind: a.kind, title: a.title })),
-			[{ kind: "actor", title: "管理员" }],
+			[{ kind: "stakeholder", title: "管理员" }],
 		);
 		const detail = runtime.getReusableAsset(created.assetId);
-		assert.equal(detail?.kind, "actor");
+		assert.equal(detail?.kind, "stakeholder");
 		assert.deepEqual(detail?.revisions.at(-1)?.content, {
 			name: "管理员",
 			description: "负责用户与权限配置",
@@ -78,7 +78,7 @@ test("fresh database accepts kind=actor and round-trips it", async () => {
 	});
 });
 
-test("actor kind survives the 0011-era table rebuild (rows preserved, CHECK expanded)", () => {
+test("stakeholder kind survives the 0011-era table rebuild (rows preserved, CHECK expanded)", () => {
 	const db = new Database(":memory:");
 	// 生产语义：applyMigrations 只在全新库上按序执行（此时表为空），或在存量库上仅校验
 	// checksum、缺迁移即抛错——永远不会对含数据的库补跑 0013。本测试仍按配方手动重放
@@ -95,11 +95,11 @@ test("actor kind survives the 0011-era table rebuild (rows preserved, CHECK expa
 		db.prepare(
 			"insert into reusable_asset_revisions(id, reusable_asset_id, revision_no, source, created_at) values (11, 1, 1, 'manual', '2026-08-01T00:00:00.000Z')",
 		).run();
-		db.exec(ACTOR_KIND_MIGRATION.sql);
+		db.exec(STAKEHOLDER_KIND_MIGRATION.sql);
 
 		const schema = db.prepare("select sql from sqlite_master where type='table' and name='reusable_assets'").get() as { sql: string };
-		assert.match(schema.sql, /'actor'/);
-		assert.match(schema.sql, /'scenario','usecase','function','actor'/);
+		assert.match(schema.sql, /'stakeholder'/);
+		assert.match(schema.sql, /'scenario','usecase','function','stakeholder'/);
 
 		const rows = db.prepare("select id, kind, title from reusable_assets").all() as Array<{ id: number; kind: string; title: string }>;
 		assert.deepEqual(rows, [{ id: 1, kind: "scenario", title: "旧场景" }]);
@@ -112,7 +112,7 @@ test("actor kind survives the 0011-era table rebuild (rows preserved, CHECK expa
 		assert.match(revisionSchema.sql, /revision_no > 0/);
 
 		db.prepare(
-			"insert into reusable_assets(id, workspace_id, kind, title, current_revision_id, legacy_origin_requirement_id, created_at, updated_at) values (2, 1, 'actor', '新参与者', null, null, ?, ?)",
+			"insert into reusable_assets(id, workspace_id, kind, title, current_revision_id, legacy_origin_requirement_id, created_at, updated_at) values (2, 1, 'stakeholder', '新干系人', null, null, ?, ?)",
 		).run("2026-08-02T00:00:00.000Z", "2026-08-02T00:00:00.000Z");
 		assert.throws(
 			() =>
@@ -126,12 +126,12 @@ test("actor kind survives the 0011-era table rebuild (rows preserved, CHECK expa
 	}
 });
 
-test("the shared kind predicate classifies actor and rejects unknown kinds", async () => {
+test("the shared kind predicate classifies stakeholder and rejects unknown kinds", async () => {
 	const { REUSABLE_ASSET_KINDS, isReusableAssetKind } = await import("./persistence/reusable-asset-kind.js");
-	assert.deepEqual([...REUSABLE_ASSET_KINDS], ["scenario", "usecase", "function", "design", "architecture", "data", "api", "actor"]);
-	assert.equal(isReusableAssetKind("actor"), true);
+	assert.deepEqual([...REUSABLE_ASSET_KINDS], ["scenario", "usecase", "function", "design", "architecture", "data", "api", "stakeholder"]);
+	assert.equal(isReusableAssetKind("stakeholder"), true);
+	assert.equal(isReusableAssetKind("actor"), false);
 	assert.equal(isReusableAssetKind("bogus"), false);
-	assert.equal(isReusableAssetKind(undefined), false);
 });
 
 
@@ -148,7 +148,7 @@ test("0016 asset-workflow rebuild preserves trigger, index, cascade FK, 8 kinds,
 			const fkSql = db.prepare("select sql from sqlite_master where type='table' and name='reusable_asset_revisions'").get() as { sql: string };
 			assert.match(fkSql.sql, /on delete cascade/, "revision FK keeps 0011 cascade semantics");
 			const assetSql = db.prepare("select sql from sqlite_master where type='table' and name='reusable_assets'").get() as { sql: string };
-			assert.match(assetSql.sql, /'scenario','usecase','function','design','architecture','data','api','actor'/);
+			assert.match(assetSql.sql, /'scenario','usecase','function','design','architecture','data','api','stakeholder'/);
 			const revisionSql = db.prepare("select sql from sqlite_master where type='table' and name='reusable_asset_revisions'").get() as { sql: string };
 			assert.match(revisionSql.sql, /'manual','import','migration','workflow'/);
 			// 走完整 store 路径建 asset + workflow-source revision（触发器必须放行合法插入）

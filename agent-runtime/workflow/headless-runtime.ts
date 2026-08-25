@@ -105,7 +105,7 @@ export interface HeadlessWorkflowRuntime {
 	getDesignPackage(designPackageId: number): DesignPackageRecord | undefined;
 	getLegacyImport(requirementId: number): LegacyImportRecord | undefined;
 	createReusableAsset(input: { workspaceId: number; kind: ReusableAssetKind; title: string; content: unknown; source?: "manual" | "import" | "migration" | "workflow" }): { assetId: number; revisionId: number; revisionNo: number };
-	updateActorReusableAsset(assetId: number, patch: unknown): { revisionId: number; revisionNo: number } | undefined;
+	updateStakeholderReusableAsset(assetId: number, patch: unknown): { revisionId: number; revisionNo: number } | undefined;
 	listReusableAssets(workspaceId: number): readonly ReusableAssetSummary[];
 	getReusableAsset(assetId: number): ReusableAssetDetail | undefined;
 	deleteReusableAsset(assetId: number): boolean;
@@ -463,8 +463,8 @@ function buildTaskInstruction(role: string, objective: string, baseline: Require
 	createReusableAsset(input) {
 		return store.createReusableAsset(input);
 	},
-	updateActorReusableAsset(assetId, patch) {
-		return store.updateActorReusableAsset(assetId, patch);
+	updateStakeholderReusableAsset(assetId, patch) {
+		return store.updateStakeholderReusableAsset(assetId, patch);
 	},
 	listReusableAssets(workspaceId) {
 		return store.listReusableAssets(workspaceId);

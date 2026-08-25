@@ -1,7 +1,7 @@
 /**
  * 0016-reusable-asset-workflow.ts — 资产库扩 8 种可复用 kind + workflow 来源（#14 决议条目级 + #22 promote 命令）。
  *
- * - reusable_assets.kind 扩为 scenario/usecase/function/design/architecture/data/api/actor
+ * - reusable_assets.kind 扩为 scenario/usecase/function/design/architecture/data/api/stakeholder
  * - reusable_assets 新增溯源列（origin_requirement_id/origin_artifact_id/origin_approval_id，审计元数据无 FK）
  * - reusable_asset_revisions.source 扩 workflow（并行 manual/import/migration）
  * SQLite 不能 ALTER CHECK，按 0013 重建配方：建新表 → 拷贝 → drop → rename。
@@ -15,7 +15,7 @@ export const REUSABLE_ASSET_WORKFLOW_MIGRATION = {
 create table reusable_assets_new (
 	id integer primary key,
 	workspace_id integer not null references workspaces(id) on delete restrict,
-	kind text not null check (kind in ('scenario','usecase','function','design','architecture','data','api','actor')),
+	kind text not null check (kind in ('scenario','usecase','function','design','architecture','data','api','stakeholder')),
 	title text not null,
 	current_revision_id integer,
 	legacy_origin_requirement_id integer,

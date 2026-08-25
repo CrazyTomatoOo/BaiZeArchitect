@@ -28,7 +28,7 @@
 | Reviewer | 绿色 | 人工审批决策 | `roles.reviewer` |
 | Translator | 粉色 | 多语言输出与一致性校验 | `roles.translator` |
 
-| 参与者 | Actor | 场景/用例中的业务参与者，workspace 级可复用资产 kind=actor（资产库「参与者库」） | 与 Agent 角色（下表）明确区分；UI 显示使用 `assets.*`/`actor.*` 文案。 |
+| 干系人 | Stakeholder | 场景/用例中的业务干系人，workspace 级可复用资产 kind=stakeholder（资产库「干系人库」） | 与 Agent 角色和治理域操作员 Actor 明确区分；UI 显示使用 `assets.*`/`stakeholder.*` 文案。 |
 ## i18n 命名空间速查
 
 - `app.*` — 应用级标题与描述
