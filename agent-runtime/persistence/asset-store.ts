@@ -17,6 +17,11 @@ export class ReusableAssetNameConflictError extends Error {
 		super("Reusable Asset stakeholder name conflicts within the workspace");
 	}
 }
+export class ReusableAssetReferencedError extends Error {
+	constructor(readonly refs: readonly { assetId: number; kind: ReusableAssetKind; title: string; type: string }[]) {
+		super("Reusable Asset is referenced by other assets");
+	}
+}
 
 export interface ReusableAssetSummary {
 	id: number;
@@ -406,7 +411,20 @@ export class AssetStore {
 		const transaction = this.database.transaction(() => {
 			const asset = this.database.prepare("select id from reusable_assets where id = ?").get(assetId) as { id: number } | undefined;
 			if (!asset) return false;
-			// revisions 由 reusable_asset_revisions.reusable_asset_id 的 on delete cascade 连带删除（0011 语义）
+			const refs = this.database
+				.prepare(`select case when relation.from_asset_id = ? then to_asset.id else from_asset.id end as asset_id,
+					case when relation.from_asset_id = ? then to_asset.kind else from_asset.kind end as kind,
+					case when relation.from_asset_id = ? then to_asset.title else from_asset.title end as title,
+					relation.relationship_type
+					from asset_relations relation
+					join reusable_assets from_asset on from_asset.id = relation.from_asset_id
+					join reusable_assets to_asset on to_asset.id = relation.to_asset_id
+					where relation.from_asset_id = ? or relation.to_asset_id = ?
+					order by relation.id`)
+				.all(assetId, assetId, assetId, assetId, assetId) as Array<{ asset_id: number; kind: ReusableAssetKind; title: string; relationship_type: string }>;
+			if (refs.length > 0) {
+				throw new ReusableAssetReferencedError(refs.map((ref) => ({ assetId: ref.asset_id, kind: ref.kind, title: ref.title, type: ref.relationship_type })));
+			}
 			this.database.prepare("delete from reusable_assets where id = ?").run(assetId);
 			return true;
 		}).immediate;

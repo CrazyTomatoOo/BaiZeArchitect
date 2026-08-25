@@ -42,7 +42,7 @@ import type { WorkspaceSummary } from "./workspace-store.js";
 // 继续从 workflow-store 引用，保持既有导入路径稳定（ADR-006 门面形态）。
 export { BusyWorkspaceError } from "./workspace-store.js";
 export type { WorkspaceSummary } from "./workspace-store.js";
-export { ReusableAssetMalformedBodyError, ReusableAssetNameConflictError } from "./asset-store.js";
+export { ReusableAssetMalformedBodyError, ReusableAssetNameConflictError, ReusableAssetReferencedError } from "./asset-store.js";
 export { AssetRelationValidationError } from "./asset-relations.js";
 export type { AssetGraph, AssetRelationExport, AssetRelationInput, AssetRelationRecord, ReusableAssetExportBundle } from "./asset-relations.js";
 export type { ReusableAssetDetail, ReusableAssetSummary } from "./asset-store.js";

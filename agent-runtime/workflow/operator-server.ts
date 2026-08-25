@@ -15,7 +15,7 @@ import { resolve } from "node:path";
 import { readFile } from "node:fs/promises";
 import type { AddressInfo } from "node:net";
 import type { HeadlessWorkflowRuntime } from "./headless-runtime.js";
-import { AssetRelationValidationError, BusyWorkspaceError, ReusableAssetMalformedBodyError, ReusableAssetNameConflictError } from "../persistence/workflow-store.js";
+import { AssetRelationValidationError, BusyWorkspaceError, ReusableAssetMalformedBodyError, ReusableAssetNameConflictError, ReusableAssetReferencedError } from "../persistence/workflow-store.js";
 import type { AssetRelationExport, AssetRelationInput } from "../persistence/workflow-store.js";
 import { WORKFLOW_COMMAND_TYPES, type WorkflowCommandType } from "./command-types.js";
 import type { RequirementBaseline } from "./requirement.js";
@@ -952,11 +952,19 @@ export async function startOperatorServer(
 		}
 
 		if (request.method === "DELETE" && segments.length === 3 && segments[0] === "api" && segments[1] === "assets") {
-			if (!options.runtime.deleteReusableAsset(Number(segments[2]))) {
-				sendJson(response, 404, { error: "unknown_asset" });
-				return;
+			try {
+				if (!options.runtime.deleteReusableAsset(Number(segments[2]))) {
+					sendJson(response, 404, { error: "unknown_asset" });
+					return;
+				}
+				sendJson(response, 200, { deleted: true });
+			} catch (error) {
+				if (error instanceof ReusableAssetReferencedError) {
+					sendJson(response, 409, { error: "asset_referenced", refs: error.refs });
+					return;
+				}
+				throw error;
 			}
-			sendJson(response, 200, { deleted: true });
 			return;
 		}
 

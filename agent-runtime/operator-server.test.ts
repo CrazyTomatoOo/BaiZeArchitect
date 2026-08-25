@@ -798,3 +798,32 @@ test("relation import reuses title-kind assets and rolls back malformed edges", 
 		assert.deepEqual((await list.json() as { assets: Array<{ title: string }> }).assets, []);
 	});
 });
+test("asset deletion scans relation edges in both directions and patch keeps graph titles current", async () => {
+	await withServer(async ({ server, workspaceId }) => {
+		const cookie = await bootstrap(server.url);
+		const stakeholder = await createAsset(server.url, cookie, {
+			workspaceId,
+			kind: "stakeholder",
+			content: { name: "Customer" },
+		});
+		const stakeholderBody = (await stakeholder.json()) as { assetId: number };
+		const scenario = await createAsset(server.url, cookie, {
+			workspaceId,
+			kind: "scenario",
+			title: "Checkout",
+			content: { title: "Checkout" },
+			relations: [{ toAssetId: stakeholderBody.assetId, type: "involves" }],
+		});
+		const scenarioBody = (await scenario.json()) as { assetId: number };
+		const patched = await patchAsset(server.url, cookie, stakeholderBody.assetId, { name: "Buyer" });
+		assert.equal(patched.status, 200);
+		const detail = await fetch(`${server.url}/api/assets/${scenarioBody.assetId}`, { headers: { cookie } });
+		assert.equal((await detail.json() as { resolvedGraph: { outgoing: Array<{ title: string }> } }).resolvedGraph.outgoing[0].title, "Buyer");
+
+		const deleteTarget = await fetch(`${server.url}/api/assets/${stakeholderBody.assetId}`, { method: "DELETE", headers: { cookie } });
+		assert.equal(deleteTarget.status, 409);
+		assert.deepEqual((await deleteTarget.json() as { error: string; refs: Array<{ assetId: number; kind: string; type: string }> }).refs, [{ assetId: scenarioBody.assetId, kind: "scenario", title: "Checkout", type: "involves" }]);
+		const deleteSource = await fetch(`${server.url}/api/assets/${scenarioBody.assetId}`, { method: "DELETE", headers: { cookie } });
+		assert.equal(deleteSource.status, 409);
+	});
+});
