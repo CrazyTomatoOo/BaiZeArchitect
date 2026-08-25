@@ -6,6 +6,7 @@ import test from "node:test";
 import Database from "better-sqlite3";
 import { createCrashInjector, createFixtureClock, createHashProvider, createOutboxTransport } from "./testing/deterministic-fixtures.ts";
 import { AssetRelationValidationError } from "./persistence/asset-relations.ts";
+import { ReusableAssetReferencedError } from "./persistence/workflow-store.ts";
 import type { HeadlessWorkflowRuntime } from "./workflow/headless-runtime.ts";
 import { openHeadlessWorkflowRuntime } from "./workflow/headless-runtime.ts";
 
@@ -61,7 +62,7 @@ test("asset relations store revision-pinned edges and deduplicates identical wri
 	});
 });
 
-test("asset relations reject invalid kind pairs and cascade with asset deletion", async () => {
+test("asset relations reject invalid kind pairs and block referenced asset deletion", async () => {
 	await withRuntime(async ({ runtime, databasePath }) => {
 		const workspaceId = runtime.createWorkspace({ repoPath: "/repo", name: "repo" });
 		const stakeholder = runtime.createReusableAsset({ workspaceId, kind: "stakeholder", title: "Customer", content: { name: "Customer" } });
@@ -79,10 +80,13 @@ test("asset relations reject invalid kind pairs and cascade with asset deletion"
 		} finally {
 			database.close();
 		}
-		runtime.deleteReusableAsset(usecase.assetId);
+		assert.throws(
+			() => runtime.deleteReusableAsset(usecase.assetId),
+			(error: unknown) => error instanceof ReusableAssetReferencedError && error.refs[0]?.assetId === scenario.assetId,
+		);
 		const reopened = new Database(databasePath);
 		try {
-			assert.equal((reopened.prepare("select count(*) as count from asset_relations").get() as { count: number }).count, 0);
+			assert.equal((reopened.prepare("select count(*) as count from asset_relations").get() as { count: number }).count, 1);
 		} finally {
 			reopened.close();
 		}
