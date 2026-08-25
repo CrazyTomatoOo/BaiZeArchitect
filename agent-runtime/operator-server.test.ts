@@ -641,3 +641,72 @@ test("non-loopback binding requires configured operator credentials", async () =
 		rmSync(directory, { recursive: true, force: true });
 	}
 });
+test("asset relation create, detail enrich, and workspace graph are exposed over HTTP", async () => {
+	await withServer(async ({ server, workspaceId }) => {
+		const cookie = await bootstrap(server.url);
+		const stakeholder = await createAsset(server.url, cookie, {
+			workspaceId,
+			kind: "stakeholder",
+			content: { name: "Customer" },
+		});
+		assert.equal(stakeholder.status, 201);
+		const stakeholderBody = (await stakeholder.json()) as { assetId: number; revisionId: number };
+		const scenario = await createAsset(server.url, cookie, {
+			workspaceId,
+			kind: "scenario",
+			title: "Checkout",
+			content: { title: "Checkout", actors: ["Customer"] },
+			relations: [{ toAssetId: stakeholderBody.assetId, type: "involves" }],
+		});
+		assert.equal(scenario.status, 201);
+		const scenarioBody = (await scenario.json()) as { assetId: number; revisionId: number };
+
+		const detail = await fetch(`${server.url}/api/assets/${scenarioBody.assetId}`, { headers: { cookie } });
+		assert.equal(detail.status, 200);
+		const detailBody = (await detail.json()) as { resolvedGraph: { outgoing: Array<{ assetId: number; revisionId: number; type: string; title: string; kind: string }> } };
+		assert.deepEqual(detailBody.resolvedGraph.outgoing, [{
+			assetId: stakeholderBody.assetId,
+			revisionId: stakeholderBody.revisionId,
+			type: "involves",
+			title: "Customer",
+			kind: "stakeholder",
+		}]);
+
+		const graph = await fetch(`${server.url}/api/assets/graph?workspaceId=${workspaceId}`, { headers: { cookie } });
+		assert.equal(graph.status, 200);
+		assert.deepEqual(await graph.json(), {
+			nodes: [
+				{ assetId: stakeholderBody.assetId, kind: "stakeholder", title: "Customer" },
+				{ assetId: scenarioBody.assetId, kind: "scenario", title: "Checkout" },
+			],
+			edges: [{ fromAssetId: scenarioBody.assetId, toAssetId: stakeholderBody.assetId, type: "involves" }],
+		});
+	});
+});
+
+test("invalid asset relations return aggregated errors without creating the source asset", async () => {
+	await withServer(async ({ server, workspaceId }) => {
+		const cookie = await bootstrap(server.url);
+		const invalid = await createAsset(server.url, cookie, {
+			workspaceId,
+			kind: "scenario",
+			title: "Invalid",
+			content: { title: "Invalid" },
+			relations: [
+				{ toAssetId: 999999, type: "involves" },
+				{ toAssetId: 999998, type: "contains" },
+			],
+		});
+		assert.equal(invalid.status, 400);
+		assert.deepEqual(await invalid.json(), {
+			error: "invalid_relations",
+			invalidRelations: [
+				{ toAssetId: 999999, type: "involves", reason: "unknown_asset" },
+				{ toAssetId: 999998, type: "contains", reason: "unknown_asset" },
+			],
+		});
+		const list = await fetch(`${server.url}/api/assets?workspaceId=${workspaceId}`, { headers: { cookie } });
+		assert.equal(list.status, 200);
+		assert.deepEqual((await list.json() as { assets: Array<{ title: string }> }).assets, []);
+	});
+});

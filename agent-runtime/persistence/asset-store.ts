@@ -1,6 +1,6 @@
 import type Database from "better-sqlite3";
 import type { FixtureClock } from "../testing/deterministic-fixtures.js";
-import type { AssetRelationInput, AssetRelationRecord } from "./asset-relations.js";
+import type { AssetRelationInput, AssetRelationRecord, AssetGraph, ResolvedAssetGraph, ResolvedAssetRelation } from "./asset-relations.js";
 import { AssetRelationValidationError, isAssetRelationType, isValidAssetRelation } from "./asset-relations.js";
 import type { ReusableAssetKind } from "./reusable-asset-kind.js";
 import { parseJson } from "./json.js";
@@ -36,6 +36,7 @@ export interface ReusableAssetDetail {
 	currentRevisionId: number | null;
 	legacyOriginRequirementId: number | null;
 	createdAt: string;
+	resolvedGraph: ResolvedAssetGraph;
 	revisions: readonly {
 		id: number;
 		revisionNo: number;
@@ -303,6 +304,61 @@ export class AssetStore {
 		}));
 	}
 
+	getResolvedAssetGraph(assetId: number): ResolvedAssetGraph {
+		const rows = this.database
+			.prepare(`select ar.from_asset_id, ar.to_asset_id, ar.from_revision_id, ar.to_revision_id, ar.relationship_type,
+				case when ar.to_asset_id = ? then ar.from_revision_id else ar.to_revision_id end as peer_revision_id,
+				case when ar.to_asset_id = ? then from_asset.title else to_asset.title end as peer_title,
+				case when ar.to_asset_id = ? then from_asset.kind else to_asset.kind end as peer_kind
+				from asset_relations ar
+				join reusable_assets from_asset on from_asset.id = ar.from_asset_id
+				join reusable_assets to_asset on to_asset.id = ar.to_asset_id
+				where ar.from_asset_id = ? or ar.to_asset_id = ?
+				order by ar.id`)
+			.all(assetId, assetId, assetId, assetId, assetId) as Array<{
+				from_asset_id: number;
+				to_asset_id: number;
+				from_revision_id: number;
+				to_revision_id: number;
+				relationship_type: string;
+				peer_revision_id: number;
+				peer_title: string;
+				peer_kind: ReusableAssetKind;
+			}>;
+		const incoming: ResolvedAssetGraph["incoming"][number][] = [];
+		const outgoing: ResolvedAssetGraph["outgoing"][number][] = [];
+		for (const row of rows) {
+			const peer = {
+				assetId: row.to_asset_id === assetId ? row.from_asset_id : row.to_asset_id,
+				revisionId: row.peer_revision_id,
+				type: row.relationship_type as ResolvedAssetRelation["type"],
+				title: row.peer_title,
+				kind: row.peer_kind,
+			};
+			if (row.to_asset_id === assetId) incoming.push(peer);
+			else outgoing.push(peer);
+		}
+		return { incoming, outgoing };
+	}
+
+	getWorkspaceAssetGraph(workspaceId: number): AssetGraph {
+		const nodes = this.database
+			.prepare("select id, kind, title from reusable_assets where workspace_id = ? order by id")
+			.all(workspaceId) as Array<{ id: number; kind: ReusableAssetKind; title: string }>;
+		const edges = this.database
+			.prepare(`select ar.from_asset_id, ar.to_asset_id, ar.relationship_type
+				from asset_relations ar
+				join reusable_assets from_asset on from_asset.id = ar.from_asset_id
+				join reusable_assets to_asset on to_asset.id = ar.to_asset_id
+				where from_asset.workspace_id = ? and to_asset.workspace_id = ?
+				order by ar.id`)
+			.all(workspaceId, workspaceId) as Array<{ from_asset_id: number; to_asset_id: number; relationship_type: string }>;
+		return {
+			nodes: nodes.map((node) => ({ assetId: node.id, kind: node.kind, title: node.title })),
+			edges: edges.map((edge) => ({ fromAssetId: edge.from_asset_id, toAssetId: edge.to_asset_id, type: edge.relationship_type as AssetGraph["edges"][number]["type"] })),
+		};
+	}
+
 	getReusableAsset(assetId: number): ReusableAssetDetail | undefined {
 		const asset = this.database
 			.prepare("select id, workspace_id, kind, title, current_revision_id, legacy_origin_requirement_id, created_at from reusable_assets where id = ?")
@@ -319,6 +375,7 @@ export class AssetStore {
 			currentRevisionId: asset.current_revision_id,
 			legacyOriginRequirementId: asset.legacy_origin_requirement_id,
 			createdAt: asset.created_at,
+			resolvedGraph: this.getResolvedAssetGraph(asset.id),
 			revisions: revisions.map((revision) => ({
 				id: revision.id,
 				revisionNo: revision.revision_no,

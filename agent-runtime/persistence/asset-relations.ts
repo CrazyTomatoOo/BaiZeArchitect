@@ -18,6 +18,24 @@ export interface AssetRelationRecord {
 	type: AssetRelationType;
 	createdAt: string;
 }
+
+export interface ResolvedAssetRelation {
+	assetId: number;
+	revisionId: number;
+	type: AssetRelationType;
+	title: string;
+	kind: ReusableAssetKind;
+}
+
+export interface ResolvedAssetGraph {
+	incoming: readonly ResolvedAssetRelation[];
+	outgoing: readonly ResolvedAssetRelation[];
+}
+
+export interface AssetGraph {
+	nodes: readonly { assetId: number; kind: ReusableAssetKind; title: string }[];
+	edges: readonly { fromAssetId: number; toAssetId: number; type: AssetRelationType }[];
+}
 export class AssetRelationValidationError extends Error {
 	constructor(readonly issues: readonly { toAssetId?: number; type?: string; reason: string }[]) {
 		super("Asset relation validation failed");

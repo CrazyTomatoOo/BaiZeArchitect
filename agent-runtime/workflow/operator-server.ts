@@ -15,7 +15,8 @@ import { resolve } from "node:path";
 import { readFile } from "node:fs/promises";
 import type { AddressInfo } from "node:net";
 import type { HeadlessWorkflowRuntime } from "./headless-runtime.js";
-import { BusyWorkspaceError, ReusableAssetMalformedBodyError, ReusableAssetNameConflictError } from "../persistence/workflow-store.js";
+import { AssetRelationValidationError, BusyWorkspaceError, ReusableAssetMalformedBodyError, ReusableAssetNameConflictError } from "../persistence/workflow-store.js";
+import type { AssetRelationInput } from "../persistence/workflow-store.js";
 import { WORKFLOW_COMMAND_TYPES, type WorkflowCommandType } from "./command-types.js";
 import type { RequirementBaseline } from "./requirement.js";
 import { isReusableAssetKind, type ReusableAssetKind } from "../persistence/reusable-asset-kind.js";
@@ -52,6 +53,17 @@ export interface OperatorServer {
 }
 
 const LOOPBACK_HOSTS = new Set(["127.0.0.1", "::1", "localhost"]);
+function parseOutgoingRelations(value: unknown): readonly AssetRelationInput[] | undefined {
+	if (!Array.isArray(value)) return undefined;
+	const relations: AssetRelationInput[] = [];
+	for (const item of value) {
+		if (typeof item !== "object" || item === null || Array.isArray(item)) return undefined;
+		const record = item as { toAssetId?: unknown; type?: unknown };
+		if (!Number.isInteger(record.toAssetId) || typeof record.type !== "string") return undefined;
+		relations.push({ toAssetId: record.toAssetId as number, type: record.type as AssetRelationInput["type"] });
+	}
+	return relations;
+}
 /**
  * 就绪 Task 驱动循环:以生产模型驱动器逐个执行当前就绪任务(beginAttempt 单任务语义),
  * 直到无就绪任务或工作流离开 running。命令接受后驱动,任务完成即返回;后续命令/门禁回答再次驱动。
@@ -675,6 +687,15 @@ export async function startOperatorServer(
 			return;
 		}
 
+		if (request.method === "GET" && url.pathname === "/api/assets/graph") {
+			const workspaceId = Number(url.searchParams.get("workspaceId"));
+			if (!Number.isInteger(workspaceId) || !options.runtime.workspaceExists(workspaceId)) {
+				sendJson(response, 404, { error: "unknown_workspace" });
+				return;
+			}
+			sendJson(response, 200, options.runtime.getWorkspaceAssetGraph(workspaceId));
+			return;
+		}
 		if (request.method === "GET" && segments.length === 3 && segments[0] === "api" && segments[1] === "approval-packets") {
 			const detail = options.runtime.getApprovalPacketDetail(Number(segments[2]));
 			if (!detail) {
@@ -805,7 +826,7 @@ export async function startOperatorServer(
 				sendJson(response, 400, { error: "actor_fields_are_not_accepted" });
 				return;
 			}
-			const createBody = body as { workspaceId?: unknown; kind?: unknown; title?: unknown; content?: unknown };
+			const createBody = body as { workspaceId?: unknown; kind?: unknown; title?: unknown; content?: unknown; relations?: unknown };
 			const workspaceId = Number(createBody.workspaceId);
 			if (!Number.isInteger(workspaceId) || !options.runtime.workspaceExists(workspaceId)) {
 				sendJson(response, 404, { error: "unknown_workspace" });
@@ -819,15 +840,29 @@ export async function startOperatorServer(
 				sendJson(response, 400, { error: "malformed_body" });
 				return;
 			}
+			const relations = createBody.relations === undefined ? [] : parseOutgoingRelations(createBody.relations);
+			if (relations === undefined) {
+				sendJson(response, 400, { error: "malformed_body" });
+				return;
+			}
+			let created: { assetId: number; revisionId: number; revisionNo: number } | undefined;
 			try {
-				const created = options.runtime.createReusableAsset({
+				created = options.runtime.createReusableAsset({
 					workspaceId,
 					kind: createBody.kind as ReusableAssetKind,
 					title: typeof createBody.title === "string" ? createBody.title : "",
 					content: createBody.content,
 				});
+				if (relations.length > 0) {
+					options.runtime.writeRelations({ workspaceId, fromAssetId: created.assetId, fromRevisionId: created.revisionId, relations });
+				}
 				sendJson(response, 201, created);
 			} catch (error) {
+				if (error instanceof AssetRelationValidationError) {
+					if (created) options.runtime.deleteReusableAsset(created.assetId);
+					sendJson(response, 400, { error: "invalid_relations", invalidRelations: error.issues });
+					return;
+				}
 				if (error instanceof ReusableAssetMalformedBodyError) {
 					sendJson(response, 400, { error: "malformed_body" });
 					return;

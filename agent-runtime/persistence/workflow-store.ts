@@ -31,7 +31,7 @@ import { ASSET_RELATIONS_MIGRATION } from "./migrations/0019-asset-relations.js"
 import type { ReusableAssetKind } from "./reusable-asset-kind.js";
 import { parseJson } from "./json.js";
 import { AssetStore } from "./asset-store.js";
-import type { AssetRelationInput, AssetRelationRecord } from "./asset-relations.js";
+import type { AssetGraph, AssetRelationInput, AssetRelationRecord } from "./asset-relations.js";
 import type { ReusableAssetDetail, ReusableAssetSummary } from "./asset-store.js";
 import { SnapshotStore } from "./snapshot-store.js";
 import type { SnapshotDocument } from "./snapshot-store.js";
@@ -43,8 +43,8 @@ import type { WorkspaceSummary } from "./workspace-store.js";
 export { BusyWorkspaceError } from "./workspace-store.js";
 export type { WorkspaceSummary } from "./workspace-store.js";
 export { ReusableAssetMalformedBodyError, ReusableAssetNameConflictError } from "./asset-store.js";
+export type { AssetGraph, AssetRelationInput, AssetRelationRecord } from "./asset-relations.js";
 export { AssetRelationValidationError } from "./asset-relations.js";
-export type { AssetRelationInput, AssetRelationRecord } from "./asset-relations.js";
 export type { ReusableAssetDetail, ReusableAssetSummary } from "./asset-store.js";
 import { type WorkflowCommandType } from "../workflow/command-types.js";
 import { ARTIFACT_OWNERSHIP, type InputBinding, type TaskOutputInput } from "../workflow/plan-types.js";
@@ -3086,6 +3086,10 @@ deleteWorkspace(workspaceId: number): boolean {
 
 	readRelations(assetId: number): readonly AssetRelationRecord[] {
 		return this.assetStore.readRelations(assetId);
+	}
+	getWorkspaceAssetGraph(workspaceId: number): AssetGraph {
+		if (!this.workspaceStore.workspaceExists(workspaceId)) throw new Error("Workspace not found");
+		return this.assetStore.getWorkspaceAssetGraph(workspaceId);
 	}
 
 	assetExistsByOriginArtifactId(workspaceId: number, artifactId: number): boolean {

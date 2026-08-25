@@ -13,7 +13,7 @@ import { FEEDBACK_REFERENCE_BUDGET } from "../persistence/workflow-store.js";
 import { instantiatePlanTemplate } from "./plan-template.js";
 import type { TaskRole } from "./plan-types.js";
 import type { PlanProposal } from "./plan-types.js";
-import type { AssetRelationInput, AssetRelationRecord } from "../persistence/workflow-store.js";
+import type { AssetGraph, AssetRelationInput, AssetRelationRecord } from "../persistence/workflow-store.js";
 import type { RequirementBaseline } from "./requirement.js";
 
 export type { RequirementBaseline } from "./requirement.js";
@@ -108,6 +108,7 @@ export interface HeadlessWorkflowRuntime {
 	createReusableAsset(input: { workspaceId: number; kind: ReusableAssetKind; title: string; content: unknown; source?: "manual" | "import" | "migration" | "workflow" }): { assetId: number; revisionId: number; revisionNo: number };
 	writeRelations(input: { workspaceId: number; fromAssetId: number; fromRevisionId: number; relations: readonly AssetRelationInput[] }): readonly AssetRelationRecord[];
 	readRelations(assetId: number): readonly AssetRelationRecord[];
+	getWorkspaceAssetGraph(workspaceId: number): AssetGraph;
 	assetExistsByOriginArtifactId(workspaceId: number, artifactId: number): boolean;
 	updateStakeholderReusableAsset(assetId: number, patch: unknown): { revisionId: number; revisionNo: number } | undefined;
 	listReusableAssets(workspaceId: number): readonly ReusableAssetSummary[];
@@ -472,6 +473,9 @@ function buildTaskInstruction(role: string, objective: string, baseline: Require
 	},
 	readRelations(assetId) {
 		return store.readRelations(assetId);
+	},
+	getWorkspaceAssetGraph(workspaceId) {
+		return store.getWorkspaceAssetGraph(workspaceId);
 	},
 	assetExistsByOriginArtifactId(workspaceId, artifactId) {
 		return store.assetExistsByOriginArtifactId(workspaceId, artifactId);
