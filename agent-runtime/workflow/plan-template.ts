@@ -1,8 +1,8 @@
 /**
  * plan-template.ts — 预置模板 DAG 实例化（#12 决议：Engine 直生成，无 Orchestrator 模型调用）。
  *
- * 模板 = plan-template/v1 契约（静态 10 Task：analysis→scenario→usecase→function→design，
- * 每环节尾 Critic 复审）。实例化只填 PlanProposal base（workflowId/version/digest），
+ * 模板 = plan-template/v1 契约（静态 13 Task：analysis→scenario→usecase→function→design→architecture→data→api，
+ * 每环节尾 Critic 复审，design 拆为 4 个独立 Task 各产 1 kind）。实例化只填 PlanProposal base（workflowId/version/digest），
  * task 列表深拷贝自契约；最终 PlanProposal 仍走 plan-proposal/v1 校验器与 adoptPlan 路径，
  * 保证与人工 replace-plan 同一验证面。模板计划免 PLAN_TASK_LIMITS（#12 决议）。
  */

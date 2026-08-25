@@ -177,7 +177,7 @@
       "key": "design",
       "kind": "design",
       "role": "design-architect",
-      "objective": "Produce design, architecture, data, and api artifacts",
+      "objective": "Produce design artifact",
       "dependsOn": [
         "review-function"
       ],
@@ -193,21 +193,63 @@
         {
           "kind": "design",
           "operation": "create_or_revise"
-        },
+        }
+      ],
+      "completionPolicyRef": "design/v1",
+      "maxAttempts": 3
+    },
+    {
+      "key": "architecture",
+      "kind": "design",
+      "role": "architecture-architect",
+      "objective": "Produce architecture artifact",
+      "dependsOn": [
+        "design"
+      ],
+      "inputs": [],
+      "expectedArtifactEffects": [
         {
           "kind": "architecture",
           "operation": "create_or_revise"
-        },
+        }
+      ],
+      "completionPolicyRef": "architecture/v1",
+      "maxAttempts": 3
+    },
+    {
+      "key": "data",
+      "kind": "design",
+      "role": "data-architect",
+      "objective": "Produce data artifact",
+      "dependsOn": [
+        "architecture"
+      ],
+      "inputs": [],
+      "expectedArtifactEffects": [
         {
           "kind": "data",
           "operation": "create_or_revise"
-        },
+        }
+      ],
+      "completionPolicyRef": "data/v1",
+      "maxAttempts": 3
+    },
+    {
+      "key": "api",
+      "kind": "design",
+      "role": "api-architect",
+      "objective": "Produce api artifact",
+      "dependsOn": [
+        "data"
+      ],
+      "inputs": [],
+      "expectedArtifactEffects": [
         {
           "kind": "api",
           "operation": "create_or_revise"
         }
       ],
-      "completionPolicyRef": "design/v1",
+      "completionPolicyRef": "api/v1",
       "maxAttempts": 3
     },
     {
@@ -216,7 +258,7 @@
       "role": "critic",
       "objective": "Review design, architecture, data, and api artifacts",
       "dependsOn": [
-        "design"
+        "api"
       ],
       "inputs": [
         {
@@ -227,19 +269,19 @@
         },
         {
           "type": "task_output",
-          "taskKey": "design",
+          "taskKey": "architecture",
           "artifactKind": "architecture",
           "purpose": "review"
         },
         {
           "type": "task_output",
-          "taskKey": "design",
+          "taskKey": "data",
           "artifactKind": "data",
           "purpose": "review"
         },
         {
           "type": "task_output",
-          "taskKey": "design",
+          "taskKey": "api",
           "artifactKind": "api",
           "purpose": "review"
         }

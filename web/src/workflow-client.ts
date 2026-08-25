@@ -55,6 +55,7 @@ export interface WorkflowProjection {
 		version: number;
 		lastEventSeq: number;
 		currentFailureCode: string | null;
+		modelRoles?: Partial<Record<ModelRoleKey, ModelProfile>>;
 		policyBundle: { documentId: number; digest: string };
 	};
 	requirement: {
@@ -122,6 +123,7 @@ export interface RequirementDetail {
 	version: number;
 	workflowId: number;
 	designPackageId: number | null;
+	modelRoles?: Partial<Record<ModelRoleKey, ModelProfile>>;
 	currentRevision: {
 		id: number;
 		artifactId: number;
@@ -276,8 +278,12 @@ export function getRequirement(apiBase: string, requirementId: number): Promise<
 	return fetchJson(apiBase, `/api/requirements/${requirementId}`);
 }
 
-export function getArtifactRevision(apiBase: string, requirementId: number, kind: ClientArtifactKind): Promise<ArtifactRevisionDetail> {
-	return fetchJson(apiBase, `/api/requirements/${requirementId}/artifacts?kind=${encodeURIComponent(kind)}`);
+export async function getArtifactRevision(apiBase: string, requirementId: number, kind: ClientArtifactKind): Promise<ArtifactRevisionDetail | null> {
+	const path = `/api/requirements/${requirementId}/artifacts?kind=${encodeURIComponent(kind)}`;
+	const response = await fetch(`${apiBase}${path}`, { credentials: "same-origin" });
+	if (response.status === 404) return null;
+	if (!response.ok) throw new Error(`request failed: ${response.status} ${path}`);
+	return (await response.json()) as ArtifactRevisionDetail;
 }
 
 export function getWorkflowProjection(apiBase: string, workflowId: number): Promise<WorkflowProjection> {
@@ -522,14 +528,14 @@ export function gateQueue(projection: WorkflowProjection): readonly GateQueueIte
 }
 
 export interface RecoveryAction {
-	commandType: "retry-task" | "retry-planning" | "retry-recovery" | "replace-plan" | "diagnostic-run";
+	commandType: "retry-task" | "retry-planning" | "retry-recovery" | "diagnostic-run";
 	label: string;
 	payload?: Record<string, unknown>;
 }
 
 /**
  * 失败恢复组合:execution(retry-task)、planning(retry-planning)、Engine/Outbox(retry-recovery)
- * 各自只显示合法动作;replace-plan 仅对 Task/Planning 类失败可用。
+ * 各自只显示合法动作。
  */
 export function recoveryActions(projection: WorkflowProjection): readonly RecoveryAction[] {
 	const incident = projection.currentIncident;
@@ -545,14 +551,12 @@ export function recoveryActions(projection: WorkflowProjection): readonly Recove
 		const failedTask = projection.tasks.find((task) => task.status === "failed");
 		return [
 			...(failedTask ? [{ commandType: "retry-task" as const, label: "重试失败任务", payload: { taskId: failedTask.id } }] : []),
-			{ commandType: "replace-plan" as const, label: "替换计划" },
 			{ commandType: "diagnostic-run" as const, label: "诊断运行" },
 		];
 	}
 	if (failureCode === "planning_exhausted" || failureCode === "plan_budget_exhausted") {
 		return [
 			{ commandType: "retry-planning", label: "重试规划" },
-			{ commandType: "replace-plan", label: "替换计划" },
 			{ commandType: "diagnostic-run", label: "诊断运行" },
 		];
 	}

@@ -98,6 +98,8 @@ export interface HeadlessWorkflowRuntime {
 	getTaskDetail(taskId: number): TaskDetailRecord | undefined;
 	listTaskAttempts(taskId: number): readonly AttemptSummaryRecord[];
 	getAttemptDetail(attemptId: number): AttemptDetailRecord | undefined;
+	getAttemptContext(attemptId: number): { role: string; objective: string; requirementBaseline: RequirementBaseline; inputs: readonly unknown[]; expectedArtifactKind: string; expectedArtifactKinds: readonly string[] } | undefined;
+	listPendingReviewedArtifacts(workflowId: number): readonly { artifactId: number; revisionId: number; kind: string }[];
 	getRunDetail(runId: number): RunDetailRecord | undefined;
 	getApprovalPacketDetail(packetId: number): ApprovalPacketDetailRecord | undefined;
 	getDesignPackage(designPackageId: number): DesignPackageRecord | undefined;
@@ -164,6 +166,64 @@ export async function openHeadlessWorkflowRuntime(
 	function completeAttemptInternal(workflowId: number, attemptId: number, structuredResult: unknown): CompleteAttemptResult {
 		return store.publishAttemptResult(workflowId, attemptId, structuredResult);
 	}
+
+/** 各产物 kind 的 schema 字段提示(禁止额外字段)。从 artifact-content-v1.schema.json 提取。 */
+const ARTIFACT_SCHEMA_HINTS: Record<string, string> = {
+	analysis: "schemaVersion:\"artifact/analysis/v1\",artifactKind:\"analysis\",summary(string),sourceRefs:[{type:\"requirement_revision\",revisionId:1}],goals:[string](至少1项),nonGoals:[string],constraints:[string],acceptanceCriteria:[string](至少1项),impactProfile:{process/actors/behavior/architecture/data/api各{status:\"yes\"或\"no\"或\"unknown\",rationale:string}},openQuestions:[string]",
+	scenario: "schemaVersion:\"artifact/scenario/v1\",artifactKind:\"scenario\",summary(string),sourceRefs:[{type:\"requirement_revision\",revisionId:1}],scenarios:[{id:string,title:string,actors:[string],preconditions:[string],trigger:string,mainFlow:[string],alternateFlows:[string],expectedOutcome:string}]",
+	usecase: "schemaVersion:\"artifact/usecase/v1\",artifactKind:\"usecase\",summary(string),sourceRefs:[{type:\"requirement_revision\",revisionId:1}],useCases:[{id:string,actor:string,goal:string,preconditions:[string],mainFlow:[string],alternativeFlows:[string],postconditions:[string]}]",
+	function: "schemaVersion:\"artifact/function/v1\",artifactKind:\"function\",summary(string),sourceRefs:[{type:\"requirement_revision\",revisionId:1}],functions:[{id:string,name:string,responsibility:string,inputs:[string],outputs:[string],businessRules:[string],acceptanceCriteria:[string]}]",
+	design: "schemaVersion:\"artifact/design/v1\",artifactKind:\"design\",summary(string),sourceRefs:[{type:\"requirement_revision\",revisionId:1}],changeUnits:[{id:string,area:string,change:string,rationale:string,sourceRefs:[{type:\"requirement_revision\",revisionId:1}]}],alternatives:[string],failureHandling:[string],testStrategy:[string],implementationOrder:[string],rolloutStrategy:string,rollbackStrategy:string",
+	architecture: "schemaVersion:\"artifact/architecture/v1\",artifactKind:\"architecture\",summary(string),sourceRefs:[{type:\"requirement_revision\",revisionId:1}],components:[{id:string,name:string,responsibility:string}],relationships:[{from:string,to:string,interaction:string}],constraints:[string],nonFunctionalRequirements:[string],decisions:[number]",
+	data: "schemaVersion:\"artifact/data/v1\",artifactKind:\"data\",summary(string),sourceRefs:[{type:\"requirement_revision\",revisionId:1}],entities:[{name:string,purpose:string,fields:[string],lifecycle:string}],relationships:[string],migrationPlan:string,rollbackPlan:string,privacyAndRetention:[string]",
+	api: "schemaVersion:\"artifact/api/v1\",artifactKind:\"api\",summary(string),sourceRefs:[{type:\"requirement_revision\",revisionId:1}],interfaces:[{id:string,kind:\"http\"或\"event\"或\"message\"或\"rpc\"或\"function\",name:string,contract:string,errors:[string],compatibility:string}],security:[string],versioning:string,testStrategy:[string]",
+};
+/** 把 contextManifest 的任务上下文拼成模型可理解的 instruction。 */
+function buildTaskInstruction(role: string, objective: string, baseline: RequirementBaseline, workflowId: number, attemptId: number, evidenceSnapshotId: number, reviewRevisionId: number, reviewArtifactKind: string, expectedArtifactKinds: readonly string[], reviewTargets: ReadonlyArray<{ resolvedRevisionId?: number; artifactKind?: string }>): string {
+	const base = [
+		`你是 BaiZe Architect 的 ${role} 角色。`,
+		`任务目标:${objective}`,
+		"",
+		"需求基线:",
+		`标题:${baseline.title}`,
+		`摘要:${baseline.summary}`,
+		`描述:${baseline.description}`,
+	];
+	if (baseline.goals?.length) base.push(`目标:${baseline.goals.join("; ")}`);
+	if (baseline.nonGoals?.length) base.push(`非目标:${baseline.nonGoals.join("; ")}`);
+	if (baseline.constraints?.length) base.push(`约束:${baseline.constraints.join("; ")}`);
+	if (role === "critic") {
+		const targets = reviewTargets.length > 0 ? reviewTargets : [{ resolvedRevisionId: reviewRevisionId, artifactKind: reviewArtifactKind }];
+		const targetsJson = targets.map((t) => `{revisionId:${t.resolvedRevisionId ?? 0},artifactKind:"${t.artifactKind ?? ""}"}`).join(",");
+		base.push(
+			"",
+			"你是评审者,负责审查产物的完整性与质量,不产出产物。",
+			"输出纯 JSON 格式的 RoleResult,不要 Markdown 代码块或解释。",
+			`RoleResult 结构:{schemaVersion:"role-result/v1",workflowId:${workflowId},attemptId:${attemptId},effects:[],criticReport:{schemaVersion:"critic-report/v1",workflowId:${workflowId},attemptId:${attemptId},coverageAttestation:{reviewTargets:[${targetsJson}],complete:true},findings:[]}}`,
+			"effects 必须为空数组(critic 不产出产物)。",
+			"criticReport.coverageAttestation.complete 必须为 true。",
+			`reviewTargets 必须包含全部以下目标:${targetsJson}`,
+			"findings 为空数组表示无问题;如有问题,每条含 fingerprint、severity、summary、targetRevisionId、targetArtifactKind、sourceRef。",
+			"保持简洁,直接以 { 开头输出完整闭合的 JSON。",
+		);
+	} else {
+		// 构造 effects 数组:每个 expectedArtifactKind 一个 effect
+		const kinds = expectedArtifactKinds.length > 0 ? expectedArtifactKinds : ["analysis"];
+		const effectsArr = kinds.map((k) => {
+			const schema = ARTIFACT_SCHEMA_HINTS[k] ?? ARTIFACT_SCHEMA_HINTS["analysis"];
+			return `{effectType:"artifact_revision",artifactKind:"${k}",logicalKey:"${k}",content:{${schema}},baseRevisionId:null,traceLinks:[{evidenceSnapshotId:${evidenceSnapshotId},sourceRef:{type:"requirement_revision",revisionId:1}}]}`;
+		});
+		base.push(
+			"",
+			"请基于以上需求,完成本角色的设计任务。",
+			"输出纯 JSON 格式的 RoleResult,不要 Markdown 代码块或解释。",
+			`RoleResult 结构:{schemaVersion:"role-result/v1",workflowId:${workflowId},attemptId:${attemptId},effects:[${effectsArr.join(",")}]}`,
+			"每个 effect 的 content 必须严格只含 schema 声明的字段(禁止额外字段)。",
+			"保持简洁,直接以 { 开头输出完整闭合的 JSON。",
+		);
+	}
+	return base.join("\n");
+}
 	return {
 		createWorkspace(input) {
 			return store.createWorkspace(input);
@@ -268,15 +328,20 @@ export async function openHeadlessWorkflowRuntime(
 				}
 			store.appendRunEvent(begin.runId, "model_call_started", { role: begin.taskRole, contextDigest: begin.contextDigest });
 			let result;
-			try {
-				result = await modelDriver.execute(
-					{ role: begin.taskRole as TaskRole, contextDigest: begin.contextDigest, instruction: "Produce the required output.", modelRoles },
-					[],
-				);
-			} catch (error) {
-				store.appendRunEvent(begin.runId, "model_call_failed", { role: begin.taskRole, error: error instanceof Error ? error.message : String(error) });
-				throw error;
-			}
+		try {
+			// 从 contextManifest 读取任务上下文,拼出有意义的 instruction(角色、需求、任务目标、输出格式)
+		const ctx = store.getAttemptContext(begin.attemptId);
+		const evidenceSnapshots = store.getEvidenceSnapshots(workflowId);
+		const evidenceSnapshotId = evidenceSnapshots[0]?.id ?? 0;
+	const reviewTargets = ctx?.inputs?.filter((i) => (i as { type?: string }).type === "task_output") as Array<{ resolvedRevisionId?: number; artifactKind?: string }> | undefined;
+	const firstReviewTarget = reviewTargets?.[0];
+	const instruction = ctx
+		? buildTaskInstruction(ctx.role, ctx.objective, ctx.requirementBaseline, workflowId, begin.attemptId, evidenceSnapshotId, firstReviewTarget?.resolvedRevisionId ?? 0, firstReviewTarget?.artifactKind ?? "", ctx.expectedArtifactKinds, reviewTargets ?? [])
+		: "Produce the required output.";
+			result = await modelDriver.execute(
+				{ role: begin.taskRole as TaskRole, contextDigest: begin.contextDigest, instruction, modelRoles },
+				[],
+			);
 			store.appendRunEvent(begin.runId, "token", { role: begin.taskRole, provider: result.modelUsage.provider, modelId: result.modelUsage.modelId, inputTokens: result.modelUsage.inputTokens, outputTokens: result.modelUsage.outputTokens });
 			store.appendRunEvent(begin.runId, "model_result", { role: begin.taskRole, produced: "role-result/v1" });
 			const complete = completeAttemptInternal(workflowId, begin.attemptId, result.structuredResult);
@@ -286,8 +351,14 @@ export async function openHeadlessWorkflowRuntime(
 				if (complete.outcome === "task_exhausted") {
 					return { outcome: "task_exhausted", workflowVersion: complete.workflowVersion, lastEventSeq: complete.lastEventSeq };
 				}
-			}
-			throw new Error("Task execution loop exceeded maximum iterations");
+		} catch (error) {
+			store.appendRunEvent(begin.runId, "model_call_failed", { role: begin.taskRole, error: error instanceof Error ? error.message : String(error) });
+			// 驱动或发布抛错都必须走 failAttempt:释放 claim、计入失败/重试/耗尽,否则 dangling claim 阻塞后续命令与引擎推进。
+			const failed = store.failAttempt(workflowId, begin.attemptId, "model_call_error", error instanceof Error ? error.message : String(error));
+			return { outcome: failed.outcome === "task_exhausted" ? "task_exhausted" : "failed", workflowVersion: failed.workflowVersion, lastEventSeq: failed.lastEventSeq };
+		}
+		}
+		throw new Error("Task execution loop exceeded maximum iterations");
 		},
 		reconcile() {
 			return store.reconcile();
@@ -370,6 +441,12 @@ export async function openHeadlessWorkflowRuntime(
 	},
 	getAttemptDetail(attemptId) {
 		return store.getAttemptDetail(attemptId);
+	},
+	getAttemptContext(attemptId) {
+		return store.getAttemptContext(attemptId);
+	},
+	listPendingReviewedArtifacts(workflowId) {
+		return store.listPendingReviewedArtifacts(workflowId);
 	},
 	getRunDetail(runId) {
 		return store.getRunDetail(runId);

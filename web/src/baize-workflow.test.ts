@@ -218,7 +218,7 @@ describe("gateQueue — 确定性门禁队列", () => {
 });
 
 describe("recoveryActions — 每类失败只给出合法恢复组合", () => {
-	it("task_budget_exhausted → retry-task + replace-plan + diagnostic-run", () => {
+	it("task_budget_exhausted → retry-task + diagnostic-run", () => {
 		const actions = recoveryActions(
 			projection({
 				workflow: { state: "failed", currentFailureCode: "task_budget_exhausted" },
@@ -227,16 +227,16 @@ describe("recoveryActions — 每类失败只给出合法恢复组合", () => {
 				],
 			}),
 		);
-		expect(actions.map((action) => action.commandType)).toEqual(["retry-task", "replace-plan", "diagnostic-run"]);
+		expect(actions.map((action) => action.commandType)).toEqual(["retry-task", "diagnostic-run"]);
 		expect(actions[0].payload).toEqual({ taskId: 31 });
 	});
 
-	it("planning_exhausted → retry-planning + replace-plan + diagnostic-run", () => {
+	it("planning_exhausted → retry-planning + diagnostic-run", () => {
 		const actions = recoveryActions(projection({ workflow: { state: "failed", currentFailureCode: "planning_exhausted" } }));
-		expect(actions.map((action) => action.commandType)).toEqual(["retry-planning", "replace-plan", "diagnostic-run"]);
+		expect(actions.map((action) => action.commandType)).toEqual(["retry-planning", "diagnostic-run"]);
 	});
 
-	it("outbox Incident → retry-recovery + diagnostic-run(不含 retry-task/replace-plan)", () => {
+	it("outbox Incident → retry-recovery + diagnostic-run(不含 retry-task)", () => {
 		const actions = recoveryActions(
 			projection({
 				workflow: { state: "failed", currentFailureCode: "outbox_exhausted" },
@@ -437,9 +437,10 @@ describe("baize-shell — 首屏与选中态安全约定(票 05)", () => {
 		expect(shellSource).toContain("baize-workspace-deleted");
 	});
 
-	it("持有 managerOpen 状态且渲染分支先于需求列表", () => {
-		expect(shellSource).toMatch(/managerOpen: \{ state: true \}/);
-		expect(shellSource).toContain("if (this.managerOpen)");
+	it("使用 @lit-labs/router 路由管理页与需求列表", () => {
+		expect(shellSource).toMatch(/Router\(this, \[/);
+		expect(shellSource).toContain("/manage");
+		expect(shellSource).toContain("/workflow/:id");
 	});
 
 	it("只用 localStorage[\"baize.workspaceId\"] 键,写/清时机齐", () => {

@@ -278,22 +278,47 @@ function executeFunctionTask(runtime: HeadlessWorkflowRuntime, workflowId: numbe
 }
 
 function executeArchitectTask(runtime: HeadlessWorkflowRuntime, workflowId: number): void {
-	const begin = runtime.beginAttempt(workflowId);
-	assert.equal(begin.taskKey, "design");
-	assert.equal(begin.taskRole, "design-architect");
 	const links = [setupEvidence(runtime, workflowId)];
-	const result: RoleResult = {
+	const designBegin = runtime.beginAttempt(workflowId);
+	assert.equal(designBegin.taskKey, "design");
+	assert.equal(designBegin.taskRole, "design-architect");
+	const designResult: RoleResult = {
 		schemaVersion: "role-result/v1",
 		workflowId,
-		attemptId: begin.attemptId,
-		effects: [
-			{ effectType: "artifact_revision", artifactKind: "design", logicalKey: "design", content: designContent(), baseRevisionId: null, traceLinks: links },
-			{ effectType: "artifact_revision", artifactKind: "architecture", logicalKey: "architecture", content: architectureContent(), baseRevisionId: null, traceLinks: links },
-			{ effectType: "artifact_revision", artifactKind: "data", logicalKey: "data", content: dataContent(), baseRevisionId: null, traceLinks: links },
-			{ effectType: "artifact_revision", artifactKind: "api", logicalKey: "api", content: apiContent(), baseRevisionId: null, traceLinks: links },
-		],
+		attemptId: designBegin.attemptId,
+		effects: [{ effectType: "artifact_revision", artifactKind: "design", logicalKey: "design", content: designContent(), baseRevisionId: null, traceLinks: links }],
 	};
-	assert.equal(runtime.completeAttempt(workflowId, begin.attemptId, result).outcome, "published");
+	assert.equal(runtime.completeAttempt(workflowId, designBegin.attemptId, designResult).outcome, "published");
+	const archBegin = runtime.beginAttempt(workflowId);
+	assert.equal(archBegin.taskKey, "architecture");
+	assert.equal(archBegin.taskRole, "architecture-architect");
+	const archResult: RoleResult = {
+		schemaVersion: "role-result/v1",
+		workflowId,
+		attemptId: archBegin.attemptId,
+		effects: [{ effectType: "artifact_revision", artifactKind: "architecture", logicalKey: "architecture", content: architectureContent(), baseRevisionId: null, traceLinks: links }],
+	};
+	assert.equal(runtime.completeAttempt(workflowId, archBegin.attemptId, archResult).outcome, "published");
+	const dataBegin = runtime.beginAttempt(workflowId);
+	assert.equal(dataBegin.taskKey, "data");
+	assert.equal(dataBegin.taskRole, "data-architect");
+	const dataResult: RoleResult = {
+		schemaVersion: "role-result/v1",
+		workflowId,
+		attemptId: dataBegin.attemptId,
+		effects: [{ effectType: "artifact_revision", artifactKind: "data", logicalKey: "data", content: dataContent(), baseRevisionId: null, traceLinks: links }],
+	};
+	assert.equal(runtime.completeAttempt(workflowId, dataBegin.attemptId, dataResult).outcome, "published");
+	const apiBegin = runtime.beginAttempt(workflowId);
+	assert.equal(apiBegin.taskKey, "api");
+	assert.equal(apiBegin.taskRole, "api-architect");
+	const apiResult: RoleResult = {
+		schemaVersion: "role-result/v1",
+		workflowId,
+		attemptId: apiBegin.attemptId,
+		effects: [{ effectType: "artifact_revision", artifactKind: "api", logicalKey: "api", content: apiContent(), baseRevisionId: null, traceLinks: links }],
+	};
+	assert.equal(runtime.completeAttempt(workflowId, apiBegin.attemptId, apiResult).outcome, "published");
 }
 
 function getRevisionId(databasePath: string, kind: string): number {
@@ -431,7 +456,7 @@ test("bounded projection embeds current state without events or snapshot content
 		assert.deepEqual(Object.keys(body.workflow.policyBundle).sort(), ["digest", "documentId"]);
 		assert.equal("events" in body, false, "bounded projection must not embed the event stream");
 		assert.equal(body.currentPlan.revisionNo, 1);
-		assert.deepEqual(body.tasks.map((task: { key: string }) => task.key), ["analyze", "review-analysis", "scenario", "review-scenario", "usecase", "review-usecase", "function", "review-function", "design", "review-design"]);
+		assert.deepEqual(body.tasks.map((task: { key: string }) => task.key), ["analyze", "review-analysis", "scenario", "review-scenario", "usecase", "review-usecase", "function", "review-function", "design", "architecture", "data", "api", "review-design"]);
 		assert.equal(body.tasks[0].status, "completed");
 		assert.equal(body.tasks[0].latestAttempt.status, "succeeded");
 		assert.equal(body.tasks[1].latestAttempt, null);
@@ -496,7 +521,7 @@ test("plan revision detail preserves the immutable proposal and provenance", asy
 		assert.equal(typeof body.proposalDocumentId, "number");
 		assert.equal(typeof body.proposalDigest, "string");
 		assert.equal(typeof body.planningAttemptId, "number");
-		assert.deepEqual(body.proposal.tasks.map((task: { key: string }) => task.key), ["analyze", "review-analysis", "scenario", "review-scenario", "usecase", "review-usecase", "function", "review-function", "design", "review-design"]);
+		assert.deepEqual(body.proposal.tasks.map((task: { key: string }) => task.key), ["analyze", "review-analysis", "scenario", "review-scenario", "usecase", "review-usecase", "function", "review-function", "design", "architecture", "data", "api", "review-design"]);
 		const missing = await get(context, "/api/plan-revisions/9999");
 		assert.equal(missing.status, 404);
 	});

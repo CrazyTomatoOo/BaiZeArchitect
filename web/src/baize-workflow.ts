@@ -12,6 +12,7 @@ import {
 	getApprovalPacket,
 	getArtifactRevision,
 	getDesignPackage,
+	getModelConfig,
 	getRequirement,
 	getWorkflowProjection,
 	listRequirements,
@@ -32,6 +33,7 @@ import {
 	type ArtifactRevisionDetail,
 	type ClientArtifactKind,
 	type CommandReceipt,
+	type ModelConfig,
 	type DesignPackageDetail,
 	type GateQueueItem,
 	type OperatorSession,
@@ -41,7 +43,10 @@ import {
 	type WorkflowProjection,
 } from "./workflow-client.js";
 import { graphToMermaid, isGraphDiagram, type GraphDiagram } from "./diagram-render.js";
-
+import { MODEL_ROLE_GROUPS, MODEL_ROLE_KEYS, ROLE_LABELS, customizedRoleCount, findModel, isRoleCustomized, providerLabel } from "./model-profiles.js";
+import { renderArtifactFields } from "./artifact-content.js";
+import { ARTIFACT_KIND_LABELS, ARTIFACT_VIEW_KINDS, schemaRefLabel } from "./artifact-labels.js";
+import { readinessCheckLabel, readinessCheckDetail } from "./readiness-labels.js";
 /**
  * baize-workflow — 自动优先的引导式 Requirement 页面(票15+票16)。
  * 状态 hero(每态一个主动作)+ 概览 + 同页详情 + 高级接管。
@@ -50,10 +55,6 @@ import { graphToMermaid, isGraphDiagram, type GraphDiagram } from "./diagram-ren
  * 只调用新 Projection / detail / Command / SSE 契约;不做乐观状态变更。
  * 仅在测试装配中挂载,生产 shell 在 S7 前不引用本组件。
  */
-/** 产物内容查看器的可图 kind 列表（#18 决议：scenario/architecture/data 等 8 生产 kind）。 */
-const ARTIFACT_VIEW_KINDS: readonly ClientArtifactKind[] = [
-	"analysis", "scenario", "usecase", "function", "design", "architecture", "data", "api",
-];
 
 /** 从产物内容提取可选 diagrams（#11 决议：内容内嵌结构化图 JSON）。 */
 function extractDiagrams(content: unknown): readonly unknown[] {
@@ -85,9 +86,9 @@ class BaizeWorkflow extends LitElement {
 		creating: { state: true },
 		requirement: { state: true },
 		projection: { state: true },
+		modelConfig: { state: true },
 		receipt: { state: true },
 		detailsOpen: { state: true },
-		takeoverOpen: { state: true },
 		packageDetail: { state: true },
 		loadError: { state: true },
 		busy: { state: true },
@@ -106,6 +107,7 @@ class BaizeWorkflow extends LitElement {
 		pendingGate: { type: String, attribute: "pending-gate" },
 		pendingApproval: { type: Boolean, attribute: "pending-approval" },
 		artifactView: { state: true },
+		activeTab: { state: true },
 	};
 
 	declare requirementId: number;
@@ -121,9 +123,9 @@ class BaizeWorkflow extends LitElement {
 	declare creating: boolean;
 	declare requirement: RequirementDetail | null;
 	declare projection: WorkflowProjection | null;
+	declare modelConfig: ModelConfig | null;
 	declare receipt: CommandReceipt | null;
 	declare detailsOpen: boolean;
-	declare takeoverOpen: boolean;
 	declare packageDetail: DesignPackageDetail | null;
 	declare loadError: string | null;
 	declare busy: boolean;
@@ -142,6 +144,7 @@ class BaizeWorkflow extends LitElement {
 	declare pendingGate: string | null;
 	declare pendingApproval: boolean;
 	declare artifactView: ArtifactViewState | null;
+	declare activeTab: string;
 
 	/** 打开的 gate 表单上下文:commandId 在表单生命周期内固定(重复提交幂等),reload 才换新。 */
 	private formContext: { key: string; commandId: string; workflowVersion: number } | null = null;
@@ -167,9 +170,9 @@ class BaizeWorkflow extends LitElement {
 		this.creating = false;
 		this.requirement = null;
 		this.projection = null;
+		this.modelConfig = null;
 		this.receipt = null;
 		this.detailsOpen = false;
-		this.takeoverOpen = false;
 		this.packageDetail = null;
 		this.loadError = null;
 		this.busy = false;
@@ -187,8 +190,9 @@ class BaizeWorkflow extends LitElement {
 		this.navOpen = false;
 		this.pendingGate = null;
 		this.pendingApproval = false;
-		this.artifactView = null;
-	}
+	this.artifactView = null;
+	this.activeTab = "tasks";
+}
 
 	static styles = [sharedStyles, css`
 		/* Hallmark · genre: atmospheric · macrostructure: Workbench · design-system: DESIGN.md · designed-as-app */
@@ -265,6 +269,16 @@ class BaizeWorkflow extends LitElement {
 		.details h3 { margin: 12px 0 6px; font-size: var(--text-sm); color: var(--text-muted); letter-spacing: 0.06em; }
 		.details h3:first-child { margin-top: 0; }
 		.fact-block { font-size: var(--text-xs); color: var(--text-muted); line-height: 1.7; word-break: break-all; }
+		/* — 只读模型档 — */
+		.profile-meta { margin: 6px 0 4px; font-size: var(--text-xs); color: var(--text-muted); }
+		.profile-group { margin-top: 8px; }
+		.profile-group-label { font-size: var(--text-xs); color: var(--text-subtle); letter-spacing: 0.06em; }
+		.profile-row { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; padding: 5px 0; font-size: var(--text-sm); border-bottom: 1px solid var(--border); }
+		.profile-role { flex: 0 0 100px; font-weight: 500; }
+		.profile-marker { font-size: var(--text-xs); color: var(--text-subtle); border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 1px 8px; }
+		.profile-marker[data-tone="custom"] { border-color: var(--accent); color: var(--accent); }
+		.profile-provider { color: var(--text-muted); }
+		.profile-model { font-family: var(--font-mono); font-variant-numeric: tabular-nums; }
 
 		/* — 产物内容查看器 — */
 		.artifact-kind-row { display: flex; flex-wrap: wrap; gap: var(--space-2xs); margin-bottom: var(--space-sm); }
@@ -280,13 +294,24 @@ class BaizeWorkflow extends LitElement {
 		.diagram-holder { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-card); padding: var(--space-sm); overflow-x: auto; }
 		.diagram-holder svg { display: block; margin: 0 auto; max-width: 100%; }
 		.artifact-json { font-size: var(--text-xs); overflow-x: auto; max-height: 360px; }
-
-		/* — 接管 — */
-		.takeover { margin-top: 12px; border-top: 1px dashed var(--border); padding-top: 10px; }
-		.takeover form { display: flex; gap: 8px; margin: 8px 0; align-items: center; flex-wrap: wrap; }
-		.takeover input, .takeover textarea { min-width: 220px; }
-		details.disclosure { margin-top: 10px; }
-		details.disclosure summary { cursor: pointer; color: var(--accent); font-size: var(--text-sm); }
+		/* — 产物结构化渲染 — */
+		.artifact-view { display: flex; flex-direction: column; gap: var(--gap); }
+		.artifact-summary { font-size: var(--text-sm); color: var(--text-muted); line-height: 1.6; margin-bottom: 4px; }
+		.artifact-fields { display: flex; flex-direction: column; gap: var(--gap); }
+		.field-row { display: flex; flex-direction: column; gap: 4px; }
+		.field-label { font-size: var(--text-xs); color: var(--text-subtle); letter-spacing: 0.06em; font-weight: 500; }
+		.field-list { margin: 0; padding-left: 20px; }
+		.field-list li { font-size: var(--text-sm); line-height: 1.6; margin-bottom: 2px; }
+		.field-cards { display: flex; flex-direction: column; gap: 8px; }
+		.field-card { border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 10px 12px; background: var(--surface-2); }
+		.field-card .field-row { margin-bottom: 6px; }
+		.field-card .field-row:last-child { margin-bottom: 0; }
+		.field-inline { font-size: var(--text-sm); color: var(--text); }
+		.field-sub-object { display: flex; flex-direction: column; gap: 6px; }
+		.impact-table { width: 100%; font-size: var(--text-sm); border-collapse: collapse; }
+		.impact-table th { font-size: var(--text-xs); color: var(--text-subtle); text-align: left; padding: 4px 8px; border-bottom: 1px solid var(--border); }
+		.impact-table td { padding: 4px 8px; border-bottom: 1px solid var(--border); vertical-align: top; }
+		.impact-table .badge { font-size: var(--text-xs); }
 		.command-row { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 8px; }
 
 		/* — 横幅 — */
@@ -319,6 +344,26 @@ class BaizeWorkflow extends LitElement {
 		.login-form button { margin-top: 10px; width: 100%; }
 
 		.sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+
+		/* — 标签页 — */
+		.tab-bar { display: flex; gap: 0; margin-top: 16px; border-bottom: 1px solid var(--border); }
+		.tab { background: none; border: none; padding: 8px 16px; cursor: pointer; font-size: var(--text-sm); color: var(--text-muted); border-bottom: 2px solid transparent; margin-bottom: -1px; }
+		.tab:hover { color: var(--text); }
+		.tab.active { color: var(--accent); border-bottom-color: var(--accent); }
+		.tab-content { margin-top: 0; }
+		.tab-content .details { margin-top: var(--gap); }
+
+		/* — 产物进度 — */
+		.artifact-progress { display: flex; flex-wrap: wrap; gap: 8px; }
+		.artifact-progress .chip { cursor: pointer; }
+		.artifact-progress .chip.done { border-color: var(--ok); color: var(--ok); }
+		.artifact-progress .chip.missing { border-color: var(--danger); color: var(--danger); }
+
+		/* — 就绪检查 — */
+		.readiness-list { display: flex; flex-direction: column; gap: 4px; }
+		.readiness-row { display: flex; align-items: center; gap: 8px; padding: 4px 0; border-bottom: 1px solid var(--border); font-size: var(--text-sm); }
+		.readiness-label { font-weight: 500; min-width: 120px; }
+		.readiness-detail { color: var(--text-muted); font-size: var(--text-xs); }
 	`];
 
 	connectedCallback(): void {
@@ -408,11 +453,16 @@ class BaizeWorkflow extends LitElement {
 	private async load(): Promise<void> {
 		try {
 			this.requirement = await getRequirement(this.apiBase, this.requirementId);
+			void this.loadModelConfig();
 			await this.refreshProjection();
 			this.connectEvents();
 		} catch (error) {
 			this.loadError = error instanceof Error ? error.message : String(error);
 		}
+	}
+	private async loadModelConfig(): Promise<void> {
+		if (this.modelConfig) return;
+		this.modelConfig = await getModelConfig(this.apiBase).catch(() => null);
 	}
 
 	private async refreshProjection(): Promise<void> {
@@ -557,175 +607,35 @@ class BaizeWorkflow extends LitElement {
 			</aside>
 		`;
 	}
-
-
-	private renderStatusSummary() {
+	/** 只读模型档:需求级 vs 部署默认;目录未加载时不渲染,避免错误的空表。 */
+	private renderModelProfile() {
 		const projection = this.projection;
-		if (!projection) return nothing;
-		const counts = pendingCounts(projection);
+		if (!projection || !this.modelConfig) return nothing;
+		const modelRoles = projection.workflow.modelRoles;
+		const defaults = this.modelConfig.defaultRoles;
+		const count = customizedRoleCount(modelRoles, defaults);
 		return html`
-			<div class="details" style="margin-top:16px">
-				<h3>待处理与版本</h3>
-				<div class="fact-block" data-testid="status-summary">
-					待处理:<span data-testid="pending-counts">门禁 ${counts.gates} · 决策 ${counts.decisions} · 发现 ${counts.findings}</span><br />
-					版本 ${projection.workflow.version} · 事件 ${projection.workflow.lastEventSeq} ·
-					计划 ${projection.currentPlan ? `r${projection.currentPlan.revisionNo}` : "—"} ·
-					策略 ${projection.workflow.policyBundle.digest.slice(0, 19)}…
-				</div>
-			</div>
-		`;
-	}
-
-	private renderDetails() {
-		const projection = this.projection;
-		if (!projection || !this.detailsOpen) return nothing;
-		const counts = pendingCounts(projection);
-		return html`
-			<section class="details" data-testid="details">
-				<h3>任务顺序</h3>
-				<table data-testid="task-table">
-					<thead><tr><th>#</th><th>键</th><th>类型</th><th>角色</th><th>状态</th><th>最近尝试</th></tr></thead>
-					<tbody>
-						${projection.tasks.map(
-							(task, index) => html`<tr data-task-key=${task.key}>
-								<td>${index + 1}</td>
-								<td>${task.key}</td>
-								<td>${task.kind}</td>
-								<td>${task.role}</td>
-								<td><span class="badge" data-tone=${task.status === "completed" ? "ok" : task.status === "failed" ? "bad" : task.status === "in_progress" ? "warn" : ""}>${statusLabel(task.status)}</span></td>
-								<td>${task.latestAttempt ? `#${task.latestAttempt.id} ${statusLabel(task.latestAttempt.status)}` : "—"}</td>
-							</tr>`,
-						)}
-					</tbody>
-				</table>
-
-				<h3>当前运行</h3>
-				<div data-testid="active-work">
-					${projection.activeRun
-						? html`运行 #${projection.activeRun.id}(${projection.activeRun.role ?? "—"}, ${statusLabel(projection.activeRun.status)})
-							${projection.activeClaim ? html` · 尝试 #${projection.activeClaim.attemptId}` : nothing}`
-						: html`当前没有活动的运行`}
-				</div>
-
-				<h3>产物与证据</h3>
-				<div class="fact-block" data-testid="revision-facts">
-					需求 r${projection.requirement.currentRevision.revisionNo}
-					(${statusLabel(projection.requirement.currentRevision.status)}, ${projection.requirement.currentRevision.digest.slice(0, 19)}…)<br />
-					产物完成:<span data-testid="artifact-summary">${artifactSummary(projection)}</span><br />
-					${projection.readiness.checks.map(
-						(check) => html`<div>${check.passed ? "✓" : "✗"} ${check.name} — ${check.detail}</div>`,
-					)}
-				</div>
-
-				<h3>产物内容</h3>
-				<div data-testid="artifact-viewer">
-					<div class="artifact-kind-row">
-						${ARTIFACT_VIEW_KINDS.map(
-							(kind) => html`<button class="${kind === this.artifactView?.kind ? "chip active" : "chip"}" @click=${() => this.openArtifactView(kind)}>${kind}</button>`,
-						)}
-					</div>
-					${this.renderArtifactContent()}
-				</div>
-
-				<h3>决策与发现</h3>
-				<div data-testid="governance-facts">
-					${projection.decisions.length === 0 && projection.findings.length === 0 ? html`暂无决策与发现` : nothing}
-					${projection.decisions.map(
-						(decision) => html`<div><span class="badge">${severityLabel(decision.severity)}</span> ${decision.summary} — ${statusLabel(decision.status)}</div>`,
-					)}
-					${projection.findings.map(
-						(finding) => html`<div><span class="badge" data-tone=${finding.severity === "critical" ? "bad" : finding.severity === "major" ? "warn" : ""}>${severityLabel(finding.severity)}</span> ${finding.summary} — ${statusLabel(finding.status)}</div>`,
-					)}
-				</div>
-
-				${projection.openGates.length > 0
-					? html`<h3>打开的门禁</h3>
-						<div data-testid="open-gates">
-							${projection.openGates.map((gate) => html`<div><span class="badge" data-tone="warn">${gate.gateType}</span> ${gate.subjectType} #${gate.subjectId}</div>`)}
-						</div>`
-					: nothing}
-
-				${projection.currentIncident
-					? html`<h3>事故</h3>
-						<div data-testid="incident">${projection.currentIncident.incidentType} / ${projection.currentIncident.failureCode} — ${statusLabel(projection.currentIncident.status)}</div>`
-					: nothing}
-
-				${projection.currentPacket
-					? html`<h3>批准包</h3>
-						<div data-testid="packet">摘要 ${projection.currentPacket.digest.slice(0, 27)}… — ${statusLabel(projection.currentPacket.status)}</div>
-						${projection.workflow.state === "ready_to_archive"
-							? html`<div class="command-row">
-								<button data-testid="open-approval" ?disabled=${this.busy || !this.connected} @click=${() => void this.openApprovalReview()}>打开批准审阅</button>
-							</div>`
-							: nothing}`
-					: nothing}
-
-
-				<h3>操作</h3>
-				<div class="command-row" data-testid="detail-commands">
-					${["running", "waiting_for_human", "ready_to_archive"].includes(projection.workflow.state)
-						? html`<button data-testid="pause-command" ?disabled=${this.busy || !this.connected} @click=${() => void this.runCommand("pause")}>暂停</button>`
-						: nothing}
-					${projection.activeRun && projection.workflow.state === "running"
-						? html`<button class="danger" data-testid="cancel-command" ?disabled=${this.busy || !this.connected} @click=${() => void this.runCommand("cancel-run", { runId: projection.activeRun!.id })}>取消当前运行</button>`
-						: nothing}
-				</div>
-
-				${this.renderTakeover()}
+			<section class="details model-profile" data-testid="model-profile-card">
+				<h3>模型档</h3>
+				<div class="profile-meta" data-testid="model-profile-count">${count}/${MODEL_ROLE_KEYS.length} 需求级自定义 · 缺省 = 部署默认档</div>
+				${MODEL_ROLE_GROUPS.map(
+					(group) => html`<div class="profile-group">
+						<div class="profile-group-label">${group.label}</div>
+						${group.roles.map((role) => {
+							const custom = isRoleCustomized(role, modelRoles, defaults);
+							// 生效档:需求级覆盖优先,缺省回落部署默认档
+							const profile = modelRoles?.[role] ?? defaults[role];
+							return html`<div class="profile-row" data-testid="profile-row-${role}" data-custom=${custom}>
+								<span class="profile-role">${ROLE_LABELS[role]}</span>
+								<span class="profile-marker" data-tone=${custom ? "custom" : "default"}>${custom ? "需求级" : "部署默认"}</span>
+								<span class="profile-provider">${providerLabel(this.modelConfig, profile)}</span>
+								<span class="profile-model">${findModel(this.modelConfig, profile)?.name ?? profile?.modelId ?? "—"}</span>
+							</div>`;
+						})}
+					</div>`,
+				)}
 			</section>
 		`;
-	}
-
-	private renderTakeover() {
-		const projection = this.projection;
-		if (!projection) return nothing;
-		return html`
-			<details class="disclosure" data-testid="takeover" @toggle=${(event: Event) => { this.takeoverOpen = (event.target as HTMLDetailsElement).open; }}>
-				<summary>高级接管(人工指令 / 替换计划 / 诊断运行)</summary>
-				${this.takeoverOpen
-					? html`
-						<form data-testid="steer-form" @submit=${(event: SubmitEvent) => { event.preventDefault; void this.submitTakeover("steer"); }}>
-							<input name="text" placeholder="人工指令内容" required />
-							<button type="submit" ?disabled=${this.busy || !this.connected}>人工指令</button>
-						</form>
-						<form data-testid="diagnostic-form" @submit=${(event: SubmitEvent) => { event.preventDefault(); void this.submitTakeover("diagnostic-run"); }}>
-							<input name="purpose" placeholder="诊断目的" required />
-							<button type="submit" ?disabled=${this.busy || !this.connected}>诊断运行</button>
-						</form>
-						<form data-testid="replace-plan-form" @submit=${(event: SubmitEvent) => { event.preventDefault(); void this.submitTakeover("replace-plan"); }}>
-							<textarea name="proposal" placeholder="完整计划提案 JSON(plan-proposal/v1)" required rows="3"></textarea>
-							<input name="reason" placeholder="替换原因" required />
-							<button type="submit" ?disabled=${this.busy || !this.connected}>替换计划</button>
-						</form>`
-					: nothing}
-			</details>
-		`;
-	}
-
-	private async submitTakeover(kind: "steer" | "diagnostic-run" | "replace-plan"): Promise<void> {
-		const form = this.shadowRoot?.querySelector<HTMLFormElement>(`form[data-testid='${kind}-form']`);
-		if (!form) return;
-		const data = new FormData(form);
-		if (kind === "steer") {
-			const text = String(data.get("text") ?? "");
-			if (text.length === 0) return;
-			await this.runCommand("steer", { text });
-			return;
-		}
-		if (kind === "diagnostic-run") {
-			const purpose = String(data.get("purpose") ?? "");
-			if (purpose.length === 0) return;
-			await this.runCommand("diagnostic-run", { purpose });
-			return;
-		}
-		const raw = String(data.get("proposal") ?? "");
-		const reason = String(data.get("reason") ?? "");
-		try {
-			const proposal = JSON.parse(raw) as Record<string, unknown>;
-			await this.runCommand("replace-plan", { proposal }, reason || undefined);
-		} catch {
-			this.loadError = "PlanProposal JSON 无法解析";
-		}
 	}
 
 	// ------------------------------------------------------------------
@@ -1065,10 +975,6 @@ class BaizeWorkflow extends LitElement {
 				<h3>恢复选项(${projection.currentIncident ? projection.currentIncident.incidentType : projection.workflow.currentFailureCode})</h3>
 				<div class="command-row">
 					${actions.map((action) => {
-						if (action.commandType === "replace-plan") {
-							return html`<button data-testid="recovery-replace-plan" ?disabled=${this.busy || !this.connected}
-								@click=${() => { this.takeoverOpen = true; }}>替换计划(在高级接管中提交)</button>`;
-						}
 						if (action.commandType === "diagnostic-run") {
 							return html`<button data-testid="recovery-diagnostic" ?disabled=${this.busy || !this.connected}
 								@click=${() => void this.runCommand("diagnostic-run", { purpose: `恢复诊断:${projection.workflow.currentFailureCode ?? projection.currentIncident?.incidentType ?? ""}` })}>诊断运行</button>`;
@@ -1260,20 +1166,21 @@ class BaizeWorkflow extends LitElement {
 		}
 	}
 
-	/** 内容面板：无 diagrams 显示 JSON 摘要；有则先把 mermaid 源渲染进 DOM 再由 updated 钩子异步画图。 */
+	/** 内容面板：summary 引言 + 图(diagrams) + 结构化卡片。 */
 	private renderArtifactContent() {
 		if (!this.artifactView) return nothing;
 		const view = this.artifactView;
 		if (view.loading) return html`<div class="fact-block" data-testid="artifact-loading">加载中…</div>`;
 		if (view.error) return html`<div class="error" data-testid="artifact-error">${view.error}</div>`;
-		if (!view.detail) return nothing;
+		if (!view.detail) return html`<div class="fact-block" data-testid="artifact-empty">该产物尚无当前版本:对应设计任务产出并完成后,此处可查看内容。</div>`;
 		const diagrams = extractDiagrams(view.detail.content);
 		return html`
-			<div class="fact-block" data-testid="artifact-content">
-				<div class="fact-block-line">r${view.detail.revisionNo} · ${statusLabel(view.detail.status)} · ${view.detail.schemaRef}</div>
+			<div class="artifact-view" data-testid="artifact-content">
+				<div class="fact-block-line">r${view.detail.revisionNo} · ${statusLabel(view.detail.status)} · ${schemaRefLabel(view.detail.schemaRef)}</div>
 				${diagrams.length > 0
 					? html`<div class="diagram-host" data-testid="artifact-diagrams">${diagrams.map((_, index) => html`<div data-diagram-id=${index} class="diagram-holder"></div>`)}</div>`
-					: html`<pre class="artifact-json" data-testid="artifact-json">${JSON.stringify(view.detail.content, null, 2)}</pre>`}
+					: nothing}
+				${renderArtifactFields(view.detail.content, view.kind)}
 			</div>
 		`;
 	}
@@ -1312,20 +1219,163 @@ class BaizeWorkflow extends LitElement {
 		}
 	}
 
+	private switchTab(tab: string): void {
+		this.activeTab = tab;
+		this.dispatchEvent(new CustomEvent("baize-tab-change", { detail: { tab }, bubbles: true, composed: true }));
+	}
+
+	private renderTabBar(): ReturnType<typeof html> {
+		const tabs = [
+			{ id: "tasks", label: "任务" },
+			{ id: "artifacts", label: "产物" },
+			{ id: "governance", label: "治理" },
+		];
+		return html`<div class="tab-bar" data-testid="tab-bar">
+			${tabs.map((t) => html`<button class="tab ${this.activeTab === t.id ? "active" : ""}" data-testid="tab-${t.id}" @click=${() => this.switchTab(t.id)}>${t.label}</button>`)}
+		</div>`;
+	}
+
 	private renderWorkflowView() {
 		if (!this.projection) return html`<div data-testid="loading">加载中…</div>`;
 		return html`
 			${this.renderConnectionBanner()}
 			${this.renderHero()}
+			${this.renderModelProfile()}
 			${this.renderReceipt()}
 			${this.renderGateQueue()}
 			${this.renderRecovery()}
-			${this.renderStatusSummary()}
-			${this.renderDetails()}
+			${this.renderTabBar()}
+			<div class="tab-content">
+				${this.activeTab === "tasks" ? this.renderTasksTab() : nothing}
+				${this.activeTab === "artifacts" ? this.renderArtifactsTab() : nothing}
+				${this.activeTab === "governance" ? this.renderGovernanceTab() : nothing}
+			</div>
 			${this.renderApprovalReview()}
 			${this.renderPackage()}
 			<div class="sr-only" aria-live="polite" data-testid="live-region">${this.liveMessage}</div>
 		`;
+	}
+
+	// — Tab: 任务 —
+	private renderTasksTab(): ReturnType<typeof html> {
+		const projection = this.projection!;
+		const counts = pendingCounts(projection);
+		return html`<section class="details" data-testid="details">
+			<h3>待处理与版本</h3>
+			<div class="fact-block" data-testid="status-summary">
+				待处理:<span data-testid="pending-counts">门禁 ${counts.gates} · 决策 ${counts.decisions} · 发现 ${counts.findings}</span><br />
+				版本 ${projection.workflow.version} · 事件 ${projection.workflow.lastEventSeq} ·
+				计划 ${projection.currentPlan ? `r${projection.currentPlan.revisionNo}` : "—"}
+			</div>
+
+			<h3>任务顺序</h3>
+			<table data-testid="task-table">
+				<thead><tr><th>#</th><th>键</th><th>类型</th><th>角色</th><th>状态</th><th>最近尝试</th></tr></thead>
+				<tbody>
+					${projection.tasks.map(
+						(task, index) => html`<tr data-task-key=${task.key}>
+							<td>${index + 1}</td>
+							<td>${task.key}</td>
+							<td>${task.kind}</td>
+							<td>${task.role}</td>
+							<td><span class="badge" data-tone=${task.status === "completed" ? "ok" : task.status === "failed" ? "bad" : task.status === "in_progress" ? "warn" : ""}>${statusLabel(task.status)}</span></td>
+							<td>${task.latestAttempt ? `#${task.latestAttempt.id} ${statusLabel(task.latestAttempt.status)}` : "—"}</td>
+						</tr>`,
+					)}
+				</tbody>
+			</table>
+
+			<h3>当前运行</h3>
+			<div data-testid="active-work">
+				${projection.activeRun
+					? html`运行 #${projection.activeRun.id}(${projection.activeRun.role ?? "—"}, ${statusLabel(projection.activeRun.status)})
+						${projection.activeClaim ? html` · 尝试 #${projection.activeClaim.attemptId}` : nothing}`
+					: html`当前没有活动的运行`}
+			</div>
+
+			${["running", "waiting_for_human", "ready_to_archive"].includes(projection.workflow.state)
+				? html`<div class="command-row"><button data-testid="pause-command" ?disabled=${this.busy || !this.connected} @click=${() => void this.runCommand("pause")}>暂停</button></div>`
+				: nothing}
+			${projection.activeRun && projection.workflow.state === "running"
+				? html`<div class="command-row"><button class="danger" data-testid="cancel-command" ?disabled=${this.busy || !this.connected} @click=${() => void this.runCommand("cancel-run", { runId: projection.activeRun!.id })}>取消当前运行</button></div>`
+				: nothing}
+		</section>`;
+	}
+
+	// — Tab: 产物 —
+	private renderArtifactsTab(): ReturnType<typeof html> {
+		const projection = this.projection!;
+		const check = projection.readiness.checks.find((c) => c.name === "complete_required_artifacts");
+		const missingKinds = check?.detail?.replace("missing=", "").split(",").filter(Boolean) ?? [];
+		return html`<section class="details" data-testid="details">
+			<h3>产物进度</h3>
+			<div class="artifact-progress" data-testid="artifact-progress">
+				${ARTIFACT_VIEW_KINDS.map((kind) => {
+					const done = !missingKinds.includes(kind);
+					return html`<span class="chip ${done ? "done" : "missing"}" data-testid="progress-${kind}" @click=${() => { this.switchTab("artifacts"); this.openArtifactView(kind); }}>${ARTIFACT_KIND_LABELS[kind] ?? kind} ${done ? "✓" : "✗"}</span>`;
+				})}
+			</div>
+
+			<h3>就绪检查</h3>
+			<div class="readiness-list" data-testid="readiness-list">
+				${projection.readiness.checks.map(
+					(check) => html`<div class="readiness-row ${check.passed ? "passed" : "failed"}" data-testid="readiness-${check.name}">
+						<span class="badge" data-tone=${check.passed ? "ok" : "bad"}>${check.passed ? "✓" : "✗"}</span>
+						<span class="readiness-label">${readinessCheckLabel(check.name)}</span>
+						<span class="readiness-detail">${readinessCheckDetail(check.name, check.detail)}</span>
+					</div>`,
+				)}
+			</div>
+
+			<h3>产物内容</h3>
+			<div data-testid="artifact-viewer">
+				<div class="artifact-kind-row">
+					${ARTIFACT_VIEW_KINDS.map(
+					(kind) => html`<button class="${kind === this.artifactView?.kind ? "chip active" : "chip"}" @click=${() => this.openArtifactView(kind)}>${ARTIFACT_KIND_LABELS[kind] ?? kind}</button>`,
+					)}
+				</div>
+				${this.renderArtifactContent()}
+			</div>
+		</section>`;
+	}
+
+	// — Tab: 治理 —
+	private renderGovernanceTab(): ReturnType<typeof html> {
+		const projection = this.projection!;
+		return html`<section class="details" data-testid="details">
+			<h3>决策与发现</h3>
+			<div data-testid="governance-facts">
+				${projection.decisions.length === 0 && projection.findings.length === 0 ? html`暂无决策与发现` : nothing}
+				${projection.decisions.map(
+					(decision) => html`<div><span class="badge">${severityLabel(decision.severity)}</span> ${decision.summary} — ${statusLabel(decision.status)}</div>`,
+				)}
+				${projection.findings.map(
+					(finding) => html`<div><span class="badge" data-tone=${finding.severity === "critical" ? "bad" : finding.severity === "major" ? "warn" : ""}>${severityLabel(finding.severity)}</span> ${finding.summary} — ${statusLabel(finding.status)}</div>`,
+				)}
+			</div>
+
+			${projection.openGates.length > 0
+				? html`<h3>打开的门禁</h3>
+					<div data-testid="open-gates">
+						${projection.openGates.map((gate) => html`<div><span class="badge" data-tone="warn">${gate.gateType}</span> ${gate.subjectType} #${gate.subjectId}</div>`)}
+					</div>`
+				: nothing}
+
+			${projection.currentIncident
+				? html`<h3>事故</h3>
+					<div data-testid="incident">${projection.currentIncident.incidentType} / ${projection.currentIncident.failureCode} — ${statusLabel(projection.currentIncident.status)}</div>`
+				: nothing}
+
+			${projection.currentPacket
+				? html`<h3>批准包</h3>
+					<div data-testid="packet">摘要 ${projection.currentPacket.digest.slice(0, 27)}… — ${statusLabel(projection.currentPacket.status)}</div>
+					${projection.workflow.state === "ready_to_archive"
+						? html`<div class="command-row">
+							<button data-testid="open-approval" ?disabled=${this.busy || !this.connected} @click=${() => void this.openApprovalReview()}>打开批准审阅</button>
+						</div>`
+						: nothing}`
+				: nothing}
+		</section>`;
 	}
 }
 

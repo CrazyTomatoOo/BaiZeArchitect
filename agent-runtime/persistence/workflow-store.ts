@@ -1554,6 +1554,7 @@ deleteWorkspace(workspaceId: number): boolean {
 		const attempt = this.database
 			.prepare("select task_id, planning_context_digest from task_attempts where id = ?")
 			.get(attemptId) as { task_id: number; planning_context_digest: string };
+		const planTask = this.database.prepare("select id, key from tasks where id = ?").get(attempt.task_id) as { id: number; key: string };
 		const currentContext = this.computePlanningContextDigest(workflowId);
 		if (attempt.planning_context_digest !== currentContext) {
 			return this.supersedePlanningRows(workflowId, attemptId, "planning_context_changed");
@@ -1581,6 +1582,7 @@ deleteWorkspace(workspaceId: number): boolean {
 		this.database.prepare("update task_attempts set status = 'succeeded', completed_at = ? where id = ?").run(timestamp, attemptId);
 		const runId = (this.database.prepare("select id from runs where attempt_id = ? order by id desc limit 1").get(attemptId) as { id: number }).id;
 		this.database.prepare("update runs set status = 'completed', completed_at = ? where id = ?").run(timestamp, runId);
+		this.database.prepare("update tasks set status = 'completed' where id = ?").run(planTask.id);
 		this.database.prepare("update governance_claims set status = 'released', released_at = ? where attempt_id = ? and status = 'active'").run(timestamp, attemptId);
 		this.database.prepare("update workflows set version = ?, current_plan_revision_id = ?, consecutive_plan_revisions = ?, updated_at = ? where id = ?")
 			.run(newVersion, planRevisionId, workflow.consecutive_plan_revisions + 1, timestamp, workflowId);
@@ -1588,6 +1590,7 @@ deleteWorkspace(workspaceId: number): boolean {
 		this.appendEvent(workflowId, "plan_adopted", newVersion, "plan_revision", planRevisionId, revisionNo, { proposalDigest: proposalSnapshot.digest, revisionNo, basePlanRevisionId: workflow.current_plan_revision_id }, timestamp);
 		this.appendEvent(workflowId, "attempt_succeeded", newVersion, "task_attempt", attemptId, 0, { taskId: attempt.task_id }, timestamp);
 		this.appendEvent(workflowId, "run_completed", newVersion, "run", runId, 0, { attemptId }, timestamp);
+		this.appendEvent(workflowId, "task_completed", newVersion, "task", planTask.id, 0, { taskKey: planTask.key }, timestamp);
 		this.appendEvent(workflowId, "workflow_attempt_claim_released", newVersion, "task_attempt", attemptId, 0, { attemptId }, timestamp);
 
 		this.options.crashInjector.reach("adopt_plan.before_commit");
@@ -1755,19 +1758,18 @@ deleteWorkspace(workspaceId: number): boolean {
 					.prepare("select id from tasks where workflow_id = ? and key = ? and plan_revision_id = ?")
 					.get(workflowId, taskOutput.taskKey, task.plan_revision_id) as { id: number } | undefined;
 				if (!ancestorTask) return null;
-				const isCritic = role === "critic";
-				// 该 kind 全 workflow 最新已发布 revision：生产用 approved（rework 后新 revision 胜出），critic 用 pending
-				// order by id desc limit 1 保证唯一——返工后的新 revision（r2）自然取代旧 approved（r1）
-				const latest = this.database
-					.prepare(`select ar.id from artifact_revisions ar
-						join attempt_effects ae on ae.published_artifact_revision_id = ar.id
-						where ae.workflow_id = ? and ae.artifact_kind = ?
-						and ${isCritic
-							? "ar.status = 'pending'"
-							: `ar.status = 'approved' and exists (select 1 from approval_records approval where approval.subject_type = 'artifact_revision' and approval.subject_id = ar.id and approval.record_type = 'artifact_approval')
-								and not exists (select 1 from findings open_finding where open_finding.workflow_id = ae.workflow_id and open_finding.target_revision_id = ar.id and open_finding.status = 'open' and open_finding.severity in ('critical','major'))`}
-						order by ar.id desc limit 1`)
-					.get(workflowId, taskOutput.artifactKind) as { id: number } | undefined;
+			const isCritic = role === "critic";
+			// critic 用 pending;生产用 approved(双闸:#20 绑定反转——未批准产物不可被下游引用)
+			const latest = this.database
+				.prepare(`select ar.id from artifact_revisions ar
+					join attempt_effects ae on ae.published_artifact_revision_id = ar.id
+					where ae.workflow_id = ? and ae.artifact_kind = ?
+					and ${isCritic
+						? "ar.status = 'pending'"
+						: `ar.status = 'approved' and exists (select 1 from approval_records approval where approval.subject_type = 'artifact_revision' and approval.subject_id = ar.id and approval.record_type = 'artifact_approval')
+							and not exists (select 1 from findings open_finding where open_finding.workflow_id = ae.workflow_id and open_finding.target_revision_id = ar.id and open_finding.status = 'open' and open_finding.severity in ('critical','major'))`}
+					order by ar.id desc limit 1`)
+				.get(workflowId, taskOutput.artifactKind) as { id: number } | undefined;
 				const revisionList: Array<{ id: number }> = latest ? [latest] : [];
 				if (revisionList.length !== 1) return null;
 				resolved.push({ ...taskOutput, resolvedRevisionId: revisionList[0]!.id });
@@ -2945,7 +2947,55 @@ deleteWorkspace(workspaceId: number): boolean {
 			completedAt: row.completed_at,
 		};
 	}
+	/** 读 attempt 的 contextManifest + requirement baseline 内容,供 executor 拼接 prompt。 */
+	getAttemptContext(attemptId: number): { role: string; objective: string; requirementBaseline: RequirementBaseline; inputs: readonly unknown[]; expectedArtifactKind: string; expectedArtifactKinds: readonly string[] } | undefined {
+		const attempt = this.database
+			.prepare("select context_manifest_document_id from task_attempts where id = ?")
+			.get(attemptId) as { context_manifest_document_id: number | null } | undefined;
+		if (!attempt?.context_manifest_document_id) return undefined;
+		const manifestRow = this.database
+			.prepare("select content from snapshot_documents where id = ?")
+			.get(attempt.context_manifest_document_id) as { content: string } | undefined;
+		if (!manifestRow) return undefined;
+	const manifest = parseJson<ContextManifest>(manifestRow.content);
+	const baselineRow = this.database
+		.prepare("select d.content from artifact_revisions ar join snapshot_documents d on d.id = ar.content_document_id where ar.id = ?")
+		.get(manifest.requirement.revisionId) as { content: string } | undefined;
+	if (!baselineRow) return undefined;
+	const baseline = parseJson<RequirementBaseline>(baselineRow.content);
+	// 读取 task 的 expectedArtifactEffects 取首个 kind(模型需知产物 kind)
+	const taskRow = this.database
+		.prepare("select expected_artifact_effects_json from tasks where id = ?")
+		.get(manifest.task.id) as { expected_artifact_effects_json: string } | undefined;
+	const expectedEffects = taskRow ? parseJson<Array<{ kind?: string }>>(taskRow.expected_artifact_effects_json) : [];
+	const expectedArtifactKind = expectedEffects[0]?.kind ?? "";
+	const expectedArtifactKinds = expectedEffects.map((e) => e.kind ?? "").filter(Boolean);
+	return { role: manifest.task.role, objective: manifest.task.objective, requirementBaseline: baseline, inputs: manifest.inputs, expectedArtifactKind, expectedArtifactKinds };
+	}
 
+
+	/** 查找 pending 产物中有 critic coverage 且无 open major/critical 的:可自动批准。 */
+	listPendingReviewedArtifacts(workflowId: number): readonly { artifactId: number; revisionId: number; kind: string }[] {
+		return this.database
+			.prepare(`select a.id as artifactId, ar.id as revisionId, a.kind
+				from artifact_revisions ar
+				join artifacts a on a.id = ar.artifact_id
+				join workflows w on w.requirement_id = a.requirement_id
+				where w.id = ? and ar.status = 'pending'
+				and exists (
+					select 1 from critic_coverage_targets cct
+					join task_attempts ta on ta.id = cct.task_attempt_id
+					join tasks t on t.id = ta.task_id
+					where cct.workflow_id = ? and cct.revision_id = ar.id
+					and t.kind = 'review' and t.role = 'critic' and t.status = 'completed' and ta.status = 'succeeded'
+				)
+				and not exists (
+					select 1 from findings f
+					where f.workflow_id = ? and f.target_revision_id = ar.id
+					and f.status = 'open' and f.severity in ('critical', 'major')
+				)`)
+			.all(workflowId, workflowId, workflowId) as Array<{ artifactId: number; revisionId: number; kind: string }>;
+	}
 	getRunDetail(runId: number): RunDetailRecord | undefined {
 		const row = this.database
 			.prepare("select id, attempt_id, workflow_id, session_file, session_id, status, model_ref, result_document_id, mode, role, created_at, completed_at from runs where id = ?")

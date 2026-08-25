@@ -81,7 +81,7 @@ export interface CompleteAttemptResult {
 }
 
 export interface ExecuteTaskResult {
-	outcome: "published" | "task_exhausted" | "no_ready_task";
+	outcome: "published" | "failed" | "task_exhausted" | "no_ready_task";
 	workflowVersion: number;
 	lastEventSeq: number;
 }

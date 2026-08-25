@@ -153,7 +153,8 @@ async function createPiExecutor(): Promise<PiModelExecutor> {
 				break;
 			}
 			if (Array.isArray(message.content)) {
-				text = (message.content as Array<{ type?: string; text?: string }>)
+			text = (message.content as Array<{ type?: string; text?: string }>)
+					.filter((part) => part.type === "text")
 					.map((part) => part.text ?? "")
 					.join("");
 				break;
@@ -210,7 +211,6 @@ async function main(): Promise<void> {
 
 	const executor = await createPiExecutor();
 	const modelDriver = new PiModelDriver(executor);
-	void modelDriver; // modelDriver is used by executeTask/planWorkflow at runtime
 
 	const server = await startOperatorServer({
 		runtime,
@@ -218,6 +218,7 @@ async function main(): Promise<void> {
 		host: HOST,
 		port: PORT,
 		staticRoot: WEB_DIST,
+		modelDriver,
 	});
 
 	console.log(`[baize] http://${HOST}:${server.port} (Workflow API + Web SPA)`);

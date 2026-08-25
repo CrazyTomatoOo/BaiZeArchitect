@@ -402,12 +402,10 @@ function executeTemplateChain(runtime: HeadlessWorkflowRuntime, databasePath: st
 	publishCriticReview(runtime, databasePath, workflowId, ["function"]);
 	approveStageArtifact(runtime, workflowId, "function");
 	const links = [traceLink(runtime, workflowId)];
-	publishTaskEffects(runtime, workflowId, "design", "design-architect", [
-		artifactEffect(runtime, workflowId, "design", designContent(), links),
-		artifactEffect(runtime, workflowId, "architecture", architectureContent(), links),
-		artifactEffect(runtime, workflowId, "data", dataContent(), links),
-		artifactEffect(runtime, workflowId, "api", apiContent(), links),
-	]);
+	publishTaskEffects(runtime, workflowId, "design", "design-architect", [artifactEffect(runtime, workflowId, "design", designContent(), links)]);
+	publishTaskEffects(runtime, workflowId, "architecture", "architecture-architect", [artifactEffect(runtime, workflowId, "architecture", architectureContent(), links)]);
+	publishTaskEffects(runtime, workflowId, "data", "data-architect", [artifactEffect(runtime, workflowId, "data", dataContent(), links)]);
+	publishTaskEffects(runtime, workflowId, "api", "api-architect", [artifactEffect(runtime, workflowId, "api", apiContent(), links)]);
 	publishCriticReview(runtime, databasePath, workflowId, ["design", "architecture", "data", "api"]);
 	for (const kind of ["design", "architecture", "data", "api"]) {
 		approveStageArtifact(runtime, workflowId, kind);

@@ -200,10 +200,10 @@ test("maxAttempts out of range is rejected", () => {
 	expectViolation(proposal, "schema");
 });
 
-test("more than 12 tasks is rejected", () => {
+test("more than 20 tasks is rejected", () => {
 	const proposal = validProposal();
 	const tasks: TaskProposal[] = [];
-	for (let i = 0; i < 13; i += 1) {
+	for (let i = 0; i < 21; i += 1) {
 		tasks.push({
 			key: `t${i}`,
 			kind: "analyze",

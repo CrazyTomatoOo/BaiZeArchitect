@@ -204,7 +204,6 @@ test.describe("gate queue 与恢复体验", () => {
 
 		await expect(page.getByTestId("recovery-panel")).toBeVisible();
 		await expect(page.getByTestId("recovery-retry-task")).toBeVisible();
-		await expect(page.getByTestId("recovery-replace-plan")).toBeVisible();
 		await expect(page.getByTestId("recovery-diagnostic")).toBeVisible();
 		await expect(page.getByTestId("recovery-retry-planning")).toHaveCount(0);
 		await expect(page.getByTestId("recovery-retry-recovery")).toHaveCount(0);

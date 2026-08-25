@@ -1,4 +1,5 @@
 import { expect, test, type Page, type Request, type Route } from "@playwright/test";
+import { modelConfigFixture, widthAlignmentProjection } from "./model-config-fixture";
 
 /**
  * 票7 需求创建模型档选择 e2e — 验证默认 omit、自定义完整 materialize、invalid_model_roles 错误展示。
@@ -14,40 +15,6 @@ function parseBody(raw: string | null): Record<string, unknown> {
 	} catch {
 		return {};
 	}
-}
-
-function modelConfigFixture() {
-	return {
-		defaultRoles: {
-			"analysis-analyst": { provider: "qwen-token-plan-cn", modelId: "qwen-plus" },
-			"scenario-analyst": { provider: "qwen-token-plan-cn", modelId: "qwen-plus" },
-			"usecase-analyst": { provider: "qwen-token-plan-cn", modelId: "qwen-plus" },
-			"function-analyst": { provider: "qwen-token-plan-cn", modelId: "qwen-plus" },
-			"design-architect": { provider: "glm", modelId: "glm-5.2" },
-			"architecture-architect": { provider: "glm", modelId: "glm-5.2" },
-			"data-architect": { provider: "glm", modelId: "glm-5.2" },
-			"api-architect": { provider: "glm", modelId: "glm-5.2" },
-			critic: { provider: "glm", modelId: "glm-4.2" },
-		},
-		providers: [
-			{
-				id: "qwen-token-plan-cn",
-				name: "通义千问",
-				models: [
-					{ id: "qwen-max", name: "Qwen Max", contextWindow: 1_048_576, maxTokens: 16_384, reasoning: true },
-					{ id: "qwen-plus", name: "Qwen Plus", contextWindow: 1_048_576, maxTokens: 8_192, reasoning: false },
-				],
-			},
-			{
-				id: "glm",
-				name: "智谱 GLM",
-				models: [
-					{ id: "glm-5.2", name: "GLM-5.2", contextWindow: 128_000, maxTokens: 8_192, reasoning: false },
-					{ id: "glm-4.2", name: "GLM-4.2", contextWindow: 128_000, maxTokens: 4_096, reasoning: false },
-				],
-			},
-		],
-	};
 }
 
 async function openFixture(page: Page): Promise<void> {
@@ -66,7 +33,7 @@ test.describe("requirement creation model profile", () => {
 		});
 		await openFixture(page);
 
-		await expect(page.getByTestId("model-custom-count")).toHaveText("有效模型档 · 0/9 自定义");
+		await expect(page.getByTestId("model-custom-count")).toHaveText("0/9 需求级自定义");
 
 		await page.getByPlaceholder("标题").fill("新建需求");
 		await page.getByPlaceholder("一句话摘要").fill("一句话摘要");
@@ -102,7 +69,7 @@ test.describe("requirement creation model profile", () => {
 		await analystRow.getByTestId("model-provider-analysis-analyst").selectOption("glm");
 		await analystRow.getByTestId("model-select-analysis-analyst").selectOption("glm-5.2");
 
-		await expect(page.getByTestId("model-custom-count")).toHaveText("有效模型档 · 1/9 自定义");
+		await expect(page.getByTestId("model-custom-count")).toHaveText("1/9 需求级自定义");
 		await expect(page.getByTestId("model-row-analysis-analyst")).toHaveAttribute("data-custom", "true");
 
 		await page.getByRole("button", { name: "创建需求并开始设计" }).click();
@@ -133,10 +100,10 @@ test.describe("requirement creation model profile", () => {
 		const analystRow = page.getByTestId("model-row-analysis-analyst");
 		await analystRow.getByTestId("model-provider-analysis-analyst").selectOption("glm");
 		await analystRow.getByTestId("model-select-analysis-analyst").selectOption("glm-5.2");
-		await expect(page.getByTestId("model-custom-count")).toHaveText("有效模型档 · 1/9 自定义");
+		await expect(page.getByTestId("model-custom-count")).toHaveText("1/9 需求级自定义");
 
-		await page.getByRole("button", { name: "恢复默认档" }).click();
-		await expect(page.getByTestId("model-custom-count")).toHaveText("有效模型档 · 0/9 自定义");
+		await page.getByRole("button", { name: "恢复部署默认" }).click();
+		await expect(page.getByTestId("model-custom-count")).toHaveText("0/9 需求级自定义");
 		await expect(page.getByTestId("model-row-analysis-analyst")).toHaveAttribute("data-custom", "false");
 	});
 
@@ -165,5 +132,51 @@ test.describe("requirement creation model profile", () => {
 
 		await expect(page.getByTestId("create-error")).toContainText("模型角色配置无效");
 		await expect(page.getByTestId("create-error")).toContainText("model_not_in_catalog");
+	});
+	test("分组表头 + option 纯名 + 行内规格行随选择实时更新", async ({ page }) => {
+		await page.route("**/api/model-config", (route) => fulfillJson(route, modelConfigFixture()));
+		await page.route("**/api/requirements?workspaceId=1", (route) => fulfillJson(route, { requirements: [] }));
+		await openFixture(page);
+
+		// 三段分组标题
+		await expect(page.getByTestId("picker-group-分析")).toHaveText("分析");
+		await expect(page.getByTestId("picker-group-架构")).toHaveText("架构");
+		await expect(page.getByTestId("picker-group-评审")).toHaveText("评审");
+		await expect(page.getByTestId("picker-group-分析").locator("td")).toHaveAttribute("colspan", "4");
+
+		// option 只含模型名,不带 ctx/tok/thinking 元数据
+		const optionTexts = await page.getByTestId("model-select-analysis-analyst").locator("option").allTextContents();
+		expect(optionTexts).toEqual(["Qwen Max", "Qwen Plus"]);
+
+		// 行内规格行显示当前选中模型(部署默认 analysis-analyst = Qwen Plus)
+		await expect(page.getByTestId("model-meta-analysis-analyst")).toHaveText("Qwen Plus · 1,048,576 ctx · 8,192 tok");
+
+		// 切换模型后规格行实时更新(含 thinking 标记)
+		await page.getByTestId("model-select-analysis-analyst").selectOption("qwen-max");
+		await expect(page.getByTestId("model-meta-analysis-analyst")).toHaveText("Qwen Max · 1,048,576 ctx · 16,384 tok · thinking");
+	});
+
+	test("模型档与需求列表同宽,需求级自定义出徽标", async ({ page }) => {
+		await page.route("**/api/model-config", (route) => fulfillJson(route, modelConfigFixture()));
+		await page.route("**/api/requirements?workspaceId=1", (route) =>
+			fulfillJson(route, {
+				requirements: [
+					{ requirementId: 1, title: "宽度对齐示例", requirementVersion: 1, workflow: { id: 7, state: "running", version: 1, lastEventSeq: 1 } },
+				],
+			}),
+		);
+		await page.route("**/api/workflows/7", (route) => fulfillJson(route, widthAlignmentProjection()));
+		await openFixture(page);
+
+		// 需求级自定义 1/9 → 卡片徽标
+		await expect(page.getByTestId("model-badge-1")).toHaveText("模型档 1/9");
+
+		// 选择器与列表卡同宽(表单不再被 720px 收窄)
+		await expect(page.getByTestId("model-picker")).toBeVisible();
+		const pickerBox = await page.getByTestId("model-picker").boundingBox();
+		const itemBox = await page.locator(".card.item").first().boundingBox();
+		expect(pickerBox).not.toBeNull();
+		expect(itemBox).not.toBeNull();
+		expect(Math.abs(pickerBox!.width - itemBox!.width)).toBeLessThan(1);
 	});
 });

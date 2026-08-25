@@ -205,13 +205,16 @@ function apiContent(): unknown {
 	};
 }
 
-/** 模板生产环节（#12 决议：analysis→scenario→usecase→function→design，design 一次产 4 kinds）。 */
+/** 模板生产环节（design 拆为 design→architecture→data→api 各一 Task，每环节尾 Critic 复审）。 */
 const TEMPLATE_STAGES: ReadonlyArray<{ key: string; role: string; kinds: readonly ArtifactEffectProposal["artifactKind"][] }> = [
 	{ key: "analyze", role: "analysis-analyst", kinds: ["analysis"] },
 	{ key: "scenario", role: "scenario-analyst", kinds: ["scenario"] },
 	{ key: "usecase", role: "usecase-analyst", kinds: ["usecase"] },
 	{ key: "function", role: "function-analyst", kinds: ["function"] },
-	{ key: "design", role: "design-architect", kinds: ["design", "architecture", "data", "api"] },
+	{ key: "design", role: "design-architect", kinds: ["design"] },
+	{ key: "architecture", role: "architecture-architect", kinds: ["architecture"] },
+	{ key: "data", role: "data-architect", kinds: ["data"] },
+	{ key: "api", role: "api-architect", kinds: ["api"] },
 ];
 
 const STAGE_CONTENT: Readonly<Record<string, () => unknown>> = {
@@ -241,7 +244,7 @@ async function createStartedWorkflow(runtime: Runtime): Promise<number> {
 	return created.workflowId;
 }
 
-/** #12 决议：引擎直接实例化 plan-template/v1（10 Task），无需 Orchestrator ModelDriver。 */
+/** #12 决议：引擎直接实例化 plan-template/v1（13 Task），无需 Orchestrator ModelDriver。 */
 async function adoptTemplatePlan(runtime: Runtime, workflowId: number): Promise<void> {
 	const result = await runtime.planWorkflow(workflowId, null);
 	assert.equal(result.outcome, "adopted");
@@ -433,7 +436,7 @@ function executeCriticTask(
 	assert.equal(complete.outcome, "published");
 }
 
-/** 模板全链执行：5 生产环节 + 每环节尾 Critic 复审（coverKinds 覆盖该环节产物）。 */
+/** 模板全链执行：8 生产环节 + 每环节尾 Critic 复审（coverKinds 覆盖该环节产物）。 */
 async function createFullyReviewedWorkflow(
 	fixture: ReadinessFixture,
 	options?: { findings?: readonly FindingScript[]; coverKinds?: readonly string[]; decisions?: Array<{ severity: "critical" | "major" | "minor"; summary: string }> },
@@ -454,17 +457,21 @@ async function createFullyReviewedWorkflow(
 	executeCriticTask(runtime, databasePath, workflowId, "review-function", { coverKinds: ["function"] });
 	approveStageArtifacts(runtime, workflowId, databasePath, ["function"]);
 	executeTemplateStage(runtime, workflowId, TEMPLATE_STAGES[4]!);
+	executeTemplateStage(runtime, workflowId, TEMPLATE_STAGES[5]!);
+	executeTemplateStage(runtime, workflowId, TEMPLATE_STAGES[6]!);
+	executeTemplateStage(runtime, workflowId, TEMPLATE_STAGES[7]!);
 	const designCoverKinds = options?.coverKinds ?? ["design", "architecture", "data", "api"];
 	executeCriticTask(runtime, databasePath, workflowId, "review-design", {
 		coverKinds: designCoverKinds,
 		findings: options?.findings,
 	});
-	approveStageArtifacts(
-		runtime,
-		workflowId,
-		databasePath,
-		TEMPLATE_STAGES[4]!.kinds.filter((kind) => designCoverKinds.includes(kind)),
-	);
+	const pendingDesignKinds = designCoverKinds.filter((kind) => {
+		const detail = runtime.getArtifactRevisionDetail(runtime.getWorkflowProjection(workflowId)!.requirement.id, kind);
+		return detail?.status === "pending";
+	});
+	if (pendingDesignKinds.length > 0) {
+		approveStageArtifacts(runtime, workflowId, databasePath, pendingDesignKinds);
+	}
 	return workflowId;
 }
 

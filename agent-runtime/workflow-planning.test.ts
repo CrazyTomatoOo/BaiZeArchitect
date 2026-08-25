@@ -133,6 +133,14 @@ function queryTaskCount(databasePath: string, workflowId: number): number {
 		database.close();
 	}
 }
+function queryPlanTaskStatus(databasePath: string, workflowId: number): string {
+	const database = new Database(databasePath, { readonly: true });
+	try {
+		return (database.prepare("select status from tasks where workflow_id = ? and kind = 'plan' order by id desc limit 1").get(workflowId) as { status: string }).status;
+	} finally {
+		database.close();
+	}
+}
 
 function queryWorkflowState(databasePath: string, workflowId: number): { state: string; version: number; consecutive_plan_revisions: number; current_failure_code: string | null } {
 	const database = new Database(databasePath, { readonly: true });
@@ -153,16 +161,19 @@ test("planWorkflow instantiates the plan-template deterministically (no orchestr
 		assert.ok(projection);
 		assert.equal(projection.workflow.currentPlanRevisionId, result.planRevisionId);
 		assert.equal(queryPlanRevisionCount(databasePath, workflowId), 1);
-		// 模板 = 5 生产 Task + 5 复审 Task (#12 决议)
-		assert.equal(queryTaskCount(databasePath, workflowId), 10);
+		// 模板 = 8 生产 Task + 5 复审 Task (design 拆为 design/architecture/data/api 各一 Task)
+		assert.equal(queryTaskCount(databasePath, workflowId), 13);
 		const plan = runtime.getPlanRevisionDetail(result.planRevisionId!);
 		assert.ok(plan);
-		assert.equal(plan.proposal.tasks.length, 10);
+		assert.equal(plan.proposal.tasks.length, 13);
 		assert.equal(plan.proposal.tasks.filter((t) => t.role === "critic").length, 5);
-		// design Task 一次产出四份产物
-		const design = plan.proposal.tasks.find((t) => t.key === "design");
-		assert.ok(design);
-		assert.deepEqual(design.expectedArtifactEffects.map((e) => e.kind).sort(), ["api", "architecture", "data", "design"]);
+		// design 拆为 4 个独立 Task 各产 1 kind
+		const designTask = plan.proposal.tasks.find((t) => t.key === "design");
+		assert.ok(designTask);
+		assert.deepEqual(designTask.expectedArtifactEffects.map((e) => e.kind), ["design"]);
+		const archTask = plan.proposal.tasks.find((t) => t.key === "architecture");
+		assert.ok(archTask);
+		assert.deepEqual(archTask.expectedArtifactEffects.map((e) => e.kind), ["architecture"]);
 	});
 });
 
@@ -195,19 +206,19 @@ test("planning creates task, attempt, run, and governance claim", async () => {
 	});
 });
 
-test("plan_adopted event is emitted with correct entity", async () => {
-	await withPlanningRuntime(async ({ runtime }) => {
+test("planning task completes on plan adoption (task_completed emitted, no stall)", async () => {
+	await withPlanningRuntime(async ({ runtime, databasePath }) => {
 		const { workflowId } = await createStartedWorkflow(runtime);
-		const contextDigest = runtime.getPlanningContextDigest(workflowId);
-		const driver = new ScriptedModelDriver([
-			{ role: "analysis-analyst", contextDigest, orderedToolCalls: [], structuredResult: validProposal(workflowId, contextDigest), modelUsage: { provider: "test", modelId: "test", inputTokens: 0, outputTokens: 0 } },
-		]);
-		await runtime.planWorkflow(workflowId, driver);
+		const result = await runtime.planWorkflow(workflowId, null);
+		assert.equal(result.outcome, "adopted");
+
+		// 规划任务必须结算为 completed,否则依赖它的生产任务永不激活 → 工作流静默卡死
+		assert.equal(queryPlanTaskStatus(databasePath, workflowId), "completed");
 		const projection = runtime.getWorkflowProjection(workflowId);
 		assert.ok(projection);
-		const planAdopted = projection.events.find((e) => e.type === "plan_adopted");
-		assert.ok(planAdopted, "plan_adopted event should exist");
-		assert.equal(planAdopted.entity.type, "plan_revision");
+		const taskCompleted = projection.events.filter((e) => e.type === "task_completed");
+		assert.equal(taskCompleted.length, 1, "planning task_completed should be emitted exactly once");
+		assert.equal(taskCompleted[0]!.entity.type, "task");
 	});
 });
 

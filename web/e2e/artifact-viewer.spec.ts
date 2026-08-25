@@ -134,28 +134,44 @@ test.describe("产物内容查看器", () => {
 
 		await page.getByTestId("primary-action").click();
 		await expect(page.getByTestId("details")).toBeVisible();
+		// 切到「产物」tab
+		await page.getByTestId("tab-artifacts").click();
 		await expect(page.getByTestId("artifact-viewer")).toBeVisible();
 
-		await page.getByTestId("artifact-viewer").getByText("scenario").click();
+		await page.getByTestId("artifact-viewer").getByText("场景分析").click();
 		await expect(page.getByTestId("artifact-content")).toBeVisible();
 		await expect(page.getByTestId("artifact-diagrams")).toBeVisible();
 		// mermaid 异步渲染出 SVG
 		await expect(page.locator("[data-testid=artifact-diagrams] svg")).toBeVisible({ timeout: 5000 });
-		await expect(page.getByTestId("artifact-json")).not.toBeVisible();
 	});
 
-	test("点击 analysis（无 diagrams）显示 JSON 摘要而非图", async ({ page }) => {
+	test("点击 analysis（无 diagrams）显示结构化字段而非图", async ({ page }) => {
 		await mockApi(page);
 		await page.goto("/e2e/guided-workflow.html?requirementId=1");
 		await expect(page.getByTestId("hero")).toBeVisible();
 
 		await page.getByTestId("primary-action").click();
 		await expect(page.getByTestId("details")).toBeVisible();
+		await page.getByTestId("tab-artifacts").click();
 
-		await page.getByTestId("artifact-viewer").getByText("analysis").click();
+		await page.getByTestId("artifact-viewer").getByText("需求分析").click();
 		await expect(page.getByTestId("artifact-content")).toBeVisible();
-		await expect(page.getByTestId("artifact-json")).toBeVisible();
-		await expect(page.getByTestId("artifact-json")).toContainText("artifact/analysis/v1");
+		// 结构化字段卡片可见
+		await expect(page.getByTestId("artifact-fields")).toBeVisible();
 		await expect(page.locator("[data-testid=artifact-content] [data-testid=artifact-diagrams]")).not.toBeVisible();
+	});
+	test("点击尚无当前版本的 kind 显示空态,不把契约 404 当错误", async ({ page }) => {
+		await mockApi(page);
+		await page.goto("/e2e/guided-workflow.html?requirementId=1");
+		await expect(page.getByTestId("hero")).toBeVisible();
+		await page.getByTestId("primary-action").click();
+		await expect(page.getByTestId("details")).toBeVisible();
+		await page.getByTestId("tab-artifacts").click();
+
+		// mock 路由对 scenario/analysis 之外的全部 kind 回 404 unknown_artifact
+		await page.getByTestId("artifact-viewer").getByText("接口").click();
+		await expect(page.getByTestId("artifact-empty")).toBeVisible();
+		await expect(page.getByTestId("artifact-empty")).toContainText("尚无当前版本");
+		await expect(page.getByTestId("artifact-error")).toHaveCount(0);
 	});
 });

@@ -288,15 +288,15 @@ const TEMPLATE_ROLES: Readonly<Record<string, true>> = {
 	critic: true,
 };
 
-/** plan-template/v1 深度校验（#19 验收：boot 加载校验）。模板 = 10 Task 固定链，#12 决议。 */
+/** plan-template/v1 深度校验（#19 验收：boot 加载校验）。模板 = 13 Task 固定链，design 拆为 design→architecture→data→api 各一 Task。 */
 function assertPlanTemplateStructure(asset: WorkflowContractAsset): void {
 	const content = asset.content as { tasks?: unknown };
 	const rawTasks = content.tasks;
-	if (!Array.isArray(rawTasks) || rawTasks.length !== 10) {
+	if (!Array.isArray(rawTasks) || rawTasks.length !== 13) {
 		throw new ContractValidationError(
 			"contract_structure_invalid",
 			asset.fileName,
-			`${asset.fileName} must declare exactly 10 template tasks`,
+			`${asset.fileName} must declare exactly 13 template tasks`,
 		);
 	}
 	const keys = new Set<string>();

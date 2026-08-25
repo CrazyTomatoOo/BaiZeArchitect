@@ -182,6 +182,10 @@ _Avoid_: 客户端自报 actor、多用户账户目录
 由当前状态行、版本化领域事实与连续事件序号组装的操作员读模型；页面可整体重取，但不能反向写入治理状态。
 _Avoid_: 客户端状态机、Workflow Event 本身
 
+**Artifact View（产物视图）**:
+操作员在产物页看到的单个 Artifact Revision 内容的结构化呈现；由 schema 字段中文标题、kind 标签和状态人类化组成，是只读投影，不持有治理事实。
+_Avoid_: Artifact Revision 本身、前端组件名、可写工作区
+
 **Gate Queue（门禁队列）**:
 按严重度和 openedEventSeq 对当前 open Blocking Gate 形成的确定性操作员视图；每项仍使用独立 subject、命令和回执。
 _Avoid_: 批量审批、第二套任务队列

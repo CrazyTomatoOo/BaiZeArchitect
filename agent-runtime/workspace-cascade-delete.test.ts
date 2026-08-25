@@ -76,7 +76,7 @@ function createWorkflow(runtime: HeadlessWorkflowRuntime): { workspaceId: number
 	return { workspaceId, workflowId: created.workflowId, requirementId: projection.requirement.id };
 }
 
-/** #19：模板规划 —— planWorkflow(workflowId, null) 确定性实例化 10-Task 模板（5 生产 + 5 Critic 复审），无 Orchestrator 模型调用。 */
+/** #19：模板规划 —— planWorkflow(workflowId, null) 确定性实例化 13-Task 模板（8 生产 + 5 Critic 复审），无 Orchestrator 模型调用。 */
 async function adoptTemplatePlan(runtime: HeadlessWorkflowRuntime, workflowId: number): Promise<void> {
 	const result = await runtime.planWorkflow(workflowId, null);
 	assert.equal(result.outcome, "adopted");

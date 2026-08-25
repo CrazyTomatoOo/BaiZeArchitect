@@ -1,6 +1,7 @@
 import { LitElement, html, css, nothing } from "lit";
 import { sharedStyles } from "./baize-styles.js";
 import { loadRequirementViews, type RequirementView } from "./baize-data.js";
+import { MODEL_ROLE_GROUPS, MODEL_ROLE_KEYS, ROLE_LABELS, customizedRoleCount, findModel, modelSpecLabel } from "./model-profiles.js";
 import {
 	createRequirement,
 	getModelConfig,
@@ -10,32 +11,7 @@ import {
 	type ModelRoleKey,
 } from "./workflow-client.js";
 
-const ROLE_KEYS: readonly ModelRoleKey[] = [
-	"analysis-analyst",
-	"scenario-analyst",
-	"usecase-analyst",
-	"function-analyst",
-	"design-architect",
-	"architecture-architect",
-	"data-architect",
-	"api-architect",
-	"critic",
-];
-
-const INITIAL_ROLE_PROFILES = Object.fromEntries(ROLE_KEYS.map((role) => [role, { provider: "", modelId: "" }])) as Record<ModelRoleKey, ModelProfile>;
-const INITIAL_CUSTOMIZED = Object.fromEntries(ROLE_KEYS.map((role) => [role, false])) as Record<ModelRoleKey, boolean>;
-
-const ROLE_LABELS: Record<ModelRoleKey, string> = {
-	"analysis-analyst": "需求分析",
-	"scenario-analyst": "场景分析",
-	"usecase-analyst": "用例分析",
-	"function-analyst": "功能分析",
-	"design-architect": "设计架构",
-	"architecture-architect": "架构设计",
-	"data-architect": "数据设计",
-	"api-architect": "API 设计",
-	critic: "评审者",
-};
+const INITIAL_CUSTOMIZED = Object.fromEntries(MODEL_ROLE_KEYS.map((role) => [role, false])) as Record<ModelRoleKey, boolean>;
 
 /** baize-requirements — 需求列表 + 新建。点击卡片进入旅程式详情。 */
 class BaizeRequirements extends LitElement {
@@ -80,7 +56,7 @@ class BaizeRequirements extends LitElement {
 		.item { display: flex; align-items: center; gap: 12px; width: 100%; text-align: left; cursor: pointer; }
 		.item .title { font-weight: 600; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 		.item .grow { flex: 1; min-width: 0; }
-		.create { margin-top: var(--gap); display: flex; flex-direction: column; gap: 8px; max-width: 720px; }
+		.create { margin-top: var(--gap); display: flex; flex-direction: column; gap: 8px; }
 
 		.model-picker {
 			margin-top: var(--gap);
@@ -96,30 +72,30 @@ class BaizeRequirements extends LitElement {
 			flex-wrap: wrap;
 		}
 		.picker-header .title { font-weight: 600; font-size: var(--text-sm); }
-		.picker-header .status {
+		.picker-status {
 			display: flex;
-			align-items: center;
+			align-items: baseline;
 			gap: var(--gap);
 			flex-wrap: wrap;
-			font-size: var(--text-sm);
+			margin-top: 6px;
+			font-size: var(--text-xs);
 			color: var(--text-muted);
 		}
-		.picker-header .count {
+		.picker-status .count {
 			font-family: var(--font-mono);
+			font-variant-numeric: tabular-nums;
 			color: var(--accent);
-		}
-		.picker-header .default-profile {
-			color: var(--text-subtle);
-		}
-		.picker-hint {
-			margin: var(--gap) 0;
-			color: var(--text-subtle);
-			font-size: var(--text-xs);
 		}
 		.picker-table { width: 100%; }
 		.picker-table th { font-size: var(--text-xs); }
 		.picker-table td { vertical-align: middle; }
 		.picker-table select { width: 100%; min-width: 140px; }
+		.picker-group td {
+			padding: var(--gap) 0 4px;
+			font-size: var(--text-xs);
+			letter-spacing: 0.06em;
+			color: var(--text-subtle);
+		}
 		.role-name { font-weight: 500; }
 		.role-inherited {
 			margin-left: var(--radius-sm);
@@ -127,8 +103,15 @@ class BaizeRequirements extends LitElement {
 			font-size: var(--text-xs);
 		}
 		.model-meta {
+			margin-top: 4px;
 			color: var(--text-subtle);
 			font-size: var(--text-xs);
+			font-family: var(--font-mono);
+			font-variant-numeric: tabular-nums;
+			white-space: nowrap;
+			overflow: hidden;
+			text-overflow: ellipsis;
+			max-width: 100%;
 		}
 		@media (max-width: 640px) {
 			.picker-table th, .picker-table td { padding: var(--radius-sm) var(--radius-sm); }
@@ -225,6 +208,12 @@ class BaizeRequirements extends LitElement {
 		this.modelRoles = { ...this.modelRoles, [role]: this.modelConfig.defaultRoles[role] };
 		this.customized = { ...this.customized, [role]: false };
 	}
+	/** 列表卡模型档徽标:存在需求级自定义时显示,否则不占位。 */
+	private renderModelBadge(v: RequirementView) {
+		if (!this.modelConfig) return nothing;
+		const count = customizedRoleCount(v.projection.workflow.modelRoles, this.modelConfig.defaultRoles);
+		return count > 0 ? html`<span class="badge" data-testid="model-badge-${v.id}">模型档 ${count}/${MODEL_ROLE_KEYS.length}</span>` : nothing;
+	}
 
 	private restoreDefaults(): void {
 		if (!this.modelConfig) return;
@@ -233,7 +222,7 @@ class BaizeRequirements extends LitElement {
 	}
 
 	private anyCustomized(): boolean {
-		return ROLE_KEYS.some((role) => this.customized[role]);
+		return MODEL_ROLE_KEYS.some((role) => this.customized[role]);
 	}
 
 	private async handleCreate(e: Event): Promise<void> {
@@ -272,20 +261,19 @@ class BaizeRequirements extends LitElement {
 			if (this.modelConfigError) return html`<div class="model-picker error">模型档加载失败: ${this.modelConfigError}</div>`;
 			return nothing;
 		}
-		const defaults = this.modelConfig.defaultRoles;
-		const count = ROLE_KEYS.filter((role) => this.customized[role]).length;
+		const count = MODEL_ROLE_KEYS.filter((role) => this.customized[role]).length;
 		return html`
 			<div class="model-picker" data-testid="model-picker">
 				<div class="picker-header">
-					<span class="title">执行模型档</span>
-					<span class="status">
-						<span class="count" data-testid="model-custom-count">有效模型档 · ${count}/${ROLE_KEYS.length} 自定义</span>
-						<span class="default-profile mono">默认档 ${defaults["analysis-analyst"]?.provider ?? "—"} / ${defaults["analysis-analyst"]?.modelId ?? "—"}</span>
-					</span>
+					<span class="title">模型档</span>
 					<span class="spacer"></span>
-					<button type="button" ?disabled=${count === 0} @click=${() => this.restoreDefaults()}>恢复默认档</button>
+					<button type="button" ?disabled=${count === 0} @click=${() => this.restoreDefaults()}>恢复部署默认</button>
 				</div>
-				<div class="picker-hint">创建后不可改 · 缺省 = 部署默认档</div>
+				<div class="picker-status">
+					<span class="count" data-testid="model-custom-count">${count}/${MODEL_ROLE_KEYS.length} 需求级自定义</span>
+					<span>· 缺省 = 部署默认档</span>
+					<span>· 创建后不可改</span>
+				</div>
 				<table class="picker-table">
 					<thead>
 						<tr>
@@ -296,7 +284,10 @@ class BaizeRequirements extends LitElement {
 						</tr>
 					</thead>
 					<tbody>
-						${ROLE_KEYS.map((role) => this.renderModelRow(role))}
+						${MODEL_ROLE_GROUPS.map(
+							(group) => html`<tr class="picker-group" data-testid="picker-group-${group.label}"><td colspan="4">${group.label}</td></tr>
+								${group.roles.map((role) => this.renderModelRow(role))}`,
+						)}
 					</tbody>
 				</table>
 			</div>
@@ -330,8 +321,9 @@ class BaizeRequirements extends LitElement {
 						.value=${selected.modelId}
 						@change=${(e: Event) => this.onModelChange(role, (e.target as HTMLSelectElement).value)}
 					>
-						${models.map((m) => html`<option value=${m.id}>${m.name} · ${m.contextWindow.toLocaleString()} ctx · ${m.maxTokens.toLocaleString()} tok${m.reasoning ? " · thinking" : ""}</option>`)}
+						${models.map((m) => html`<option value=${m.id}>${m.name}</option>`)}
 					</select>
+					<div class="model-meta" data-testid="model-meta-${role}">${modelSpecLabel(findModel(this.modelConfig, selected))}</div>
 				</td>
 				<td>
 					<button type="button" ?disabled=${!isCustom} @click=${() => this.resetRole(role)}>重置</button>
@@ -374,6 +366,7 @@ class BaizeRequirements extends LitElement {
 										</div>
 									</div>
 									${v.gates.length > 0 ? html`<span class="badge" data-tone="warn">${v.gates.length} 待处理</span>` : nothing}
+									${this.renderModelBadge(v)}
 									<span class="badge" data-tone=${v.state === "archived" ? "ok" : v.state === "failed" ? "bad" : "accent"}>${stateLabel(v.state)}</span>
 								</button>`)}
 						</div>`}

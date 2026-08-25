@@ -13,7 +13,7 @@ import {
 } from "./testing/deterministic-fixtures.js";
 import { openHeadlessWorkflowRuntime, type RequirementBaseline } from "./workflow/headless-runtime.js";
 import type { PlanProposal } from "./workflow/plan-types.js";
-import type { CriticReport, RoleResult, TraceLinkProposal } from "./workflow/role-result.js";
+import type { ArtifactEffectProposal, CriticReport, RoleResult, TraceLinkProposal } from "./workflow/role-result.js";
 
 const BASELINE: RequirementBaseline = {
 	schemaVersion: "artifact/requirement/v1",
@@ -242,22 +242,25 @@ function executeFunctionTask(runtime: Runtime, workflowId: number): void {
 }
 
 function executeArchitectTask(runtime: Runtime, workflowId: number): void {
-	const begin = runtime.beginAttempt(workflowId);
-	assert.equal(begin.taskKey, "design");
-	assert.equal(begin.taskRole, "design-architect");
 	const links = [setupEvidence(runtime, workflowId)];
-	const result: RoleResult = {
-		schemaVersion: "role-result/v1",
-		workflowId,
-		attemptId: begin.attemptId,
-		effects: [
-			{ effectType: "artifact_revision", artifactKind: "design", logicalKey: "design", content: designContent(), baseRevisionId: null, traceLinks: links },
-			{ effectType: "artifact_revision", artifactKind: "architecture", logicalKey: "architecture", content: architectureContent(), baseRevisionId: null, traceLinks: links },
-			{ effectType: "artifact_revision", artifactKind: "data", logicalKey: "data", content: dataContent(), baseRevisionId: null, traceLinks: links },
-			{ effectType: "artifact_revision", artifactKind: "api", logicalKey: "api", content: apiContent(), baseRevisionId: null, traceLinks: links },
-		],
-	};
-	assert.equal(runtime.completeAttempt(workflowId, begin.attemptId, result).outcome, "published");
+	const kinds: Array<{ key: string; role: string; kind: string; content: () => unknown }> = [
+		{ key: "design", role: "design-architect", kind: "design", content: designContent },
+		{ key: "architecture", role: "architecture-architect", kind: "architecture", content: architectureContent },
+		{ key: "data", role: "data-architect", kind: "data", content: dataContent },
+		{ key: "api", role: "api-architect", kind: "api", content: apiContent },
+	];
+	for (const t of kinds) {
+		const begin = runtime.beginAttempt(workflowId);
+		assert.equal(begin.taskKey, t.key);
+		assert.equal(begin.taskRole, t.role);
+		const result: RoleResult = {
+			schemaVersion: "role-result/v1",
+			workflowId,
+			attemptId: begin.attemptId,
+			effects: [{ effectType: "artifact_revision", artifactKind: t.kind as ArtifactEffectProposal["artifactKind"], logicalKey: t.kind, content: t.content(), baseRevisionId: null, traceLinks: links }],
+		};
+		assert.equal(runtime.completeAttempt(workflowId, begin.attemptId, result).outcome, "published");
+	}
 }
 
 function getRevisionId(databasePath: string, kind: string): number {
@@ -403,7 +406,7 @@ test("replace-plan validates and adopts a complete Proposal and supersedes non-t
 			const oldPlan = db.prepare("select status from plan_revisions where id = ?").get(oldPlanRevisionId) as { status: string };
 			assert.equal(oldPlan.status, "superseded");
 			const superseded = (db.prepare("select count(*) as count from tasks where workflow_id = ? and plan_revision_id = ? and status = 'superseded'").get(workflowId, oldPlanRevisionId) as { count: number }).count;
-			assert.equal(superseded, 10);
+		assert.equal(superseded, 13);
 			const newTasks = db.prepare("select key, status from tasks where workflow_id = ? and plan_revision_id = ?").all(workflowId, after.workflow.currentPlanRevisionId) as Array<{ key: string; status: string }>;
 			assert.deepEqual(newTasks, [{ key: "analyze-v2", status: "pending" }]);
 		} finally {
