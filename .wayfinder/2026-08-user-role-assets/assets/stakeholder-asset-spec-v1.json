@@ -1,0 +1,147 @@
+{
+  "$schema": "https://baize.local/schemas/spec-v1",
+  "title": "BaiZe workspace 设计模型资产化规格 v1",
+  "specVersion": "1",
+  "status": "ready-for-review",
+  "derivedFrom": [
+    "tickets/R06-stakeholder-rename-and-migration.md",
+    "tickets/R07-asset-relations-graph-table.md",
+    "tickets/R08-archive-auto-promote.md",
+    "tickets/R09-import-export-api-relations.md"
+  ],
+  "scope": "asset-library-only; workflow artifact layer untouched; no approval/readiness/RBAC/audit additions; no existing data (pre-production, compatibility waived)",
+  "contracts": {
+    "schema": {
+      "stakeholderAsset": {
+        "kind": "stakeholder",
+        "schemaId": "asset/stakeholder/v1",
+        "identity": "store-level assetId only; no slug id in content",
+        "content": { "name": "string(必填非空)", "description": "string(可空,缺省/null归一化为\"\")" },
+        "titleRule": "title mirrors content.name: create sets title=name; PATCH name updates title",
+        "uniqueness": "within workspace, normalized = name.trim().toLowerCase(); violation on create or PATCH returns 409 name_conflict",
+        "governance": "pure asset-library operation; no approval/readiness/workflow events; audit unchanged (no stakeholderSnapshot recorded)",
+        "migration": "rewrite 0013 (not new 0019): CHECK 'actor'→'stakeholder', checksum stakeholder-kind-v1, file 0013-stakeholder-kind.ts; no existing data, demo/dev DB delete-rebuild",
+        "labelPropagation": "all layers unified to 干系人: assetKindLabel stakeholder→干系人; artifact-labels.ts actor→干系人, actors→干系人 (display label only, schema field names actors/actor unchanged)",
+        "contextMdUpdate": "Store subdomain Actor→Stakeholder(干系人); governance Actor disambiguation simplified; Reusable Asset kind list updated"
+      },
+      "assetRelationsTable": {
+        "tableName": "asset_relations",
+        "columns": {
+          "id": "integer PK autoincrement",
+          "from_asset_id": "integer not null FK→reusable_assets(id) on delete cascade",
+          "to_asset_id": "integer not null FK→reusable_assets(id) on delete cascade",
+          "from_revision_id": "integer not null FK→reusable_asset_revisions(id) on delete cascade",
+          "to_revision_id": "integer not null FK→reusable_asset_revisions(id) on delete cascade",
+          "relationship_type": "text not null (no DB CHECK, server-validated whitelist)",
+          "created_at": "text not null"
+        },
+        "uniqueConstraint": "unique(from_asset_id, to_asset_id, relationship_type) — same pair+type deduped, different types coexist",
+        "cascadeDelete": "from or to asset delete cascades to edges (on delete cascade)",
+        "edgeGranularity": "dual-level: asset_id for join/cascade/enrich(floating-latest); revision_id pinned at write time for traceability",
+        "edgeTypes": {
+          "contains": "containment DAG: scenario→usecase, usecase→function, function→api, function→data, design→architecture; allows multiple parents (same function referenced by multiple usecases)",
+          "involves": "cross-cutting reference: scenario→stakeholder, usecase→stakeholder; stakeholder not in contains tree"
+        },
+        "kindPairWhitelist": "server-validated (fromKind, toKind, type) whitelist; extensible without migration; first 7 combinations: scenario→usecase/contains, usecase→function/contains, function→api/contains, function→data/contains, design→architecture/contains, scenario→stakeholder/involves, usecase→stakeholder/involves",
+        "contentFieldDisposition": "scenario content actors / usecase content actor retained as free-text (human-readable); asset_relations table stores structured references (machine-readable); R02 field-level assetId references never implemented in code, no existing data to migrate"
+      }
+    },
+    "runtime": {
+      "archiveAutoPromote": {
+        "trigger": "same-transaction: inside executeCommandTransaction approve-packet branch, after workflow state→archived, before appendEvent, call promoteRequirementArtifacts(workflowId, ALL_KINDS)",
+        "consistency": "strong: promote failure rolls back archive; archive failure skips promote; no outbox async (outbox only publishes SSE events, doesn't execute business logic)",
+        "promoteScope": "all 7 kinds: design/architecture/data/api/scenario/usecase/function; analysis excluded (intermediate artifact, not an asset kind); stakeholder excluded (not promoted from artifacts, only manual create/import; upsertReusableAssetByTitle rejects stakeholder kind); kinds without approved revisions return 0",
+        "dedup": "skip-if-already-promoted: check reusable_assets.origin_artifact_id (no-FK audit column, 0016-defined) before upsert; exists → skip that artifact (no duplicate revision); requires AssetStore.assetExistsByOriginArtifactId(workspaceId, artifactId)",
+        "relationBuilding": "parse Artifact content to build asset_relations edges: actors/actor free-text matched by name to workspace stakeholder assets → involves edges; contains edges NOT auto-built by promote (artifact content has no cross-kind containment field; scenario→usecase containment cannot be inferred from content); contains edges only built by manual create/import relations declaration",
+        "idempotency": "archive command idempotent (duplicate approve-packet returns idempotency_conflict, no repeat promote); same-transaction atomic, no outbox retry needed",
+        "manualPromoteEndpoint": "retain POST /api/requirements/:id/promote for pre-archive preview/selective; archive-auto skips already-manually-promoted artifacts (dedup)",
+        "provenance": "originApprovalId = packet_approval record id; source=workflow; origin_requirement_id/origin_artifact_id consistent with existing"
+      }
+    },
+    "api": {
+      "export": {
+        "endpoint": "GET /api/assets/export?workspaceId=",
+        "shape": "single segment: { assets: ReusableAssetDetail[], relations: [{ fromTitle, fromKind, toTitle, toKind, type }] }",
+        "relationsPortability": "edges use title+kind not assetId — cross-workspace portable"
+      },
+      "import": {
+        "endpoint": "POST /api/assets/import",
+        "body": "{ assets: [{ kind, title, content }], relations: [{ fromTitle, fromKind, toTitle, toKind, type }] } (relations optional)",
+        "remap": "title mapping: build all assets first (by title+kind reuse or create), then resolve edges by title+kind lookup to new assetId, then build relations",
+        "batchOrder": "1. build all assets → 2. resolve edge from/to by title+kind → 3. build asset_relations (validate toAssetId existence, whitelist, self-loop, same-workspace)"
+      },
+      "create": {
+        "endpoint": "POST /api/assets",
+        "bodyExtension": "optional relations: [{ toAssetId, type }] declares outgoing edges of new asset; server resolves toAssetId→current revisionId for to_revision_id; from uses new asset's revisionId"
+      },
+      "patch": {
+        "endpoint": "PATCH /api/assets/:id",
+        "scope": "kind=stakeholder only; method updateStakeholderReusableAsset",
+        "body": "{ name?, description? } at least one non-empty",
+        "responses": "200 { revisionId, revisionNo } on success; 400 malformed_body if empty; 409 name_conflict; 404 unknown_asset if non-stakeholder or missing; no optimistic lock",
+        "edgeSync": "edge table not refreshed on rename — resolvedGraph enrich reads latest title dynamically (floating-latest)"
+      },
+      "delete": {
+        "endpoint": "DELETE /api/assets/:id",
+        "scan": "bidirectional: select count(*) from asset_relations where from_asset_id = ? OR to_asset_id = ?; non-empty → 409 { error: asset_referenced, refs: [{ assetId, kind, title, type }] }; empty → 200 { deleted: true }",
+        "cascade": "asset delete cascades to asset_relations edges (on delete cascade)"
+      },
+      "enrich": {
+        "detailEndpoint": "GET /api/assets/:id returns resolvedGraph: { incoming: [{ fromAssetId, fromRevisionId, type, title, kind }], outgoing: [{ toAssetId, toRevisionId, type, title, kind }] }",
+        "listEndpoint": "GET /api/assets?workspaceId= returns ReusableAssetSummary[] WITHOUT resolvedGraph (avoid N+1; use graph endpoint for topology)",
+        "graphEndpoint": "GET /api/assets/graph?workspaceId= returns { nodes: [{ assetId, kind, title }], edges: [{ fromAssetId, toAssetId, type }] } for full workspace topology (frontend architecture rendering)"
+      },
+      "validation": {
+        "location": "server layer (operator-server create/import branches)",
+        "checks": ["toAssetId existence (same workspace)", "(fromKind, toKind, type) whitelist", "self-loop forbidden (from != to)", "same-workspace constraint"],
+        "error": "aggregated 400 { error: invalid_relations, invalidRelations: [{ toAssetId, type, reason }] }; no partial write",
+        "migration": "R02 content-field assetId validation → now asset_relations write validation"
+      }
+    }
+  },
+  "acceptanceMatrix": {
+    "dimensions": [
+      {
+        "dimension": "CRUD",
+        "variables": "create stakeholder 201+rev1; PATCH name→new rev+title sync; PATCH desc→only desc changes; PATCH name conflict→409; uniqueness trim+case-insensitive; PATCH empty body→400; PATCH non-stakeholder→404"
+      },
+      {
+        "dimension": "引用校验",
+        "variables": "relations write validation: toAssetId existence; (fromKind,toKind,type) whitelist; self-loop→400; cross-workspace→400; aggregated invalid_relations with all errors; no partial write"
+      },
+      {
+        "dimension": "禁删",
+        "variables": "bidirectional scan: from OR to non-empty→409 asset_referenced+refs; empty→200; cascade destroys edges on asset delete"
+      },
+      {
+        "dimension": "重映射",
+        "variables": "import title mapping: same title+kind reuse assetId (no definition override); new title+kind create; relations edges rebuilt by title+kind lookup; batch order assets-first-then-edges"
+      },
+      {
+        "dimension": "导出",
+        "variables": "single segment {assets, relations}; edges use title+kind not assetId; cross-workspace portable"
+      },
+      {
+        "dimension": "归档",
+        "variables": "same-transaction promote: approve-packet→archived→promote 7 kinds (analysis/stakeholder excluded); dedup skip by origin_artifact_id (no-FK audit column); involves edges auto-built from actors/actor free-text matching stakeholder by name; contains edges NOT auto-built (only manual create/import); idempotent (duplicate archive command no repeat promote); manual promote retained and deduped"
+      },
+      {
+        "dimension": "关系建模",
+        "variables": "contains edges: scenario→usecase/usecase→function/function→api|data/design→architecture; DAG multiple parents allowed; involves edges: scenario|usecase→stakeholder; kind-pair whitelist server-validated; resolvedGraph enrich floating-latest; GET /api/assets/graph full topology"
+      },
+      {
+        "dimension": "迁移",
+        "variables": "0013 rewrite: CHECK actor→stakeholder; checksum stakeholder-kind-v1; file rename 0013-stakeholder-kind.ts; no existing data, demo/dev DB delete-rebuild; code全量改名 (reusable-asset-kind/asset-store/workflow-store/headless-runtime/operator-server/web/contract/test); CONTEXT.md术语更新; FTS no migration (no existing data)"
+      }
+    ]
+  },
+  "reviewChecklist": [
+    "契约完整：R06-R09 决议逐项落入本规格",
+    "一致性：与既有 store/server/web 类型、CHECK 约束、A08 ReusableAsset 模型无冲突",
+    "无兼容层：无 actor/stakeholder 双写/别名适配；无字段引用与关系表并存",
+    "无越界：未动 artifact-content-v1.schema.json；未加 RBAC/审批/审计；归档自动 promote 不改 Workflow 治理状态机",
+    "关系类型白名单完整性：contains (5 kind-pairs) + involves (2 kind-pairs) 覆盖全部设计模型关系；DAG 多父语义正确",
+    "归档去重幂等性：origin_artifact_id 查询跳过已 promote；归档命令幂等保证不重复 promote；同事务原子无窗口期"
+  ],
+  "releaseGate": "用户对《workspace 设计模型资产化规格》（评审文档）人工评审通过 = 本图终点；实现切面化落地走 BaiZe 既有实现流程"
+}
