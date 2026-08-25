@@ -1,5 +1,7 @@
 import type Database from "better-sqlite3";
 import type { FixtureClock } from "../testing/deterministic-fixtures.js";
+import type { AssetRelationInput, AssetRelationRecord } from "./asset-relations.js";
+import { AssetRelationValidationError, isAssetRelationType, isValidAssetRelation } from "./asset-relations.js";
 import type { ReusableAssetKind } from "./reusable-asset-kind.js";
 import { parseJson } from "./json.js";
 import type { SnapshotStore } from "./snapshot-store.js";
@@ -83,6 +85,97 @@ export class AssetStore {
 		private readonly clock: FixtureClock,
 		private readonly snapshotStore: SnapshotStore,
 	) {}
+	writeRelations(input: {
+		workspaceId: number;
+		fromAssetId: number;
+		fromRevisionId: number;
+		relations: readonly AssetRelationInput[];
+	}): readonly AssetRelationRecord[] {
+		const timestamp = this.clock.now().toISOString();
+		const transaction = this.database.transaction(() => {
+			const from = this.database
+				.prepare("select id, kind, current_revision_id from reusable_assets where id = ? and workspace_id = ?")
+				.get(input.fromAssetId, input.workspaceId) as { id: number; kind: ReusableAssetKind; current_revision_id: number | null } | undefined;
+			const issues: Array<{ toAssetId?: number; type?: string; reason: string }> = [];
+			if (!from) {
+				throw new AssetRelationValidationError([{ reason: "unknown_from_asset" }]);
+			}
+			const fromRevision = this.database
+				.prepare("select id from reusable_asset_revisions where id = ? and reusable_asset_id = ?")
+				.get(input.fromRevisionId, input.fromAssetId) as { id: number } | undefined;
+			if (!fromRevision || from.current_revision_id !== fromRevision.id) {
+				throw new AssetRelationValidationError([{ reason: "stale_from_revision" }]);
+			}
+			const records: AssetRelationRecord[] = [];
+			for (const relation of input.relations) {
+				if (!isAssetRelationType(relation.type)) {
+					issues.push({ toAssetId: relation.toAssetId, type: String(relation.type), reason: "unknown_relation_type" });
+					continue;
+				}
+				const target = this.database
+					.prepare("select id, kind, current_revision_id from reusable_assets where id = ? and workspace_id = ?")
+					.get(relation.toAssetId, input.workspaceId) as { id: number; kind: ReusableAssetKind; current_revision_id: number | null } | undefined;
+				if (!target) {
+					issues.push({ toAssetId: relation.toAssetId, type: relation.type, reason: "unknown_asset" });
+					continue;
+				}
+				if (target.id === from.id) {
+					issues.push({ toAssetId: relation.toAssetId, type: relation.type, reason: "self_loop" });
+					continue;
+				}
+				if (!isValidAssetRelation(from.kind, target.kind, relation.type)) {
+					issues.push({ toAssetId: relation.toAssetId, type: relation.type, reason: "invalid_kind_pair" });
+					continue;
+				}
+				if (target.current_revision_id === null) {
+					issues.push({ toAssetId: relation.toAssetId, type: relation.type, reason: "target_without_revision" });
+					continue;
+				}
+				this.database
+					.prepare("insert or ignore into asset_relations(from_asset_id, to_asset_id, from_revision_id, to_revision_id, relationship_type, created_at) values (?, ?, ?, ?, ?, ?)")
+					.run(input.fromAssetId, target.id, input.fromRevisionId, target.current_revision_id, relation.type, timestamp);
+				const row = this.database
+					.prepare("select id, from_asset_id, to_asset_id, from_revision_id, to_revision_id, relationship_type, created_at from asset_relations where from_asset_id = ? and to_asset_id = ? and relationship_type = ?")
+					.get(input.fromAssetId, target.id, relation.type) as { id: number; from_asset_id: number; to_asset_id: number; from_revision_id: number; to_revision_id: number; relationship_type: string; created_at: string };
+				records.push({
+					id: row.id,
+					fromAssetId: row.from_asset_id,
+					toAssetId: row.to_asset_id,
+					fromRevisionId: row.from_revision_id,
+					toRevisionId: row.to_revision_id,
+					type: row.relationship_type as AssetRelationRecord["type"],
+					createdAt: row.created_at,
+				});
+			}
+			if (issues.length > 0) {
+				throw new AssetRelationValidationError(issues);
+			}
+			return records;
+		}).immediate;
+		return transaction();
+	}
+
+	readRelations(assetId: number): readonly AssetRelationRecord[] {
+		const rows = this.database
+			.prepare("select id, from_asset_id, to_asset_id, from_revision_id, to_revision_id, relationship_type, created_at from asset_relations where from_asset_id = ? or to_asset_id = ? order by id")
+			.all(assetId, assetId) as Array<{ id: number; from_asset_id: number; to_asset_id: number; from_revision_id: number; to_revision_id: number; relationship_type: string; created_at: string }>;
+		return rows.map((row) => ({
+			id: row.id,
+			fromAssetId: row.from_asset_id,
+			toAssetId: row.to_asset_id,
+			fromRevisionId: row.from_revision_id,
+			toRevisionId: row.to_revision_id,
+			type: row.relationship_type as AssetRelationRecord["type"],
+			createdAt: row.created_at,
+		}));
+	}
+
+	assetExistsByOriginArtifactId(workspaceId: number, artifactId: number): boolean {
+		const row = this.database
+			.prepare("select 1 as found from reusable_assets where workspace_id = ? and origin_artifact_id = ? limit 1")
+			.get(workspaceId, artifactId) as { found: number } | undefined;
+		return row !== undefined;
+	}
 
 	createReusableAsset(input: { workspaceId: number; kind: ReusableAssetKind; title: string; content: unknown; source?: "manual" | "import" | "migration" | "workflow"; legacyOriginRequirementId?: number | null; actorSnapshotDocumentId?: number | null; migrationAttestationDocumentId?: number | null }): { assetId: number; revisionId: number; revisionNo: number } {
 		const timestamp = this.clock.now().toISOString();

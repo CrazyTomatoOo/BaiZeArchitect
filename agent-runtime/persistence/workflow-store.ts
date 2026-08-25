@@ -27,9 +27,11 @@ import { PRODUCTION_ROLE_KIND_MIGRATION } from "./migrations/0015-production-rol
 import { REUSABLE_ASSET_WORKFLOW_MIGRATION } from "./migrations/0016-reusable-asset-workflow.js";
 import { FINALIZE_ROLE_SET_MIGRATION } from "./migrations/0017-finalize-role-set.js";
 import { FTS_ASSET_SEARCH_MIGRATION } from "./migrations/0018-fts-asset-search.js";
+import { ASSET_RELATIONS_MIGRATION } from "./migrations/0019-asset-relations.js";
 import type { ReusableAssetKind } from "./reusable-asset-kind.js";
 import { parseJson } from "./json.js";
 import { AssetStore } from "./asset-store.js";
+import type { AssetRelationInput, AssetRelationRecord } from "./asset-relations.js";
 import type { ReusableAssetDetail, ReusableAssetSummary } from "./asset-store.js";
 import { SnapshotStore } from "./snapshot-store.js";
 import type { SnapshotDocument } from "./snapshot-store.js";
@@ -41,13 +43,15 @@ import type { WorkspaceSummary } from "./workspace-store.js";
 export { BusyWorkspaceError } from "./workspace-store.js";
 export type { WorkspaceSummary } from "./workspace-store.js";
 export { ReusableAssetMalformedBodyError, ReusableAssetNameConflictError } from "./asset-store.js";
+export { AssetRelationValidationError } from "./asset-relations.js";
+export type { AssetRelationInput, AssetRelationRecord } from "./asset-relations.js";
 export type { ReusableAssetDetail, ReusableAssetSummary } from "./asset-store.js";
 import { type WorkflowCommandType } from "../workflow/command-types.js";
 import { ARTIFACT_OWNERSHIP, type InputBinding, type TaskOutputInput } from "../workflow/plan-types.js";
 import type { RoleResult, ContextManifest, RoleContract, BeginAttemptResult, CompleteAttemptResult, TraceLinkProposal, CriticReport, FindingProposal, FindingSeverity, AssetReference } from "../workflow/role-result.js";
 import type { ModelRolesOverride } from "../workflow/model-driver.js";
 
-const MIGRATIONS = [WORKFLOW_GOVERNANCE_MIGRATION, COMMAND_GOVERNANCE_MIGRATION, RECOVERY_GOVERNANCE_MIGRATION, PLANNING_GOVERNANCE_MIGRATION, ATTEMPT_EXECUTION_MIGRATION, DEPENDENT_TASK_SAFETY_MIGRATION, REQUIRED_ARTIFACTS_AND_EVIDENCE_MIGRATION, CRITIC_GOVERNANCE_MIGRATION, DECISIONS_AND_READINESS_MIGRATION, HUMAN_GOVERNANCE_MIGRATION, READ_MODEL_GOVERNANCE_MIGRATION, RUN_EVENT_STREAM_MIGRATION, STAKEHOLDER_KIND_MIGRATION, MODEL_ROLES_MIGRATION, PRODUCTION_ROLE_KIND_MIGRATION, REUSABLE_ASSET_WORKFLOW_MIGRATION, FINALIZE_ROLE_SET_MIGRATION, FTS_ASSET_SEARCH_MIGRATION] as const;
+const MIGRATIONS = [WORKFLOW_GOVERNANCE_MIGRATION, COMMAND_GOVERNANCE_MIGRATION, RECOVERY_GOVERNANCE_MIGRATION, PLANNING_GOVERNANCE_MIGRATION, ATTEMPT_EXECUTION_MIGRATION, DEPENDENT_TASK_SAFETY_MIGRATION, REQUIRED_ARTIFACTS_AND_EVIDENCE_MIGRATION, CRITIC_GOVERNANCE_MIGRATION, DECISIONS_AND_READINESS_MIGRATION, HUMAN_GOVERNANCE_MIGRATION, READ_MODEL_GOVERNANCE_MIGRATION, RUN_EVENT_STREAM_MIGRATION, STAKEHOLDER_KIND_MIGRATION, MODEL_ROLES_MIGRATION, PRODUCTION_ROLE_KIND_MIGRATION, REUSABLE_ASSET_WORKFLOW_MIGRATION, FINALIZE_ROLE_SET_MIGRATION, FTS_ASSET_SEARCH_MIGRATION, ASSET_RELATIONS_MIGRATION] as const;
 export type CommandOutcome =
 	| "accepted"
 	| "capability_denied"
@@ -3074,6 +3078,18 @@ deleteWorkspace(workspaceId: number): boolean {
 		// workspace 存在性前置归门面（ADR-006）：AssetStore 不依赖 WorkspaceStore。
 		if (!this.workspaceStore.workspaceExists(input.workspaceId)) throw new Error("Workspace not found");
 		return this.assetStore.createReusableAsset(input);
+	}
+	writeRelations(input: { workspaceId: number; fromAssetId: number; fromRevisionId: number; relations: readonly AssetRelationInput[] }): readonly AssetRelationRecord[] {
+		if (!this.workspaceStore.workspaceExists(input.workspaceId)) throw new Error("Workspace not found");
+		return this.assetStore.writeRelations(input);
+	}
+
+	readRelations(assetId: number): readonly AssetRelationRecord[] {
+		return this.assetStore.readRelations(assetId);
+	}
+
+	assetExistsByOriginArtifactId(workspaceId: number, artifactId: number): boolean {
+		return this.assetStore.assetExistsByOriginArtifactId(workspaceId, artifactId);
 	}
 
 	/** #22 promote：按 kind 条目拆细入库（幂等、可批选）。返回每 kind 入资产条数。 */
