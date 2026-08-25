@@ -298,6 +298,9 @@ export class AssetStore {
 		}
 		return undefined;
 	}
+	deleteOutgoingRelations(assetId: number, type: AssetRelationRecord["type"]): void {
+		this.database.prepare("delete from asset_relations where from_asset_id = ? and relationship_type = ?").run(assetId, type);
+	}
 
 
 	listReusableAssets(workspaceId: number): readonly ReusableAssetSummary[] {

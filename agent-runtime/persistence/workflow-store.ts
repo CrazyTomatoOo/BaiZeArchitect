@@ -3128,13 +3128,20 @@ deleteWorkspace(workspaceId: number): boolean {
 				counts[kind] = 0;
 				continue;
 			}
-			const revision = this.database
-				.prepare(`select ar.id, ar.content_digest, d.content from artifact_revisions ar
-					join snapshot_documents d on d.id = ar.content_document_id
-					where ar.artifact_id = ? and ar.status = 'approved'
-					and exists (select 1 from approval_records approval where approval.workflow_id = ? and approval.record_type = 'artifact_approval' and approval.subject_type = 'artifact_revision' and approval.subject_id = ar.id)
-					order by ar.id desc limit 1`)
-				.get(artifact.id, workflowId) as { id: number; content_digest: string; content: string } | undefined;
+			const revision = typeof options?.originApprovalId === "number"
+				? this.database
+					.prepare(`select ar.id, ar.content_digest, d.content from artifact_revisions ar
+						join snapshot_documents d on d.id = ar.content_document_id
+						where ar.artifact_id = ? and ar.status = 'approved'
+						order by ar.id desc limit 1`)
+					.get(artifact.id) as { id: number; content_digest: string; content: string } | undefined
+				: this.database
+					.prepare(`select ar.id, ar.content_digest, d.content from artifact_revisions ar
+						join snapshot_documents d on d.id = ar.content_document_id
+						where ar.artifact_id = ? and ar.status = 'approved'
+						and exists (select 1 from approval_records approval where approval.workflow_id = ? and approval.record_type = 'artifact_approval' and approval.subject_type = 'artifact_revision' and approval.subject_id = ar.id)
+						order by ar.id desc limit 1`)
+					.get(artifact.id, workflowId) as { id: number; content_digest: string; content: string } | undefined;
 			if (!revision) {
 				counts[kind] = 0;
 				continue;
@@ -3168,6 +3175,7 @@ deleteWorkspace(workspaceId: number): boolean {
 		content: unknown,
 	): void {
 		if (kind !== "scenario" && kind !== "usecase") return;
+		this.assetStore.deleteOutgoingRelations(fromAssetId, "involves");
 		const actorNames: string[] = [];
 		if (typeof content !== "object" || content === null || Array.isArray(content)) return;
 		const record = content as { actors?: unknown; actor?: unknown };
