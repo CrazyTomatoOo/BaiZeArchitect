@@ -52,6 +52,7 @@ import type { RoleResult, ContextManifest, RoleContract, BeginAttemptResult, Com
 import type { ModelRolesOverride } from "../workflow/model-driver.js";
 
 const MIGRATIONS = [WORKFLOW_GOVERNANCE_MIGRATION, COMMAND_GOVERNANCE_MIGRATION, RECOVERY_GOVERNANCE_MIGRATION, PLANNING_GOVERNANCE_MIGRATION, ATTEMPT_EXECUTION_MIGRATION, DEPENDENT_TASK_SAFETY_MIGRATION, REQUIRED_ARTIFACTS_AND_EVIDENCE_MIGRATION, CRITIC_GOVERNANCE_MIGRATION, DECISIONS_AND_READINESS_MIGRATION, HUMAN_GOVERNANCE_MIGRATION, READ_MODEL_GOVERNANCE_MIGRATION, RUN_EVENT_STREAM_MIGRATION, STAKEHOLDER_KIND_MIGRATION, MODEL_ROLES_MIGRATION, PRODUCTION_ROLE_KIND_MIGRATION, REUSABLE_ASSET_WORKFLOW_MIGRATION, FINALIZE_ROLE_SET_MIGRATION, FTS_ASSET_SEARCH_MIGRATION, ASSET_RELATIONS_MIGRATION] as const;
+const ALL_PROMOTABLE_ASSET_KINDS = ["design", "architecture", "data", "api", "scenario", "usecase", "function"] as const;
 export type CommandOutcome =
 	| "accepted"
 	| "capability_denied"
@@ -636,6 +637,7 @@ deleteWorkspace(workspaceId: number): boolean {
 		const workflow = this.database
 			.prepare("select state, version, last_event_seq, current_failure_code, current_plan_revision_id, current_approval_packet_id, requirement_id from workflows where id = ?")
 			.get(input.workflowId) as { state: string; version: number; last_event_seq: number; current_failure_code: string | null; current_plan_revision_id: number | null; current_approval_packet_id: number | null; requirement_id: number };
+		let archiveApprovalId: number | null = null;
 		const actorSnapshot = this.snapshotStore.insertSnapshot(
 			"actor_snapshot",
 			"actor/v1",
@@ -961,6 +963,7 @@ deleteWorkspace(workspaceId: number): boolean {
 			const approvalRecordId = Number(this.database
 				.prepare("insert into approval_records(workflow_id, record_type, subject_type, subject_id, subject_digest, reason, targets_json, actor_snapshot_document_id, command_id, created_at) values (?, 'packet_approval', 'approval_packet', ?, ?, null, null, ?, ?, ?)")
 				.run(input.workflowId, packet.id, packet.digest, actorSnapshot.id, input.commandId, timestamp).lastInsertRowid);
+			archiveApprovalId = approvalRecordId;
 			this.database
 				.prepare("insert into design_packages(requirement_id, workspace_id, document_id, digest, approval_packet_id, approval_id, migration_attestation_document_id, archive_class, archived_at) values (?, ?, ?, ?, ?, ?, null, 'governed', ?)")
 				.run(workflow.requirement_id, (this.database.prepare("select workspace_id from requirements where id = ?").get(workflow.requirement_id) as { workspace_id: number }).workspace_id, packetSnapshot.id, packet.digest, packet.id, approvalRecordId, timestamp);
@@ -991,6 +994,12 @@ deleteWorkspace(workspaceId: number): boolean {
 	this.database
 		.prepare("update workflows set state = ?, version = ?, consecutive_plan_revisions = 0, updated_at = ? where id = ?")
 		.run(toState, newVersion, timestamp, input.workflowId);
+		if (input.type === "approve-packet") {
+			this.promoteRequirementArtifacts(input.workflowId, ALL_PROMOTABLE_ASSET_KINDS, {
+				skipAlreadyPromoted: true,
+				originApprovalId: archiveApprovalId,
+			});
+		}
 		const eventPayload = input.type === "revoke-approval" && typeof input.payload?.approvalRecordId === "number"
 		? (() => {
 				const revoked = this.database
@@ -3097,7 +3106,11 @@ deleteWorkspace(workspaceId: number): boolean {
 	}
 
 	/** #22 promote：按 kind 条目拆细入库（幂等、可批选）。返回每 kind 入资产条数。 */
-	promoteRequirementArtifacts(workflowId: number, kinds: readonly string[]): Record<string, number> {
+	promoteRequirementArtifacts(
+		workflowId: number,
+		kinds: readonly string[],
+		options?: { skipAlreadyPromoted?: boolean; originApprovalId?: number | null },
+	): Record<string, number> {
 		const projection = this.getWorkflowProjection(workflowId);
 		if (!projection) throw new Error("Workflow not found");
 		const requirementId = projection.requirement.id;
@@ -3108,6 +3121,10 @@ deleteWorkspace(workspaceId: number): boolean {
 				.prepare("select id from artifacts where requirement_id = ? and kind = ?")
 				.get(requirementId, kind) as { id: number } | undefined;
 			if (!artifact) {
+				counts[kind] = 0;
+				continue;
+			}
+			if (options?.skipAlreadyPromoted && this.assetStore.assetExistsByOriginArtifactId(workspaceId, artifact.id)) {
 				counts[kind] = 0;
 				continue;
 			}
@@ -3127,19 +3144,43 @@ deleteWorkspace(workspaceId: number): boolean {
 				.get(workflowId, revision.id) as { id: number } | undefined;
 			const items = this.extractAssetItems(kind, revision.content);
 			for (const item of items) {
-				this.assetStore.upsertReusableAssetByTitle({
+				const promoted = this.assetStore.upsertReusableAssetByTitle({
 					workspaceId,
 					kind: kind as ReusableAssetKind,
 					title: item.title,
 					content: item.content,
 					originRequirementId: requirementId,
 					originArtifactId: artifact.id,
-					originApprovalId: approval?.id ?? null,
+					originApprovalId: options?.originApprovalId ?? approval?.id ?? null,
 				});
+				this.buildStakeholderInvolvementRelations(workspaceId, kind, promoted.assetId, promoted.revisionId, item.content);
 			}
 			counts[kind] = items.length;
 		}
 		return counts;
+	}
+
+	private buildStakeholderInvolvementRelations(
+		workspaceId: number,
+		kind: string,
+		fromAssetId: number,
+		fromRevisionId: number,
+		content: unknown,
+	): void {
+		if (kind !== "scenario" && kind !== "usecase") return;
+		const actorNames: string[] = [];
+		if (typeof content !== "object" || content === null || Array.isArray(content)) return;
+		const record = content as { actors?: unknown; actor?: unknown };
+		if (kind === "scenario" && Array.isArray(record.actors)) {
+			for (const actor of record.actors) if (typeof actor === "string") actorNames.push(actor);
+		}
+		if (kind === "usecase" && typeof record.actor === "string") actorNames.push(record.actor);
+		const relations: AssetRelationInput[] = [];
+		for (const actorName of actorNames) {
+			const stakeholder = this.assetStore.findStakeholderByName(workspaceId, actorName);
+			if (stakeholder) relations.push({ toAssetId: stakeholder.assetId, type: "involves" });
+		}
+		if (relations.length > 0) this.assetStore.writeRelations({ workspaceId, fromAssetId, fromRevisionId, relations });
 	}
 
 	/** 条目级拆解（#14 决议）：按 kind 结构抽条目（标题 + 内容对象）。 */

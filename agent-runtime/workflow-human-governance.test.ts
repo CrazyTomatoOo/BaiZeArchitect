@@ -615,6 +615,8 @@ test("accept-finding-risk binds the exact major Finding and target revision; cri
 test("approve-packet archives atomically: approval record, revisions approved, session frozen", async () => {
 	await withRuntime(async ({ runtime, databasePath }) => {
 		const { workflowId, digest } = await createReadyWorkflow(runtime, databasePath);
+		const workspaceId = runtime.getWorkflowProjection(workflowId)!.requirement.workspaceId;
+		runtime.createReusableAsset({ workspaceId, kind: "stakeholder", title: "User", content: { name: "User", description: "Customer" } });
 		const wrongDigest = command(runtime, workflowId, "approve-packet", { packetDigest: "sha256:wrong" });
 		assert.equal(wrongDigest.outcome, "business_rule_rejected");
 		const receipt = command(runtime, workflowId, "approve-packet", { packetDigest: digest });
@@ -636,6 +638,10 @@ test("approve-packet archives atomically: approval record, revisions approved, s
 			assert.ok(archivedEvent);
 			const packetEvent = db.prepare("select type from workflow_events where workflow_id = ? and type = 'packet_approved'").get(workflowId);
 			assert.ok(packetEvent);
+			const promoted = db.prepare("select count(*) as count from reusable_assets where workspace_id = ? and origin_approval_id = ?").get(workspaceId, approval.id) as { count: number };
+			assert.equal(promoted.count, 7, "archive promotes all seven asset kinds except analysis and stakeholder");
+			const involves = db.prepare("select count(*) as count from asset_relations where relationship_type = 'involves'").get() as { count: number };
+			assert.ok(involves.count >= 2, "archive promotes stakeholder involves relations from scenario and usecase content");
 		} finally {
 			db.close();
 		}

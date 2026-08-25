@@ -287,6 +287,17 @@ export class AssetStore {
 		const key = stakeholderNameKey(name);
 		return rows.some((row) => row.id !== excludeAssetId && stakeholderNameKey(normalizeStakeholderContent(parseJson<unknown>(row.content))?.name ?? "") === key);
 	}
+	findStakeholderByName(workspaceId: number, name: string): { assetId: number; revisionId: number } | undefined {
+		const key = stakeholderNameKey(name);
+		const rows = this.database
+			.prepare("select a.id, a.current_revision_id, d.content from reusable_assets a join reusable_asset_revisions r on r.id = a.current_revision_id join snapshot_documents d on d.id = r.content_document_id where a.workspace_id = ? and a.kind = 'stakeholder'")
+			.all(workspaceId) as Array<{ id: number; current_revision_id: number; content: string }>;
+		for (const row of rows) {
+			const content = normalizeStakeholderContent(parseJson<unknown>(row.content));
+			if (content && stakeholderNameKey(content.name) === key) return { assetId: row.id, revisionId: row.current_revision_id };
+		}
+		return undefined;
+	}
 
 
 	listReusableAssets(workspaceId: number): readonly ReusableAssetSummary[] {
