@@ -8,6 +8,7 @@ import {
 	type OperatorSession,
 } from "./workflow-client.js";
 import "./baize-requirements.js";
+import "./baize-asset-library.js";
 import "./baize-workflow.js";
 import "./baize-workspace-manager.js";
 
@@ -213,14 +214,20 @@ class BaizeShell extends LitElement {
 		if (this.workspaceId === 0) {
 			return html`<div class="empty">请先选择或创建工作空间。</div>`;
 		}
-		return html`<baize-requirements
-			.apiBase=${this.apiBase}
-			.workspaceId=${this.workspaceId}
-			@baize-open-requirement=${(e: Event) => {
-				const id = (e as CustomEvent<{ id: number }>).detail.id;
-				this.router.goto(`/workflow/${id}`);
-			}}
-		></baize-requirements>`;
+		return html`<div class="home-stack">
+			<baize-asset-library
+				.apiBase=${this.apiBase}
+				.workspaceId=${this.workspaceId}
+			></baize-asset-library>
+			<baize-requirements
+				.apiBase=${this.apiBase}
+				.workspaceId=${this.workspaceId}
+				@baize-open-requirement=${(e: Event) => {
+					const id = (e as CustomEvent<{ id: number }>).detail.id;
+					this.router.goto(`/workflow/${id}`);
+				}}
+			></baize-requirements>
+		</div>`;
 	}
 
 	private renderManage(): ReturnType<typeof html> {

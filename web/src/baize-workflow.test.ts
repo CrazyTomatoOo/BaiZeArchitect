@@ -5,6 +5,7 @@ import workflowClientSource from "./workflow-client.ts?raw";
 import workspaceManagerSource from "./baize-workspace-manager.ts?raw";
 import shellSource from "./baize-shell.ts?raw";
 import indexSource from "../index.html?raw";
+import assetLibrarySource from "./baize-asset-library.ts?raw";
 import {
 	artifactSummary,
 	createWorkspaceErrorCopy,
@@ -461,5 +462,11 @@ describe("baize-shell — 首屏与选中态安全约定(票 05)", () => {
 	it("index.html 不再硬编码 workspace-id,仍挂载 baize-shell", () => {
 		expect(indexSource).toContain("<baize-shell>");
 		expect(indexSource).not.toMatch(/workspace-id\s*=/);
+	});
+});
+describe("workspace asset surface", () => {
+	it("renders workspace asset information after entering a workspace", () => {
+		expect(shellSource).toMatch(/baize-asset-library/);
+		expect(assetLibrarySource).toMatch(/listAssets/);
 	});
 });
