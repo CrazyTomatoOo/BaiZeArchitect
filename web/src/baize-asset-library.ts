@@ -273,6 +273,7 @@ class BaizeAssetLibrary extends LitElement {
 			--asset-fact-min-width: 7.5rem;
 			--asset-graph-node-width: 8.125rem;
 			--asset-graph-edge-width: 0.125rem;
+			--asset-graph-node-height: 2.25rem;
 		}
 		.workspace { display: grid; gap: var(--gap); }
 		.toolbar {
@@ -353,7 +354,7 @@ class BaizeAssetLibrary extends LitElement {
 		.graph-canvas { position: relative; width: 100%; min-height: var(--asset-placeholder-height); overflow: hidden; border: 1px solid var(--border); background: var(--bg); }
 		.graph-layer { position: relative; transform-origin: top left; }
 		.graph-edge { position: absolute; height: 0; border-top: var(--asset-graph-edge-width) solid var(--border-strong); transform-origin: left center; pointer-events: none; }
-		.graph-node { position: absolute; width: var(--asset-graph-node-width); min-height: 36px; display: grid; gap: var(--space-2xs); text-align: left; cursor: pointer; }
+		.graph-node { position: absolute; width: var(--asset-graph-node-width); min-height: var(--asset-graph-node-height); display: grid; gap: var(--space-2xs); text-align: left; cursor: pointer; }
 		.graph-node span { color: var(--accent); font-size: var(--text-xs); }
 		.graph-node strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 		.array-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: var(--space-2xs); align-items: start; }
