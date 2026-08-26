@@ -106,9 +106,14 @@ const functionFields: readonly FormField[] = [
 	{ key: "businessRules", label: "业务规则", type: "list" },
 	{ key: "acceptanceCriteria", label: "验收标准", type: "list" },
 ];
+const designChangeUnitFields: readonly FormField[] = [{ key: "id", label: "标识", type: "text" }, { key: "area", label: "区域", type: "text" }, { key: "change", label: "变更", type: "textarea" }, { key: "rationale", label: "理由", type: "textarea" }, { key: "sourceRefs", label: "来源引用", type: "object-list", itemFields: [{ key: "type", label: "类型", type: "text" }, { key: "revisionId", label: "版本号", type: "number" }] }];
+const architectureComponentFields: readonly FormField[] = [{ key: "id", label: "标识", type: "text" }, { key: "name", label: "名称", type: "text" }, { key: "responsibility", label: "职责", type: "textarea" }];
+const architectureRelationshipFields: readonly FormField[] = [{ key: "from", label: "起点", type: "text" }, { key: "to", label: "终点", type: "text" }, { key: "interaction", label: "交互", type: "textarea" }];
+const dataEntityFields: readonly FormField[] = [{ key: "name", label: "名称", type: "text" }, { key: "purpose", label: "用途", type: "textarea" }, { key: "fields", label: "字段", type: "list" }, { key: "lifecycle", label: "生命周期", type: "textarea" }];
+const apiInterfaceFields: readonly FormField[] = [{ key: "id", label: "标识", type: "text" }, { key: "kind", label: "类型", type: "text" }, { key: "name", label: "名称", type: "text" }, { key: "contract", label: "契约", type: "textarea" }, { key: "errors", label: "错误", type: "list" }, { key: "compatibility", label: "兼容性", type: "textarea" }];
 const designFields: readonly FormField[] = [
 	{ key: "summary", label: "摘要", type: "textarea" },
-	{ key: "changeUnits", label: "变更单元", type: "object-list", itemFields: [{ key: "id", label: "标识", type: "text" }, { key: "area", label: "区域", type: "text" }, { key: "change", label: "变更", type: "textarea" }, { key: "rationale", label: "理由", type: "textarea" }, { key: "sourceRefs", label: "来源引用", type: "object-list", itemFields: [{ key: "type", label: "类型", type: "text" }, { key: "revisionId", label: "版本号", type: "number" }] }] },
+	{ key: "changeUnits", label: "变更单元", type: "object-list", itemFields: designChangeUnitFields },
 	{ key: "alternatives", label: "替代方案", type: "list" },
 	{ key: "failureHandling", label: "失败处理", type: "list" },
 	{ key: "testStrategy", label: "测试策略", type: "list" },
@@ -118,15 +123,15 @@ const designFields: readonly FormField[] = [
 ];
 const architectureFields: readonly FormField[] = [
 	{ key: "summary", label: "摘要", type: "textarea" },
-	{ key: "components", label: "组件", type: "object-list", itemFields: [{ key: "id", label: "标识", type: "text" }, { key: "name", label: "名称", type: "text" }, { key: "responsibility", label: "职责", type: "textarea" }] },
-	{ key: "relationships", label: "关系", type: "object-list", itemFields: [{ key: "from", label: "起点", type: "text" }, { key: "to", label: "终点", type: "text" }, { key: "interaction", label: "交互", type: "textarea" }] },
+	{ key: "components", label: "组件", type: "object-list", itemFields: architectureComponentFields },
+	{ key: "relationships", label: "关系", type: "object-list", itemFields: architectureRelationshipFields },
 	{ key: "constraints", label: "约束", type: "list" },
 	{ key: "nonFunctionalRequirements", label: "非功能需求", type: "list" },
 	{ key: "decisions", label: "决策引用", type: "number-list" },
 ];
 const dataFields: readonly FormField[] = [
 	{ key: "summary", label: "摘要", type: "textarea" },
-	{ key: "entities", label: "实体", type: "object-list", itemFields: [{ key: "name", label: "名称", type: "text" }, { key: "purpose", label: "用途", type: "textarea" }, { key: "fields", label: "字段", type: "list" }, { key: "lifecycle", label: "生命周期", type: "textarea" }] },
+	{ key: "entities", label: "实体", type: "object-list", itemFields: dataEntityFields },
 	{ key: "relationships", label: "关系", type: "list" },
 	{ key: "migrationPlan", label: "迁移计划", type: "textarea" },
 	{ key: "rollbackPlan", label: "回滚计划", type: "textarea" },
@@ -134,7 +139,7 @@ const dataFields: readonly FormField[] = [
 ];
 const apiFields: readonly FormField[] = [
 	{ key: "summary", label: "摘要", type: "textarea" },
-	{ key: "interfaces", label: "接口", type: "object-list", itemFields: [{ key: "id", label: "标识", type: "text" }, { key: "kind", label: "类型", type: "text" }, { key: "name", label: "名称", type: "text" }, { key: "contract", label: "契约", type: "textarea" }, { key: "errors", label: "错误", type: "list" }, { key: "compatibility", label: "兼容性", type: "textarea" }] },
+	{ key: "interfaces", label: "接口", type: "object-list", itemFields: apiInterfaceFields },
 	{ key: "security", label: "安全", type: "list" },
 	{ key: "versioning", label: "版本策略", type: "textarea" },
 	{ key: "testStrategy", label: "测试策略", type: "list" },
@@ -153,10 +158,10 @@ const PROMOTED_ITEM_FIELDS: Partial<Record<AssetKind, readonly FormField[]>> = {
 	scenario: scenarioFields,
 	usecase: usecaseFields,
 	function: functionFields,
-	design: [{ key: "id", label: "标识", type: "text" }, { key: "area", label: "区域", type: "text" }, { key: "change", label: "变更", type: "textarea" }, { key: "rationale", label: "理由", type: "textarea" }, { key: "sourceRefs", label: "来源引用", type: "object-list", itemFields: [{ key: "type", label: "类型", type: "text" }, { key: "revisionId", label: "版本号", type: "number" }] }],
-	architecture: [{ key: "id", label: "标识", type: "text" }, { key: "name", label: "名称", type: "text" }, { key: "responsibility", label: "职责", type: "textarea" }],
-	data: [{ key: "name", label: "名称", type: "text" }, { key: "purpose", label: "用途", type: "textarea" }, { key: "fields", label: "字段", type: "list" }, { key: "lifecycle", label: "生命周期", type: "textarea" }],
-	api: [{ key: "id", label: "标识", type: "text" }, { key: "kind", label: "类型", type: "text" }, { key: "name", label: "名称", type: "text" }, { key: "contract", label: "契约", type: "textarea" }, { key: "errors", label: "错误", type: "list" }, { key: "compatibility", label: "兼容性", type: "textarea" }],
+	design: designChangeUnitFields,
+	architecture: architectureComponentFields,
+	data: dataEntityFields,
+	api: apiInterfaceFields,
 };
 
 const RELATION_TARGETS: Record<AssetKind, readonly { kind: AssetKind; type: "contains" | "involves" }[]> = {
@@ -265,6 +270,7 @@ class BaizeAssetLibrary extends LitElement {
 			--asset-list-min-width: 15rem;
 			--asset-pane-height: min(68vh, 42rem);
 			--asset-placeholder-height: 11rem;
+			--asset-fact-min-width: 7.5rem;
 			--asset-graph-node-width: 8.125rem;
 			--asset-graph-edge-width: 0.125rem;
 		}
@@ -323,7 +329,7 @@ class BaizeAssetLibrary extends LitElement {
 		.detail-sub { margin: var(--space-2xs) 0 0; color: var(--text-muted); font-size: var(--text-sm); }
 		.detail-block { border-top: 1px solid var(--border); padding-top: var(--gap); }
 		.detail-block h2 { margin: 0 0 var(--space-2xs); font-size: var(--text-base); }
-		.facts { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: var(--space-2xs); margin: 0; }
+		.facts { display: grid; grid-template-columns: repeat(auto-fit, minmax(var(--asset-fact-min-width), 1fr)); gap: var(--space-2xs); margin: 0; }
 		.fact dt { color: var(--text-subtle); font-size: var(--text-xs); }
 		.fact dd { margin: var(--space-2xs) 0 0; overflow-wrap: anywhere; }
 		.field-list { display: grid; gap: var(--space-2xs); margin: 0; }
@@ -667,7 +673,8 @@ class BaizeAssetLibrary extends LitElement {
 		this.setDraftValue(path, next);
 	}
 
-	private renderFormField(field: FormField, path: readonly string[]): ReturnType<typeof html> {
+	private renderFormField(field: FormField, path: readonly string[]): Renderable {
+		if (this.formMode === "edit" && typeof this.detail?.originArtifactId === "number" && field.key === "sourceRefs") return nothing;
 		const value = this.draftValue(path);
 		if (field.type === "list" || field.type === "number-list") {
 			const values = Array.isArray(value) ? value : [];

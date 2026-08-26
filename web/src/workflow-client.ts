@@ -878,6 +878,19 @@ export function getAsset(apiBase: string, assetId: number): Promise<AssetDetail>
 	return fetchJson(apiBase, `/api/assets/${assetId}`);
 }
 
+async function throwAssetMutationError(response: Response, operation: string): Promise<never> {
+	const body: unknown = await response.json().catch(() => null);
+	if (typeof body === "object" && body !== null && !Array.isArray(body)) {
+		const record = body as Record<string, unknown>;
+		if (record.error === "invalid_relations" && Array.isArray(record.invalidRelations)) {
+			const details = record.invalidRelations.map((item) => typeof item === "string" ? item : JSON.stringify(item)).join("；");
+			throw new Error(`${operation} 关系校验失败：${details}`);
+		}
+		if (typeof record.error === "string") throw new Error(`${operation} asset failed: ${record.error}`);
+	}
+	throw new Error(`${operation} asset failed: ${response.status}`);
+}
+
 export async function createAsset(
 	apiBase: string,
 	workspaceId: number,
@@ -889,7 +902,7 @@ export async function createAsset(
 		credentials: "same-origin",
 		body: JSON.stringify({ workspaceId, kind: input.kind, title: input.title, content: input.content, ...(input.relations === undefined ? {} : { relations: input.relations }) }),
 	});
-	if (!response.ok) throw new Error(`create asset failed: ${response.status}`);
+	if (!response.ok) await throwAssetMutationError(response, "create");
 	return (await response.json()) as { assetId: number; revisionId: number; revisionNo: number };
 }
 export async function updateAsset(
@@ -903,7 +916,7 @@ export async function updateAsset(
 		credentials: "same-origin",
 		body: JSON.stringify(input),
 	});
-	if (!response.ok) throw new Error(`update asset failed: ${response.status}`);
+	if (!response.ok) await throwAssetMutationError(response, "update");
 	return (await response.json()) as { assetId: number; revisionId: number; revisionNo: number };
 }
 
@@ -913,7 +926,12 @@ export async function deleteAsset(apiBase: string, assetId: number): Promise<voi
 		const body: unknown = await response.json().catch(() => null);
 		if (typeof body === "object" && body !== null && !Array.isArray(body)) {
 			const record = body as Record<string, unknown>;
-			if (record.error === "asset_referenced" && Array.isArray(record.refs)) throw new Error(`资产仍被引用：${record.refs.length} 条关系`);
+			if (record.error === "asset_referenced" && Array.isArray(record.refs)) {
+				const details = record.refs.map((ref) => typeof ref === "object" && ref !== null && !Array.isArray(ref)
+					? JSON.stringify(ref)
+					: String(ref)).join("；");
+				throw new Error(`资产仍被以下资产引用：${details}`);
+			}
 		}
 		throw new Error(`delete asset failed: ${response.status}`);
 	}
