@@ -3269,6 +3269,7 @@ deleteWorkspace(workspaceId: number): boolean {
 		return this.assetStore.listReusableAssets(workspaceId);
 	}
 	listReusableAssetPage(workspaceId: number, query: ReusableAssetListQuery = {}): ReusableAssetPage {
+		if (!this.workspaceStore.workspaceExists(workspaceId)) throw new Error("Workspace not found");
 		return this.assetStore.listReusableAssetPage(workspaceId, query);
 	}
 

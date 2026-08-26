@@ -222,7 +222,7 @@ class BaizeShell extends LitElement {
 		return html`<div class="topbar">
 			<div class="brand"><span class="dot">◇</span> BaiZe Architect</div>
 			<span class="spacer"></span>
-			<button class="menu-button" aria-label="打开工作台导航" aria-expanded=${this.drawerOpen} @click=${() => this.toggleDrawer()}>菜单</button>
+			${window.location.pathname.startsWith("/assets") ? html`<button class="menu-button" aria-label="打开工作台导航" aria-expanded=${this.drawerOpen} @click=${() => this.toggleDrawer()}>菜单</button>` : nothing}
 			${this.routerLink("/assets") ? html`<button @click=${() => this.router.goto("/assets")}>资产库</button>` : nothing}
 			${this.routerLink("/manage") ? html`<button @click=${() => this.handleOpenManager()}>管理工作空间</button>` : nothing}
 			<button @click=${() => { this.session = null; }}>退出</button>

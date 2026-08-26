@@ -262,6 +262,8 @@ class BaizeAssetLibrary extends LitElement {
 			display: block;
 			--asset-toolbar-offset: 6.5rem;
 			--asset-mobile-toolbar-offset: 9rem;
+			--asset-list-min-width: 15rem;
+			--asset-pane-height: min(68vh, 42rem);
 			--asset-placeholder-height: 11rem;
 			--asset-graph-node-width: 8.125rem;
 			--asset-graph-edge-width: 0.125rem;
@@ -474,7 +476,7 @@ class BaizeAssetLibrary extends LitElement {
 	private async load(): Promise<void> {
 		if (this.workspaceId <= 0) return;
 		if (this.activeView === "graph") {
-			await this.loadGraph();
+			await Promise.all([this.loadGraph(), this.loadKindCounts()]);
 			return;
 		}
 		this.loading = true;
@@ -531,6 +533,14 @@ class BaizeAssetLibrary extends LitElement {
 			this.error = error instanceof Error ? error.message : String(error);
 		} finally {
 			this.loading = false;
+		}
+	}
+	private async loadKindCounts(): Promise<void> {
+		try {
+			const result = await listAssets(this.apiBase, this.workspaceId, { page: 1, pageSize: 1, kind: "design" });
+			this.kindCounts = result.kindCounts;
+		} catch (error) {
+			this.error = error instanceof Error ? error.message : String(error);
 		}
 	}
 	private async loadRelationCandidates(kind: AssetKind): Promise<void> {
@@ -1104,9 +1114,10 @@ class BaizeAssetLibrary extends LitElement {
 	private graphVisibleNodes(): readonly AssetGraph["nodes"][number][] {
 		if (!this.graph) return [];
 		if (!this.graphKindFilter) return this.graph.nodes;
-		const visibleIds = new Set(this.graph.nodes.filter((node) => node.kind === this.graphKindFilter).map((node) => node.assetId));
+		const selectedIds = new Set(this.graph.nodes.filter((node) => node.kind === this.graphKindFilter).map((node) => node.assetId));
+		const visibleIds = new Set(selectedIds);
 		for (const edge of this.graph.edges) {
-			if (visibleIds.has(edge.fromAssetId) || visibleIds.has(edge.toAssetId)) {
+			if (selectedIds.has(edge.fromAssetId) || selectedIds.has(edge.toAssetId)) {
 				visibleIds.add(edge.fromAssetId);
 				visibleIds.add(edge.toAssetId);
 			}
