@@ -766,7 +766,16 @@ export function gateCategoryLabel(category: GateCategory): string {
 
 /** 资产类别中文标签。 */
 export function assetKindLabel(kind: string): string {
-	const map: Record<string, string> = { scenario: "场景", usecase: "用例", function: "功能", stakeholder: "干系人" };
+	const map: Record<string, string> = {
+		design: "设计",
+		architecture: "架构",
+		data: "数据",
+		api: "接口",
+		scenario: "场景",
+		usecase: "用例",
+		function: "功能",
+		stakeholder: "干系人",
+	};
 	return map[kind] ?? kind;
 }
 
@@ -786,10 +795,26 @@ export function journeySteps(projection: WorkflowProjection): readonly JourneySt
 }
 
 // ---------------------------------------------------------------------------
-// 资产库 API(场景/用例/功能复用池)
+// 资产库 API（Workspace Reusable Asset 列表、详情、关系和操作）
 // ---------------------------------------------------------------------------
 
-export type AssetKind = "scenario" | "usecase" | "function" | "stakeholder";
+export const ASSET_KINDS = ["design", "architecture", "data", "api", "scenario", "usecase", "function", "stakeholder"] as const;
+export type AssetKind = (typeof ASSET_KINDS)[number];
+
+export interface AssetListQuery {
+	page?: number;
+	pageSize?: number;
+	kind?: AssetKind;
+	q?: string;
+}
+
+export interface AssetPage {
+	assets: readonly AssetSummary[];
+	total: number;
+	page: number;
+	pageSize: number;
+	kindCounts: Readonly<Record<AssetKind, number>>;
+}
 
 export interface AssetSummary {
 	id: number;
@@ -831,35 +856,66 @@ export interface AssetDetail {
 		revisionNo: number;
 		contentDocumentId: number;
 		digest: string;
-		source: "manual" | "import" | "migration";
+		source: "manual" | "import" | "migration" | "workflow";
 		content: unknown;
 		createdAt: string;
 	}[];
 }
 
-export async function listAssets(apiBase: string, workspaceId: number): Promise<readonly AssetSummary[]> {
-	const body = await fetchJson<{ assets: AssetSummary[] }>(apiBase, `/api/assets?workspaceId=${workspaceId}`);
-	return body.assets;
+export async function listAssets(apiBase: string, workspaceId: number, query: AssetListQuery = {}): Promise<AssetPage> {
+	const params = new URLSearchParams({ workspaceId: String(workspaceId) });
+	if (query.page !== undefined) params.set("page", String(query.page));
+	if (query.pageSize !== undefined) params.set("pageSize", String(query.pageSize));
+	if (query.kind !== undefined) params.set("kind", query.kind);
+	if (query.q !== undefined && query.q.length > 0) params.set("q", query.q);
+	return fetchJson<AssetPage>(apiBase, `/api/assets?${params.toString()}`);
 }
 
 export function getAsset(apiBase: string, assetId: number): Promise<AssetDetail> {
 	return fetchJson(apiBase, `/api/assets/${assetId}`);
 }
 
-export async function createAsset(apiBase: string, workspaceId: number, input: { kind: AssetKind; title: string; content: unknown }): Promise<{ id: number }> {
+export async function createAsset(
+	apiBase: string,
+	workspaceId: number,
+	input: { kind: AssetKind; title: string; content: unknown; relations?: readonly { toAssetId: number; type: "contains" | "involves" }[] },
+): Promise<{ assetId: number; revisionId: number; revisionNo: number }> {
 	const response = await fetch(`${apiBase}/api/assets`, {
 		method: "POST",
 		headers: { "Content-Type": "application/json" },
 		credentials: "same-origin",
-		body: JSON.stringify({ workspaceId, kind: input.kind, title: input.title, content: input.content }),
+		body: JSON.stringify({ workspaceId, kind: input.kind, title: input.title, content: input.content, ...(input.relations === undefined ? {} : { relations: input.relations }) }),
 	});
 	if (!response.ok) throw new Error(`create asset failed: ${response.status}`);
-	return (await response.json()) as { id: number };
+	return (await response.json()) as { assetId: number; revisionId: number; revisionNo: number };
+}
+export async function updateAsset(
+	apiBase: string,
+	assetId: number,
+	input: { expectedRevisionId: number; title: string; content: unknown; relations: readonly { toAssetId: number; type: "contains" | "involves" }[] },
+): Promise<{ assetId: number; revisionId: number; revisionNo: number }> {
+	const response = await fetch(`${apiBase}/api/assets/${assetId}`, {
+		method: "PUT",
+		headers: { "Content-Type": "application/json" },
+		credentials: "same-origin",
+		body: JSON.stringify(input),
+	});
+	if (!response.ok) throw new Error(`update asset failed: ${response.status}`);
+	return (await response.json()) as { assetId: number; revisionId: number; revisionNo: number };
 }
 
 export async function deleteAsset(apiBase: string, assetId: number): Promise<void> {
 	const response = await fetch(`${apiBase}/api/assets/${assetId}`, { method: "DELETE", credentials: "same-origin" });
 	if (!response.ok) throw new Error(`delete asset failed: ${response.status}`);
+}
+
+export interface AssetGraph {
+	nodes: readonly { assetId: number; kind: AssetKind; title: string }[];
+	edges: readonly { fromAssetId: number; toAssetId: number; type: "contains" | "involves" }[];
+}
+
+export function getAssetGraph(apiBase: string, workspaceId: number): Promise<AssetGraph> {
+	return fetchJson(apiBase, `/api/assets/graph?workspaceId=${workspaceId}`);
 }
 
 export async function exportAssets(apiBase: string, workspaceId: number): Promise<{ assets: readonly AssetDetail[]; relations: readonly AssetRelationExport[] }> {

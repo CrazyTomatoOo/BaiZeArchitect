@@ -2,7 +2,7 @@ import type Database from "better-sqlite3";
 import type { FixtureClock } from "../testing/deterministic-fixtures.js";
 import type { AssetGraph, AssetRelationExport, AssetRelationInput, AssetRelationRecord, ResolvedAssetGraph, ResolvedAssetRelation, ReusableAssetExportBundle } from "./asset-relations.js";
 import { AssetRelationValidationError, isAssetRelationType, isValidAssetRelation } from "./asset-relations.js";
-import type { ReusableAssetKind } from "./reusable-asset-kind.js";
+import { REUSABLE_ASSET_KINDS, type ReusableAssetKind } from "./reusable-asset-kind.js";
 import { parseJson } from "./json.js";
 import type { SnapshotStore } from "./snapshot-store.js";
 
@@ -15,6 +15,12 @@ export class ReusableAssetMalformedBodyError extends Error {
 export class ReusableAssetNameConflictError extends Error {
 	constructor() {
 		super("Reusable Asset stakeholder name conflicts within the workspace");
+	}
+}
+export class ReusableAssetVersionConflictError extends Error {
+	constructor() {
+		super("Reusable Asset revision is stale");
+		this.name = "ReusableAssetVersionConflictError";
 	}
 }
 export class ReusableAssetReferencedError extends Error {
@@ -31,6 +37,44 @@ export interface ReusableAssetSummary {
 	currentRevision: { id: number; revisionNo: number; digest: string } | null;
 	legacyOriginRequirementId: number | null;
 	createdAt: string;
+}
+
+export interface ReusableAssetListQuery {
+	page?: number;
+	pageSize?: number;
+	kind?: ReusableAssetKind;
+	q?: string;
+}
+
+export interface ReusableAssetPage {
+	assets: readonly ReusableAssetSummary[];
+	total: number;
+	page: number;
+	pageSize: number;
+	kindCounts: Readonly<Record<ReusableAssetKind, number>>;
+}
+
+type ReusableAssetSummaryRow = {
+	id: number;
+	kind: string;
+	title: string;
+	current_revision_id: number | null;
+	legacy_origin_requirement_id: number | null;
+	created_at: string;
+	revision_no: number | null;
+	content_digest: string | null;
+};
+
+function toReusableAssetSummary(workspaceId: number, row: ReusableAssetSummaryRow): ReusableAssetSummary {
+	return {
+		id: row.id,
+		workspaceId,
+		kind: row.kind as ReusableAssetKind,
+		title: row.title,
+		currentRevision: row.current_revision_id === null ? null : { id: row.current_revision_id, revisionNo: row.revision_no as number, digest: row.content_digest as string },
+		legacyOriginRequirementId: row.legacy_origin_requirement_id,
+		createdAt: row.created_at,
+	};
 }
 
 export interface ReusableAssetDetail {
@@ -75,6 +119,30 @@ function normalizeStakeholderContent(content: unknown): { name: string; descript
 
 function stakeholderNameKey(name: string): string {
 	return name.trim().toLowerCase();
+}
+
+function isStructuredAssetContentValid(kind: ReusableAssetKind, content: unknown): boolean {
+	if (kind === "stakeholder") return normalizeStakeholderContent(content) !== undefined;
+	if (typeof content !== "object" || content === null || Array.isArray(content)) return false;
+	const record = content as Record<string, unknown>;
+	if (!("schemaVersion" in record) && !("artifactKind" in record)) return true;
+	if (record.schemaVersion !== `artifact/${kind}/v1` || record.artifactKind !== kind || typeof record.summary !== "string" || record.summary.trim().length === 0) return false;
+	const requiredArrays: Partial<Record<Exclude<ReusableAssetKind, "stakeholder">, readonly string[]>> = {
+		scenario: ["scenarios"],
+		usecase: ["useCases"],
+		function: ["functions"],
+		design: ["changeUnits", "alternatives", "failureHandling", "testStrategy", "implementationOrder"],
+		architecture: ["components", "nonFunctionalRequirements"],
+		data: ["entities", "privacyAndRetention"],
+		api: ["interfaces", "security", "testStrategy"],
+	};
+	for (const key of requiredArrays[kind] ?? []) {
+		if (!Array.isArray(record[key]) || record[key].length === 0) return false;
+	}
+	if (kind === "data" && (typeof record.migrationPlan !== "string" || typeof record.rollbackPlan !== "string")) return false;
+	if (kind === "api" && typeof record.versioning !== "string") return false;
+	if (kind === "design" && (typeof record.rolloutStrategy !== "string" || typeof record.rollbackStrategy !== "string")) return false;
+	return true;
 }
 
 /**
@@ -187,6 +255,7 @@ export class AssetStore {
 		const timestamp = this.clock.now().toISOString();
 		const content = input.kind === "stakeholder" ? normalizeStakeholderContent(input.content) : input.content;
 		if (input.kind === "stakeholder" && !content) throw new ReusableAssetMalformedBodyError();
+		if (!isStructuredAssetContentValid(input.kind, content)) throw new ReusableAssetMalformedBodyError();
 		const title = input.kind === "stakeholder" ? (content as { name: string }).name : input.title;
 		const schemaRef = input.kind === "stakeholder" ? "asset/stakeholder/v1" : `artifact/${input.kind}/v1`;
 		const transaction = this.database.transaction(() => {
@@ -202,6 +271,46 @@ export class AssetStore {
 				.run(assetId, document.id, document.digest, input.source ?? "manual", input.actorSnapshotDocumentId ?? null, input.migrationAttestationDocumentId ?? null, timestamp).lastInsertRowid);
 			this.database.prepare("update reusable_assets set current_revision_id = ? where id = ?").run(revisionId, assetId);
 			return { assetId, revisionId, revisionNo: 1 };
+		}).immediate;
+		return transaction();
+	}
+
+	updateReusableAsset(input: {
+		workspaceId: number;
+		assetId: number;
+		expectedRevisionId: number;
+		title: string;
+		content: unknown;
+		relations: readonly AssetRelationInput[];
+	}): { assetId: number; revisionId: number; revisionNo: number } | undefined {
+		const timestamp = this.clock.now().toISOString();
+		const transaction = this.database.transaction(() => {
+			const asset = this.database
+				.prepare(`select a.id, a.workspace_id, a.kind, a.current_revision_id, r.revision_no
+					from reusable_assets a
+					left join reusable_asset_revisions r on r.id = a.current_revision_id
+					where a.id = ? and a.workspace_id = ?`)
+				.get(input.assetId, input.workspaceId) as { id: number; workspace_id: number; kind: ReusableAssetKind; current_revision_id: number | null; revision_no: number | null } | undefined;
+			if (!asset) return undefined;
+			if (asset.current_revision_id !== input.expectedRevisionId) throw new ReusableAssetVersionConflictError();
+			const title = input.title.trim();
+			if (title.length === 0) throw new ReusableAssetMalformedBodyError();
+			const stakeholderContent = asset.kind === "stakeholder" ? normalizeStakeholderContent(input.content) : undefined;
+			const content = asset.kind === "stakeholder" ? stakeholderContent : input.content;
+			if (asset.kind === "stakeholder" && (!stakeholderContent || stakeholderContent.name !== title)) throw new ReusableAssetMalformedBodyError();
+			if (!isStructuredAssetContentValid(asset.kind, content)) throw new ReusableAssetMalformedBodyError();
+			if (asset.kind === "stakeholder" && this.stakeholderNameExists(input.workspaceId, title, asset.id)) throw new ReusableAssetNameConflictError();
+			const document = this.snapshotStore.insertSnapshot("reusable_asset_content", asset.kind === "stakeholder" ? "asset/stakeholder/v1" : `artifact/${asset.kind}/v1`, content, timestamp);
+			const revisionNo = (asset.revision_no ?? 0) + 1;
+			const revisionId = Number(this.database
+				.prepare("insert into reusable_asset_revisions(reusable_asset_id, revision_no, content_document_id, content_digest, source, actor_snapshot_document_id, migration_attestation_document_id, created_at) values (?, ?, ?, ?, 'manual', null, null, ?)")
+				.run(asset.id, revisionNo, document.id, document.digest, timestamp).lastInsertRowid);
+			this.database.prepare("update reusable_assets set title = ?, current_revision_id = ?, updated_at = ? where id = ?").run(title, revisionId, timestamp, asset.id);
+			this.database.prepare("delete from asset_relations where from_asset_id = ?").run(asset.id);
+			if (input.relations.length > 0) {
+				this.writeRelations({ workspaceId: input.workspaceId, fromAssetId: asset.id, fromRevisionId: revisionId, relations: input.relations });
+			}
+			return { assetId: asset.id, revisionId, revisionNo };
 		}).immediate;
 		return transaction();
 	}
@@ -252,38 +361,6 @@ export class AssetStore {
 		return transaction();
 	}
 
-	updateStakeholderReusableAsset(assetId: number, patch: unknown): { revisionId: number; revisionNo: number } | undefined {
-		if (typeof patch !== "object" || patch === null || Array.isArray(patch)) throw new ReusableAssetMalformedBodyError();
-		const record = patch as { name?: unknown; description?: unknown };
-		if (!("name" in record) && !("description" in record)) throw new ReusableAssetMalformedBodyError();
-		const hasName = "name" in record;
-		const hasDescription = "description" in record;
-		const patchName = hasName ? normalizeStakeholderName(record.name) : undefined;
-		const patchDescription = hasDescription ? normalizeStakeholderDescription(record.description) : undefined;
-		if ((hasName && !patchName) || (hasDescription && patchDescription === undefined)) throw new ReusableAssetMalformedBodyError();
-		const timestamp = this.clock.now().toISOString();
-		const transaction = this.database.transaction(() => {
-			const asset = this.database
-				.prepare("select a.id, a.workspace_id, a.kind, a.current_revision_id, r.revision_no, d.content from reusable_assets a join reusable_asset_revisions r on r.id = a.current_revision_id join snapshot_documents d on d.id = r.content_document_id where a.id = ?")
-				.get(assetId) as { id: number; workspace_id: number; kind: string; current_revision_id: number; revision_no: number; content: string } | undefined;
-			if (!asset || asset.kind !== "stakeholder") return undefined;
-			const current = normalizeStakeholderContent(parseJson<unknown>(asset.content));
-			if (!current) throw new ReusableAssetMalformedBodyError();
-			const next = {
-				name: patchName ?? current.name,
-				description: patchDescription ?? current.description,
-			};
-			if (this.stakeholderNameExists(asset.workspace_id, next.name, asset.id)) throw new ReusableAssetNameConflictError();
-			const document = this.snapshotStore.insertSnapshot("reusable_asset_content", "asset/stakeholder/v1", next, timestamp);
-			const revisionNo = asset.revision_no + 1;
-			const revisionId = Number(this.database
-				.prepare("insert into reusable_asset_revisions(reusable_asset_id, revision_no, content_document_id, content_digest, source, actor_snapshot_document_id, migration_attestation_document_id, created_at) values (?, ?, ?, ?, 'manual', null, null, ?)")
-				.run(asset.id, revisionNo, document.id, document.digest, timestamp).lastInsertRowid);
-			this.database.prepare("update reusable_assets set title = ?, current_revision_id = ?, updated_at = ? where id = ?").run(next.name, revisionId, timestamp, asset.id);
-			return { revisionId, revisionNo };
-		}).immediate;
-		return transaction();
-	}
 
 	private stakeholderNameExists(workspaceId: number, name: string, excludeAssetId?: number): boolean {
 		const rows = this.database
@@ -311,16 +388,42 @@ export class AssetStore {
 	listReusableAssets(workspaceId: number): readonly ReusableAssetSummary[] {
 		const rows = this.database
 			.prepare("select a.id, a.kind, a.title, a.current_revision_id, a.legacy_origin_requirement_id, a.created_at, r.revision_no, r.content_digest from reusable_assets a left join reusable_asset_revisions r on r.id = a.current_revision_id where a.workspace_id = ? order by a.id")
-			.all(workspaceId) as Array<{ id: number; kind: string; title: string; current_revision_id: number | null; legacy_origin_requirement_id: number | null; created_at: string; revision_no: number | null; content_digest: string | null }>;
-		return rows.map((row) => ({
-			id: row.id,
-			workspaceId,
-			kind: row.kind as ReusableAssetSummary["kind"],
-			title: row.title,
-			currentRevision: row.current_revision_id === null ? null : { id: row.current_revision_id, revisionNo: row.revision_no as number, digest: row.content_digest as string },
-			legacyOriginRequirementId: row.legacy_origin_requirement_id,
-			createdAt: row.created_at,
-		}));
+			.all(workspaceId) as ReusableAssetSummaryRow[];
+		return rows.map((row) => toReusableAssetSummary(workspaceId, row));
+	}
+
+	listReusableAssetPage(workspaceId: number, query: ReusableAssetListQuery = {}): ReusableAssetPage {
+		const page = Number.isInteger(query.page) && (query.page as number) > 0 ? query.page as number : 1;
+		const pageSize = Number.isInteger(query.pageSize) && (query.pageSize as number) > 0 ? query.pageSize as number : 12;
+		const normalizedQuery = typeof query.q === "string" ? query.q.trim().toLowerCase() : "";
+		const conditions = ["a.workspace_id = ?"];
+		const parameters: Array<number | string> = [workspaceId];
+		if (query.kind !== undefined) {
+			conditions.push("a.kind = ?");
+			parameters.push(query.kind);
+		}
+		if (normalizedQuery.length > 0) {
+			conditions.push("instr(lower(a.title), ?) > 0");
+			parameters.push(normalizedQuery);
+		}
+		const where = conditions.join(" and ");
+		const total = (this.database
+			.prepare(`select count(*) as count from reusable_assets a where ${where}`)
+			.get(...parameters) as { count: number }).count;
+		const rows = this.database
+			.prepare(`select a.id, a.kind, a.title, a.current_revision_id, a.legacy_origin_requirement_id, a.created_at, r.revision_no, r.content_digest
+				from reusable_assets a
+				left join reusable_asset_revisions r on r.id = a.current_revision_id
+				where ${where}
+				order by a.id desc
+				limit ? offset ?`)
+			.all(...parameters, pageSize, (page - 1) * pageSize) as ReusableAssetSummaryRow[];
+		const kindCounts = Object.fromEntries(REUSABLE_ASSET_KINDS.map((kind) => [kind, 0])) as Record<ReusableAssetKind, number>;
+		const countRows = this.database
+			.prepare("select kind, count(*) as count from reusable_assets where workspace_id = ? group by kind")
+			.all(workspaceId) as Array<{ kind: ReusableAssetKind; count: number }>;
+		for (const row of countRows) kindCounts[row.kind] = row.count;
+		return { assets: rows.map((row) => toReusableAssetSummary(workspaceId, row)), total, page, pageSize, kindCounts };
 	}
 
 	getResolvedAssetGraph(assetId: number): ResolvedAssetGraph {

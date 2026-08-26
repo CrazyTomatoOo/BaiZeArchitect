@@ -15,7 +15,7 @@ import { resolve } from "node:path";
 import { readFile } from "node:fs/promises";
 import type { AddressInfo } from "node:net";
 import type { HeadlessWorkflowRuntime } from "./headless-runtime.js";
-import { AssetRelationValidationError, BusyWorkspaceError, ReusableAssetMalformedBodyError, ReusableAssetNameConflictError, ReusableAssetReferencedError } from "../persistence/workflow-store.js";
+import { AssetRelationValidationError, BusyWorkspaceError, ReusableAssetMalformedBodyError, ReusableAssetNameConflictError, ReusableAssetReferencedError, ReusableAssetVersionConflictError } from "../persistence/workflow-store.js";
 import type { AssetRelationExport, AssetRelationInput } from "../persistence/workflow-store.js";
 import { WORKFLOW_COMMAND_TYPES, type WorkflowCommandType } from "./command-types.js";
 import type { RequirementBaseline } from "./requirement.js";
@@ -86,6 +86,13 @@ function parseImportedRelations(value: unknown): readonly AssetRelationExport[] 
 		});
 	}
 	return relations;
+}
+
+function parsePositiveQueryInteger(value: string | null, fallback: number, maximum?: number): number | undefined {
+	if (value === null || value === "") return fallback;
+	const parsed = Number(value);
+	if (!Number.isSafeInteger(parsed) || parsed < 1 || (maximum !== undefined && parsed > maximum)) return undefined;
+	return parsed;
 }
 /**
  * 就绪 Task 驱动循环:以生产模型驱动器逐个执行当前就绪任务(beginAttempt 单任务语义),
@@ -814,7 +821,20 @@ export async function startOperatorServer(
 				sendJson(response, 404, { error: "unknown_workspace" });
 				return;
 			}
-			sendJson(response, 200, { assets: options.runtime.listReusableAssets(workspaceId) });
+			const page = parsePositiveQueryInteger(url.searchParams.get("page"), 1);
+			const pageSize = parsePositiveQueryInteger(url.searchParams.get("pageSize"), 12, 100);
+			const rawKind = url.searchParams.get("kind");
+			const kind = rawKind === null || rawKind === "" ? undefined : rawKind;
+			if (page === undefined || pageSize === undefined || (kind !== undefined && !isReusableAssetKind(kind))) {
+				sendJson(response, 400, { error: "invalid_asset_query" });
+				return;
+			}
+			sendJson(response, 200, options.runtime.listReusableAssetPage(workspaceId, {
+				page,
+				pageSize,
+				kind,
+				q: url.searchParams.get("q") ?? undefined,
+			}));
 			return;
 		}
 
@@ -912,7 +932,7 @@ export async function startOperatorServer(
 			return;
 		}
 
-		if (request.method === "PATCH" && segments.length === 3 && segments[0] === "api" && segments[1] === "assets") {
+		if (request.method === "PUT" && segments.length === 3 && segments[0] === "api" && segments[1] === "assets") {
 			let body: unknown;
 			try {
 				body = JSON.parse(await readBody(request));
@@ -920,20 +940,51 @@ export async function startOperatorServer(
 				sendJson(response, 400, { error: "malformed_body" });
 				return;
 			}
+			if (typeof body !== "object" || body === null || Array.isArray(body)) {
+				sendJson(response, 400, { error: "malformed_body" });
+				return;
+			}
+			const record = body as { expectedRevisionId?: unknown; title?: unknown; content?: unknown; relations?: unknown };
+			const assetId = Number(segments[2]);
+			const asset = options.runtime.getReusableAsset(assetId);
+			if (!asset) {
+				sendJson(response, 404, { error: "unknown_asset" });
+				return;
+			}
+			const relations = parseOutgoingRelations(record.relations);
+			if (!Number.isInteger(record.expectedRevisionId) || typeof record.title !== "string" || !("content" in record) || relations === undefined) {
+				sendJson(response, 400, { error: "malformed_body" });
+				return;
+			}
 			try {
-				const updated = options.runtime.updateStakeholderReusableAsset(Number(segments[2]), body);
+				const updated = options.runtime.updateReusableAsset({
+					workspaceId: asset.workspaceId,
+					assetId,
+					expectedRevisionId: record.expectedRevisionId as number,
+					title: record.title,
+					content: record.content,
+					relations,
+				});
 				if (!updated) {
 					sendJson(response, 404, { error: "unknown_asset" });
 					return;
 				}
 				sendJson(response, 200, updated);
 			} catch (error) {
+				if (error instanceof ReusableAssetVersionConflictError) {
+					sendJson(response, 409, { error: "version_conflict" });
+					return;
+				}
 				if (error instanceof ReusableAssetMalformedBodyError) {
 					sendJson(response, 400, { error: "malformed_body" });
 					return;
 				}
 				if (error instanceof ReusableAssetNameConflictError) {
 					sendJson(response, 409, { error: "name_conflict" });
+					return;
+				}
+				if (error instanceof AssetRelationValidationError) {
+					sendJson(response, 400, { error: "invalid_relations", invalidRelations: error.issues });
 					return;
 				}
 				throw error;

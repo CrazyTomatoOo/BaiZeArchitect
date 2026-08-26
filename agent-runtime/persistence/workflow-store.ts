@@ -32,7 +32,7 @@ import type { ReusableAssetKind } from "./reusable-asset-kind.js";
 import { parseJson } from "./json.js";
 import { AssetStore } from "./asset-store.js";
 import type { AssetGraph, AssetRelationExport, AssetRelationInput, AssetRelationRecord, ReusableAssetExportBundle } from "./asset-relations.js";
-import type { ReusableAssetDetail, ReusableAssetSummary } from "./asset-store.js";
+import type { ReusableAssetDetail, ReusableAssetListQuery, ReusableAssetPage, ReusableAssetSummary } from "./asset-store.js";
 import { SnapshotStore } from "./snapshot-store.js";
 import type { SnapshotDocument } from "./snapshot-store.js";
 import { WorkspaceStore } from "./workspace-store.js";
@@ -42,10 +42,10 @@ import type { WorkspaceSummary } from "./workspace-store.js";
 // 继续从 workflow-store 引用，保持既有导入路径稳定（ADR-006 门面形态）。
 export { BusyWorkspaceError } from "./workspace-store.js";
 export type { WorkspaceSummary } from "./workspace-store.js";
-export { ReusableAssetMalformedBodyError, ReusableAssetNameConflictError, ReusableAssetReferencedError } from "./asset-store.js";
+export { ReusableAssetMalformedBodyError, ReusableAssetNameConflictError, ReusableAssetReferencedError, ReusableAssetVersionConflictError } from "./asset-store.js";
 export { AssetRelationValidationError } from "./asset-relations.js";
 export type { AssetGraph, AssetRelationExport, AssetRelationInput, AssetRelationRecord, ReusableAssetExportBundle } from "./asset-relations.js";
-export type { ReusableAssetDetail, ReusableAssetSummary } from "./asset-store.js";
+export type { ReusableAssetDetail, ReusableAssetListQuery, ReusableAssetPage, ReusableAssetSummary } from "./asset-store.js";
 import { type WorkflowCommandType } from "../workflow/command-types.js";
 import { ARTIFACT_OWNERSHIP, type InputBinding, type TaskOutputInput } from "../workflow/plan-types.js";
 import type { RoleResult, ContextManifest, RoleContract, BeginAttemptResult, CompleteAttemptResult, TraceLinkProposal, CriticReport, FindingProposal, FindingSeverity, AssetReference } from "../workflow/role-result.js";
@@ -3260,12 +3260,16 @@ deleteWorkspace(workspaceId: number): boolean {
 		return items;
 	}
 
-	updateStakeholderReusableAsset(assetId: number, patch: unknown): { revisionId: number; revisionNo: number } | undefined {
-		return this.assetStore.updateStakeholderReusableAsset(assetId, patch);
+	updateReusableAsset(input: { workspaceId: number; assetId: number; expectedRevisionId: number; title: string; content: unknown; relations: readonly AssetRelationInput[] }): { assetId: number; revisionId: number; revisionNo: number } | undefined {
+		if (!this.workspaceStore.workspaceExists(input.workspaceId)) throw new Error("Workspace not found");
+		return this.assetStore.updateReusableAsset(input);
 	}
 
 	listReusableAssets(workspaceId: number): readonly ReusableAssetSummary[] {
 		return this.assetStore.listReusableAssets(workspaceId);
+	}
+	listReusableAssetPage(workspaceId: number, query: ReusableAssetListQuery = {}): ReusableAssetPage {
+		return this.assetStore.listReusableAssetPage(workspaceId, query);
 	}
 
 	getReusableAsset(assetId: number): ReusableAssetDetail | undefined {

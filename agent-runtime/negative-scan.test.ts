@@ -120,7 +120,6 @@ test("old web components are deleted", () => {
 		"web/src/baize-chat-intake.ts",
 		"web/src/baize-architecture-browser.ts",
 		"web/src/baize-c4-canvas.ts",
-		"web/src/baize-asset-library.ts",
 		"web/src/baize-overview.ts",
 		"web/src/baize-requirement.ts",
 		"web/src/baize-system.ts",

@@ -16,8 +16,8 @@ workspace 设计产出的完整事实图景（干系人、场景、用例、功�
 | kind | `stakeholder` |
 | 身份 | 仅 store 级 `assetId`；content 无 slug id |
 | content | `{ name: string(必填非空), description?: string(可空→"") }`，additionalProperties: false |
-| title | `title = content.name` 镜像：创建同步、PATCH 改名同步 |
-| 唯一性 | workspace 内 `trim + 大小写不敏感` 归一化后唯一；冲突（创建/PATCH）→ `409 name_conflict` |
+| title | `title = content.name` 镜像：创建同步、统一 PUT 改名同步 |
+| 唯一性 | workspace 内 `trim + 大小写不敏感` 归一化后唯一；冲突（创建/统一 PUT）→ `409 name_conflict` |
 | 治理 | 纯资产库操作；不触发审批/readiness/workflow 事件 |
 | 迁移 | 重写 0013 migration（非新增 0019）：CHECK `'actor'`→`'stakeholder'`、checksum `stakeholder-kind-v1`、文件改名 `0013-stakeholder-kind.ts`；无存量数据，demo/dev DB 删除重建 |
 | 标签传播 | 全层统一「干系人」：`assetKindLabel`、`artifact-labels.ts` 展示标签都改；schema 字段名 `actors`/`actor` 不改（Out of scope 边界） |
@@ -98,43 +98,63 @@ create table asset_relations (
 - 批内顺序：先建全部资产（按 title+kind 复用或新建）→ 再按 title+kind 反查 assetId 重建边
 - 校验沿用 R07：toAssetId 存在性、白名单、自环、同 workspace
 
-### PATCH
+### 编辑
 
-`PATCH /api/assets/:id`（仅 kind=stakeholder）body `{ name?, description? }`。改名追加 revision、title 同步；边表不刷新（enrich 动态读最新 title）。
+`PUT /api/assets/:id` 对全部 8 种 Reusable Asset 提供完整替换编辑，body：
+```jsonc
+{
+  "expectedRevisionId": 9,
+  "title": "资产标题",
+  "content": { /* 当前 kind 的业务字段 */ },
+  "relations": [{ "toAssetId": 12, "type": "contains" }]
+}
+```
 
-### 禁删
+- `expectedRevisionId` 必须等于当前 revisionId；不一致 → `409 version_conflict`，避免并发覆盖。
+- title 与 content 一次提交；成功追加一个不可变 revision，旧 revision 保留只读。
+- `stakeholder` 继续保持 `name = title` 镜像与 workspace 内 trim+大小写不敏感唯一。
+- 业务字段严格复用对应 `artifact-content-v1` v1 schema；`artifactKind`、`schemaVersion` 由 kind 系统生成；`sourceRefs` 对 promote 资产只读，手动资产可为空或由系统生成；不修改 Artifact schema。
+- `relations` 是该资产完整 outgoing 集合；编辑时与新 revision 同事务替换。incoming 关系不被隐式修改。
+- 关系边仍保留创建时的 revisionId；`resolvedGraph` 展示双方最新 revision。编辑不自动重写已有关系。
+- 原 stakeholder-only `PATCH /api/assets/:id` 契约由该统一 PUT 替代，不保留双轨写入。
 
-`DELETE /api/assets/:id` 前双向扫：`from_asset_id = ? OR to_asset_id = ?`。非空 → `409 asset_referenced+refs`；空 → 200。
+### 列表分页与过滤
 
-### create 扩展
+`GET /api/assets?workspaceId=&page=&pageSize=&kind=&q=`：
 
-`POST /api/assets` body 加可选 `relations: [{ toAssetId, type }]`。server 解析当前 revisionId 存入边表。
+- `kind` 必须是 8 种 Reusable Asset kind 之一；`q` 只匹配 title，大小写不敏感。
+- 默认 `pageSize=12`；按 `id desc` 稳定排序。
+- 返回 `{ assets, total, page, pageSize, kindCounts }`；`kindCounts` 返回 8 种 kind 的 workspace 总数。
+- 列表不返回 `resolvedGraph`；详情按需返回直接 incoming/outgoing，避免列表 N+1。
 
-### enrich
+### 展示与操作边界
 
-- `GET /api/assets/:id` 返回 `resolvedGraph: { incoming, outgoing }` 浮跟随最新 revision
-- `GET /api/assets?workspaceId=` 列表返回 `ReusableAssetSummary[]`（**不含 resolvedGraph**，避免 N+1；需拓扑用 graph 端点）
-- 新增 `GET /api/assets/graph?workspaceId=` 返回 `{ nodes, edges }` 全拓扑
+- 资产库使用 8 个资产类型 tab 加 1 个「关系图」tab；关系图不是资产 kind，而是 Workspace 级拓扑视图。
+- 类型 tab 使用服务端分页和当前 tab 标题过滤；关系图支持类型过滤，保留相邻节点与关联边，并与资产详情联动。
+- 单资产详情展示概览、当前 revision、结构化内容和双向关联；revision 历史及原始 JSON 默认折叠。
+- 新建 8 种资产均使用对应 v1 schema 的结构化表单，数组字段支持增删、排序和逐项编辑；导出立即下载，导入先预览后一次性提交。
+- 删除前行内二次确认；有任何 incoming/outgoing 关系时阻止删除并展示引用方。
 
 ### 校验
 
 server 层 create/import 校验 relations 写入：toAssetId 存在性 + (fromKind,toKind,type) 白名单 + 自环禁止 + 同 workspace。聚合 `400 invalid_relations`。
 
-## 5. 测试矩阵（八维）
+## 5. 测试矩阵（十维）
 
 | 维度 | 变量（判据） |
 |---|---|
-| CRUD | create stakeholder 201+rev1；PATCH name→新rev+title同步；PATCH desc→仅desc变；PATCH 重名→409；唯一性；PATCH 空 body→400；PATCH 非 stakeholder→404 |
-| 引用校验 | relations 写入校验：toAssetId 存在性；白名单；自环→400；跨 workspace→400；聚合 invalid_relations |
-| 禁删 | 双向扫 from OR to 非空→409；空→200；级联销毁边 |
-| 重映射 | import title 映射：同 title+kind 复用；新名新建；边按 title+kind 反查重建 |
-| 导出 | 单段 {assets, relations}；边用 title+kind |
+| CRUD | 8 种 kind 均可结构化创建；统一 PUT 完整替换并追加不可变 revision；expectedRevisionId 过期→409 version_conflict；stakeholder name/title 镜像与唯一性；旧 revision 只读；outgoing relations 同事务替换 |
+| 引用校验 | relations 写入校验：toAssetId 存在性；白名单；自环→400；跨 workspace→400；聚合 invalid_relations；无部分写入 |
+| 禁删 | 双向扫 from OR to 非空→409 asset_referenced+refs；空→200；级联销毁边；UI 行内二次确认 |
+| 重映射 | import title 映射：同 title+kind 复用且不覆盖内容；新名新建；边按 title+kind 反查重建；bundle 内 outgoing 集合替换 |
+| 导出 | 单段 `{assets, relations}`；边用 title+kind；立即下载；跨 workspace 可移植 |
 | 归档 | 同事务 promote 7 kind（analysis/stakeholder 排除）；去重跳过 origin_artifact_id（无 FK 审计列）；involves 边自动建（actors/actor 按名匹配 stakeholder）；contains 边不自动建（只手动声明）；幂等不重复；手动 promote 去重 |
-| 关系建模 | contains 5 kind-pairs + involves 2 kind-pairs；DAG 多父；resolvedGraph 浮跟随；graph 端点全拓扑 |
-| 迁移 | 0013 重写 actor→stakeholder；checksum；代码全量改名；CONTEXT.md；FTS 无迁移 |
+| 关系建模 | contains 5 kind-pairs + involves 2 kind-pairs；DAG 多父；resolvedGraph 浮跟随；graph 端点全拓扑；编辑保留关系创建时 revision |
+| 规模治理 | 服务端 `page/pageSize/kind/q`；默认 pageSize=12；q 只匹配 title 且大小写不敏感；稳定 `id desc`；返回 `total/page/pageSize/kindCounts`；列表不返回 resolvedGraph |
+| 展示交互 | 8 个资产 kind tab + 关系图第 9 个 tab；固定 toolbar/tabs；左紧凑列表与右详情/表单独立滚动；详情四块，历史/原始 JSON 折叠；窄屏单列 |
+| 迁移 | 0013 重写 actor→stakeholder；checksum；代码全量改名；CONTEXT.md；FTS 无迁移；统一 PUT 替代 stakeholder-only PATCH |
 
 完整机读矩阵见 [stakeholder-asset-spec-v1.json](../.wayfinder/2026-08-user-role-assets/assets/stakeholder-asset-spec-v1.json) 的 `acceptanceMatrix`。
-
 ## 6. 评审清单与门禁
 
 评审清单（六项）：

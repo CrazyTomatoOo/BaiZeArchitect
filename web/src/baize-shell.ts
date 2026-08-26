@@ -18,7 +18,7 @@ import { Router, type RouteConfig } from "@lit-labs/router";
 
 /**
  * baize-shell — 应用外壳:session 管理 + 路由视图切换。
- * 路由:/ = 登录或需求列表;/manage = 管理页;/workflow/:id = 详情;/workflow/:id/:tab = 详情+tab。
+ * 路由:/ = 登录或需求列表;/assets = 资产工作台;/manage = 管理页;/workflow/:id = 详情;/workflow/:id/:tab = 详情+tab。
  * session 走 cookie 不受路由影响;登录后跳回原 URL。
  */
 class BaizeShell extends LitElement {
@@ -40,6 +40,7 @@ class BaizeShell extends LitElement {
 
 	private router = new Router(this, [
 		{ path: "/", render: () => this.renderHome() },
+		{ path: "/assets", render: () => this.renderAssets() },
 		{ path: "/manage", render: () => this.renderManage() },
 		{ path: "/workflow/:id", render: ({ id }) => this.renderWorkflow(Number(id)) },
 		{ path: "/workflow/:id/:tab", render: ({ id, tab }) => this.renderWorkflow(Number(id), tab) },
@@ -199,6 +200,7 @@ class BaizeShell extends LitElement {
 		return html`<div class="topbar">
 			<div class="brand"><span class="dot">◇</span> BaiZe Architect</div>
 			<span class="spacer"></span>
+			${this.routerLink("/assets") ? html`<button @click=${() => this.router.goto("/assets")}>资产库</button>` : nothing}
 			${this.routerLink("/manage") ? html`<button @click=${() => this.handleOpenManager()}>管理工作空间</button>` : nothing}
 			<button @click=${() => { this.session = null; }}>退出</button>
 		</div>`;
@@ -215,10 +217,6 @@ class BaizeShell extends LitElement {
 			return html`<div class="empty">请先选择或创建工作空间。</div>`;
 		}
 		return html`<div class="home-stack">
-			<baize-asset-library
-				.apiBase=${this.apiBase}
-				.workspaceId=${this.workspaceId}
-			></baize-asset-library>
 			<baize-requirements
 				.apiBase=${this.apiBase}
 				.workspaceId=${this.workspaceId}
@@ -228,6 +226,16 @@ class BaizeShell extends LitElement {
 				}}
 			></baize-requirements>
 		</div>`;
+	}
+
+	private renderAssets(): ReturnType<typeof html> {
+		if (this.workspaceId === 0) {
+			return html`<div class="empty">请先选择或创建工作空间。</div>`;
+		}
+		return html`<baize-asset-library
+			.apiBase=${this.apiBase}
+			.workspaceId=${this.workspaceId}
+		></baize-asset-library>`;
 	}
 
 	private renderManage(): ReturnType<typeof html> {

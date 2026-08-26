@@ -49,18 +49,23 @@
   "reusableAssets": {
     "list": {
       "method": "GET",
-      "path": "/api/assets",
-      "purpose": "List workspace-level ReusableAssets"
+      "path": "/api/assets?workspaceId=:workspaceId&page=:page&pageSize=:pageSize&kind=:kind&q=:query",
+      "purpose": "List workspace-level ReusableAssets with server pagination, kind filtering, title query, total, and kindCounts"
     },
     "create": {
       "method": "POST",
       "path": "/api/assets",
       "purpose": "Create ReusableAsset and first immutable revision without Requirement or Run"
     },
-    "detail": {
-      "method": "GET",
+    "update": {
+      "method": "PUT",
       "path": "/api/assets/:assetId",
-      "purpose": "Read identity and revision history"
+      "purpose": "Append an immutable full-replacement revision with expectedRevisionId and outgoing relation set"
+    },
+    "graph": {
+      "method": "GET",
+      "path": "/api/assets/graph",
+      "purpose": "Read Workspace-wide Reusable Asset topology for the relation-graph view"
     },
     "delete": {
       "method": "DELETE",

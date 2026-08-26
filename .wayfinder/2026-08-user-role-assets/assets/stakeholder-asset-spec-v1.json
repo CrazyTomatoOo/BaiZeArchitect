@@ -9,7 +9,7 @@
     "tickets/R08-archive-auto-promote.md",
     "tickets/R09-import-export-api-relations.md"
   ],
-  "scope": "asset-library-only; workflow artifact layer untouched; no approval/readiness/RBAC/audit additions; no existing data (pre-production, compatibility waived)",
+  "scope": "asset-library-and-presentation; workflow artifact layer untouched; no approval/readiness/RBAC/audit additions; no existing data (pre-production, compatibility waived)",
   "contracts": {
     "schema": {
       "stakeholderAsset": {
@@ -17,8 +17,8 @@
         "schemaId": "asset/stakeholder/v1",
         "identity": "store-level assetId only; no slug id in content",
         "content": { "name": "string(必填非空)", "description": "string(可空,缺省/null归一化为\"\")" },
-        "titleRule": "title mirrors content.name: create sets title=name; PATCH name updates title",
-        "uniqueness": "within workspace, normalized = name.trim().toLowerCase(); violation on create or PATCH returns 409 name_conflict",
+        "titleRule": "title mirrors content.name: create sets title=name; unified PUT name updates title",
+        "uniqueness": "within workspace, normalized = name.trim().toLowerCase(); violation on create or unified PUT returns 409 name_conflict",
         "governance": "pure asset-library operation; no approval/readiness/workflow events; audit unchanged (no stakeholderSnapshot recorded)",
         "migration": "rewrite 0013 (not new 0019): CHECK 'actor'→'stakeholder', checksum stakeholder-kind-v1, file 0013-stakeholder-kind.ts; no existing data, demo/dev DB delete-rebuild",
         "labelPropagation": "all layers unified to 干系人: assetKindLabel stakeholder→干系人; artifact-labels.ts actor→干系人, actors→干系人 (display label only, schema field names actors/actor unchanged)",
@@ -74,12 +74,24 @@
         "endpoint": "POST /api/assets",
         "bodyExtension": "optional relations: [{ toAssetId, type }] declares outgoing edges of new asset; server resolves toAssetId→current revisionId for to_revision_id; from uses new asset's revisionId"
       },
+      "update": {
+        "endpoint": "PUT /api/assets/:id",
+        "scope": "all 8 Reusable Asset kinds; full replacement with expectedRevisionId",
+        "body": "{ expectedRevisionId, title, content, relations: [{ toAssetId, type }] }",
+        "responses": "200 { revisionId, revisionNo } on success; 409 version_conflict when expectedRevisionId is stale; 400 malformed_body or invalid_relations; 409 name_conflict for stakeholder rename; 404 unknown_asset",
+        "revision": "title and content append one immutable revision; old revisions remain read-only; stakeholder name mirrors title",
+        "relations": "relations is the complete outgoing set; replace it in the same transaction as the new revision; incoming edges are not implicitly changed",
+        "edgeSync": "edge table retains creation-time revision ids; resolvedGraph reads latest peer title/kind; no automatic edge rewrite"
+      },
+      "list": {
+        "endpoint": "GET /api/assets?workspaceId=&page=&pageSize=&kind=&q=",
+        "query": "kind selects one of 8 kinds; q performs case-insensitive title matching only; default pageSize=12; stable id-desc order",
+        "response": "{ assets, total, page, pageSize, kindCounts }",
+        "resolvedGraph": "omitted from list; returned by detail only to avoid N+1"
+      },
       "patch": {
-        "endpoint": "PATCH /api/assets/:id",
-        "scope": "kind=stakeholder only; method updateStakeholderReusableAsset",
-        "body": "{ name?, description? } at least one non-empty",
-        "responses": "200 { revisionId, revisionNo } on success; 400 malformed_body if empty; 409 name_conflict; 404 unknown_asset if non-stakeholder or missing; no optimistic lock",
-        "edgeSync": "edge table not refreshed on rename — resolvedGraph enrich reads latest title dynamically (floating-latest)"
+        "status": "retired",
+        "reason": "replaced by unified PUT; no dual write path"
       },
       "delete": {
         "endpoint": "DELETE /api/assets/:id",
@@ -92,18 +104,25 @@
         "graphEndpoint": "GET /api/assets/graph?workspaceId= returns { nodes: [{ assetId, kind, title }], edges: [{ fromAssetId, toAssetId, type }] } for full workspace topology (frontend architecture rendering)"
       },
       "validation": {
-        "location": "server layer (operator-server create/import branches)",
-        "checks": ["toAssetId existence (same workspace)", "(fromKind, toKind, type) whitelist", "self-loop forbidden (from != to)", "same-workspace constraint"],
-        "error": "aggregated 400 { error: invalid_relations, invalidRelations: [{ toAssetId, type, reason }] }; no partial write",
+        "location": "server layer (operator-server create/import/update branches)",
+        "checks": ["toAssetId existence (same workspace)", "(fromKind, toKind, type) whitelist", "self-loop forbidden (from != to)", "same-workspace constraint", "expectedRevisionId matches current revision for update"],
+        "error": "aggregated 400 { error: invalid_relations, invalidRelations: [{ toAssetId, type, reason }] }; stale update → 409 version_conflict; no partial write",
         "migration": "R02 content-field assetId validation → now asset_relations write validation"
       }
     }
+  },
+  "presentation": {
+    "tabs": "8 asset-kind tabs in fixed order design/architecture/data/api/scenario/usecase/function/stakeholder plus workspace-level relation graph as the ninth tab; no mixed all tab",
+    "layout": "fixed toolbar and tabs; compact paginated list on the left and independently scrolling detail/form pane on the right; narrow screens stack list then detail",
+    "detail": "overview, current revision, structured content, incoming/outgoing direct relations; revision history and raw JSON collapsed; arrays add/remove/reorder/edit with schema minimums",
+    "operations": "all 8 kinds support structured create and full replacement edit; export downloads immediately; import previews before one atomic commit; delete uses inline confirmation and blocks when referenced",
+    "graph": "workspace graph supports kind filtering while retaining adjacent nodes and edges; node click updates kind and selectedAssetId"
   },
   "acceptanceMatrix": {
     "dimensions": [
       {
         "dimension": "CRUD",
-        "variables": "create stakeholder 201+rev1; PATCH name→new rev+title sync; PATCH desc→only desc changes; PATCH name conflict→409; uniqueness trim+case-insensitive; PATCH empty body→400; PATCH non-stakeholder→404"
+        "variables": "create all 8 kinds with structured v1 forms; full PUT title+content+relations appends immutable revision; expectedRevisionId stale→409 version_conflict; stakeholder name/title mirror and uniqueness; old revisions read-only; outgoing relations replaced atomically"
       },
       {
         "dimension": "引用校验",
@@ -130,14 +149,22 @@
         "variables": "contains edges: scenario→usecase/usecase→function/function→api|data/design→architecture; DAG multiple parents allowed; involves edges: scenario|usecase→stakeholder; kind-pair whitelist server-validated; resolvedGraph enrich floating-latest; GET /api/assets/graph full topology"
       },
       {
+        "dimension": "展示",
+        "variables": "fixed toolbar+tabs; 8 kind tabs plus relation graph ninth tab; compact paginated list/detail split; direct incoming/outgoing relations; structured content with collapsible history/raw JSON; narrow layout stacks"
+      },
+      {
+        "dimension": "规模治理",
+        "variables": "server pagination page/pageSize/kind/q; default pageSize=12; title-only case-insensitive q; stable id-desc order; response includes total and 8-kind kindCounts"
+      },
+      {
         "dimension": "迁移",
         "variables": "0013 rewrite: CHECK actor→stakeholder; checksum stakeholder-kind-v1; file rename 0013-stakeholder-kind.ts; no existing data, demo/dev DB delete-rebuild; code全量改名 (reusable-asset-kind/asset-store/workflow-store/headless-runtime/operator-server/web/contract/test); CONTEXT.md术语更新; FTS no migration (no existing data)"
       }
     ]
   },
   "reviewChecklist": [
-    "契约完整：R06-R09 决议逐项落入本规格",
-    "一致性：与既有 store/server/web 类型、CHECK 约束、A08 ReusableAsset 模型无冲突",
+    "契约完整：R06-R09 决议与统一资产编辑、分页、过滤、tab、详情展示决议逐项落入本规格",
+    "一致性：与既有 store/server/web 类型、CHECK 约束、资产 revision/关系语义一致；Artifact schema 不被修改",
     "无兼容层：无 actor/stakeholder 双写/别名适配；无字段引用与关系表并存",
     "无越界：未动 artifact-content-v1.schema.json；未加 RBAC/审批/审计；归档自动 promote 不改 Workflow 治理状态机",
     "关系类型白名单完整性：contains (5 kind-pairs) + involves (2 kind-pairs) 覆盖全部设计模型关系；DAG 多父语义正确",

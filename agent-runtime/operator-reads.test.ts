@@ -759,6 +759,40 @@ test("reusable assets support list, create, detail, delete, export and import wi
 	});
 });
 
+test("asset list route returns a paginated kind-filtered envelope", async () => {
+	await withReadServer(async (context) => {
+		context.runtime.createReusableAsset({ workspaceId: context.workspaceId, kind: "scenario", title: "Flow A", content: { steps: ["a"] } });
+		context.runtime.createReusableAsset({ workspaceId: context.workspaceId, kind: "scenario", title: "Flow B", content: { steps: ["b"] } });
+		context.runtime.createReusableAsset({ workspaceId: context.workspaceId, kind: "usecase", title: "Flow use case", content: { flow: ["c"] } });
+
+		const response = await get(context, `/api/assets?workspaceId=${context.workspaceId}&page=2&pageSize=1&kind=scenario&q=FLOW`);
+		assert.equal(response.status, 200);
+		const body = (await response.json()) as {
+			assets: Array<{ title: string; kind: string; resolvedGraph?: unknown }>;
+			total: number;
+			page: number;
+			pageSize: number;
+			kindCounts: Record<string, number>;
+		};
+		assert.equal(body.total, 2);
+		assert.equal(body.page, 2);
+		assert.equal(body.pageSize, 1);
+		assert.deepEqual(body.assets.map((asset) => asset.title), ["Flow A"]);
+		assert.equal(body.assets[0]?.kind, "scenario");
+		assert.equal("resolvedGraph" in (body.assets[0] ?? {}), false);
+		assert.deepEqual(body.kindCounts, {
+			scenario: 2,
+			usecase: 1,
+			function: 0,
+			design: 0,
+			architecture: 0,
+			data: 0,
+			api: 0,
+			stakeholder: 0,
+		});
+	});
+});
+
 
 // #22 review（P3/P4）：promote 路由边界 —— unknown kinds → 400、unknown requirement → 404、
 // requirementId 路径正确解析（无需走 approve 链即可验证路由前置校验）。

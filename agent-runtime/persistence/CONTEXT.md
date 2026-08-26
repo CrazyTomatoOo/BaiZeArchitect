@@ -13,8 +13,12 @@ _Avoid_: persistence 工具层、workflow-store 类、数据库连接配置
 _Avoid_: 上层 project 概念、软归档/可逆删除、按工作区 ACL
 
 **Reusable Asset（可复用资产）**:
-属于 Workspace、独立于 Requirement/Workflow/Attempt 的 scenario、usecase、function 或 stakeholder 版本化资产；被 Task 使用时必须引用精确 revision。
+属于 Workspace、独立于 Requirement/Workflow/Attempt 的 scenario、usecase、function、design、architecture、data、api 或 stakeholder 版本化资产；被 Task 使用时必须引用精确 revision。
 _Avoid_: 隐藏 Requirement、fake Run、当前治理 Artifact
+
+**Asset Relation（资产关系）**:
+连接同一 Workspace 内两个 Reusable Asset 的有向、类型化关系；关系保留建立时的资产 revision 以供追溯，同时当前展示可解析到双方最新 revision。
+_Avoid_: content 内的隐式引用、治理域 Workflow Event、无方向标签
 
 **Stakeholder（干系人）**:
 属于 Workspace、作为场景/用例干系人共享事实源的版本化可复用资产（kind=stakeholder），content 仅含 name（workspace 内 trim+大小写不敏感唯一）与 description；与治理域的 Actor（操作者身份）及 Agent 角色明确区分。

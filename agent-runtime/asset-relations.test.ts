@@ -93,6 +93,73 @@ test("asset relations reject invalid kind pairs and block referenced asset delet
 	});
 });
 
+test("asset list pages by kind and filters titles while reporting workspace kind counts", async () => {
+	await withRuntime(async ({ runtime }) => {
+		const workspaceId = runtime.createWorkspace({ repoPath: "/repo", name: "repo" });
+		runtime.createReusableAsset({ workspaceId, kind: "scenario", title: "Checkout flow", content: { title: "Checkout flow" } });
+		runtime.createReusableAsset({ workspaceId, kind: "scenario", title: "Checkout recovery", content: { title: "Checkout recovery" } });
+		runtime.createReusableAsset({ workspaceId, kind: "usecase", title: "Pay", content: { title: "Pay" } });
+
+		const page = runtime.listReusableAssetPage(workspaceId, { page: 2, pageSize: 1, kind: "scenario", q: "CHECKOUT" });
+
+		assert.equal(page.total, 2);
+		assert.equal(page.page, 2);
+		assert.equal(page.pageSize, 1);
+		assert.deepEqual(page.assets.map((asset) => asset.title), ["Checkout flow"]);
+		assert.deepEqual(page.kindCounts, {
+			scenario: 2,
+			usecase: 1,
+			function: 0,
+			design: 0,
+			architecture: 0,
+			data: 0,
+			api: 0,
+			stakeholder: 0,
+		});
+	});
+});
+
+test("asset updates append a revision, replace outgoing relations atomically, and reject stale revisions", async () => {
+	await withRuntime(async ({ runtime }) => {
+		const workspaceId = runtime.createWorkspace({ repoPath: "/repo", name: "repo" });
+		const scenario = runtime.createReusableAsset({ workspaceId, kind: "scenario", title: "Checkout", content: { steps: ["old"] } });
+		const usecase = runtime.createReusableAsset({ workspaceId, kind: "usecase", title: "Pay", content: { steps: ["pay"] } });
+		runtime.writeRelations({
+			workspaceId,
+			fromAssetId: scenario.assetId,
+			fromRevisionId: scenario.revisionId,
+			relations: [{ toAssetId: usecase.assetId, type: "contains" }],
+		});
+
+		const updated = runtime.updateReusableAsset({
+			workspaceId,
+			assetId: scenario.assetId,
+			expectedRevisionId: scenario.revisionId,
+			title: "Checkout v2",
+			content: { steps: ["new"] },
+			relations: [],
+		});
+		assert.ok(updated);
+
+		assert.equal(updated.revisionNo, 2);
+		const detail = runtime.getReusableAsset(scenario.assetId);
+		assert.equal(detail?.title, "Checkout v2");
+		assert.deepEqual(detail?.revisions.map((revision) => revision.content), [{ steps: ["old"] }, { steps: ["new"] }]);
+		assert.deepEqual(runtime.readRelations(scenario.assetId), []);
+		assert.throws(
+			() => runtime.updateReusableAsset({
+				workspaceId,
+				assetId: scenario.assetId,
+				expectedRevisionId: scenario.revisionId,
+				title: "stale",
+				content: { steps: ["stale"] },
+				relations: [],
+			}),
+			(error: unknown) => error instanceof Error && error.name === "ReusableAssetVersionConflictError",
+		);
+	});
+});
+
 test("asset relation origin lookup is workspace-scoped", async () => {
 	await withRuntime(async ({ runtime, databasePath }) => {
 		const workspaceId = runtime.createWorkspace({ repoPath: "/repo", name: "repo" });

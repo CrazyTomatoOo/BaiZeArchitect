@@ -683,7 +683,7 @@
       ]
     },
     "reusable_assets": {
-      "purpose": "Workspace-level reusable scenario, usecase or function identity outside Requirement governance",
+      "purpose": "Workspace-level reusable design-model asset identity outside Requirement governance",
       "key": [
         "id"
       ],

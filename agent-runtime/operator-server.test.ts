@@ -125,14 +125,14 @@ async function createAsset(
 	});
 }
 
-async function patchAsset(
+async function updateAsset(
 	url: string,
 	cookie: string,
 	assetId: number,
 	body: unknown,
 ): Promise<Response> {
 	return fetch(`${url}/api/assets/${assetId}`, {
-		method: "PATCH",
+		method: "PUT",
 		headers: { "content-type": "application/json", cookie },
 		body: JSON.stringify(body),
 	});
@@ -213,7 +213,7 @@ test("stakeholder assets create with normalized content, mirrored title, and nam
 	});
 });
 
-test("PATCH appends stakeholder revisions and rejects malformed, conflicting, and non-stakeholder assets", async () => {
+test("PUT appends revisions for all asset kinds and rejects malformed, conflicting, and stale updates", async () => {
 	await withServer(async ({ server, workspaceId }) => {
 		const cookie = await bootstrap(server.url);
 		const actor = await createAsset(server.url, cookie, {
@@ -234,9 +234,14 @@ test("PATCH appends stakeholder revisions and rejects malformed, conflicting, an
 			title: "Scenario",
 			content: { actors: ["Operator"] },
 		});
-		const scenarioBody = (await scenario.json()) as { assetId: number };
+		const scenarioBody = (await scenario.json()) as { assetId: number; revisionId: number };
 
-		const patched = await patchAsset(server.url, cookie, actorBody.assetId, { name: "Lead Operator" });
+		const patched = await updateAsset(server.url, cookie, actorBody.assetId, {
+			expectedRevisionId: actorBody.revisionId,
+			title: "Lead Operator",
+			content: { name: "Lead Operator", description: "Old" },
+			relations: [],
+		});
 		assert.equal(patched.status, 200);
 		const patchedBody = (await patched.json()) as { revisionId: number; revisionNo: number };
 		assert.equal(patchedBody.revisionNo, 2);
@@ -247,22 +252,39 @@ test("PATCH appends stakeholder revisions and rejects malformed, conflicting, an
 		assert.deepEqual(asset.revisions.map((revision) => revision.revisionNo), [1, 2]);
 		assert.deepEqual(asset.revisions.at(-1)?.content, { name: "Lead Operator", description: "Old" });
 
-		const descriptionOnly = await patchAsset(server.url, cookie, actorBody.assetId, { description: "New" });
-		assert.equal(descriptionOnly.status, 200);
-		const descriptionOnlyBody = (await descriptionOnly.json()) as { revisionId: number; revisionNo: number };
-		assert.equal(descriptionOnlyBody.revisionNo, 3);
-		assert.ok(descriptionOnlyBody.revisionId > patchedBody.revisionId);
+		const scenarioUpdate = await updateAsset(server.url, cookie, scenarioBody.assetId, {
+			expectedRevisionId: scenarioBody.revisionId,
+			title: "Updated Scenario",
+			content: { actors: ["Operator"], steps: ["new"] },
+			relations: [],
+		});
+		assert.equal(scenarioUpdate.status, 200);
 
-		const empty = await patchAsset(server.url, cookie, actorBody.assetId, {});
+		const empty = await updateAsset(server.url, cookie, actorBody.assetId, {});
 		assert.equal(empty.status, 400);
 		assert.deepEqual(await empty.json(), { error: "malformed_body" });
-		const conflict = await patchAsset(server.url, cookie, actorBody.assetId, { name: " reviewer " });
+		const conflict = await updateAsset(server.url, cookie, actorBody.assetId, {
+			expectedRevisionId: patchedBody.revisionId,
+			title: " reviewer ",
+			content: { name: " reviewer " },
+			relations: [],
+		});
 		assert.equal(conflict.status, 409);
 		assert.deepEqual(await conflict.json(), { error: "name_conflict" });
-		const nonActor = await patchAsset(server.url, cookie, scenarioBody.assetId, { name: "Nope" });
-		assert.equal(nonActor.status, 404);
-		assert.deepEqual(await nonActor.json(), { error: "unknown_asset" });
-		const missing = await patchAsset(server.url, cookie, 999999, { name: "Missing" });
+		const stale = await updateAsset(server.url, cookie, actorBody.assetId, {
+			expectedRevisionId: actorBody.revisionId,
+			title: "Stale",
+			content: { name: "Stale" },
+			relations: [],
+		});
+		assert.equal(stale.status, 409);
+		assert.deepEqual(await stale.json(), { error: "version_conflict" });
+		const missing = await updateAsset(server.url, cookie, 999999, {
+			expectedRevisionId: 1,
+			title: "Missing",
+			content: {},
+			relations: [],
+		});
 		assert.equal(missing.status, 404);
 		assert.deepEqual(await missing.json(), { error: "unknown_asset" });
 	});
@@ -798,7 +820,7 @@ test("relation import reuses title-kind assets and rolls back malformed edges", 
 		assert.deepEqual((await list.json() as { assets: Array<{ title: string }> }).assets, []);
 	});
 });
-test("asset deletion scans relation edges in both directions and patch keeps graph titles current", async () => {
+test("asset deletion scans relation edges in both directions and unified update keeps graph titles current", async () => {
 	await withServer(async ({ server, workspaceId }) => {
 		const cookie = await bootstrap(server.url);
 		const stakeholder = await createAsset(server.url, cookie, {
@@ -806,7 +828,7 @@ test("asset deletion scans relation edges in both directions and patch keeps gra
 			kind: "stakeholder",
 			content: { name: "Customer" },
 		});
-		const stakeholderBody = (await stakeholder.json()) as { assetId: number };
+		const stakeholderBody = (await stakeholder.json()) as { assetId: number; revisionId: number };
 		const scenario = await createAsset(server.url, cookie, {
 			workspaceId,
 			kind: "scenario",
@@ -814,9 +836,14 @@ test("asset deletion scans relation edges in both directions and patch keeps gra
 			content: { title: "Checkout" },
 			relations: [{ toAssetId: stakeholderBody.assetId, type: "involves" }],
 		});
-		const scenarioBody = (await scenario.json()) as { assetId: number };
-		const patched = await patchAsset(server.url, cookie, stakeholderBody.assetId, { name: "Buyer" });
-		assert.equal(patched.status, 200);
+		const scenarioBody = (await scenario.json()) as { assetId: number; revisionId: number };
+		const updated = await updateAsset(server.url, cookie, stakeholderBody.assetId, {
+			expectedRevisionId: stakeholderBody.revisionId,
+			title: "Buyer",
+			content: { name: "Buyer" },
+			relations: [],
+		});
+		assert.equal(updated.status, 200);
 		const detail = await fetch(`${server.url}/api/assets/${scenarioBody.assetId}`, { headers: { cookie } });
 		assert.equal((await detail.json() as { resolvedGraph: { outgoing: Array<{ title: string }> } }).resolvedGraph.outgoing[0].title, "Buyer");
 

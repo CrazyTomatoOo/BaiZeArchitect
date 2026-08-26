@@ -1,4 +1,5 @@
 import type { ReusableAssetKind } from "../persistence/reusable-asset-kind.js";
+import type { ReusableAssetListQuery, ReusableAssetPage } from "../persistence/asset-store.js";
 import type { CrashInjector, FixtureClock, FixtureOperator, FixtureOutboxTransport, HashProvider } from "../testing/deterministic-fixtures.js";
 import { WorkflowStore, type BeginPlanningResult, type CommandReceipt, type CompletePlanningResult, type ExecuteCommandInput, type ReconciliationReport, type WorkflowProjection, type EvidenceSnapshotResult, type TraceLinkResult, type FindingRecord, type FindingThreadRecord, type DecisionRecord, type ReadinessReport, type BuildApprovalPacketResult, type ApprovalPacketRecord, type HumanGateRecord, type ApprovalRecordEntry, type HumanDirectiveRecord, type DiagnosticRunRecord, type CommandReceiptDetail, type RequirementSummaryRecord, type RequirementDetailRecord, type ArtifactRevisionDetailRecord, type BoundedWorkflowProjection, type PlanRevisionDetail, type TaskDetailRecord, type AttemptSummaryRecord, type AttemptDetailRecord, type RunDetailRecord, type ApprovalPacketDetailRecord, type DesignPackageRecord, type LegacyImportRecord, type ReusableAssetSummary, type ReusableAssetDetail,
 	type SearchHit, type WorkflowEventEnvelope, type WorkspaceSummary, type RunEventEnvelope } from "../persistence/workflow-store.js";
@@ -110,8 +111,9 @@ export interface HeadlessWorkflowRuntime {
 	readRelations(assetId: number): readonly AssetRelationRecord[];
 	getWorkspaceAssetGraph(workspaceId: number): AssetGraph;
 	assetExistsByOriginArtifactId(workspaceId: number, artifactId: number): boolean;
-	updateStakeholderReusableAsset(assetId: number, patch: unknown): { revisionId: number; revisionNo: number } | undefined;
+	updateReusableAsset(input: { workspaceId: number; assetId: number; expectedRevisionId: number; title: string; content: unknown; relations: readonly AssetRelationInput[] }): { assetId: number; revisionId: number; revisionNo: number } | undefined;
 	listReusableAssets(workspaceId: number): readonly ReusableAssetSummary[];
+	listReusableAssetPage(workspaceId: number, query?: ReusableAssetListQuery): ReusableAssetPage;
 	getReusableAsset(assetId: number): ReusableAssetDetail | undefined;
 	deleteReusableAsset(assetId: number): boolean;
 	exportReusableAssets(workspaceId: number): readonly ReusableAssetDetail[];
@@ -482,11 +484,14 @@ function buildTaskInstruction(role: string, objective: string, baseline: Require
 	assetExistsByOriginArtifactId(workspaceId, artifactId) {
 		return store.assetExistsByOriginArtifactId(workspaceId, artifactId);
 	},
-	updateStakeholderReusableAsset(assetId, patch) {
-		return store.updateStakeholderReusableAsset(assetId, patch);
+	updateReusableAsset(input) {
+		return store.updateReusableAsset(input);
 	},
 	listReusableAssets(workspaceId) {
 		return store.listReusableAssets(workspaceId);
+	},
+	listReusableAssetPage(workspaceId, query) {
+		return store.listReusableAssetPage(workspaceId, query);
 	},
 	getReusableAsset(assetId) {
 		return store.getReusableAsset(assetId);
