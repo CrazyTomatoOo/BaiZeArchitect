@@ -160,6 +160,34 @@ test("asset updates append a revision, replace outgoing relations atomically, an
 	});
 });
 
+test("marked asset content is validated against the artifact v1 schema while legacy item content remains readable", async () => {
+	await withRuntime(async ({ runtime }) => {
+		const workspaceId = runtime.createWorkspace({ repoPath: "/repo", name: "repo" });
+		assert.throws(
+			() => runtime.createReusableAsset({
+				workspaceId,
+				kind: "scenario",
+				title: "Invalid",
+				content: { schemaVersion: "artifact/scenario/v1", artifactKind: "scenario", summary: "missing scenarios", sourceRefs: [] },
+			}),
+			(error: unknown) => error instanceof Error && error.message.includes("malformed"),
+		);
+		const valid = runtime.createReusableAsset({
+			workspaceId,
+			kind: "scenario",
+			title: "Valid",
+			content: {
+				schemaVersion: "artifact/scenario/v1",
+				artifactKind: "scenario",
+				summary: "A valid scenario",
+				sourceRefs: [],
+				scenarios: [{ id: "s1", title: "Checkout", actors: ["Customer"], preconditions: [], trigger: "Start", mainFlow: ["Pay"], alternateFlows: [], expectedOutcome: "Complete" }],
+			},
+		});
+		assert.equal(valid.revisionNo, 1);
+	});
+});
+
 test("asset relation origin lookup is workspace-scoped", async () => {
 	await withRuntime(async ({ runtime, databasePath }) => {
 		const workspaceId = runtime.createWorkspace({ repoPath: "/repo", name: "repo" });

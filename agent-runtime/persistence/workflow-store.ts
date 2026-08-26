@@ -320,7 +320,7 @@ this.database.pragma("busy_timeout = 5000");
 		this.applyMigrations();
 		this.snapshotStore = new SnapshotStore(this.database, this.options.hashProvider);
 		this.workspaceStore = new WorkspaceStore(this.database, this.options.clock);
-		this.assetStore = new AssetStore(this.database, this.options.clock, this.snapshotStore);
+		this.assetStore = new AssetStore(this.database, this.options.clock, this.snapshotStore, this.options.artifactValidator);
 		this.createRequirementTransaction = this.database.transaction((input) =>
 			this.createRequirementRows(input),
 		).immediate;

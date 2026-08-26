@@ -38,6 +38,24 @@ function arrayItemLabel(value: unknown, index: number): string {
 function assetKey(kind: AssetKind, title: string): string {
 	return `${kind}\u0000${title}`;
 }
+function assetContentWarning(kind: AssetKind, content: unknown): string | null {
+	if (typeof content !== "object" || content === null || Array.isArray(content)) return "内容不是结构化对象，按原始内容展示。";
+	const record = content as Record<string, unknown>;
+	if (!("schemaVersion" in record) && !("artifactKind" in record)) return "该版本未声明 v1 schema，按历史内容展示。";
+	if (record.schemaVersion !== `artifact/${kind}/v1` || record.artifactKind !== kind) return "内容 schema 与资产类型不匹配。";
+	if (typeof record.summary !== "string" || record.summary.trim().length === 0) return "内容缺少有效摘要。";
+	const requiredArrays: Partial<Record<Exclude<AssetKind, "stakeholder">, readonly string[]>> = {
+		scenario: ["scenarios"],
+		usecase: ["useCases"],
+		function: ["functions"],
+		design: ["changeUnits", "alternatives", "failureHandling", "testStrategy", "implementationOrder"],
+		architecture: ["components", "nonFunctionalRequirements"],
+		data: ["entities", "privacyAndRetention"],
+		api: ["interfaces", "security", "testStrategy"],
+	};
+	for (const key of (kind === "stakeholder" ? [] : requiredArrays[kind]) ?? []) if (!Array.isArray(record[key]) || record[key].length === 0) return `内容缺少有效${fieldTitle(key)}。`;
+	return null;
+}
 
 type FormFieldType = "text" | "textarea" | "list" | "number-list" | "object-list";
 interface FormField {
@@ -135,6 +153,7 @@ interface ImportDraft {
 	relations?: readonly AssetRelationExport[];
 	createdCount: number;
 	reusedCount: number;
+	kindCounts: Readonly<Record<AssetKind, number>>;
 	relationAddedCount: number;
 	relationRemovedCount: number;
 	relationKeptCount: number;
@@ -174,6 +193,7 @@ class BaizeAssetLibrary extends LitElement {
 		graphZoom: { state: true },
 		graphOffset: { state: true },
 		relationCandidates: { state: true },
+		relationError: { state: true },
 		loading: { state: true },
 		error: { state: true },
 	};
@@ -210,12 +230,20 @@ class BaizeAssetLibrary extends LitElement {
 	declare graphZoom: number;
 	declare graphOffset: { x: number; y: number };
 	declare relationCandidates: readonly { assetId: number; kind: AssetKind; title: string }[];
+	declare relationError: string | null;
 	declare loading: boolean;
 	declare error: string | null;
 	private detailRequestNo = 0;
 
 	static styles = [sharedStyles, css`
-		:host { display: block; }
+		:host {
+			display: block;
+			--asset-toolbar-offset: 6.5rem;
+			--asset-mobile-toolbar-offset: 9rem;
+			--asset-list-min-width: 15rem;
+			--asset-pane-height: min(68vh, 42rem);
+			--asset-placeholder-height: 11rem;
+		}
 		.workspace { display: grid; gap: var(--gap); }
 		.toolbar {
 			position: sticky;
@@ -230,91 +258,91 @@ class BaizeAssetLibrary extends LitElement {
 		}
 		.heading { min-width: 0; flex: 1; }
 		.heading h1 { margin: 0; font: 600 var(--text-display) var(--font-display); }
-		.sub { margin: 4px 0 0; color: var(--text-muted); font-size: var(--text-base); }
+		.sub { margin: var(--space-2xs) 0 0; color: var(--text-muted); font-size: var(--text-base); }
 		.count { color: var(--text-subtle); font: 600 var(--text-sm) var(--font-mono); white-space: nowrap; }
 		.search { width: min(280px, 30vw); }
 		.tabs {
 			position: sticky;
-			top: 104px;
+			top: var(--asset-toolbar-offset);
 			z-index: 2;
 			display: flex;
-			gap: 4px;
+			gap: var(--space-2xs);
 			overflow-x: auto;
-			padding: 4px 0;
+			padding: var(--space-2xs) 0;
 			background: var(--bg);
 			border-bottom: 1px solid var(--border);
 		}
-		.tab { border: 0; border-bottom: 2px solid transparent; border-radius: 0; padding: 8px 10px; color: var(--text-muted); }
+		.tab { border: 0; border-bottom: 2px solid transparent; border-radius: 0; padding: var(--space-2xs) var(--gap); color: var(--text-muted); }
 		.tab:hover { color: var(--text); }
 		.tab.active { border-bottom-color: var(--accent); color: var(--accent); font-weight: 600; }
-		.tab-count { margin-left: 4px; color: var(--text-subtle); font: var(--text-xs) var(--font-mono); }
-		.content { display: grid; grid-template-columns: minmax(240px, 0.8fr) minmax(0, 1.4fr); gap: var(--gap); min-height: 0; }
-		.pane { min-width: 0; height: min(68vh, 680px); overflow: auto; }
+		.tab-count { margin-left: var(--space-2xs); color: var(--text-subtle); font: var(--text-xs) var(--font-mono); }
+		.content { display: grid; grid-template-columns: minmax(var(--asset-list-min-width), 0.8fr) minmax(0, 1.4fr); gap: var(--gap); min-height: 0; }
+		.pane { min-width: 0; height: var(--asset-pane-height); overflow: auto; }
 		.list-pane { padding: var(--gap); }
 		.detail-pane { padding: var(--gap); }
-		.list { display: grid; gap: 4px; }
-		.asset-row { width: 100%; display: grid; gap: 4px; text-align: left; border-color: transparent; border-left: 2px solid transparent; padding: 10px; }
+		.list { display: grid; gap: var(--space-2xs); }
+		.asset-row { width: 100%; display: grid; gap: var(--space-2xs); text-align: left; border-color: transparent; border-left: 2px solid transparent; padding: var(--gap); }
 		.asset-row:hover { border-color: var(--border); }
 		.asset-row.selected { border-left-color: var(--accent); background: var(--surface-2); }
-		.row-head { display: flex; align-items: center; gap: 8px; min-width: 0; }
+		.row-head { display: flex; align-items: center; gap: var(--space-2xs); min-width: 0; }
 		.kind { color: var(--accent-hi); font-size: var(--text-xs); letter-spacing: 0.04em; }
 		.title { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; }
 		.meta { color: var(--text-muted); font-size: var(--text-sm); }
 		.digest { color: var(--text-subtle); font: var(--text-xs) var(--font-mono); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 		.pager { display: flex; align-items: center; justify-content: space-between; gap: var(--gap); margin-top: var(--gap); color: var(--text-muted); font-size: var(--text-sm); }
-		.pager-actions { display: flex; gap: 4px; }
+		.pager-actions { display: flex; gap: var(--space-2xs); }
 		.selected-note { margin: 0 0 var(--gap); color: var(--warn); font-size: var(--text-sm); }
-		.detail-placeholder { display: grid; place-items: center; min-height: 180px; color: var(--text-muted); text-align: center; }
+		.detail-placeholder { display: grid; place-items: center; min-height: var(--asset-placeholder-height); color: var(--text-muted); text-align: center; }
 		.detail { display: grid; gap: var(--gap); }
 		.detail-head { display: flex; align-items: start; justify-content: space-between; gap: var(--gap); }
 		.detail-title { margin: 0; font: 600 var(--text-xl) var(--font-display); overflow-wrap: anywhere; }
-		.detail-sub { margin: 4px 0 0; color: var(--text-muted); font-size: var(--text-sm); }
+		.detail-sub { margin: var(--space-2xs) 0 0; color: var(--text-muted); font-size: var(--text-sm); }
 		.detail-block { border-top: 1px solid var(--border); padding-top: var(--gap); }
-		.detail-block h2 { margin: 0 0 8px; font-size: var(--text-base); }
-		.facts { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 8px; margin: 0; }
+		.detail-block h2 { margin: 0 0 var(--space-2xs); font-size: var(--text-base); }
+		.facts { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: var(--space-2xs); margin: 0; }
 		.fact dt { color: var(--text-subtle); font-size: var(--text-xs); }
-		.fact dd { margin: 2px 0 0; overflow-wrap: anywhere; }
-		.field-list { display: grid; gap: 8px; margin: 0; }
+		.fact dd { margin: var(--space-2xs) 0 0; overflow-wrap: anywhere; }
+		.field-list { display: grid; gap: var(--space-2xs); margin: 0; }
 		.field dt { color: var(--text-muted); font-size: var(--text-sm); }
-		.field dd { margin: 2px 0 0; }
-		.value-list { display: grid; gap: 4px; padding-left: var(--pad); }
+		.field dd { margin: var(--space-2xs) 0 0; }
+		.value-list { display: grid; gap: var(--space-2xs); padding-left: var(--pad); }
 		.value { white-space: pre-wrap; overflow-wrap: anywhere; }
-		.array-item { border: 1px solid var(--border); border-radius: var(--radius); padding: 8px 10px; }
+		.array-item { border: 1px solid var(--border); border-radius: var(--radius); padding: var(--space-2xs) var(--gap); }
 		.array-item summary { cursor: pointer; color: var(--text); }
-		.relations { display: grid; gap: 8px; }
-		.relation-group h3 { margin: 0 0 4px; color: var(--text-muted); font-size: var(--text-sm); }
+		.relations { display: grid; gap: var(--space-2xs); }
+		.relation-group h3 { margin: 0 0 var(--space-2xs); color: var(--text-muted); font-size: var(--text-sm); }
 		.relation { width: 100%; text-align: left; }
-		pre.raw { margin: 8px 0 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+		pre.raw { margin: var(--space-2xs) 0 0; white-space: pre-wrap; overflow-wrap: anywhere; }
 		.form { display: grid; gap: var(--gap); }
 		.form h2 { margin: 0; font: 600 var(--text-xl) var(--font-display); }
-		.form-field { display: grid; gap: 4px; }
+		.form-field { display: grid; gap: var(--space-2xs); }
 		.form-field > label, .form-field legend { color: var(--text-muted); font-size: var(--text-sm); }
 		.form-field input, .form-field textarea, .form-field select { width: 100%; }
-		.array-editor { display: grid; gap: 8px; }
-		.graph-controls { display: flex; gap: 4px; align-items: center; margin-bottom: var(--gap); }
-		.graph-canvas { position: relative; width: 100%; min-height: 360px; overflow: hidden; border: 1px solid var(--border); background: var(--bg); }
+		.array-editor { display: grid; gap: var(--space-2xs); }
+		.graph-controls { display: flex; gap: var(--space-2xs); align-items: center; margin-bottom: var(--gap); }
+		.graph-canvas { position: relative; width: 100%; min-height: var(--asset-placeholder-height); overflow: hidden; border: 1px solid var(--border); background: var(--bg); }
 		.graph-layer { position: relative; transform-origin: top left; }
 		.graph-edge { position: absolute; height: 0; border-top: 2px solid var(--border-strong); transform-origin: left center; pointer-events: none; }
-		.graph-node { position: absolute; width: 130px; min-height: 36px; display: grid; gap: 2px; text-align: left; cursor: pointer; }
+		.graph-node { position: absolute; width: 130px; min-height: 36px; display: grid; gap: var(--space-2xs); text-align: left; cursor: pointer; }
 		.graph-node span { color: var(--accent); font-size: var(--text-xs); }
 		.graph-node strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-		.array-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 4px; align-items: start; }
-		.array-actions { display: flex; gap: 4px; flex-wrap: wrap; }
-		.array-actions button { padding: 4px 8px; font-size: var(--text-xs); }
-		.form-actions { display: flex; gap: 8px; }
+		.array-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: var(--space-2xs); align-items: start; }
+		.array-actions { display: flex; gap: var(--space-2xs); flex-wrap: wrap; }
+		.array-actions button { padding: var(--space-2xs) var(--gap); font-size: var(--text-xs); }
+		.form-actions { display: flex; gap: var(--space-2xs); }
 		.form-error { color: var(--danger); font-size: var(--text-sm); }
-		.import-preview { display: grid; gap: 8px; padding: var(--gap); }
+		.import-preview { display: grid; gap: var(--space-2xs); padding: var(--gap); }
 		.import-preview h2 { margin: 0; font-size: var(--text-base); }
-		.danger-zone { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+		.danger-zone { display: flex; gap: var(--space-2xs); align-items: center; flex-wrap: wrap; }
 		.file-input { display: none; }
 		@media (max-width: 900px) {
 			.toolbar { top: 0; align-items: stretch; flex-wrap: wrap; }
 			.heading { flex-basis: 100%; }
 			.search { width: 100%; flex: 1; }
-			.tabs { top: 142px; }
+			.tabs { top: var(--asset-mobile-toolbar-offset); }
 			.content { grid-template-columns: minmax(0, 1fr); }
 			.pane { height: auto; max-height: none; overflow: visible; }
-			.detail-pane { min-height: 180px; }
+			.detail-pane { min-height: var(--asset-placeholder-height); }
 		}
 	`];
 
@@ -350,6 +378,7 @@ class BaizeAssetLibrary extends LitElement {
 		this.graphZoom = 1;
 		this.graphOffset = { x: 0, y: 0 };
 		this.relationCandidates = [];
+		this.relationError = null;
 		this.loading = true;
 		this.error = null;
 		this.readUrl();
@@ -480,10 +509,9 @@ class BaizeAssetLibrary extends LitElement {
 			this.relationCandidates = graph.nodes
 				.filter((node) => targetKinds.has(node.kind))
 				.map((node) => ({ assetId: node.assetId, kind: node.kind, title: node.title }));
-		} catch {
-			this.relationCandidates = this.assets
-				.filter((asset) => targetKinds.has(asset.kind))
-				.map((asset) => ({ assetId: asset.id, kind: asset.kind, title: asset.title }));
+		} catch (error) {
+			this.relationCandidates = [];
+			this.relationError = error instanceof Error ? error.message : "关联资产加载失败。";
 		}
 	}
 
@@ -528,6 +556,7 @@ class BaizeAssetLibrary extends LitElement {
 		this.formDraft = this.createDraft(this.activeView);
 		this.formRelations = [];
 		this.formError = null;
+		this.relationError = null;
 		void this.loadRelationCandidates(this.activeView);
 	}
 	private openEdit(): void {
@@ -545,6 +574,7 @@ class BaizeAssetLibrary extends LitElement {
 		this.formDraft = content;
 		this.formRelations = detail.resolvedGraph.outgoing.map((relation) => ({ toAssetId: relation.assetId, type: relation.type }));
 		this.formError = null;
+		this.relationError = null;
 		void this.loadRelationCandidates(detail.kind);
 	}
 
@@ -643,6 +673,7 @@ class BaizeAssetLibrary extends LitElement {
 		if (!this.formKind) return nothing;
 		const validTargets = RELATION_TARGETS[this.formKind];
 		const candidates = this.relationCandidates;
+		if (this.relationError) return html`<p class="form-error" role="alert">关联资产加载失败：${this.relationError}</p>`;
 		if (candidates.length === 0) return html`<p class="detail-sub">当前类型没有可选的直接关系目标。</p>`;
 		return html`<fieldset class="form-field">
 			<legend>关联资产</legend>
@@ -716,6 +747,8 @@ class BaizeAssetLibrary extends LitElement {
 				if (typeof kind !== "string" || !ASSET_KINDS.includes(kind as AssetKind) || typeof title !== "string" || content === undefined) throw new Error("资产条目必须包含有效 kind、title 和 content。");
 				assets.push({ kind: kind as AssetKind, title, content });
 			}
+			const kindCounts = emptyKindCounts();
+			for (const asset of assets) kindCounts[asset.kind] += 1;
 			let relations: AssetRelationExport[] | undefined;
 			if (record.relations !== undefined) {
 				if (!Array.isArray(record.relations)) throw new Error("relations 必须是数组。");
@@ -749,7 +782,7 @@ class BaizeAssetLibrary extends LitElement {
 			const relationAddedCount = [...importedRelationKeys].filter((key) => !existingRelationKeys.has(key)).length;
 			const relationRemovedCount = relations === undefined ? 0 : [...existingRelationKeys].filter((key) => !importedRelationKeys.has(key)).length;
 			const relationKeptCount = [...importedRelationKeys].filter((key) => existingRelationKeys.has(key)).length;
-			this.importDraft = { assets, relations, createdCount: assets.length - reusedCount, reusedCount, relationAddedCount, relationRemovedCount, relationKeptCount };
+			this.importDraft = { assets, relations, createdCount: assets.length - reusedCount, reusedCount, kindCounts, relationAddedCount, relationRemovedCount, relationKeptCount };
 			this.importError = null;
 		} catch (error) {
 			this.importDraft = null;
@@ -884,8 +917,8 @@ class BaizeAssetLibrary extends LitElement {
 	private renderList() {
 		if (this.loading) return html`<div class="empty">正在加载资产…</div>`;
 		if (this.error) return html`<div class="empty error">资产加载失败：${this.error}</div>`;
-		if (this.assets.length === 0) return html`<div class="empty">${this.query ? "没有匹配当前标题过滤条件的资产。" : `暂无${assetKindLabel(this.activeView)}资产。归档或创建后，资产会出现在这里。`}</div>`;
 		const selectedHidden = this.selectedAssetId !== null && !this.assets.some((asset) => asset.id === this.selectedAssetId);
+		if (this.assets.length === 0) return html`${selectedHidden ? html`<p class="selected-note">当前选中的资产不在此筛选结果中。</p>` : ""}<div class="empty">${this.query ? "没有匹配当前标题过滤条件的资产。" : `暂无${assetKindLabel(this.activeView)}资产。归档或创建后，资产会出现在这里。`}</div>`;
 		return html`
 			${selectedHidden ? html`<p class="selected-note">当前选中的资产不在此筛选结果中。</p>` : ""}
 			<div class="list" role="list">${this.assets.map((asset) => html`<div role="listitem">${this.renderAssetRow(asset)}</div>`)}</div>
@@ -954,6 +987,7 @@ class BaizeAssetLibrary extends LitElement {
 			<h2>导入预览</h2>
 			<p class="detail-sub">${this.importDraft.assets.length} 个资产 · ${(this.importDraft.relations ?? []).length} 条关系</p>
 			<p class="detail-sub">新建 ${this.importDraft.createdCount} · 复用 ${this.importDraft.reusedCount} · 关系新增 ${this.importDraft.relationAddedCount} · 删除 ${this.importDraft.relationRemovedCount} · 保持 ${this.importDraft.relationKeptCount}</p>
+			<p class="detail-sub">类型分布：${ASSET_KINDS.map((kind) => `${assetKindLabel(kind)} ${this.importDraft?.kindCounts[kind] ?? 0}`).join(" · ")}</p>
 			<div class="form-actions">
 				<button class="primary" ?disabled=${this.importSubmitting} @click=${() => void this.confirmImport()}>${this.importSubmitting ? "导入中…" : "确认导入"}</button>
 				<button @click=${() => { this.importDraft = null; }}>取消</button>
@@ -967,6 +1001,7 @@ class BaizeAssetLibrary extends LitElement {
 		if (!this.detail) return html`<div class="detail-placeholder">选择资产查看详情</div>`;
 		const detail = this.detail;
 		const current = detail.revisions.find((revision) => revision.id === detail.currentRevisionId) ?? detail.revisions.at(-1);
+		const warning = current ? assetContentWarning(detail.kind, current.content) : null;
 		return html`<article class="detail">
 			<header class="detail-head">
 				<div>
@@ -999,6 +1034,7 @@ class BaizeAssetLibrary extends LitElement {
 			</section>
 			<section class="detail-block">
 				<h2>结构化内容</h2>
+				${warning ? html`<p class="form-error" role="status">校验警告：${warning}</p>` : ""}
 				${current ? this.renderValue(current.content) : html`<p class="detail-sub">暂无可展示内容。</p>`}
 			</section>
 			<section class="detail-block">

@@ -121,28 +121,20 @@ function stakeholderNameKey(name: string): string {
 	return name.trim().toLowerCase();
 }
 
-function isStructuredAssetContentValid(kind: ReusableAssetKind, content: unknown): boolean {
+interface StructuredAssetValidator {
+	check(value: unknown): boolean;
+}
+
+function isStructuredAssetContentValid(kind: ReusableAssetKind, content: unknown, validator?: StructuredAssetValidator): boolean {
 	if (kind === "stakeholder") return normalizeStakeholderContent(content) !== undefined;
 	if (typeof content !== "object" || content === null || Array.isArray(content)) return false;
 	const record = content as Record<string, unknown>;
 	if (!("schemaVersion" in record) && !("artifactKind" in record)) return true;
-	if (record.schemaVersion !== `artifact/${kind}/v1` || record.artifactKind !== kind || typeof record.summary !== "string" || record.summary.trim().length === 0) return false;
-	const requiredArrays: Partial<Record<Exclude<ReusableAssetKind, "stakeholder">, readonly string[]>> = {
-		scenario: ["scenarios"],
-		usecase: ["useCases"],
-		function: ["functions"],
-		design: ["changeUnits", "alternatives", "failureHandling", "testStrategy", "implementationOrder"],
-		architecture: ["components", "nonFunctionalRequirements"],
-		data: ["entities", "privacyAndRetention"],
-		api: ["interfaces", "security", "testStrategy"],
-	};
-	for (const key of requiredArrays[kind] ?? []) {
-		if (!Array.isArray(record[key]) || record[key].length === 0) return false;
-	}
-	if (kind === "data" && (typeof record.migrationPlan !== "string" || typeof record.rollbackPlan !== "string")) return false;
-	if (kind === "api" && typeof record.versioning !== "string") return false;
-	if (kind === "design" && (typeof record.rolloutStrategy !== "string" || typeof record.rollbackStrategy !== "string")) return false;
-	return true;
+	if (record.schemaVersion !== `artifact/${kind}/v1` || record.artifactKind !== kind || !validator) return false;
+	const sourceRefs = Array.isArray(record.sourceRefs) && record.sourceRefs.length > 0
+		? record.sourceRefs
+		: [{ type: "requirement_revision", revisionId: 1 }];
+	return validator.check({ ...record, sourceRefs });
 }
 
 /**
@@ -158,6 +150,7 @@ export class AssetStore {
 		private readonly database: Database.Database,
 		private readonly clock: FixtureClock,
 		private readonly snapshotStore: SnapshotStore,
+		private readonly structuredValidator?: StructuredAssetValidator,
 	) {}
 	writeRelations(input: {
 		workspaceId: number;
@@ -255,7 +248,7 @@ export class AssetStore {
 		const timestamp = this.clock.now().toISOString();
 		const content = input.kind === "stakeholder" ? normalizeStakeholderContent(input.content) : input.content;
 		if (input.kind === "stakeholder" && !content) throw new ReusableAssetMalformedBodyError();
-		if (!isStructuredAssetContentValid(input.kind, content)) throw new ReusableAssetMalformedBodyError();
+		if (!isStructuredAssetContentValid(input.kind, content, this.structuredValidator)) throw new ReusableAssetMalformedBodyError();
 		const title = input.kind === "stakeholder" ? (content as { name: string }).name : input.title;
 		const schemaRef = input.kind === "stakeholder" ? "asset/stakeholder/v1" : `artifact/${input.kind}/v1`;
 		const transaction = this.database.transaction(() => {
@@ -298,7 +291,7 @@ export class AssetStore {
 			const stakeholderContent = asset.kind === "stakeholder" ? normalizeStakeholderContent(input.content) : undefined;
 			const content = asset.kind === "stakeholder" ? stakeholderContent : input.content;
 			if (asset.kind === "stakeholder" && (!stakeholderContent || stakeholderContent.name !== title)) throw new ReusableAssetMalformedBodyError();
-			if (!isStructuredAssetContentValid(asset.kind, content)) throw new ReusableAssetMalformedBodyError();
+			if (!isStructuredAssetContentValid(asset.kind, content, this.structuredValidator)) throw new ReusableAssetMalformedBodyError();
 			if (asset.kind === "stakeholder" && this.stakeholderNameExists(input.workspaceId, title, asset.id)) throw new ReusableAssetNameConflictError();
 			const document = this.snapshotStore.insertSnapshot("reusable_asset_content", asset.kind === "stakeholder" ? "asset/stakeholder/v1" : `artifact/${asset.kind}/v1`, content, timestamp);
 			const revisionNo = (asset.revision_no ?? 0) + 1;
