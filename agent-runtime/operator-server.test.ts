@@ -125,6 +125,16 @@ async function createAsset(
 	});
 }
 
+function scenarioContent(title: string, actor = "Customer"): Record<string, unknown> {
+	return {
+		schemaVersion: "artifact/scenario/v1",
+		artifactKind: "scenario",
+		summary: title,
+		sourceRefs: [],
+		scenarios: [{ id: title.toLowerCase().replace(/\s+/g, "-"), title, actors: [actor], preconditions: [], trigger: "Start", mainFlow: ["Complete"], alternateFlows: [], expectedOutcome: "Done" }],
+	};
+}
+
 async function updateAsset(
 	url: string,
 	cookie: string,
@@ -232,7 +242,7 @@ test("PUT appends revisions for all asset kinds and rejects malformed, conflicti
 			workspaceId,
 			kind: "scenario",
 			title: "Scenario",
-			content: { actors: ["Operator"] },
+			content: scenarioContent("Scenario", "Operator"),
 		});
 		const scenarioBody = (await scenario.json()) as { assetId: number; revisionId: number };
 
@@ -255,7 +265,7 @@ test("PUT appends revisions for all asset kinds and rejects malformed, conflicti
 		const scenarioUpdate = await updateAsset(server.url, cookie, scenarioBody.assetId, {
 			expectedRevisionId: scenarioBody.revisionId,
 			title: "Updated Scenario",
-			content: { actors: ["Operator"], steps: ["new"] },
+			content: scenarioContent("Updated Scenario", "Operator"),
 			relations: [],
 		});
 		assert.equal(scenarioUpdate.status, 200);
@@ -677,7 +687,7 @@ test("asset relation create, detail enrich, and workspace graph are exposed over
 			workspaceId,
 			kind: "scenario",
 			title: "Checkout",
-			content: { title: "Checkout", actors: ["Customer"] },
+			content: scenarioContent("Checkout"),
 			relations: [{ toAssetId: stakeholderBody.assetId, type: "involves" }],
 		});
 		assert.equal(scenario.status, 201);
@@ -713,7 +723,7 @@ test("invalid asset relations return aggregated errors without creating the sour
 			workspaceId,
 			kind: "scenario",
 			title: "Invalid",
-			content: { title: "Invalid" },
+			content: scenarioContent("Invalid"),
 			relations: [
 				{ toAssetId: 999999, type: "involves" },
 				{ toAssetId: 999998, type: "contains" },
@@ -745,7 +755,7 @@ test("asset export and import preserve portable relationship edges", async () =>
 			workspaceId,
 			kind: "scenario",
 			title: "Checkout",
-			content: { title: "Checkout" },
+			content: scenarioContent("Checkout"),
 			relations: [{ toAssetId: stakeholderBody.assetId, type: "involves" }],
 		});
 		assert.equal(scenario.status, 201);
@@ -833,7 +843,7 @@ test("asset deletion scans relation edges in both directions and unified update 
 			workspaceId,
 			kind: "scenario",
 			title: "Checkout",
-			content: { title: "Checkout" },
+			content: scenarioContent("Checkout"),
 			relations: [{ toAssetId: stakeholderBody.assetId, type: "involves" }],
 		});
 		const scenarioBody = (await scenario.json()) as { assetId: number; revisionId: number };

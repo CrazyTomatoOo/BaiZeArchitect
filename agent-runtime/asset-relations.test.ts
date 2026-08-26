@@ -130,13 +130,19 @@ test("asset updates append a revision, replace outgoing relations atomically, an
 			fromRevisionId: scenario.revisionId,
 			relations: [{ toAssetId: usecase.assetId, type: "contains" }],
 		});
-
+		const newContent = {
+			schemaVersion: "artifact/scenario/v1",
+			artifactKind: "scenario",
+			summary: "Checkout v2",
+			sourceRefs: [],
+			scenarios: [{ id: "checkout-v2", title: "Checkout v2", actors: ["Customer"], preconditions: [], trigger: "Start", mainFlow: ["Pay"], alternateFlows: [], expectedOutcome: "Done" }],
+		};
 		const updated = runtime.updateReusableAsset({
 			workspaceId,
 			assetId: scenario.assetId,
 			expectedRevisionId: scenario.revisionId,
 			title: "Checkout v2",
-			content: { steps: ["new"] },
+			content: newContent,
 			relations: [],
 		});
 		assert.ok(updated);
@@ -144,7 +150,7 @@ test("asset updates append a revision, replace outgoing relations atomically, an
 		assert.equal(updated.revisionNo, 2);
 		const detail = runtime.getReusableAsset(scenario.assetId);
 		assert.equal(detail?.title, "Checkout v2");
-		assert.deepEqual(detail?.revisions.map((revision) => revision.content), [{ steps: ["old"] }, { steps: ["new"] }]);
+		assert.deepEqual(detail?.revisions.map((revision) => revision.content), [{ steps: ["old"] }, newContent]);
 		assert.deepEqual(runtime.readRelations(scenario.assetId), []);
 		assert.throws(
 			() => runtime.updateReusableAsset({
@@ -152,7 +158,7 @@ test("asset updates append a revision, replace outgoing relations atomically, an
 				assetId: scenario.assetId,
 				expectedRevisionId: scenario.revisionId,
 				title: "stale",
-				content: { steps: ["stale"] },
+				content: newContent,
 				relations: [],
 			}),
 			(error: unknown) => error instanceof Error && error.name === "ReusableAssetVersionConflictError",

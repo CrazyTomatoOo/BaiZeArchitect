@@ -75,6 +75,16 @@ class BaizeShell extends LitElement {
 		.topbar .brand .dot { color: var(--accent); }
 		.topbar .spacer { flex: 1; }
 		.view-host { margin-top: var(--gap); }
+		.workbench-frame { display: grid; grid-template-columns: var(--workbench-rail-width) minmax(0, 1fr) var(--workbench-rail-width); gap: var(--gap); align-items: start; }
+		:host { --workbench-rail-width: 12rem; }
+		.workbench-rail { position: sticky; top: 0; display: grid; gap: var(--space-2xs); padding: var(--gap); border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface); }
+		.workbench-rail h2 { margin: 0; font-size: var(--text-sm); color: var(--text-muted); }
+		.workbench-rail p { margin: 0; color: var(--text-muted); font-size: var(--text-sm); }
+		.workbench-rail button { text-align: left; }
+		@media (max-width: 900px) {
+			.workbench-frame { grid-template-columns: minmax(0, 1fr); }
+			.workbench-rail { position: static; }
+		}
 		.login-wrap {
 			display: flex;
 			align-items: center;
@@ -232,10 +242,21 @@ class BaizeShell extends LitElement {
 		if (this.workspaceId === 0) {
 			return html`<div class="empty">请先选择或创建工作空间。</div>`;
 		}
-		return html`<baize-asset-library
-			.apiBase=${this.apiBase}
-			.workspaceId=${this.workspaceId}
-		></baize-asset-library>`;
+		return html`<div class="workbench-frame">
+			<aside class="workbench-rail" aria-label="工作台导航">
+				<h2>工作台</h2>
+				<button @click=${() => this.router.goto("/")}>需求</button>
+				<button class="primary" aria-current="page">资产库</button>
+			</aside>
+			<main class="asset-main">
+				<baize-asset-library .apiBase=${this.apiBase} .workspaceId=${this.workspaceId}></baize-asset-library>
+			</main>
+			<aside class="workbench-rail" aria-label="运行上下文">
+				<h2>运行上下文</h2>
+				<p>资产操作不产生治理 Run。</p>
+				<p>当前 Workspace 的资产关系和 revision 在详情区查看。</p>
+			</aside>
+		</div>`;
 	}
 
 	private renderManage(): ReturnType<typeof html> {

@@ -57,7 +57,7 @@ function assetContentWarning(kind: AssetKind, content: unknown): string | null {
 	return null;
 }
 
-type FormFieldType = "text" | "textarea" | "list" | "number-list" | "object-list";
+type FormFieldType = "text" | "number" | "textarea" | "list" | "number-list" | "object-list";
 interface FormField {
 	key: string;
 	label: string;
@@ -95,7 +95,7 @@ const functionFields: readonly FormField[] = [
 ];
 const designFields: readonly FormField[] = [
 	{ key: "summary", label: "摘要", type: "textarea" },
-	{ key: "changeUnits", label: "变更单元", type: "object-list", itemFields: [{ key: "id", label: "标识", type: "text" }, { key: "area", label: "区域", type: "text" }, { key: "change", label: "变更", type: "textarea" }, { key: "rationale", label: "理由", type: "textarea" }] },
+	{ key: "changeUnits", label: "变更单元", type: "object-list", itemFields: [{ key: "id", label: "标识", type: "text" }, { key: "area", label: "区域", type: "text" }, { key: "change", label: "变更", type: "textarea" }, { key: "rationale", label: "理由", type: "textarea" }, { key: "sourceRefs", label: "来源引用", type: "object-list", itemFields: [{ key: "type", label: "类型", type: "text" }, { key: "revisionId", label: "版本号", type: "number" }] }] },
 	{ key: "alternatives", label: "替代方案", type: "list" },
 	{ key: "failureHandling", label: "失败处理", type: "list" },
 	{ key: "testStrategy", label: "测试策略", type: "list" },
@@ -240,9 +240,9 @@ class BaizeAssetLibrary extends LitElement {
 			display: block;
 			--asset-toolbar-offset: 6.5rem;
 			--asset-mobile-toolbar-offset: 9rem;
-			--asset-list-min-width: 15rem;
-			--asset-pane-height: min(68vh, 42rem);
 			--asset-placeholder-height: 11rem;
+			--asset-graph-node-width: 8.125rem;
+			--asset-graph-edge-width: 0.125rem;
 		}
 		.workspace { display: grid; gap: var(--gap); }
 		.toolbar {
@@ -322,8 +322,8 @@ class BaizeAssetLibrary extends LitElement {
 		.graph-controls { display: flex; gap: var(--space-2xs); align-items: center; margin-bottom: var(--gap); }
 		.graph-canvas { position: relative; width: 100%; min-height: var(--asset-placeholder-height); overflow: hidden; border: 1px solid var(--border); background: var(--bg); }
 		.graph-layer { position: relative; transform-origin: top left; }
-		.graph-edge { position: absolute; height: 0; border-top: 2px solid var(--border-strong); transform-origin: left center; pointer-events: none; }
-		.graph-node { position: absolute; width: 130px; min-height: 36px; display: grid; gap: var(--space-2xs); text-align: left; cursor: pointer; }
+		.graph-edge { position: absolute; height: 0; border-top: var(--asset-graph-edge-width) solid var(--border-strong); transform-origin: left center; pointer-events: none; }
+		.graph-node { position: absolute; width: var(--asset-graph-node-width); min-height: 36px; display: grid; gap: var(--space-2xs); text-align: left; cursor: pointer; }
 		.graph-node span { color: var(--accent); font-size: var(--text-xs); }
 		.graph-node strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 		.array-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: var(--space-2xs); align-items: start; }
@@ -335,6 +335,8 @@ class BaizeAssetLibrary extends LitElement {
 		.import-preview h2 { margin: 0; font-size: var(--text-base); }
 		.danger-zone { display: flex; gap: var(--space-2xs); align-items: center; flex-wrap: wrap; }
 		.file-input { display: none; }
+		.file-button { display: inline-flex; align-items: center; padding: var(--space-2xs) var(--pad); border: 1px solid var(--border-strong); border-radius: var(--radius); color: var(--text); cursor: pointer; white-space: nowrap; }
+		.file-button:hover { background: var(--surface-hover); }
 		@media (max-width: 900px) {
 			.toolbar { top: 0; align-items: stretch; flex-wrap: wrap; }
 			.heading { flex-basis: 100%; }
@@ -660,12 +662,12 @@ class BaizeAssetLibrary extends LitElement {
 				</div>
 			</fieldset>`;
 		}
-		const text = typeof value === "string" ? value : "";
+		const valueText = typeof value === "number" || typeof value === "string" ? String(value) : "";
 		return html`<div class="form-field">
 			<label>${field.label}
 				${field.type === "textarea"
-					? html`<textarea rows="3" .value=${text} @input=${(event: Event) => this.setDraftValue(path, (event.target as HTMLTextAreaElement).value)}></textarea>`
-					: html`<input .value=${text} @input=${(event: Event) => this.setDraftValue(path, (event.target as HTMLInputElement).value)} />`}
+					? html`<textarea rows="3" .value=${valueText} @input=${(event: Event) => this.setDraftValue(path, (event.target as HTMLTextAreaElement).value)}></textarea>`
+					: html`<input type=${field.type === "number" ? "number" : "text"} .value=${valueText} @input=${(event: Event) => this.setDraftValue(path, field.type === "number" ? Number((event.target as HTMLInputElement).value) : (event.target as HTMLInputElement).value)} />`}
 			</label>
 		</div>`;
 	}
@@ -777,7 +779,7 @@ class BaizeAssetLibrary extends LitElement {
 			const existingRelationKeys = new Set((existingGraph?.edges ?? []).flatMap((edge) => {
 				const from = existingNodeKeys.get(edge.fromAssetId);
 				const to = existingNodeKeys.get(edge.toAssetId);
-				return from && to && bundleKeys.has(from) && bundleKeys.has(to) ? [`${from}→${to}:${edge.type}`] : [];
+				return from && to && bundleKeys.has(from) ? [`${from}→${to}:${edge.type}`] : [];
 			}));
 			const relationAddedCount = [...importedRelationKeys].filter((key) => !existingRelationKeys.has(key)).length;
 			const relationRemovedCount = relations === undefined ? 0 : [...existingRelationKeys].filter((key) => !importedRelationKeys.has(key)).length;
@@ -909,7 +911,7 @@ class BaizeAssetLibrary extends LitElement {
 		const revision = asset.currentRevision;
 		return html`<button class="asset-row ${this.selectedAssetId === asset.id ? "selected" : ""}" aria-pressed=${this.selectedAssetId === asset.id} @click=${() => this.chooseAsset(asset.id)}>
 			<div class="row-head"><span class="kind">${assetKindLabel(asset.kind)}</span><span class="title">${asset.title}</span></div>
-			<div class="meta">${revision ? `Revision ${revision.revisionNo}` : "暂无当前版本"} · ${new Date(asset.createdAt).toLocaleDateString("zh-CN")}</div>
+			<div class="meta">${revision ? `Revision ${revision.revisionNo} · ${revision.source}` : "暂无当前版本"} · ${new Date(asset.createdAt).toLocaleDateString("zh-CN")}</div>
 			${revision ? html`<div class="digest">${revision.digest}</div>` : ""}
 		</button>`;
 	}
@@ -1154,7 +1156,7 @@ class BaizeAssetLibrary extends LitElement {
 						<button class="primary" @click=${() => this.openCreate()}>新建${assetKindLabel(this.activeView)}</button>
 					` : ""}
 					<button @click=${() => void this.exportWorkspace()}>导出</button>
-					<label><button type="button">导入</button><input class="file-input" type="file" accept="application/json" @change=${(event: Event) => void this.handleImportFile(event)} /></label>
+					<label class="file-button">导入<input class="file-input" type="file" accept="application/json" @change=${(event: Event) => void this.handleImportFile(event)} /></label>
 				</header>
 				${this.renderTabs()}
 				${this.renderImportPreview()}

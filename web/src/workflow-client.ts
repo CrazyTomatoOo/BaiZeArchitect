@@ -821,7 +821,7 @@ export interface AssetSummary {
 	workspaceId: number;
 	kind: AssetKind;
 	title: string;
-	currentRevision: { id: number; revisionNo: number; digest: string } | null;
+	currentRevision: { id: number; revisionNo: number; digest: string; source: "manual" | "import" | "migration" | "workflow" } | null;
 	legacyOriginRequirementId: number | null;
 	createdAt: string;
 }

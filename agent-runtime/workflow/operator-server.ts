@@ -908,6 +908,7 @@ export async function startOperatorServer(
 					kind: createBody.kind as ReusableAssetKind,
 					title: typeof createBody.title === "string" ? createBody.title : "",
 					content: createBody.content,
+					strict: true,
 				});
 				if (relations.length > 0) {
 					options.runtime.writeRelations({ workspaceId, fromAssetId: created.assetId, fromRevisionId: created.revisionId, relations });

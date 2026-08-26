@@ -34,7 +34,7 @@ export interface ReusableAssetSummary {
 	workspaceId: number;
 	kind: ReusableAssetKind;
 	title: string;
-	currentRevision: { id: number; revisionNo: number; digest: string } | null;
+	currentRevision: { id: number; revisionNo: number; digest: string; source: "manual" | "import" | "migration" | "workflow" } | null;
 	legacyOriginRequirementId: number | null;
 	createdAt: string;
 }
@@ -63,6 +63,7 @@ type ReusableAssetSummaryRow = {
 	created_at: string;
 	revision_no: number | null;
 	content_digest: string | null;
+	source: string | null;
 };
 
 function toReusableAssetSummary(workspaceId: number, row: ReusableAssetSummaryRow): ReusableAssetSummary {
@@ -71,7 +72,7 @@ function toReusableAssetSummary(workspaceId: number, row: ReusableAssetSummaryRo
 		workspaceId,
 		kind: row.kind as ReusableAssetKind,
 		title: row.title,
-		currentRevision: row.current_revision_id === null ? null : { id: row.current_revision_id, revisionNo: row.revision_no as number, digest: row.content_digest as string },
+		currentRevision: row.current_revision_id === null ? null : { id: row.current_revision_id, revisionNo: row.revision_no as number, digest: row.content_digest as string, source: row.source as "manual" | "import" | "migration" | "workflow" },
 		legacyOriginRequirementId: row.legacy_origin_requirement_id,
 		createdAt: row.created_at,
 	};
@@ -125,11 +126,11 @@ interface StructuredAssetValidator {
 	check(value: unknown): boolean;
 }
 
-function isStructuredAssetContentValid(kind: ReusableAssetKind, content: unknown, validator?: StructuredAssetValidator): boolean {
+function isStructuredAssetContentValid(kind: ReusableAssetKind, content: unknown, validator: StructuredAssetValidator | undefined, strict: boolean): boolean {
 	if (kind === "stakeholder") return normalizeStakeholderContent(content) !== undefined;
 	if (typeof content !== "object" || content === null || Array.isArray(content)) return false;
 	const record = content as Record<string, unknown>;
-	if (!("schemaVersion" in record) && !("artifactKind" in record)) return true;
+	if (!("schemaVersion" in record) && !("artifactKind" in record)) return !strict;
 	if (record.schemaVersion !== `artifact/${kind}/v1` || record.artifactKind !== kind || !validator) return false;
 	const sourceRefs = Array.isArray(record.sourceRefs) && record.sourceRefs.length > 0
 		? record.sourceRefs
@@ -244,11 +245,11 @@ export class AssetStore {
 		return row !== undefined;
 	}
 
-	createReusableAsset(input: { workspaceId: number; kind: ReusableAssetKind; title: string; content: unknown; source?: "manual" | "import" | "migration" | "workflow"; legacyOriginRequirementId?: number | null; actorSnapshotDocumentId?: number | null; migrationAttestationDocumentId?: number | null }): { assetId: number; revisionId: number; revisionNo: number } {
+	createReusableAsset(input: { workspaceId: number; kind: ReusableAssetKind; title: string; content: unknown; source?: "manual" | "import" | "migration" | "workflow"; strict?: boolean; legacyOriginRequirementId?: number | null; actorSnapshotDocumentId?: number | null; migrationAttestationDocumentId?: number | null }): { assetId: number; revisionId: number; revisionNo: number } {
 		const timestamp = this.clock.now().toISOString();
 		const content = input.kind === "stakeholder" ? normalizeStakeholderContent(input.content) : input.content;
 		if (input.kind === "stakeholder" && !content) throw new ReusableAssetMalformedBodyError();
-		if (!isStructuredAssetContentValid(input.kind, content, this.structuredValidator)) throw new ReusableAssetMalformedBodyError();
+		if (!isStructuredAssetContentValid(input.kind, content, this.structuredValidator, input.strict === true)) throw new ReusableAssetMalformedBodyError();
 		const title = input.kind === "stakeholder" ? (content as { name: string }).name : input.title;
 		const schemaRef = input.kind === "stakeholder" ? "asset/stakeholder/v1" : `artifact/${input.kind}/v1`;
 		const transaction = this.database.transaction(() => {
@@ -291,7 +292,7 @@ export class AssetStore {
 			const stakeholderContent = asset.kind === "stakeholder" ? normalizeStakeholderContent(input.content) : undefined;
 			const content = asset.kind === "stakeholder" ? stakeholderContent : input.content;
 			if (asset.kind === "stakeholder" && (!stakeholderContent || stakeholderContent.name !== title)) throw new ReusableAssetMalformedBodyError();
-			if (!isStructuredAssetContentValid(asset.kind, content, this.structuredValidator)) throw new ReusableAssetMalformedBodyError();
+			if (!isStructuredAssetContentValid(asset.kind, content, this.structuredValidator, true)) throw new ReusableAssetMalformedBodyError();
 			if (asset.kind === "stakeholder" && this.stakeholderNameExists(input.workspaceId, title, asset.id)) throw new ReusableAssetNameConflictError();
 			const document = this.snapshotStore.insertSnapshot("reusable_asset_content", asset.kind === "stakeholder" ? "asset/stakeholder/v1" : `artifact/${asset.kind}/v1`, content, timestamp);
 			const revisionNo = (asset.revision_no ?? 0) + 1;
@@ -380,7 +381,7 @@ export class AssetStore {
 
 	listReusableAssets(workspaceId: number): readonly ReusableAssetSummary[] {
 		const rows = this.database
-			.prepare("select a.id, a.kind, a.title, a.current_revision_id, a.legacy_origin_requirement_id, a.created_at, r.revision_no, r.content_digest from reusable_assets a left join reusable_asset_revisions r on r.id = a.current_revision_id where a.workspace_id = ? order by a.id")
+			.prepare("select a.id, a.kind, a.title, a.current_revision_id, a.legacy_origin_requirement_id, a.created_at, r.revision_no, r.content_digest, r.source from reusable_assets a left join reusable_asset_revisions r on r.id = a.current_revision_id where a.workspace_id = ? order by a.id")
 			.all(workspaceId) as ReusableAssetSummaryRow[];
 		return rows.map((row) => toReusableAssetSummary(workspaceId, row));
 	}
@@ -404,7 +405,7 @@ export class AssetStore {
 			.prepare(`select count(*) as count from reusable_assets a where ${where}`)
 			.get(...parameters) as { count: number }).count;
 		const rows = this.database
-			.prepare(`select a.id, a.kind, a.title, a.current_revision_id, a.legacy_origin_requirement_id, a.created_at, r.revision_no, r.content_digest
+			.prepare(`select a.id, a.kind, a.title, a.current_revision_id, a.legacy_origin_requirement_id, a.created_at, r.revision_no, r.content_digest, r.source
 				from reusable_assets a
 				left join reusable_asset_revisions r on r.id = a.current_revision_id
 				where ${where}

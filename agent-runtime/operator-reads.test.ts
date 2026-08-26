@@ -720,7 +720,7 @@ test("reusable assets support list, create, detail, delete, export and import wi
 		const created = await fetch(`${context.server.url}/api/assets`, {
 			method: "POST",
 			headers: { "content-type": "application/json", cookie: context.cookie },
-			body: JSON.stringify({ workspaceId: context.workspaceId, kind: "scenario", title: "Expiry scenario", content: { steps: ["a"] } }),
+			body: JSON.stringify({ workspaceId: context.workspaceId, kind: "scenario", title: "Expiry scenario", content: { schemaVersion: "artifact/scenario/v1", artifactKind: "scenario", summary: "Expiry scenario", sourceRefs: [], scenarios: [{ id: "expiry", title: "Expiry", actors: ["Customer"], preconditions: [], trigger: "Date reached", mainFlow: ["Expire"], alternateFlows: [], expectedOutcome: "Expired" }] } }),
 		});
 		assert.equal(created.status, 201);
 		const { assetId } = (await created.json()) as { assetId: number; revisionId: number };
@@ -733,7 +733,7 @@ test("reusable assets support list, create, detail, delete, export and import wi
 		assert.equal(detail.title, "Expiry scenario");
 		assert.equal(detail.revisions.length, 1);
 		assert.equal(detail.revisions[0].source, "manual");
-		assert.deepEqual(detail.revisions[0].content, { steps: ["a"] });
+		assert.deepEqual(detail.revisions[0].content, { schemaVersion: "artifact/scenario/v1", artifactKind: "scenario", summary: "Expiry scenario", sourceRefs: [], scenarios: [{ id: "expiry", title: "Expiry", actors: ["Customer"], preconditions: [], trigger: "Date reached", mainFlow: ["Expire"], alternateFlows: [], expectedOutcome: "Expired" }] });
 		const exported = (await (await get(context, `/api/assets/export?workspaceId=${context.workspaceId}`)).json()) as { assets: Array<{ title: string }> };
 		assert.equal(exported.assets.length, 1);
 		const imported = await fetch(`${context.server.url}/api/assets/import`, {
