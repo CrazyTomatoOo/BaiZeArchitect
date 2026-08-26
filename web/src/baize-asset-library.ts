@@ -265,8 +265,8 @@ class BaizeAssetLibrary extends LitElement {
 	static styles = [sharedStyles, css`
 		:host {
 			display: block;
-			--asset-toolbar-offset: 6.5rem;
-			--asset-mobile-toolbar-offset: 9rem;
+			--asset-toolbar-offset: 8.5rem;
+			--asset-mobile-toolbar-offset: 11rem;
 			--asset-list-min-width: 15rem;
 			--asset-pane-height: min(68vh, 42rem);
 			--asset-placeholder-height: 11rem;
@@ -280,17 +280,18 @@ class BaizeAssetLibrary extends LitElement {
 			position: sticky;
 			top: 0;
 			z-index: 2;
-			display: flex;
-			align-items: end;
+			display: grid;
 			gap: var(--gap);
 			padding: var(--pad) 0;
 			background: var(--bg);
 			border-bottom: 1px solid var(--border);
 		}
-		.heading { min-width: 0; flex: 1; }
+		.toolbar-head { display: flex; align-items: start; justify-content: space-between; gap: var(--gap); }
+		.heading { min-width: 0; }
 		.heading h1 { margin: 0; font: 600 var(--text-display) var(--font-display); }
 		.sub { margin: var(--space-2xs) 0 0; color: var(--text-muted); font-size: var(--text-base); }
 		.count { color: var(--text-subtle); font: 600 var(--text-sm) var(--font-mono); white-space: nowrap; }
+		.toolbar-actions { display: flex; align-items: center; justify-content: flex-start; gap: var(--gap); flex-wrap: wrap; }
 		.search { width: min(280px, 30vw); }
 		.tabs {
 			position: sticky;
@@ -370,9 +371,9 @@ class BaizeAssetLibrary extends LitElement {
 		.file-button:hover { background: var(--surface-hover); }
 		.file-button:focus-within { outline: var(--focus-ring); outline-offset: 1px; }
 		@media (max-width: 900px) {
-			.toolbar { top: 0; align-items: stretch; flex-wrap: wrap; }
-			.heading { flex-basis: 100%; }
-			.search { width: 100%; flex: 1; }
+			.toolbar { top: 0; }
+			.toolbar-actions { align-items: stretch; }
+			.search { width: 100%; flex: 1 1 100%; }
 			.tabs { top: var(--asset-mobile-toolbar-offset); }
 			.content { grid-template-columns: minmax(0, 1fr); }
 			.pane { height: auto; max-height: none; overflow: visible; }
@@ -1204,19 +1205,23 @@ class BaizeAssetLibrary extends LitElement {
 		return html`
 			<section class="workspace" aria-labelledby="asset-library-title">
 				<header class="toolbar">
-					<div class="heading">
-						<h1 id="asset-library-title">设计模型资产</h1>
-						<p class="sub">按类型浏览 Workspace 内可复用的设计事实，并追溯资产关系。</p>
+					<div class="toolbar-head">
+						<div class="heading">
+							<h1 id="asset-library-title">设计模型资产</h1>
+							<p class="sub">按类型浏览 Workspace 内可复用的设计事实，并追溯资产关系。</p>
+						</div>
+						<span class="count">${this.loading ? "…" : this.activeView === "graph" ? "关系图" : this.total}</span>
 					</div>
-					<span class="count">${this.loading ? "…" : this.activeView === "graph" ? "关系图" : this.total}</span>
-					${this.activeView !== "graph" ? html`
-						<label class="search">标题过滤
-							<input type="search" .value=${this.query} placeholder="搜索当前类型" @input=${(event: Event) => this.updateQuery(event)} />
-						</label>
-						<button class="primary" @click=${() => this.openCreate()}>新建${assetKindLabel(this.activeView)}</button>
-					` : ""}
-					<button @click=${() => void this.exportWorkspace()}>导出</button>
-					<label class="file-button">导入<input class="file-input" type="file" accept="application/json" @change=${(event: Event) => void this.handleImportFile(event)} /></label>
+					<div class="toolbar-actions">
+						${this.activeView !== "graph" ? html`
+							<label class="search">标题过滤
+								<input type="search" .value=${this.query} placeholder="搜索当前类型" @input=${(event: Event) => this.updateQuery(event)} />
+							</label>
+							<button class="primary" @click=${() => this.openCreate()}>新建${assetKindLabel(this.activeView)}</button>
+						` : ""}
+						<button @click=${() => void this.exportWorkspace()}>导出</button>
+						<label class="file-button">导入<input class="file-input" type="file" accept="application/json" @change=${(event: Event) => void this.handleImportFile(event)} /></label>
+					</div>
 				</header>
 				${this.renderTabs()}
 				${this.renderImportPreview()}

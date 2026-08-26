@@ -69,6 +69,12 @@ async function installAssetMocks(page: Page): Promise<void> {
 	});
 }
 
+async function openWorkbenchNavigation(page: Page): Promise<void> {
+	const menu = page.getByRole("button", { name: "打开工作台导航" });
+	if (await menu.isVisible()) await menu.click();
+}
+
+
 test("asset workbench exposes typed tabs, detail relations, forms, and graph navigation", async ({ page }) => {
 	await installAssetMocks(page);
 	await page.goto("/assets");
@@ -109,14 +115,26 @@ test("asset workbench navigation keeps the browser URL in sync", async ({ page }
 	await installAssetMocks(page);
 	await page.goto("/assets?kind=stakeholder&page=1");
 	await expect(page.getByRole("heading", { name: "设计模型资产" })).toBeVisible();
-	if (await page.getByRole("button", { name: "打开工作台导航" }).isVisible()) {
-		await page.getByRole("button", { name: "打开工作台导航" }).click();
-	}
+	await openWorkbenchNavigation(page);
 	await page.getByRole("button", { name: "需求" }).click();
 	await expect(page).toHaveURL(/\/$/);
 	await expect(page.getByRole("heading", { name: "需求" })).toBeVisible();
 
+	await openWorkbenchNavigation(page);
 	await page.getByRole("button", { name: "资产库" }).click();
 	await expect(page).toHaveURL(/\/assets(?:\?|$)/);
 	await expect(page.getByRole("heading", { name: "设计模型资产" })).toBeVisible();
+});
+
+test("requirements and assets share the workbench sidebar", async ({ page }) => {
+	await installAssetMocks(page);
+	await page.goto("/assets");
+	await expect(page.locator("baize-asset-library .toolbar-head")).toBeVisible();
+	await expect(page.locator("baize-asset-library .toolbar-actions")).toBeVisible();
+
+	await openWorkbenchNavigation(page);
+	await page.getByRole("button", { name: "需求" }).click();
+	await expect(page.getByRole("heading", { name: "需求" })).toBeVisible();
+	await expect(page.getByRole("complementary", { name: "工作台导航" })).toBeVisible();
+	await expect(page.getByRole("button", { name: "资产库" })).toHaveCount(1);
 });

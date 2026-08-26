@@ -78,6 +78,7 @@ class BaizeShell extends LitElement {
 		.menu-button, .drawer-scrim { display: none; }
 		.workbench-frame { display: grid; grid-template-columns: var(--workbench-rail-width) minmax(0, 1fr) var(--workbench-rail-width); gap: var(--gap); align-items: start; }
 		:host { --workbench-rail-width: 12rem; }
+		.requirements-main, .asset-main { min-width: 0; }
 		.workbench-rail { position: sticky; top: 0; display: grid; gap: var(--space-2xs); padding: var(--gap); border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface); }
 		.workbench-rail h2 { margin: 0; font-size: var(--text-sm); color: var(--text-muted); }
 		.workbench-rail p { margin: 0; color: var(--text-muted); font-size: var(--text-sm); }
@@ -227,14 +228,35 @@ class BaizeShell extends LitElement {
 
 
 	private topbar(): ReturnType<typeof html> {
+		const path = window.location.pathname;
+		const inWorkbench = this.workspaceId !== 0 && (path === "/" || path.startsWith("/assets"));
 		return html`<div class="topbar">
 			<div class="brand"><span class="dot">◇</span> BaiZe Architect</div>
 			<span class="spacer"></span>
-			${window.location.pathname.startsWith("/assets") ? html`<button class="menu-button" aria-label="打开工作台导航" aria-expanded=${this.drawerOpen} @click=${() => this.toggleDrawer()}>菜单</button>` : nothing}
-			${this.routerLink("/assets") ? html`<button @click=${() => this.navigate("/assets")}>资产库</button>` : nothing}
+			${inWorkbench ? html`<button class="menu-button" aria-label="打开工作台导航" aria-expanded=${this.drawerOpen} @click=${() => this.toggleDrawer()}>菜单</button>` : nothing}
+			${!inWorkbench && this.routerLink("/assets") ? html`<button @click=${() => this.navigate("/assets")}>资产库</button>` : nothing}
 			${this.routerLink("/manage") ? html`<button @click=${() => this.handleOpenManager()}>管理工作空间</button>` : nothing}
 			<button @click=${() => { this.session = null; }}>退出</button>
 		</div>`;
+	}
+
+	private renderWorkbenchNav(active: "requirements" | "assets"): ReturnType<typeof html> {
+		return html`
+			<aside class="workbench-rail ${this.drawerOpen ? "drawer-open" : ""}" aria-label="工作台导航">
+				<h2>工作台</h2>
+				<button class=${active === "requirements" ? "primary" : ""} aria-current=${active === "requirements" ? "page" : nothing} @click=${() => { this.closeDrawer(); if (active !== "requirements") this.navigate("/"); }}>需求</button>
+				<button class=${active === "assets" ? "primary" : ""} aria-current=${active === "assets" ? "page" : nothing} @click=${() => { this.closeDrawer(); if (active !== "assets") this.navigate("/assets"); }}>资产库</button>
+			</aside>
+			${this.drawerOpen ? html`<button class="drawer-scrim" aria-label="关闭工作台导航" @click=${() => this.closeDrawer()}></button>` : nothing}
+		`;
+	}
+
+	private renderRunContext(description: string): ReturnType<typeof html> {
+		return html`<aside class="workbench-rail" aria-label="运行上下文">
+			<h2>运行上下文</h2>
+			<p>${description}</p>
+			<p>当前 Workspace 的设计事实与治理状态分别在对应页面查看。</p>
+		</aside>`;
 	}
 
 	private routerLink(path: string): boolean {
@@ -247,15 +269,19 @@ class BaizeShell extends LitElement {
 		if (this.workspaceId === 0) {
 			return html`<div class="empty">请先选择或创建工作空间。</div>`;
 		}
-		return html`<div class="home-stack">
-			<baize-requirements
-				.apiBase=${this.apiBase}
-				.workspaceId=${this.workspaceId}
-				@baize-open-requirement=${(e: Event) => {
-					const id = (e as CustomEvent<{ id: number }>).detail.id;
-					this.navigate(`/workflow/${id}`);
-				}}
-			></baize-requirements>
+		return html`<div class="workbench-frame">
+			${this.renderWorkbenchNav("requirements")}
+			<main class="requirements-main">
+				<baize-requirements
+					.apiBase=${this.apiBase}
+					.workspaceId=${this.workspaceId}
+					@baize-open-requirement=${(e: Event) => {
+						const id = (e as CustomEvent<{ id: number }>).detail.id;
+						this.navigate(`/workflow/${id}`);
+					}}
+				></baize-requirements>
+			</main>
+			${this.renderRunContext("需求页面展示治理入口；执行记录在具体需求详情中查看。")}
 		</div>`;
 	}
 
@@ -264,22 +290,14 @@ class BaizeShell extends LitElement {
 			return html`<div class="empty">请先选择或创建工作空间。</div>`;
 		}
 		return html`<div class="workbench-frame">
-			<aside class="workbench-rail ${this.drawerOpen ? "drawer-open" : ""}" aria-label="工作台导航">
-				<h2>工作台</h2>
-				<button @click=${() => { this.closeDrawer(); this.navigate("/"); }}>需求</button>
-				<button class="primary" aria-current="page" @click=${() => this.closeDrawer()}>资产库</button>
-			</aside>
-			${this.drawerOpen ? html`<button class="drawer-scrim" aria-label="关闭工作台导航" @click=${() => this.closeDrawer()}></button>` : nothing}
+			${this.renderWorkbenchNav("assets")}
 			<main class="asset-main">
 				<baize-asset-library .apiBase=${this.apiBase} .workspaceId=${this.workspaceId}></baize-asset-library>
 			</main>
-			<aside class="workbench-rail" aria-label="运行上下文">
-				<h2>运行上下文</h2>
-				<p>资产操作不产生治理 Run。</p>
-				<p>当前 Workspace 的资产关系和 revision 在详情区查看。</p>
-			</aside>
+			${this.renderRunContext("资产操作不产生治理 Run。")}
 		</div>`;
 	}
+
 
 	private renderManage(): ReturnType<typeof html> {
 		return html`<baize-workspace-manager
