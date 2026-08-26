@@ -104,3 +104,19 @@ test("asset workbench exposes typed tabs, detail relations, forms, and graph nav
 	});
 	await expect(page.getByRole("heading", { name: "导入预览" })).toBeVisible();
 });
+
+test("asset workbench navigation keeps the browser URL in sync", async ({ page }) => {
+	await installAssetMocks(page);
+	await page.goto("/assets?kind=stakeholder&page=1");
+	await expect(page.getByRole("heading", { name: "设计模型资产" })).toBeVisible();
+	if (await page.getByRole("button", { name: "打开工作台导航" }).isVisible()) {
+		await page.getByRole("button", { name: "打开工作台导航" }).click();
+	}
+	await page.getByRole("button", { name: "需求" }).click();
+	await expect(page).toHaveURL(/\/$/);
+	await expect(page.getByRole("heading", { name: "需求" })).toBeVisible();
+
+	await page.getByRole("button", { name: "资产库" }).click();
+	await expect(page).toHaveURL(/\/assets(?:\?|$)/);
+	await expect(page.getByRole("heading", { name: "设计模型资产" })).toBeVisible();
+});

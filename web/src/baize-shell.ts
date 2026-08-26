@@ -164,7 +164,7 @@ class BaizeShell extends LitElement {
 				this.workspaceId = resolved.workspaceId;
 				// 如果当前 URL 是根路径,导航到列表;否则保持原 URL(如刷新详情页)
 				if (window.location.pathname === "/" || window.location.pathname === "") {
-					this.router.goto("/");
+					this.navigate("/");
 				}
 				return;
 			}
@@ -174,7 +174,7 @@ class BaizeShell extends LitElement {
 		this.workspaceId = 0;
 		// 无有效 workspace → 管理页
 		if (window.location.pathname === "/" || window.location.pathname === "") {
-			this.router.goto("/manage");
+			this.navigate("/manage");
 		}
 	}
 
@@ -196,7 +196,7 @@ class BaizeShell extends LitElement {
 		const id = (event as CustomEvent<{ id: number }>).detail.id;
 		this.workspaceId = id;
 		localStorage.setItem("baize.workspaceId", String(id));
-		this.router.goto("/");
+		this.navigate("/");
 	}
 
 	private handleWorkspaceDeleted(event: Event): void {
@@ -208,7 +208,7 @@ class BaizeShell extends LitElement {
 	}
 
 	private handleOpenManager(): void {
-		this.router.goto("/manage");
+		this.navigate("/manage");
 	}
 	private toggleDrawer(): void {
 		this.drawerOpen = !this.drawerOpen;
@@ -218,12 +218,20 @@ class BaizeShell extends LitElement {
 		this.drawerOpen = false;
 	}
 
+	private navigate(path: string): void {
+		if (window.location.pathname !== path || window.location.search !== "") {
+			window.history.pushState({}, "", path);
+		}
+		void this.router.goto(path);
+	}
+
+
 	private topbar(): ReturnType<typeof html> {
 		return html`<div class="topbar">
 			<div class="brand"><span class="dot">◇</span> BaiZe Architect</div>
 			<span class="spacer"></span>
 			${window.location.pathname.startsWith("/assets") ? html`<button class="menu-button" aria-label="打开工作台导航" aria-expanded=${this.drawerOpen} @click=${() => this.toggleDrawer()}>菜单</button>` : nothing}
-			${this.routerLink("/assets") ? html`<button @click=${() => this.router.goto("/assets")}>资产库</button>` : nothing}
+			${this.routerLink("/assets") ? html`<button @click=${() => this.navigate("/assets")}>资产库</button>` : nothing}
 			${this.routerLink("/manage") ? html`<button @click=${() => this.handleOpenManager()}>管理工作空间</button>` : nothing}
 			<button @click=${() => { this.session = null; }}>退出</button>
 		</div>`;
@@ -245,7 +253,7 @@ class BaizeShell extends LitElement {
 				.workspaceId=${this.workspaceId}
 				@baize-open-requirement=${(e: Event) => {
 					const id = (e as CustomEvent<{ id: number }>).detail.id;
-					this.router.goto(`/workflow/${id}`);
+					this.navigate(`/workflow/${id}`);
 				}}
 			></baize-requirements>
 		</div>`;
@@ -258,7 +266,7 @@ class BaizeShell extends LitElement {
 		return html`<div class="workbench-frame">
 			<aside class="workbench-rail ${this.drawerOpen ? "drawer-open" : ""}" aria-label="工作台导航">
 				<h2>工作台</h2>
-				<button @click=${() => { this.closeDrawer(); this.router.goto("/"); }}>需求</button>
+				<button @click=${() => { this.closeDrawer(); this.navigate("/"); }}>需求</button>
 				<button class="primary" aria-current="page" @click=${() => this.closeDrawer()}>资产库</button>
 			</aside>
 			${this.drawerOpen ? html`<button class="drawer-scrim" aria-label="关闭工作台导航" @click=${() => this.closeDrawer()}></button>` : nothing}
@@ -287,7 +295,7 @@ class BaizeShell extends LitElement {
 			.workspaceId=${this.workspaceId}
 			.requirementId=${id}
 			.activeTab=${tab ?? "tasks"}
-			@baize-goto=${() => { this.router.goto("/"); }}
+			@baize-goto=${() => { this.navigate("/"); }}
 		></baize-workflow>`;
 	}
 
