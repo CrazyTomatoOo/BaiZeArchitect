@@ -590,7 +590,7 @@ class BaizeAssetLibrary extends LitElement {
 		let target = this.formDraft;
 		for (const key of path.slice(0, -1)) {
 			const current = target[key];
-			if (typeof current !== "object" || current === null || Array.isArray(current)) target[key] = {};
+			if (typeof current !== "object" || current === null) target[key] = {};
 			target = target[key] as Record<string, unknown>;
 		}
 		target[path[path.length - 1] as string] = value;
@@ -651,9 +651,12 @@ class BaizeAssetLibrary extends LitElement {
 	private addArrayItem(field: FormField, path: readonly string[]): void {
 		const current = this.draftValue(path);
 		if (!Array.isArray(current)) return;
-		const value = field.type === "object-list"
+		let value: unknown = field.type === "object-list"
 			? Object.fromEntries((field.itemFields ?? []).map((item) => [item.key, item.type === "list" || item.type === "number-list" || item.type === "object-list" ? [] : ""]))
 			: "";
+		if (field.key === "changeUnits" && typeof value === "object" && value !== null && !Array.isArray(value)) {
+			(value as Record<string, unknown>).sourceRefs = [{ type: "requirement_revision", revisionId: 1 }];
+		}
 		this.setDraftValue(path, [...current, value]);
 	}
 

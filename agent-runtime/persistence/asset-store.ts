@@ -188,7 +188,7 @@ export class AssetStore {
 		relations: readonly AssetRelationInput[];
 	}): readonly AssetRelationRecord[] {
 		const timestamp = this.clock.now().toISOString();
-		const transaction = this.database.transaction(() => {
+		const write = (): AssetRelationRecord[] => {
 			const from = this.database
 				.prepare("select id, kind, current_revision_id from reusable_assets where id = ? and workspace_id = ?")
 				.get(input.fromAssetId, input.workspaceId) as { id: number; kind: ReusableAssetKind; current_revision_id: number | null } | undefined;
@@ -247,7 +247,8 @@ export class AssetStore {
 				throw new AssetRelationValidationError(issues);
 			}
 			return records;
-		}).immediate;
+		};
+		const transaction = this.database.inTransaction ? write : this.database.transaction(write).immediate;
 		return transaction();
 	}
 

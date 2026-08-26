@@ -143,7 +143,7 @@ test("asset updates append a revision, replace outgoing relations atomically, an
 			expectedRevisionId: scenario.revisionId,
 			title: "Checkout v2",
 			content: newContent,
-			relations: [],
+			relations: [{ toAssetId: usecase.assetId, type: "contains" }],
 		});
 		assert.ok(updated);
 
@@ -151,7 +151,7 @@ test("asset updates append a revision, replace outgoing relations atomically, an
 		const detail = runtime.getReusableAsset(scenario.assetId);
 		assert.equal(detail?.title, "Checkout v2");
 		assert.deepEqual(detail?.revisions.map((revision) => revision.content), [{ steps: ["old"] }, newContent]);
-		assert.deepEqual(runtime.readRelations(scenario.assetId), []);
+		assert.equal(runtime.readRelations(scenario.assetId)[0]?.fromRevisionId, updated.revisionId);
 		assert.throws(
 			() => runtime.updateReusableAsset({
 				workspaceId,
