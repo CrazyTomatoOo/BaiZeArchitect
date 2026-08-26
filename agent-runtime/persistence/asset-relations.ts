@@ -49,7 +49,7 @@ export interface ReusableAssetExportBundle {
 	relations: readonly AssetRelationExport[];
 }
 export class AssetRelationValidationError extends Error {
-	constructor(readonly issues: readonly { toAssetId?: number; type?: string; reason: string }[]) {
+	constructor(readonly issues: readonly { toAssetId?: number; type?: string; reason: string; fromTitle?: string; fromKind?: ReusableAssetKind; toTitle?: string; toKind?: ReusableAssetKind }[]) {
 		super("Asset relation validation failed");
 	}
 }

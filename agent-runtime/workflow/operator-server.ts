@@ -784,6 +784,7 @@ export async function startOperatorServer(
 					workspaceId,
 					importBody.assets as { kind: ReusableAssetKind; title: string; content: unknown }[],
 					relations,
+					true,
 				);
 				sendJson(response, 201, { assetIds: ids });
 			} catch (error) {

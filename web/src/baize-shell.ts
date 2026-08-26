@@ -29,14 +29,15 @@ class BaizeShell extends LitElement {
 		loginError: { state: true },
 		workspaceId: { state: true },
 		initializing: { state: true },
+		drawerOpen: { state: true },
 	};
-
 	declare apiBase: string;
 	declare session: OperatorSession | null;
 	declare loginToken: string;
 	declare loginError: string | null;
 	declare workspaceId: number;
 	declare initializing: boolean;
+	declare drawerOpen: boolean;
 
 	private router = new Router(this, [
 		{ path: "/", render: () => this.renderHome() },
@@ -70,11 +71,11 @@ class BaizeShell extends LitElement {
 			font-size: var(--text-lg);
 			display: flex;
 			align-items: center;
-			gap: 8px;
+			gap: var(--space-2xs);
 		}
 		.topbar .brand .dot { color: var(--accent); }
-		.topbar .spacer { flex: 1; }
 		.view-host { margin-top: var(--gap); }
+		.menu-button, .drawer-scrim { display: none; }
 		.workbench-frame { display: grid; grid-template-columns: var(--workbench-rail-width) minmax(0, 1fr) var(--workbench-rail-width); gap: var(--gap); align-items: start; }
 		:host { --workbench-rail-width: 12rem; }
 		.workbench-rail { position: sticky; top: 0; display: grid; gap: var(--space-2xs); padding: var(--gap); border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface); }
@@ -82,8 +83,12 @@ class BaizeShell extends LitElement {
 		.workbench-rail p { margin: 0; color: var(--text-muted); font-size: var(--text-sm); }
 		.workbench-rail button { text-align: left; }
 		@media (max-width: 900px) {
-			.workbench-frame { grid-template-columns: minmax(0, 1fr); }
-			.workbench-rail { position: static; }
+			.menu-button { display: inline-flex; }
+			.workbench-frame { display: block; position: relative; }
+			.workbench-frame > .workbench-rail:first-of-type { position: fixed; inset: 0 auto 0 0; z-index: 4; width: var(--sidebar-w); box-sizing: border-box; transform: translateX(-100%); transition: transform var(--dur-2) var(--ease-out); }
+			.workbench-frame > .workbench-rail:first-of-type.drawer-open { transform: translateX(0); }
+			.workbench-frame > .workbench-rail:last-of-type { display: none; }
+			.drawer-scrim { display: block; position: fixed; inset: 0; z-index: 3; width: 100%; height: 100%; border: 0; border-radius: 0; background: var(--scrim); }
 		}
 		.login-wrap {
 			display: flex;
@@ -124,8 +129,8 @@ class BaizeShell extends LitElement {
 		this.session = null;
 		this.loginToken = "";
 		this.loginError = null;
-		this.workspaceId = 0;
 		this.initializing = true;
+		this.drawerOpen = false;
 	}
 
 	connectedCallback(): void {
@@ -205,11 +210,19 @@ class BaizeShell extends LitElement {
 	private handleOpenManager(): void {
 		this.router.goto("/manage");
 	}
+	private toggleDrawer(): void {
+		this.drawerOpen = !this.drawerOpen;
+	}
+
+	private closeDrawer(): void {
+		this.drawerOpen = false;
+	}
 
 	private topbar(): ReturnType<typeof html> {
 		return html`<div class="topbar">
 			<div class="brand"><span class="dot">◇</span> BaiZe Architect</div>
 			<span class="spacer"></span>
+			<button class="menu-button" aria-label="打开工作台导航" aria-expanded=${this.drawerOpen} @click=${() => this.toggleDrawer()}>菜单</button>
 			${this.routerLink("/assets") ? html`<button @click=${() => this.router.goto("/assets")}>资产库</button>` : nothing}
 			${this.routerLink("/manage") ? html`<button @click=${() => this.handleOpenManager()}>管理工作空间</button>` : nothing}
 			<button @click=${() => { this.session = null; }}>退出</button>
@@ -243,11 +256,12 @@ class BaizeShell extends LitElement {
 			return html`<div class="empty">请先选择或创建工作空间。</div>`;
 		}
 		return html`<div class="workbench-frame">
-			<aside class="workbench-rail" aria-label="工作台导航">
+			<aside class="workbench-rail ${this.drawerOpen ? "drawer-open" : ""}" aria-label="工作台导航">
 				<h2>工作台</h2>
-				<button @click=${() => this.router.goto("/")}>需求</button>
-				<button class="primary" aria-current="page">资产库</button>
+				<button @click=${() => { this.closeDrawer(); this.router.goto("/"); }}>需求</button>
+				<button class="primary" aria-current="page" @click=${() => this.closeDrawer()}>资产库</button>
 			</aside>
+			${this.drawerOpen ? html`<button class="drawer-scrim" aria-label="关闭工作台导航" @click=${() => this.closeDrawer()}></button>` : nothing}
 			<main class="asset-main">
 				<baize-asset-library .apiBase=${this.apiBase} .workspaceId=${this.workspaceId}></baize-asset-library>
 			</main>

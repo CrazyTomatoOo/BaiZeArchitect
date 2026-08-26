@@ -81,7 +81,7 @@ test("asset workbench exposes typed tabs, detail relations, forms, and graph nav
 	await page.getByRole("button", { name: "删除" }).click();
 	await expect(page.getByText("确认删除？资产及其历史 revision 将无法恢复。")).toBeVisible();
 	await page.getByRole("button", { name: "确认删除" }).click();
-	await expect(page.getByText(/仍被 1 个资产引用/)).toBeVisible();
+	await expect(page.getByText(/仍被以下 1 个资产引用/)).toBeVisible();
 
 	await page.getByRole("button", { name: /关系图/ }).click();
 	await expect(page.getByRole("img", { name: "Workspace 资产关系图" })).toBeVisible();

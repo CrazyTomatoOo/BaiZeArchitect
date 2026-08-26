@@ -41,7 +41,7 @@ function assetKey(kind: AssetKind, title: string): string {
 function assetContentWarning(kind: AssetKind, content: unknown): string | null {
 	if (typeof content !== "object" || content === null || Array.isArray(content)) return "内容不是结构化对象，按原始内容展示。";
 	const record = content as Record<string, unknown>;
-	if (!("schemaVersion" in record) && !("artifactKind" in record)) return "该版本未声明 v1 schema，按历史内容展示。";
+	if (!("schemaVersion" in record) && !("artifactKind" in record)) return isPromotedAssetItem(kind, record) ? null : "该版本未声明 v1 schema，按历史内容展示。";
 	if (record.schemaVersion !== `artifact/${kind}/v1` || record.artifactKind !== kind) return "内容 schema 与资产类型不匹配。";
 	if (typeof record.summary !== "string" || record.summary.trim().length === 0) return "内容缺少有效摘要。";
 	const requiredArrays: Partial<Record<Exclude<AssetKind, "stakeholder">, readonly string[]>> = {
@@ -55,6 +55,19 @@ function assetContentWarning(kind: AssetKind, content: unknown): string | null {
 	};
 	for (const key of (kind === "stakeholder" ? [] : requiredArrays[kind]) ?? []) if (!Array.isArray(record[key]) || record[key].length === 0) return `内容缺少有效${fieldTitle(key)}。`;
 	return null;
+}
+
+function isPromotedAssetItem(kind: AssetKind, record: Record<string, unknown>): boolean {
+	switch (kind) {
+		case "scenario": return typeof record.id === "string" && typeof record.title === "string" && Array.isArray(record.actors);
+		case "usecase": return typeof record.id === "string" && typeof record.actor === "string" && typeof record.goal === "string";
+		case "function": return typeof record.id === "string" && typeof record.name === "string" && typeof record.responsibility === "string";
+		case "design": return typeof record.id === "string" && typeof record.area === "string" && typeof record.change === "string";
+		case "architecture": return typeof record.id === "string" && typeof record.name === "string" && typeof record.responsibility === "string";
+		case "data": return typeof record.name === "string" && typeof record.purpose === "string" && Array.isArray(record.fields);
+		case "api": return typeof record.id === "string" && typeof record.name === "string" && typeof record.contract === "string";
+		case "stakeholder": return typeof record.name === "string";
+	}
 }
 
 type FormFieldType = "text" | "number" | "textarea" | "list" | "number-list" | "object-list";
@@ -135,6 +148,15 @@ const FORM_FIELDS: Record<AssetKind, readonly FormField[]> = {
 	usecase: [{ key: "summary", label: "摘要", type: "textarea" }, { key: "useCases", label: "用例", type: "object-list", itemFields: usecaseFields }],
 	function: [{ key: "summary", label: "摘要", type: "textarea" }, { key: "functions", label: "功能", type: "object-list", itemFields: functionFields }],
 	stakeholder: [{ key: "name", label: "名称", type: "text" }, { key: "description", label: "描述", type: "textarea" }],
+};
+const PROMOTED_ITEM_FIELDS: Partial<Record<AssetKind, readonly FormField[]>> = {
+	scenario: scenarioFields,
+	usecase: usecaseFields,
+	function: functionFields,
+	design: [{ key: "id", label: "标识", type: "text" }, { key: "area", label: "区域", type: "text" }, { key: "change", label: "变更", type: "textarea" }, { key: "rationale", label: "理由", type: "textarea" }, { key: "sourceRefs", label: "来源引用", type: "object-list", itemFields: [{ key: "type", label: "类型", type: "text" }, { key: "revisionId", label: "版本号", type: "number" }] }],
+	architecture: [{ key: "id", label: "标识", type: "text" }, { key: "name", label: "名称", type: "text" }, { key: "responsibility", label: "职责", type: "textarea" }],
+	data: [{ key: "name", label: "名称", type: "text" }, { key: "purpose", label: "用途", type: "textarea" }, { key: "fields", label: "字段", type: "list" }, { key: "lifecycle", label: "生命周期", type: "textarea" }],
+	api: [{ key: "id", label: "标识", type: "text" }, { key: "kind", label: "类型", type: "text" }, { key: "name", label: "名称", type: "text" }, { key: "contract", label: "契约", type: "textarea" }, { key: "errors", label: "错误", type: "list" }, { key: "compatibility", label: "兼容性", type: "textarea" }],
 };
 
 const RELATION_TARGETS: Record<AssetKind, readonly { kind: AssetKind; type: "contains" | "involves" }[]> = {
@@ -334,9 +356,10 @@ class BaizeAssetLibrary extends LitElement {
 		.import-preview { display: grid; gap: var(--space-2xs); padding: var(--gap); }
 		.import-preview h2 { margin: 0; font-size: var(--text-base); }
 		.danger-zone { display: flex; gap: var(--space-2xs); align-items: center; flex-wrap: wrap; }
-		.file-input { display: none; }
-		.file-button { display: inline-flex; align-items: center; padding: var(--space-2xs) var(--pad); border: 1px solid var(--border-strong); border-radius: var(--radius); color: var(--text); cursor: pointer; white-space: nowrap; }
+		.file-input { position: absolute; inline-size: 1px; block-size: 1px; opacity: 0; clip-path: inset(50%); }
+		.file-button { display: inline-flex; align-items: center; position: relative; padding: var(--space-2xs) var(--pad); border: 1px solid var(--border-strong); border-radius: var(--radius); color: var(--text); cursor: pointer; white-space: nowrap; }
 		.file-button:hover { background: var(--surface-hover); }
+		.file-button:focus-within { outline: var(--focus-ring); outline-offset: 1px; }
 		@media (max-width: 900px) {
 			.toolbar { top: 0; align-items: stretch; flex-wrap: wrap; }
 			.heading { flex-basis: 100%; }
@@ -419,9 +442,12 @@ class BaizeAssetLibrary extends LitElement {
 		this.selectedAssetId = selected === null ? null : positiveInteger(selected, 0) || null;
 		const graphKind = params.get("graphKind");
 		this.graphKindFilter = graphKind !== null && ASSET_KINDS.includes(graphKind as AssetKind) ? graphKind as AssetKind : null;
+		const zoom = Number(params.get("graphZoom"));
+		this.graphZoom = Number.isFinite(zoom) && zoom >= 0.6 && zoom <= 2 ? zoom : 1;
+		this.graphOffset = { x: Number(params.get("graphX")) || 0, y: Number(params.get("graphY")) || 0 };
 	}
 
-	private updateUrl(changes: Partial<{ kind: AssetView; q: string; page: number; pageSize: number; selectedAssetId: number | null; graphKind: AssetKind | null }>, replace = false): void {
+	private updateUrl(changes: Partial<{ kind: AssetView; q: string; page: number; pageSize: number; selectedAssetId: number | null; graphKind: AssetKind | null; graphZoom: number; graphX: number; graphY: number }>, replace = false): void {
 		const params = new URLSearchParams(window.location.search);
 		if (changes.kind !== undefined) params.set("kind", changes.kind);
 		if (changes.q !== undefined) changes.q.length > 0 ? params.set("q", changes.q) : params.delete("q");
@@ -435,6 +461,9 @@ class BaizeAssetLibrary extends LitElement {
 			if (changes.graphKind === null) params.delete("graphKind");
 			else params.set("graphKind", changes.graphKind);
 		}
+		if (changes.graphZoom !== undefined) params.set("graphZoom", String(changes.graphZoom));
+		if (changes.graphX !== undefined) params.set("graphX", String(changes.graphX));
+		if (changes.graphY !== undefined) params.set("graphY", String(changes.graphY));
 		const query = params.toString();
 		const url = query.length > 0 ? `/assets?${query}` : "/assets";
 		if (replace) window.history.replaceState({}, "", url);
@@ -488,6 +517,10 @@ class BaizeAssetLibrary extends LitElement {
 		} finally {
 			if (requestNo === this.detailRequestNo) this.detailLoading = false;
 		}
+	}
+	private fieldsForDraft(kind: AssetKind, draft: Record<string, unknown>): readonly FormField[] {
+		if (kind !== "stakeholder" && !("schemaVersion" in draft) && !("artifactKind" in draft)) return PROMOTED_ITEM_FIELDS[kind] ?? FORM_FIELDS[kind];
+		return FORM_FIELDS[kind];
 	}
 	private async loadGraph(): Promise<void> {
 		this.loading = true;
@@ -654,6 +687,7 @@ class BaizeAssetLibrary extends LitElement {
 							? html`${(field.itemFields ?? []).map((child) => this.renderFormField(child, [...path, String(index), child.key]))}`
 							: html`<p class="form-error">该条目格式无效。</p>`}
 						<div class="array-actions">
+							<button type="button" @click=${() => this.moveArrayItem(path, index, -1)}>上移</button>
 							<button type="button" @click=${() => this.moveArrayItem(path, index, 1)}>下移</button>
 							<button type="button" @click=${() => this.removeArrayItem(path, index)}>删除</button>
 						</div>
@@ -836,7 +870,8 @@ class BaizeAssetLibrary extends LitElement {
 		if (!detail) return;
 		const references = [...detail.resolvedGraph.incoming, ...detail.resolvedGraph.outgoing];
 		if (references.length > 0) {
-			this.deleteError = `该资产仍被 ${references.length} 个资产引用，无法删除。`;
+			const referenceDetails = references.map((reference) => `${assetKindLabel(reference.kind)}「${reference.title}」·${relationTypeLabel(reference.type)}`).join("、");
+			this.deleteError = `该资产仍被以下 ${references.length} 个资产引用，无法删除：${referenceDetails}`;
 			return;
 		}
 		try {
@@ -855,7 +890,7 @@ class BaizeAssetLibrary extends LitElement {
 		return html`<form class="form" @submit=${(event: Event) => void this.submitForm(event)}>
 			<header><h2>${this.formMode === "create" ? "新建" : "编辑"}${assetKindLabel(this.formKind)}资产</h2><p class="detail-sub">严格遵循当前类型 v1 业务字段。</p></header>
 			<div class="form-field"><label>资产标题<input required .value=${this.formTitle} @input=${(event: Event) => { const value = (event.target as HTMLInputElement).value; this.formTitle = value; if (this.formKind === "stakeholder") this.setDraftValue(["name"], value); }} /></label></div>
-			${FORM_FIELDS[this.formKind].map((field) => this.renderFormField(field, [field.key]))}
+			${this.fieldsForDraft(this.formKind, this.formDraft).map((field) => this.renderFormField(field, [field.key]))}
 			${this.renderFormRelations()}
 			${this.formError ? html`<p class="form-error" role="alert">${this.formError}</p>` : ""}
 			<div class="form-actions">
@@ -1023,6 +1058,9 @@ class BaizeAssetLibrary extends LitElement {
 				<dl class="facts">
 					<div class="fact"><dt>创建时间</dt><dd>${new Date(detail.createdAt).toLocaleDateString("zh-CN")}</dd></div>
 					<div class="fact"><dt>版本数量</dt><dd>${detail.revisions.length}</dd></div>
+					<div class="fact"><dt>来源需求</dt><dd>${detail.originRequirementId ?? "—"}</dd></div>
+					<div class="fact"><dt>来源产物</dt><dd>${detail.originArtifactId ?? "—"}</dd></div>
+					<div class="fact"><dt>来源批准</dt><dd>${detail.originApprovalId ?? "—"}</dd></div>
 					<div class="fact"><dt>当前 Revision</dt><dd>${current ? `Revision ${current.revisionNo}` : "暂无"}</dd></div>
 				</dl>
 			</section>
@@ -1107,12 +1145,12 @@ class BaizeAssetLibrary extends LitElement {
 						${ASSET_KINDS.map((kind) => html`<option value=${kind} ?selected=${this.graphKindFilter === kind}>${assetKindLabel(kind)}</option>`)}
 					</select>
 				</label>
-				<button @click=${() => { this.graphZoom = Math.min(2, this.graphZoom + 0.1); }}>放大</button>
-				<button @click=${() => { this.graphZoom = Math.max(0.6, this.graphZoom - 0.1); }}>缩小</button>
-				<button aria-label="向左平移" @click=${() => { this.graphOffset = { ...this.graphOffset, x: this.graphOffset.x - 30 }; }}>←</button>
-				<button aria-label="向右平移" @click=${() => { this.graphOffset = { ...this.graphOffset, x: this.graphOffset.x + 30 }; }}>→</button>
-				<button aria-label="向上平移" @click=${() => { this.graphOffset = { ...this.graphOffset, y: this.graphOffset.y - 30 }; }}>↑</button>
-				<button aria-label="向下平移" @click=${() => { this.graphOffset = { ...this.graphOffset, y: this.graphOffset.y + 30 }; }}>↓</button>
+				<button @click=${() => { const graphZoom = Math.min(2, this.graphZoom + 0.1); this.updateUrl({ graphZoom }, true); }}>放大</button>
+				<button @click=${() => { const graphZoom = Math.max(0.6, this.graphZoom - 0.1); this.updateUrl({ graphZoom }, true); }}>缩小</button>
+				<button aria-label="向左平移" @click=${() => this.updateUrl({ graphX: this.graphOffset.x - 30 }, true)}>←</button>
+				<button aria-label="向右平移" @click=${() => this.updateUrl({ graphX: this.graphOffset.x + 30 }, true)}>→</button>
+				<button aria-label="向上平移" @click=${() => this.updateUrl({ graphY: this.graphOffset.y - 30 }, true)}>↑</button>
+				<button aria-label="向下平移" @click=${() => this.updateUrl({ graphY: this.graphOffset.y + 30 }, true)}>↓</button>
 				<span class="detail-sub">实线：包含 · 虚线：涉及</span>
 			</div>
 			<div class="graph-canvas" role="img" aria-label="Workspace 资产关系图" style="height: ${height}px">

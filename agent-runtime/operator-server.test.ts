@@ -792,7 +792,7 @@ test("relation import reuses title-kind assets and rolls back malformed edges", 
 			workspaceId: destinationWorkspaceId,
 			assets: [
 				{ kind: "stakeholder", title: "Customer", content: { name: "Customer" } },
-				{ kind: "scenario", title: "Checkout", content: { title: "Checkout" } },
+				{ kind: "scenario", title: "Checkout", content: scenarioContent("Checkout") },
 			],
 			relations: [{ fromTitle: "Checkout", fromKind: "scenario", toTitle: "Customer", toKind: "stakeholder", type: "involves" }],
 		});

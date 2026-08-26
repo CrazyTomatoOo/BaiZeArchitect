@@ -739,7 +739,7 @@ test("reusable assets support list, create, detail, delete, export and import wi
 		const imported = await fetch(`${context.server.url}/api/assets/import`, {
 			method: "POST",
 			headers: { "content-type": "application/json", cookie: context.cookie },
-			body: JSON.stringify({ workspaceId: context.workspaceId, assets: [{ kind: "usecase", title: "Imported use case", content: { flow: ["x"] } }] }),
+			body: JSON.stringify({ workspaceId: context.workspaceId, assets: [{ kind: "usecase", title: "Imported use case", content: { schemaVersion: "artifact/usecase/v1", artifactKind: "usecase", summary: "Imported use case", sourceRefs: [], useCases: [{ id: "imported", actor: "Customer", goal: "Use imported case", preconditions: [], mainFlow: ["Complete"], alternativeFlows: [], postconditions: ["Done"] }] } }] }),
 		});
 		assert.equal(imported.status, 201);
 		const { assetIds } = (await imported.json()) as { assetIds: number[] };

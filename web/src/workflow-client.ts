@@ -849,6 +849,9 @@ export interface AssetDetail {
 	title: string;
 	currentRevisionId: number | null;
 	legacyOriginRequirementId: number | null;
+	originRequirementId: number | null;
+	originArtifactId: number | null;
+	originApprovalId: number | null;
 	createdAt: string;
 	resolvedGraph: { incoming: readonly AssetResolvedRelation[]; outgoing: readonly AssetResolvedRelation[] };
 	revisions: readonly {
@@ -906,7 +909,14 @@ export async function updateAsset(
 
 export async function deleteAsset(apiBase: string, assetId: number): Promise<void> {
 	const response = await fetch(`${apiBase}/api/assets/${assetId}`, { method: "DELETE", credentials: "same-origin" });
-	if (!response.ok) throw new Error(`delete asset failed: ${response.status}`);
+	if (!response.ok) {
+		const body: unknown = await response.json().catch(() => null);
+		if (typeof body === "object" && body !== null && !Array.isArray(body)) {
+			const record = body as Record<string, unknown>;
+			if (record.error === "asset_referenced" && Array.isArray(record.refs)) throw new Error(`资产仍被引用：${record.refs.length} 条关系`);
+		}
+		throw new Error(`delete asset failed: ${response.status}`);
+	}
 }
 
 export interface AssetGraph {
@@ -930,7 +940,17 @@ export async function importAssets(apiBase: string, workspaceId: number, assets:
 		credentials: "same-origin",
 		body: JSON.stringify({ workspaceId, assets, ...(relations === undefined ? {} : { relations }) }),
 	});
-	if (!response.ok) throw new Error(`import assets failed: ${response.status}`);
+	if (!response.ok) {
+		const body: unknown = await response.json().catch(() => null);
+		if (typeof body === "object" && body !== null && !Array.isArray(body)) {
+			const record = body as Record<string, unknown>;
+			if (record.error === "invalid_relations" && Array.isArray(record.invalidRelations)) {
+				const details = record.invalidRelations.map((item) => typeof item === "string" ? item : JSON.stringify(item)).join("；");
+				throw new Error(`导入关系校验失败：${details}`);
+			}
+		}
+		throw new Error(`import assets failed: ${response.status}`);
+	}
 	const body = (await response.json()) as { assetIds: number[] };
 	return body.assetIds;
 }

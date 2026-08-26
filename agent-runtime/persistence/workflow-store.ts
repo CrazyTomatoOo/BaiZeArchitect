@@ -3292,9 +3292,10 @@ deleteWorkspace(workspaceId: number): boolean {
 		workspaceId: number,
 		assets: readonly { kind: ReusableAssetKind; title: string; content: unknown }[],
 		relations?: readonly AssetRelationExport[],
+		strict = false,
 	): readonly number[] {
 		if (!this.workspaceStore.workspaceExists(workspaceId)) throw new Error("Workspace not found");
-		return this.assetStore.importReusableAssetBundle(workspaceId, assets, relations);
+		return this.assetStore.importReusableAssetBundle(workspaceId, assets, relations, strict);
 	}
 
 	importReusableAssets(workspaceId: number, assets: readonly { kind: ReusableAssetKind; title: string; content: unknown; provenanceDigest?: string }[]): readonly number[] {

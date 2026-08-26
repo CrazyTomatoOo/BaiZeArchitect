@@ -118,7 +118,7 @@ export interface HeadlessWorkflowRuntime {
 	exportReusableAssets(workspaceId: number): readonly ReusableAssetDetail[];
 	importReusableAssets(workspaceId: number, assets: readonly { kind: ReusableAssetKind; title: string; content: unknown }[]): readonly number[];
 	exportReusableAssetBundle(workspaceId: number): ReusableAssetExportBundle;
-	importReusableAssetBundle(workspaceId: number, assets: readonly { kind: ReusableAssetKind; title: string; content: unknown }[], relations?: readonly AssetRelationExport[]): readonly number[];
+	importReusableAssetBundle(workspaceId: number, assets: readonly { kind: ReusableAssetKind; title: string; content: unknown }[], relations?: readonly AssetRelationExport[], strict?: boolean): readonly number[];
 	searchWorkspaceContent(workspaceId: number, query: string): readonly SearchHit[];
 	getFeedbackAssetReferences(workflowId: number, query: string, budget: number): readonly AssetReference[];
 	promoteRequirementArtifacts(workflowId: number, kinds: readonly string[]): Record<string, number>;
@@ -504,8 +504,8 @@ function buildTaskInstruction(role: string, objective: string, baseline: Require
 	exportReusableAssetBundle(workspaceId) {
 		return store.exportReusableAssetBundle(workspaceId);
 	},
-	importReusableAssetBundle(workspaceId, assets, relations) {
-		return store.importReusableAssetBundle(workspaceId, assets, relations);
+	importReusableAssetBundle(workspaceId, assets, relations, strict) {
+		return store.importReusableAssetBundle(workspaceId, assets, relations, strict);
 	},
 	importReusableAssets(workspaceId, assets) {
 		return store.importReusableAssets(workspaceId, assets);

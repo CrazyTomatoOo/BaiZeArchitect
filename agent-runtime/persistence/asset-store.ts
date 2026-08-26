@@ -83,9 +83,12 @@ export interface ReusableAssetDetail {
 	workspaceId: number;
 	kind: ReusableAssetKind;
 	title: string;
-	currentRevisionId: number | null;
-	legacyOriginRequirementId: number | null;
-	createdAt: string;
+		currentRevisionId: number | null;
+		legacyOriginRequirementId: number | null;
+		originRequirementId: number | null;
+		originArtifactId: number | null;
+		originApprovalId: number | null;
+		createdAt: string;
 	resolvedGraph: ResolvedAssetGraph;
 	revisions: readonly {
 		id: number;
@@ -126,11 +129,26 @@ interface StructuredAssetValidator {
 	check(value: unknown): boolean;
 }
 
+function promotedAssetDocument(kind: Exclude<ReusableAssetKind, "stakeholder">, item: Record<string, unknown>): Record<string, unknown> {
+	const common = { schemaVersion: `artifact/${kind}/v1`, artifactKind: kind, summary: "Reusable Asset item", sourceRefs: [{ type: "requirement_revision", revisionId: 1 }] };
+	switch (kind) {
+		case "scenario": return { ...common, scenarios: [item] };
+		case "usecase": return { ...common, useCases: [item] };
+		case "function": return { ...common, functions: [item] };
+		case "design": return { ...common, changeUnits: [item], alternatives: ["manual"], failureHandling: ["manual"], testStrategy: ["manual"], implementationOrder: ["manual"], rolloutStrategy: "manual", rollbackStrategy: "manual" };
+		case "architecture": return { ...common, components: [item], relationships: [], constraints: [], nonFunctionalRequirements: ["manual"], decisions: [] };
+		case "data": return { ...common, entities: [item], relationships: [], migrationPlan: "manual", rollbackPlan: "manual", privacyAndRetention: ["manual"] };
+		case "api": return { ...common, interfaces: [item], security: ["manual"], versioning: "manual", testStrategy: ["manual"] };
+	}
+}
+
 function isStructuredAssetContentValid(kind: ReusableAssetKind, content: unknown, validator: StructuredAssetValidator | undefined, strict: boolean): boolean {
 	if (kind === "stakeholder") return normalizeStakeholderContent(content) !== undefined;
 	if (typeof content !== "object" || content === null || Array.isArray(content)) return false;
 	const record = content as Record<string, unknown>;
-	if (!("schemaVersion" in record) && !("artifactKind" in record)) return !strict;
+	if (!("schemaVersion" in record) && !("artifactKind" in record)) {
+		return !strict || (validator !== undefined && validator.check(promotedAssetDocument(kind, record)));
+	}
 	if (record.schemaVersion !== `artifact/${kind}/v1` || record.artifactKind !== kind || !validator) return false;
 	const sourceRefs = Array.isArray(record.sourceRefs) && record.sourceRefs.length > 0
 		? record.sourceRefs
@@ -138,6 +156,16 @@ function isStructuredAssetContentValid(kind: ReusableAssetKind, content: unknown
 	return validator.check({ ...record, sourceRefs });
 }
 
+
+function sourceReferencesFingerprint(value: unknown): string {
+	if (Array.isArray(value)) return `[${value.map(sourceReferencesFingerprint).join(",")}]`;
+	if (typeof value !== "object" || value === null) return "";
+	const record = value as Record<string, unknown>;
+	return Object.entries(record)
+		.flatMap(([key, child]) => key === "sourceRefs" ? [`sourceRefs:${JSON.stringify(child)}`] : [sourceReferencesFingerprint(child)].filter((entry) => entry.length > 0))
+		.sort()
+		.join("|");
+}
 /**
  * asset-store.ts — Store（存储域）子域：Reusable Asset 资产库面。
  *
@@ -280,11 +308,12 @@ export class AssetStore {
 		const timestamp = this.clock.now().toISOString();
 		const transaction = this.database.transaction(() => {
 			const asset = this.database
-				.prepare(`select a.id, a.workspace_id, a.kind, a.current_revision_id, r.revision_no
+				.prepare(`select a.id, a.workspace_id, a.kind, a.current_revision_id, a.origin_artifact_id, r.revision_no, d.content
 					from reusable_assets a
 					left join reusable_asset_revisions r on r.id = a.current_revision_id
+					left join snapshot_documents d on d.id = r.content_document_id
 					where a.id = ? and a.workspace_id = ?`)
-				.get(input.assetId, input.workspaceId) as { id: number; workspace_id: number; kind: ReusableAssetKind; current_revision_id: number | null; revision_no: number | null } | undefined;
+				.get(input.assetId, input.workspaceId) as { id: number; workspace_id: number; kind: ReusableAssetKind; current_revision_id: number | null; origin_artifact_id: number | null; revision_no: number | null; content: string | null } | undefined;
 			if (!asset) return undefined;
 			if (asset.current_revision_id !== input.expectedRevisionId) throw new ReusableAssetVersionConflictError();
 			const title = input.title.trim();
@@ -294,6 +323,9 @@ export class AssetStore {
 			if (asset.kind === "stakeholder" && (!stakeholderContent || stakeholderContent.name !== title)) throw new ReusableAssetMalformedBodyError();
 			if (!isStructuredAssetContentValid(asset.kind, content, this.structuredValidator, true)) throw new ReusableAssetMalformedBodyError();
 			if (asset.kind === "stakeholder" && this.stakeholderNameExists(input.workspaceId, title, asset.id)) throw new ReusableAssetNameConflictError();
+			if (asset.origin_artifact_id !== null && asset.content !== null && sourceReferencesFingerprint(parseJson<unknown>(asset.content)) !== sourceReferencesFingerprint(content)) {
+				throw new ReusableAssetMalformedBodyError();
+			}
 			const document = this.snapshotStore.insertSnapshot("reusable_asset_content", asset.kind === "stakeholder" ? "asset/stakeholder/v1" : `artifact/${asset.kind}/v1`, content, timestamp);
 			const revisionNo = (asset.revision_no ?? 0) + 1;
 			const revisionId = Number(this.database
@@ -477,8 +509,8 @@ export class AssetStore {
 
 	getReusableAsset(assetId: number): ReusableAssetDetail | undefined {
 		const asset = this.database
-			.prepare("select id, workspace_id, kind, title, current_revision_id, legacy_origin_requirement_id, created_at from reusable_assets where id = ?")
-			.get(assetId) as { id: number; workspace_id: number; kind: string; title: string; current_revision_id: number | null; legacy_origin_requirement_id: number | null; created_at: string } | undefined;
+			.prepare("select id, workspace_id, kind, title, current_revision_id, legacy_origin_requirement_id, origin_requirement_id, origin_artifact_id, origin_approval_id, created_at from reusable_assets where id = ?")
+			.get(assetId) as { id: number; workspace_id: number; kind: string; title: string; current_revision_id: number | null; legacy_origin_requirement_id: number | null; origin_requirement_id: number | null; origin_artifact_id: number | null; origin_approval_id: number | null; created_at: string } | undefined;
 		if (!asset) return undefined;
 		const revisions = this.database
 			.prepare("select r.id, r.revision_no, r.content_document_id, r.content_digest, r.source, r.created_at, d.content from reusable_asset_revisions r join snapshot_documents d on d.id = r.content_document_id where r.reusable_asset_id = ? order by r.revision_no")
@@ -490,6 +522,9 @@ export class AssetStore {
 			title: asset.title,
 			currentRevisionId: asset.current_revision_id,
 			legacyOriginRequirementId: asset.legacy_origin_requirement_id,
+			originRequirementId: asset.origin_requirement_id,
+			originArtifactId: asset.origin_artifact_id,
+			originApprovalId: asset.origin_approval_id,
 			createdAt: asset.created_at,
 			resolvedGraph: this.getResolvedAssetGraph(asset.id),
 			revisions: revisions.map((revision) => ({
@@ -497,7 +532,7 @@ export class AssetStore {
 				revisionNo: revision.revision_no,
 				contentDocumentId: revision.content_document_id,
 				digest: revision.content_digest,
-				source: revision.source as "manual" | "import" | "migration",
+				source: revision.source as "manual" | "import" | "migration" | "workflow",
 				content: parseJson<unknown>(revision.content),
 				createdAt: revision.created_at,
 			})),
@@ -572,6 +607,7 @@ export class AssetStore {
 		workspaceId: number,
 		assets: readonly { kind: ReusableAssetKind; title: string; content: unknown }[],
 		relations?: readonly AssetRelationExport[],
+		strict = false,
 	): readonly number[] {
 		const ids: number[] = [];
 		const relationRows = relations ?? [];
@@ -588,32 +624,33 @@ export class AssetStore {
 					assetId = existing.id;
 					revisionId = existing.current_revision_id;
 				} else {
-					const created = this.createReusableAsset({ workspaceId, kind: asset.kind, title: asset.title, content: asset.content, source: "import" });
+					const created = this.createReusableAsset({ workspaceId, kind: asset.kind, title: asset.title, content: asset.content, source: "import", strict });
 					assetId = created.assetId;
 					revisionId = created.revisionId;
 				}
 				assetsByKey.set(key, { assetId, revisionId, kind: asset.kind });
 				ids.push(assetId);
 			}
-			const issues: Array<{ reason: string; type?: string }> = [];
+			const issues: Array<{ reason: string; type?: string; fromTitle?: string; fromKind?: ReusableAssetKind; toTitle?: string; toKind?: ReusableAssetKind }> = [];
 			const relationGroups = new Map<number, { fromRevisionId: number; relations: AssetRelationInput[] }>();
 			for (const relation of relationRows) {
 				const from = assetsByKey.get(`${relation.fromKind}\u0000${relation.fromTitle}`);
 				const to = assetsByKey.get(`${relation.toKind}\u0000${relation.toTitle}`);
+				const context = { fromTitle: relation.fromTitle, fromKind: relation.fromKind, toTitle: relation.toTitle, toKind: relation.toKind, type: relation.type };
 				if (!from || !to) {
-					issues.push({ reason: "unknown_import_asset", type: relation.type });
+					issues.push({ ...context, reason: "unknown_import_asset" });
 					continue;
 				}
 				if (from.assetId === to.assetId) {
-					issues.push({ reason: "self_loop", type: relation.type });
+					issues.push({ ...context, reason: "self_loop" });
 					continue;
 				}
 				if (!isAssetRelationType(relation.type)) {
-					issues.push({ reason: "unknown_relation_type", type: relation.type });
+					issues.push({ ...context, reason: "unknown_relation_type" });
 					continue;
 				}
 				if (!isValidAssetRelation(from.kind, to.kind, relation.type)) {
-					issues.push({ reason: "invalid_kind_pair", type: relation.type });
+					issues.push({ ...context, reason: "invalid_kind_pair" });
 					continue;
 				}
 				const group = relationGroups.get(from.assetId) ?? { fromRevisionId: from.revisionId, relations: [] };
