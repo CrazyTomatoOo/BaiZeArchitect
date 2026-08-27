@@ -719,4 +719,240 @@ export class AssetStore {
 		}).immediate;
 		return transaction();
 	}
+
+	// --- Hierarchy tree operations ---
+
+	getHierarchyRoots(workspaceId: number, rootKind: string, query: { page: number; pageSize: number; q?: string }): { roots: readonly HierarchyNode[]; total: number; kindCounts: Record<string, number> } {
+		const conditions = ["workspace_id = ?", "kind = ?"];
+		const params: unknown[] = [workspaceId, rootKind];
+		const normalizedQuery = query.q?.trim().toLowerCase();
+		if (normalizedQuery) {
+			conditions.push("(lower(title) like ? or exists (select 1 from reusable_asset_revisions r join snapshot_documents d on d.id = r.content_document_id where r.reusable_asset_id = reusable_assets.id and (lower(d.content) like ?)))");
+			params.push(`%${normalizedQuery}%`, `%${normalizedQuery}%`);
+		}
+		const where = conditions.join(" and ");
+		const total = (this.database.prepare(`select count(*) as count from reusable_assets where ${where}`).get(...params) as { count: number }).count;
+		const rows = this.database
+			.prepare(`select id, kind, title, current_revision_id, created_at from reusable_assets where ${where} order by id limit ? offset ?`)
+			.all(...params, query.pageSize, (query.page - 1) * query.pageSize) as Array<{ id: number; kind: string; title: string; current_revision_id: number | null; created_at: string }>;
+		const kindCounts: Record<string, number> = {};
+		const countRows = this.database.prepare("select kind, count(*) as count from reusable_assets where workspace_id = ? group by kind").all(workspaceId) as Array<{ kind: string; count: number }>;
+		for (const row of countRows) kindCounts[row.kind] = row.count;
+		return {
+			roots: rows.map((row) => ({
+				assetId: row.id,
+				kind: row.kind as ReusableAssetKind,
+				title: row.title,
+				childCount: this.getChildCount(row.id),
+				currentRevisionId: row.current_revision_id,
+				createdAt: row.created_at,
+			})),
+			total,
+			kindCounts,
+		};
+	}
+
+	getChildren(parentAssetId: number): readonly HierarchyNode[] {
+		const rows = this.database
+			.prepare(`select a.id, a.kind, a.title, a.current_revision_id, a.created_at, ar.position
+				from reusable_assets a
+				join asset_relations ar on ar.to_asset_id = a.id
+				where ar.from_asset_id = ? and ar.relationship_type = 'contains'
+				order by ar.position, ar.id`)
+			.all(parentAssetId) as Array<{ id: number; kind: string; title: string; current_revision_id: number | null; created_at: string; position: number }>;
+		return rows.map((row) => ({
+			assetId: row.id,
+			kind: row.kind as ReusableAssetKind,
+			title: row.title,
+			childCount: this.getChildCount(row.id),
+			currentRevisionId: row.current_revision_id,
+			position: row.position,
+			createdAt: row.created_at,
+		}));
+	}
+
+	getChildCount(assetId: number): number {
+		return (this.database.prepare("select count(*) as count from asset_relations where from_asset_id = ? and relationship_type = 'contains'").get(assetId) as { count: number }).count;
+	}
+
+	searchNodes(workspaceId: number, q: string): readonly { assetId: number; kind: ReusableAssetKind; title: string; matchedPath: string[] }[] {
+		const normalized = q.trim().toLowerCase();
+		if (normalized.length === 0) return [];
+		const rows = this.database
+			.prepare(`select a.id, a.kind, a.title, d.content
+				from reusable_assets a
+				join reusable_asset_revisions r on r.id = a.current_revision_id
+				join snapshot_documents d on d.id = r.content_document_id
+				where a.workspace_id = ? and (lower(a.title) like ? or lower(d.content) like ?)
+				order by a.id`)
+			.all(workspaceId, `%${normalized}%`, `%${normalized}%`) as Array<{ id: number; kind: string; title: string; content: string }>;
+		return rows.map((row) => {
+			const nodeId = this.extractNodeId(row.content);
+			return { assetId: row.id, kind: row.kind as ReusableAssetKind, title: row.title, matchedPath: this.buildPath(row.id, nodeId) };
+		});
+	}
+
+	private extractNodeId(contentJson: string): string {
+		try {
+			const content = JSON.parse(contentJson) as Record<string, unknown>;
+			return typeof content.nodeId === "string" ? content.nodeId : "";
+		} catch { return ""; }
+	}
+
+	private buildPath(assetId: number, nodeId: string): string[] {
+		const path: string[] = [];
+		let current = assetId;
+		for (let i = 0; i < 10 && current > 0; i++) {
+			const parent = this.database
+				.prepare("select from_asset_id from asset_relations where to_asset_id = ? and relationship_type = 'contains' limit 1")
+				.get(current) as { from_asset_id: number } | undefined;
+			if (!parent) break;
+			const parentContent = this.database
+				.prepare("select d.content from reusable_assets a join reusable_asset_revisions r on r.id = a.current_revision_id join snapshot_documents d on d.id = r.content_document_id where a.id = ?")
+				.get(parent.from_asset_id) as { content: string } | undefined;
+			path.unshift(this.extractNodeId(parentContent?.content ?? "") || String(parent.from_asset_id));
+			current = parent.from_asset_id;
+		}
+		path.unshift(nodeId || String(assetId));
+		return path;
+	}
+
+	createSubtree(workspaceId: number, tree: SubtreeNode, parentId: number | null): { assets: Array<{ assetId: number; revisionId: number; title: string; kind: string }>; relations: Array<{ fromAssetId: number; toAssetId: number; type: string; position: number }> } {
+		const assets: Array<{ assetId: number; revisionId: number; title: string; kind: string }> = [];
+		const relations: Array<{ fromAssetId: number; toAssetId: number; type: string; position: number }> = [];
+		const timestamp = this.clock.now().toISOString();
+		const transaction = this.database.transaction(() => {
+			this.createSubtreeNode(workspaceId, tree, parentId, 0, assets, relations, timestamp);
+		}).immediate;
+		transaction();
+		return { assets, relations };
+	}
+
+	private createSubtreeNode(workspaceId: number, node: SubtreeNode, parentId: number | null, position: number, assets: Array<{ assetId: number; revisionId: number; title: string; kind: string }>, relations: Array<{ fromAssetId: number; toAssetId: number; type: string; position: number }>, timestamp: string): void {
+		const content = { ...node.content, nodeId: node.nodeId ?? cryptoNodeId() };
+		const created = this.createReusableAsset({ workspaceId, kind: node.kind as ReusableAssetKind, title: node.title, content, source: "manual" });
+		assets.push({ assetId: created.assetId, revisionId: created.revisionId, title: node.title, kind: node.kind });
+		if (parentId !== null) {
+			const parentRevision = this.database
+				.prepare("select current_revision_id from reusable_assets where id = ?")
+				.get(parentId) as { current_revision_id: number | null };
+			this.database
+				.prepare("insert or ignore into asset_relations(from_asset_id, to_asset_id, from_revision_id, to_revision_id, relationship_type, position, created_at) values (?, ?, ?, ?, 'contains', ?, ?)")
+				.run(parentId, created.assetId, parentRevision.current_revision_id, created.revisionId, position, timestamp);
+			relations.push({ fromAssetId: parentId, toAssetId: created.assetId, type: "contains", position });
+		}
+		for (let i = 0; i < (node.children ?? []).length; i++) {
+			this.createSubtreeNode(workspaceId, node.children![i], created.assetId, i, assets, relations, timestamp);
+		}
+	}
+
+	moveSubtree(workspaceId: number, assetId: number, expectedRevisionId: number, newParentAssetId: number | null): void {
+		const asset = this.database
+			.prepare("select id, kind, current_revision_id from reusable_assets where id = ? and workspace_id = ?")
+			.get(assetId, workspaceId) as { id: number; kind: string; current_revision_id: number | null } | undefined;
+		if (!asset) throw new Error("Asset not found");
+		if (asset.current_revision_id !== expectedRevisionId) throw new ReusableAssetVersionConflictError();
+		if (newParentAssetId !== null) {
+			const parent = this.database
+				.prepare("select id, kind from reusable_assets where id = ? and workspace_id = ?")
+				.get(newParentAssetId, workspaceId) as { id: number; kind: string } | undefined;
+			if (!parent) throw new Error("Parent not found");
+			if (!isValidAssetRelation(parent.kind as ReusableAssetKind, asset.kind as ReusableAssetKind, "contains")) {
+				throw new AssetRelationValidationError([{ reason: "invalid_kind_pair" }]);
+			}
+			if (this.wouldCreateCycle(assetId, newParentAssetId)) {
+				throw new AssetRelationValidationError([{ reason: "cycle_detected" }]);
+			}
+		}
+		this.database.prepare("delete from asset_relations where to_asset_id = ? and relationship_type = 'contains'").run(assetId);
+		if (newParentAssetId !== null) {
+			const parentRevision = this.database.prepare("select current_revision_id from reusable_assets where id = ?").get(newParentAssetId) as { current_revision_id: number | null };
+			const childRevision = asset.current_revision_id;
+			const maxPos = (this.database.prepare("select coalesce(max(position), -1) as pos from asset_relations where from_asset_id = ? and relationship_type = 'contains'").get(newParentAssetId) as { pos: number }).pos;
+			this.database
+				.prepare("insert or ignore into asset_relations(from_asset_id, to_asset_id, from_revision_id, to_revision_id, relationship_type, position, created_at) values (?, ?, ?, ?, 'contains', ?, ?)")
+				.run(newParentAssetId, assetId, parentRevision.current_revision_id, childRevision, maxPos + 1, this.clock.now().toISOString());
+		}
+	}
+
+	private wouldCreateCycle(assetId: number, newParentAssetId: number): boolean {
+		let current: number | null = newParentAssetId;
+		for (let i = 0; i < 50 && current !== null; i++) {
+			if (current === assetId) return true;
+			const parent = this.database.prepare("select from_asset_id from asset_relations where to_asset_id = ? and relationship_type = 'contains' limit 1").get(current) as { from_asset_id: number } | undefined;
+			current = parent?.from_asset_id ?? null;
+		}
+		return false;
+	}
+
+	deleteSubtree(assetId: number): readonly { assetId: number; title: string; kind: string }[] {
+		const affected: Array<{ assetId: number; title: string; kind: string }> = [];
+		const transaction = this.database.transaction(() => {
+			this.collectSubtree(assetId, affected);
+			for (const node of affected) {
+				this.database.prepare("delete from asset_relations where from_asset_id = ? or to_asset_id = ?").run(node.assetId, node.assetId);
+				this.database.prepare("delete from reusable_assets where id = ?").run(node.assetId);
+			}
+		}).immediate;
+		transaction();
+		return affected;
+	}
+
+	previewSubtreeDeletion(assetId: number): readonly { assetId: number; title: string; kind: string }[] {
+		const affected: Array<{ assetId: number; title: string; kind: string }> = [];
+		this.collectSubtree(assetId, affected);
+		return affected;
+	}
+
+	private collectSubtree(assetId: number, affected: Array<{ assetId: number; title: string; kind: string }>): void {
+		const asset = this.database.prepare("select id, kind, title from reusable_assets where id = ?").get(assetId) as { id: number; kind: string; title: string } | undefined;
+		if (!asset) return;
+		affected.push({ assetId: asset.id, title: asset.title, kind: asset.kind });
+		const children = this.database
+			.prepare("select to_asset_id from asset_relations where from_asset_id = ? and relationship_type = 'contains'")
+			.all(assetId) as Array<{ to_asset_id: number }>;
+		for (const child of children) {
+			this.collectSubtree(child.to_asset_id, affected);
+		}
+	}
+
+	hasChildren(assetId: number): boolean {
+		return this.getChildCount(assetId) > 0;
+	}
+	hasIncomingCrossAssetRelations(assetId: number): readonly { assetId: number; kind: string; title: string; type: string }[] {
+		const refs = this.database
+			.prepare(`select case when relation.from_asset_id = ? then to_asset.id else from_asset.id end as asset_id,
+				case when relation.from_asset_id = ? then to_asset.kind else from_asset.kind end as kind,
+				case when relation.from_asset_id = ? then to_asset.title else from_asset.title end as title,
+				relation.relationship_type as type
+				from asset_relations relation
+				join reusable_assets from_asset on from_asset.id = relation.from_asset_id
+				join reusable_assets to_asset on to_asset.id = relation.to_asset_id
+				where (relation.from_asset_id = ? or relation.to_asset_id = ?) and relation.relationship_type != 'contains'
+				order by relation.id`)
+			.all(assetId, assetId, assetId, assetId, assetId) as Array<{ asset_id: number; kind: string; title: string; type: string }>;
+		return refs.map((ref) => ({ assetId: ref.asset_id, kind: ref.kind, title: ref.title, type: ref.type }));
+	}
+}
+
+export interface HierarchyNode {
+	assetId: number;
+	kind: ReusableAssetKind;
+	title: string;
+	childCount: number;
+	currentRevisionId: number | null;
+	position?: number;
+	createdAt: string;
+}
+
+export interface SubtreeNode {
+	kind: string;
+	title: string;
+	nodeId?: string;
+	content: Record<string, unknown>;
+	children?: readonly SubtreeNode[];
+}
+
+function cryptoNodeId(): string {
+	return `node-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
 }

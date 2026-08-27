@@ -891,3 +891,95 @@ test("asset deletion scans relation edges in both directions and unified update 
 		assert.equal(deleteSource.status, 409);
 	});
 });
+
+test("hierarchy endpoints expose roots, children, subtree creation, move, search, preview and cascade delete", async () => {
+	await withServer(async ({ server, workspaceId }) => {
+		const cookie = await bootstrap(server.url);
+
+		const rootResponse = await fetch(`${server.url}/api/assets/hierarchy`, {
+			method: "POST",
+			headers: { "content-type": "application/json", cookie },
+			body: JSON.stringify({
+				workspaceId,
+				tree: {
+					kind: "scenario-domain",
+					title: "Payments",
+					nodeId: "payments",
+					content: { title: "Payments" },
+					children: [
+						{ kind: "scenario", title: "Pay by card", nodeId: "pay-card", content: { title: "Pay by card" } },
+					],
+				},
+			}),
+		});
+		assert.equal(rootResponse.status, 201);
+		const rootBody = (await rootResponse.json()) as { assets: Array<{ assetId: number; kind: string; title: string }>; relations: Array<{ fromAssetId: number; toAssetId: number; type: string }> };
+		assert.equal(rootBody.assets.length, 2);
+		assert.equal(rootBody.relations.length, 1);
+		const rootAssetId = rootBody.assets[0].assetId;
+		const childAssetId = rootBody.assets[1].assetId;
+
+		const roots = await fetch(`${server.url}/api/assets/hierarchy?workspaceId=${workspaceId}&root=scenario-domain`, { headers: { cookie } });
+		assert.equal(roots.status, 200);
+		const rootsBody = (await roots.json()) as { roots: Array<{ assetId: number; title: string; childCount: number }>; total: number };
+		assert.equal(rootsBody.total, 1);
+		assert.equal(rootsBody.roots[0].assetId, rootAssetId);
+		assert.equal(rootsBody.roots[0].childCount, 1);
+
+		const children = await fetch(`${server.url}/api/assets/hierarchy?workspaceId=${workspaceId}&parentAssetId=${rootAssetId}`, { headers: { cookie } });
+		assert.equal(children.status, 200);
+		const childrenBody = (await children.json()) as { children: Array<{ assetId: number; title: string }> };
+		assert.equal(childrenBody.children.length, 1);
+		assert.equal(childrenBody.children[0].assetId, childAssetId);
+
+	const search = await fetch(`${server.url}/api/assets/hierarchy?workspaceId=${workspaceId}&q=card`, { headers: { cookie } });
+	assert.equal(search.status, 200);
+	const searchBody = (await search.json()) as { query: string; hits: Array<{ assetId: number; matchedPath: string[] }> };
+	assert.equal(searchBody.query, "card");
+	assert.equal(searchBody.hits.length, 1);
+	assert.ok(searchBody.hits[0].matchedPath.includes("pay-card"));
+
+		const newParentResponse = await fetch(`${server.url}/api/assets/hierarchy`, {
+			method: "POST",
+			headers: { "content-type": "application/json", cookie },
+			body: JSON.stringify({
+				workspaceId,
+				tree: { kind: "scenario-domain", title: "Billing", nodeId: "billing", content: { title: "Billing" } },
+			}),
+		});
+		assert.equal(newParentResponse.status, 201);
+		const newParentBody = (await newParentResponse.json()) as { assets: Array<{ assetId: number }> };
+		const newParentId = newParentBody.assets[0].assetId;
+		const childDetail = await fetch(`${server.url}/api/assets/${childAssetId}`, { headers: { cookie } });
+		const childDetailBody = (await childDetail.json()) as { currentRevisionId: number };
+		const childRevisionId = childDetailBody.currentRevisionId;
+		const moveResponse = await fetch(`${server.url}/api/assets/hierarchy/move`, {
+			method: "PUT",
+			headers: { "content-type": "application/json", cookie },
+			body: JSON.stringify({ workspaceId, assetId: childAssetId, expectedRevisionId: childRevisionId, newParentAssetId: newParentId }),
+		});
+		assert.equal(moveResponse.status, 200);
+		assert.deepEqual(await moveResponse.json(), { ok: true });
+
+		const preview = await fetch(`${server.url}/api/assets/${newParentId}?preview=true`, { method: "DELETE", headers: { cookie } });
+		assert.equal(preview.status, 200);
+		const previewBody = (await preview.json()) as { affected: Array<{ assetId: number }> };
+		assert.ok(previewBody.affected.some((n) => n.assetId === childAssetId));
+
+		const blocked = await fetch(`${server.url}/api/assets/${newParentId}`, { method: "DELETE", headers: { cookie } });
+		assert.equal(blocked.status, 409);
+		assert.deepEqual(await blocked.json(), { error: "has_children" });
+
+		const cascade = await fetch(`${server.url}/api/assets/${newParentId}`, {
+			method: "DELETE",
+			headers: { "content-type": "application/json", cookie },
+			body: JSON.stringify({ cascadeSubtree: true }),
+		});
+		assert.equal(cascade.status, 200);
+		assert.deepEqual(await cascade.json(), { deleted: true });
+
+		const rootsAfter = await fetch(`${server.url}/api/assets/hierarchy?workspaceId=${workspaceId}&root=scenario-domain`, { headers: { cookie } });
+		const rootsAfterBody = (await rootsAfter.json()) as { roots: Array<{ assetId: number; childCount: number }> };
+		assert.equal(rootsAfterBody.roots.find((r) => r.assetId === rootAssetId)?.childCount, 0);
+	});
+});

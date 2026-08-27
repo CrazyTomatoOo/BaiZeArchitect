@@ -13,7 +13,7 @@ import { FEEDBACK_REFERENCE_BUDGET } from "../persistence/workflow-store.js";
 import { instantiatePlanTemplate } from "./plan-template.js";
 import type { TaskRole } from "./plan-types.js";
 import type { PlanProposal } from "./plan-types.js";
-import type { AssetGraph, AssetRelationExport, AssetRelationInput, AssetRelationRecord, ReusableAssetExportBundle } from "../persistence/workflow-store.js";
+import type { AssetGraph, AssetRelationExport, AssetRelationInput, AssetRelationRecord, ReusableAssetExportBundle, HierarchyNode, SubtreeNode } from "../persistence/workflow-store.js";
 import type { RequirementBaseline } from "./requirement.js";
 
 export type { RequirementBaseline } from "./requirement.js";
@@ -119,6 +119,15 @@ export interface HeadlessWorkflowRuntime {
 	importReusableAssets(workspaceId: number, assets: readonly { kind: ReusableAssetKind; title: string; content: unknown }[]): readonly number[];
 	exportReusableAssetBundle(workspaceId: number): ReusableAssetExportBundle;
 	importReusableAssetBundle(workspaceId: number, assets: readonly { kind: ReusableAssetKind; title: string; content: unknown }[], relations?: readonly AssetRelationExport[], strict?: boolean): readonly number[];
+	getHierarchyRoots(workspaceId: number, rootKind: string, query: { page: number; pageSize: number; q?: string }): { roots: readonly HierarchyNode[]; total: number; kindCounts: Record<string, number> };
+	getHierarchyChildren(parentAssetId: number): readonly HierarchyNode[];
+	searchHierarchyNodes(workspaceId: number, q: string): readonly { assetId: number; kind: ReusableAssetKind; title: string; matchedPath: string[] }[];
+	createHierarchySubtree(workspaceId: number, tree: SubtreeNode, parentId: number | null): { assets: Array<{ assetId: number; revisionId: number; title: string; kind: string }>; relations: Array<{ fromAssetId: number; toAssetId: number; type: string; position: number }> };
+	moveHierarchySubtree(workspaceId: number, assetId: number, expectedRevisionId: number, newParentAssetId: number | null): void;
+	previewSubtreeDeletion(assetId: number): readonly { assetId: number; title: string; kind: string }[];
+	deleteSubtree(assetId: number): readonly { assetId: number; title: string; kind: string }[];
+	hasChildren(assetId: number): boolean;
+	hasIncomingCrossAssetRelations(assetId: number): readonly { assetId: number; kind: string; title: string; type: string }[];
 	searchWorkspaceContent(workspaceId: number, query: string): readonly SearchHit[];
 	getFeedbackAssetReferences(workflowId: number, query: string, budget: number): readonly AssetReference[];
 	promoteRequirementArtifacts(workflowId: number, kinds: readonly string[]): Record<string, number>;
@@ -509,6 +518,33 @@ function buildTaskInstruction(role: string, objective: string, baseline: Require
 	},
 	importReusableAssets(workspaceId, assets) {
 		return store.importReusableAssets(workspaceId, assets);
+	},
+	getHierarchyRoots(workspaceId, rootKind, query) {
+		return store.getHierarchyRoots(workspaceId, rootKind, query);
+	},
+	getHierarchyChildren(parentAssetId) {
+		return store.getHierarchyChildren(parentAssetId);
+	},
+	searchHierarchyNodes(workspaceId, q) {
+		return store.searchHierarchyNodes(workspaceId, q);
+	},
+	createHierarchySubtree(workspaceId, tree, parentId) {
+		return store.createHierarchySubtree(workspaceId, tree, parentId);
+	},
+	moveHierarchySubtree(workspaceId, assetId, expectedRevisionId, newParentAssetId) {
+		store.moveHierarchySubtree(workspaceId, assetId, expectedRevisionId, newParentAssetId);
+	},
+	previewSubtreeDeletion(assetId) {
+		return store.previewSubtreeDeletion(assetId);
+	},
+	deleteSubtree(assetId) {
+		return store.deleteSubtree(assetId);
+	},
+	hasChildren(assetId) {
+		return store.hasChildren(assetId);
+	},
+	hasIncomingCrossAssetRelations(assetId) {
+		return store.hasIncomingCrossAssetRelations(assetId);
 	},
 		searchWorkspaceContent(workspaceId, query) {
 			return store.searchWorkspaceContent(workspaceId, query);

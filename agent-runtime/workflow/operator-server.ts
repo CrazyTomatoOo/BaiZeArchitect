@@ -16,7 +16,7 @@ import { readFile } from "node:fs/promises";
 import type { AddressInfo } from "node:net";
 import type { HeadlessWorkflowRuntime } from "./headless-runtime.js";
 import { AssetRelationValidationError, BusyWorkspaceError, ReusableAssetMalformedBodyError, ReusableAssetNameConflictError, ReusableAssetReferencedError, ReusableAssetVersionConflictError } from "../persistence/workflow-store.js";
-import type { AssetRelationExport, AssetRelationInput } from "../persistence/workflow-store.js";
+import type { AssetRelationExport, AssetRelationInput, SubtreeNode } from "../persistence/workflow-store.js";
 import { WORKFLOW_COMMAND_TYPES, type WorkflowCommandType } from "./command-types.js";
 import type { RequirementBaseline } from "./requirement.js";
 import { isReusableAssetKind, type ReusableAssetKind } from "../persistence/reusable-asset-kind.js";
@@ -96,6 +96,26 @@ function parseImportedRelations(value: unknown): readonly AssetRelationExport[] 
 		relations.push(relation);
 	}
 	return relations;
+}
+
+function parseSubtreeNode(value: unknown): SubtreeNode | undefined {
+	if (typeof value !== "object" || value === null || Array.isArray(value)) return undefined;
+	const node = value as { kind?: unknown; title?: unknown; nodeId?: unknown; content?: unknown; children?: unknown };
+	if (
+		!isReusableAssetKind(node.kind)
+		|| typeof node.title !== "string"
+		|| typeof node.content !== "object"
+		|| node.content === null
+		|| Array.isArray(node.content)
+	) return undefined;
+	if (node.nodeId !== undefined && typeof node.nodeId !== "string") return undefined;
+	if (node.children !== undefined) {
+		if (!Array.isArray(node.children)) return undefined;
+		for (const child of node.children) {
+			if (parseSubtreeNode(child) === undefined) return undefined;
+		}
+	}
+	return node as SubtreeNode;
 }
 
 function sendAssetError(response: ServerResponse, error: unknown): boolean {
@@ -839,12 +859,164 @@ export async function startOperatorServer(
 			return;
 		}
 
+		if (request.method === "GET" && url.pathname === "/api/assets/hierarchy") {
+			const workspaceId = Number(url.searchParams.get("workspaceId"));
+			if (!Number.isInteger(workspaceId) || !options.runtime.workspaceExists(workspaceId)) {
+				sendJson(response, 404, { error: "unknown_workspace" });
+				return;
+			}
+		const searchQ = url.searchParams.get("q");
+		if (searchQ !== null && searchQ.length > 0) {
+			sendJson(response, 200, { query: searchQ, hits: options.runtime.searchHierarchyNodes(workspaceId, searchQ) });
+			return;
+		}
+		const parentAssetIdParam = url.searchParams.get("parentAssetId");
+		if (parentAssetIdParam !== null && parentAssetIdParam !== "") {
+			const parentAssetId = Number(parentAssetIdParam);
+			if (!Number.isInteger(parentAssetId)) {
+				sendJson(response, 400, { error: "invalid_parent_asset_id" });
+				return;
+			}
+			const asset = options.runtime.getReusableAsset(parentAssetId);
+			if (!asset || asset.workspaceId !== workspaceId) {
+				sendJson(response, 404, { error: "unknown_asset" });
+				return;
+			}
+			sendJson(response, 200, { children: options.runtime.getHierarchyChildren(parentAssetId) });
+			return;
+		}
+		const root = url.searchParams.get("root") ?? "scenario-domain";
+		if (!isReusableAssetKind(root)) {
+			sendJson(response, 400, { error: "invalid_root_kind" });
+			return;
+		}
+		const page = parsePositiveQueryInteger(url.searchParams.get("page"), 1);
+		const pageSize = parsePositiveQueryInteger(url.searchParams.get("pageSize"), 12, 100);
+		if (page === undefined || pageSize === undefined) {
+			sendJson(response, 400, { error: "invalid_asset_query" });
+			return;
+		}
+		sendJson(response, 200, options.runtime.getHierarchyRoots(workspaceId, root, { page, pageSize }));
+		return;
+			return;
+		}
+
+		if (request.method === "POST" && url.pathname === "/api/assets/hierarchy") {
+			let body: unknown;
+			try {
+				body = JSON.parse(await readBody(request));
+			} catch {
+				sendJson(response, 400, { error: "malformed_body" });
+				return;
+			}
+			if (typeof body !== "object" || body === null || Array.isArray(body)) {
+				sendJson(response, 400, { error: "malformed_body" });
+				return;
+			}
+			const createBody = body as { workspaceId?: unknown; tree?: unknown; parentAssetId?: unknown };
+			const workspaceId = Number(createBody.workspaceId);
+			if (!Number.isInteger(workspaceId) || !options.runtime.workspaceExists(workspaceId)) {
+				sendJson(response, 404, { error: "unknown_workspace" });
+				return;
+			}
+			const tree = parseSubtreeNode(createBody.tree);
+			if (tree === undefined) {
+				sendJson(response, 400, { error: "malformed_body" });
+				return;
+			}
+			let parentAssetId: number | null = null;
+			if (createBody.parentAssetId !== undefined) {
+				parentAssetId = Number(createBody.parentAssetId);
+				if (!Number.isInteger(parentAssetId)) {
+					sendJson(response, 400, { error: "malformed_body" });
+					return;
+				}
+				const parentAsset = options.runtime.getReusableAsset(parentAssetId);
+				if (!parentAsset || parentAsset.workspaceId !== workspaceId) {
+					sendJson(response, 404, { error: "unknown_asset" });
+					return;
+				}
+			}
+			try {
+				const result = options.runtime.createHierarchySubtree(workspaceId, tree, parentAssetId);
+				sendJson(response, 201, result);
+			} catch (error) {
+				if (error instanceof ReusableAssetNameConflictError) {
+					sendJson(response, 409, { error: "name_conflict" });
+					return;
+				}
+				if (sendAssetError(response, error)) return;
+				throw error;
+			}
+			return;
+		}
+
+		if (request.method === "PUT" && url.pathname === "/api/assets/hierarchy/move") {
+			let body: unknown;
+			try {
+				body = JSON.parse(await readBody(request));
+			} catch {
+				sendJson(response, 400, { error: "malformed_body" });
+				return;
+			}
+			if (typeof body !== "object" || body === null || Array.isArray(body)) {
+				sendJson(response, 400, { error: "malformed_body" });
+				return;
+			}
+			const moveBody = body as { workspaceId?: unknown; assetId?: unknown; expectedRevisionId?: unknown; newParentAssetId?: unknown };
+			const workspaceId = Number(moveBody.workspaceId);
+			const assetId = Number(moveBody.assetId);
+			const expectedRevisionId = Number(moveBody.expectedRevisionId);
+			if (!Number.isInteger(workspaceId) || !Number.isInteger(assetId) || !Number.isInteger(expectedRevisionId)) {
+				sendJson(response, 400, { error: "malformed_body" });
+				return;
+			}
+			if (!options.runtime.workspaceExists(workspaceId)) {
+				sendJson(response, 404, { error: "unknown_workspace" });
+				return;
+			}
+			const asset = options.runtime.getReusableAsset(assetId);
+			if (!asset || asset.workspaceId !== workspaceId) {
+				sendJson(response, 404, { error: "unknown_asset" });
+				return;
+			}
+			let newParentAssetId: number | null = null;
+			if (moveBody.newParentAssetId !== undefined && moveBody.newParentAssetId !== null) {
+				newParentAssetId = Number(moveBody.newParentAssetId);
+				if (!Number.isInteger(newParentAssetId)) {
+					sendJson(response, 400, { error: "malformed_body" });
+					return;
+				}
+				const parentAsset = options.runtime.getReusableAsset(newParentAssetId);
+				if (!parentAsset || parentAsset.workspaceId !== workspaceId) {
+					sendJson(response, 404, { error: "unknown_asset" });
+					return;
+				}
+			}
+			try {
+				options.runtime.moveHierarchySubtree(workspaceId, assetId, expectedRevisionId, newParentAssetId);
+				sendJson(response, 200, { ok: true });
+			} catch (error) {
+				if (error instanceof ReusableAssetVersionConflictError) {
+					sendJson(response, 409, { error: "version_conflict" });
+					return;
+				}
+				if (error instanceof AssetRelationValidationError) {
+					sendJson(response, 400, { error: "invalid_relation", invalidRelations: error.issues });
+					return;
+				}
+				throw error;
+			}
+			return;
+		}
+
 		if (request.method === "GET" && url.pathname === "/api/assets") {
 			const workspaceId = Number(url.searchParams.get("workspaceId"));
 			if (!Number.isInteger(workspaceId) || !options.runtime.workspaceExists(workspaceId)) {
 				sendJson(response, 404, { error: "unknown_workspace" });
 				return;
 			}
+			const q = url.searchParams.get("q");
 			const page = parsePositiveQueryInteger(url.searchParams.get("page"), 1);
 			const pageSize = parsePositiveQueryInteger(url.searchParams.get("pageSize"), 12, 100);
 			const rawKind = url.searchParams.get("kind");
@@ -853,12 +1025,7 @@ export async function startOperatorServer(
 				sendJson(response, 400, { error: "invalid_asset_query" });
 				return;
 			}
-			sendJson(response, 200, options.runtime.listReusableAssetPage(workspaceId, {
-				page,
-				pageSize,
-				kind,
-				q: url.searchParams.get("q") ?? undefined,
-			}));
+		sendJson(response, 200, options.runtime.listReusableAssetPage(workspaceId, { page, pageSize, kind, q: q ?? undefined }));
 			return;
 		}
 
@@ -1006,8 +1173,48 @@ export async function startOperatorServer(
 		}
 
 		if (request.method === "DELETE" && segments.length === 3 && segments[0] === "api" && segments[1] === "assets") {
+			const assetId = Number(segments[2]);
+			const asset = options.runtime.getReusableAsset(assetId);
+			if (!asset) {
+				sendJson(response, 404, { error: "unknown_asset" });
+				return;
+			}
+			if (url.searchParams.get("preview") === "true") {
+				sendJson(response, 200, { affected: options.runtime.previewSubtreeDeletion(assetId) });
+				return;
+			}
+			let body: unknown = {};
 			try {
-				if (!options.runtime.deleteReusableAsset(Number(segments[2]))) {
+				body = JSON.parse(await readBody(request));
+			} catch {
+				// empty body is allowed for plain deletion
+			}
+			if (typeof body !== "object" || body === null || Array.isArray(body)) {
+				sendJson(response, 400, { error: "malformed_body" });
+				return;
+			}
+			const deleteBody = body as { cascadeSubtree?: unknown };
+			if (deleteBody.cascadeSubtree === true) {
+				const refs = options.runtime.hasIncomingCrossAssetRelations(assetId);
+				if (refs.length > 0) {
+					sendJson(response, 409, { error: "asset_referenced", refs });
+					return;
+				}
+				try {
+					options.runtime.deleteSubtree(assetId);
+					sendJson(response, 200, { deleted: true });
+				} catch (error) {
+					if (sendAssetError(response, error)) return;
+					throw error;
+				}
+				return;
+			}
+			if (options.runtime.hasChildren(assetId)) {
+				sendJson(response, 409, { error: "has_children" });
+				return;
+			}
+			try {
+				if (!options.runtime.deleteReusableAsset(assetId)) {
 					sendJson(response, 404, { error: "unknown_asset" });
 					return;
 				}

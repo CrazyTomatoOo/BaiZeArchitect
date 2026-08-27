@@ -33,7 +33,7 @@ import type { ReusableAssetKind } from "./reusable-asset-kind.js";
 import { parseJson } from "./json.js";
 import { AssetStore } from "./asset-store.js";
 import type { AssetGraph, AssetRelationExport, AssetRelationInput, AssetRelationRecord, ReusableAssetExportBundle } from "./asset-relations.js";
-import type { ReusableAssetDetail, ReusableAssetListQuery, ReusableAssetPage, ReusableAssetSummary } from "./asset-store.js";
+import type { ReusableAssetDetail, ReusableAssetListQuery, ReusableAssetPage, ReusableAssetSummary, SubtreeNode } from "./asset-store.js";
 import { SnapshotStore } from "./snapshot-store.js";
 import type { SnapshotDocument } from "./snapshot-store.js";
 import { WorkspaceStore } from "./workspace-store.js";
@@ -46,7 +46,7 @@ export type { WorkspaceSummary } from "./workspace-store.js";
 export { ReusableAssetMalformedBodyError, ReusableAssetNameConflictError, ReusableAssetReferencedError, ReusableAssetVersionConflictError } from "./asset-store.js";
 export { AssetRelationValidationError } from "./asset-relations.js";
 export type { AssetGraph, AssetRelationExport, AssetRelationInput, AssetRelationRecord, ReusableAssetExportBundle } from "./asset-relations.js";
-export type { ReusableAssetDetail, ReusableAssetListQuery, ReusableAssetPage, ReusableAssetSummary } from "./asset-store.js";
+export type { ReusableAssetDetail, ReusableAssetListQuery, ReusableAssetPage, ReusableAssetSummary, HierarchyNode, SubtreeNode } from "./asset-store.js";
 import { type WorkflowCommandType } from "../workflow/command-types.js";
 import { ARTIFACT_OWNERSHIP, type InputBinding, type TaskOutputInput } from "../workflow/plan-types.js";
 import type { RoleResult, ContextManifest, RoleContract, BeginAttemptResult, CompleteAttemptResult, TraceLinkProposal, CriticReport, FindingProposal, FindingSeverity, AssetReference } from "../workflow/role-result.js";
@@ -3103,6 +3103,38 @@ deleteWorkspace(workspaceId: number): boolean {
 
 	assetExistsByOriginArtifactId(workspaceId: number, artifactId: number): boolean {
 		return this.assetStore.assetExistsByOriginArtifactId(workspaceId, artifactId);
+	}
+
+	getHierarchyRoots(workspaceId: number, rootKind: string, query: { page: number; pageSize: number; q?: string }) {
+		if (!this.workspaceStore.workspaceExists(workspaceId)) throw new Error("Workspace not found");
+		return this.assetStore.getHierarchyRoots(workspaceId, rootKind, query);
+	}
+	getHierarchyChildren(parentAssetId: number) {
+		return this.assetStore.getChildren(parentAssetId);
+	}
+	searchHierarchyNodes(workspaceId: number, q: string) {
+		if (!this.workspaceStore.workspaceExists(workspaceId)) throw new Error("Workspace not found");
+		return this.assetStore.searchNodes(workspaceId, q);
+	}
+	createHierarchySubtree(workspaceId: number, tree: SubtreeNode, parentId: number | null) {
+		if (!this.workspaceStore.workspaceExists(workspaceId)) throw new Error("Workspace not found");
+		return this.assetStore.createSubtree(workspaceId, tree, parentId);
+	}
+	moveHierarchySubtree(workspaceId: number, assetId: number, expectedRevisionId: number, newParentAssetId: number | null) {
+		if (!this.workspaceStore.workspaceExists(workspaceId)) throw new Error("Workspace not found");
+		this.assetStore.moveSubtree(workspaceId, assetId, expectedRevisionId, newParentAssetId);
+	}
+	previewSubtreeDeletion(assetId: number) {
+		return this.assetStore.previewSubtreeDeletion(assetId);
+	}
+	deleteSubtree(assetId: number) {
+		return this.assetStore.deleteSubtree(assetId);
+	}
+	hasChildren(assetId: number) {
+		return this.assetStore.hasChildren(assetId);
+	}
+	hasIncomingCrossAssetRelations(assetId: number) {
+		return this.assetStore.hasIncomingCrossAssetRelations(assetId);
 	}
 
 	/** #22 promote：按 kind 条目拆细入库（幂等、可批选）。返回每 kind 入资产条数。 */
