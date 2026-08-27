@@ -731,7 +731,7 @@ test("approve-packet archives atomically: approval record, revisions approved, s
 			const packetEvent = db.prepare("select type from workflow_events where workflow_id = ? and type = 'packet_approved'").get(workflowId);
 			assert.ok(packetEvent);
 			const promoted = db.prepare("select count(*) as count from reusable_assets where workspace_id = ? and origin_approval_id = ?").get(workspaceId, approval.id) as { count: number };
-			assert.equal(promoted.count, 8, "archive promotes every artifact item except analysis and stakeholder (scenario variant, usecase, function point, design unit, two architecture components, data entity, api path)");
+		assert.equal(promoted.count, 12, "archive promotes every artifact node (3 scenario + 3 function + usecase + design + 2 architecture + data + api)");
 			const involves = db.prepare("select count(*) as count from asset_relations where relationship_type = 'involves'").get() as { count: number };
 			assert.ok(involves.count >= 2, "archive promotes stakeholder involves relations from scenario and usecase content");
 		} finally {

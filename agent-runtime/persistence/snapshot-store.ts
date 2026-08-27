@@ -31,21 +31,11 @@ export class SnapshotStore {
 		const digest = this.hashProvider.digest(content);
 		const encoded = this.hashProvider.canonicalize(content);
 		this.database
-			.prepare(
-				"insert into snapshot_documents(kind, schema_ref, media_type, content, digest, created_at) values (?, ?, 'application/json', ?, ?, ?) on conflict(kind, digest) do nothing",
-			)
+			.prepare("insert into snapshot_documents(kind, schema_ref, media_type, content, digest, created_at) values (?, ?, 'application/json', ?, ?, ?) on conflict(kind, digest) do nothing")
 			.run(kind, schemaRef, encoded, digest, createdAt);
 		const row = this.database
-			.prepare(
-				"select id, digest, schema_ref, content, media_type from snapshot_documents where kind = ? and digest = ?",
-			)
-			.get(kind, digest) as {
-			id: number;
-			digest: string;
-			schema_ref: string;
-			content: string;
-			media_type: string;
-		};
+			.prepare("select id, digest, schema_ref, content, media_type from snapshot_documents where kind = ? and digest = ?")
+			.get(kind, digest) as { id: number; digest: string; schema_ref: string; content: string; media_type: string };
 		if (row.schema_ref !== schemaRef || row.media_type !== "application/json" || row.content !== encoded) {
 			throw new Error(`Snapshot digest collision for ${kind}/${digest}`);
 		}

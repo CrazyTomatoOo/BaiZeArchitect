@@ -3190,21 +3190,46 @@ deleteWorkspace(workspaceId: number): boolean {
 			const approval = this.database
 				.prepare("select id from approval_records where workflow_id = ? and record_type = 'artifact_approval' and subject_type = 'artifact_revision' and subject_id = ? order by id desc limit 1")
 				.get(workflowId, revision.id) as { id: number } | undefined;
+		if (kind === "scenario" || kind === "function") {
+			const nodes = this.extractHierarchyNodes(kind, revision.content);
+			const assetIdByNodeId = new Map<string, number>();
+			for (const node of nodes) {
+				const promoted = this.assetStore.upsertReusableAssetByTitle({
+					workspaceId,
+					kind: node.assetKind as ReusableAssetKind,
+					title: node.title,
+					content: node.content,
+					originRequirementId: requirementId,
+					originArtifactId: artifact.id,
+					originApprovalId: options?.originApprovalId ?? approval?.id ?? null,
+				});
+				this.buildStakeholderInvolvementRelations(workspaceId, node.assetKind, promoted.assetId, promoted.revisionId, node.content);
+				assetIdByNodeId.set(node.nodeId, promoted.assetId);
+				if (node.parentNodeId) {
+					const parentId = assetIdByNodeId.get(node.parentNodeId);
+					if (parentId) {
+					this.assetStore.writeRelations({ workspaceId, fromAssetId: parentId, fromRevisionId: this.assetStore.getReusableAsset(parentId)!.currentRevisionId!, relations: [{ toAssetId: promoted.assetId, type: "contains", position: node.position }] });
+					}
+				}
+			}
+			counts[kind] = nodes.length;
+		} else {
 			const items = this.extractAssetItems(kind, revision.content);
-		for (const item of items) {
-			const promoted = this.assetStore.upsertReusableAssetByTitle({
-				workspaceId,
-				kind: item.assetKind as ReusableAssetKind,
-				title: item.title,
-				content: item.content,
-				originRequirementId: requirementId,
-				originArtifactId: artifact.id,
-				originApprovalId: options?.originApprovalId ?? approval?.id ?? null,
-			});
-			this.buildStakeholderInvolvementRelations(workspaceId, item.assetKind, promoted.assetId, promoted.revisionId, item.content);
-		}
+			for (const item of items) {
+				const promoted = this.assetStore.upsertReusableAssetByTitle({
+					workspaceId,
+					kind: item.assetKind as ReusableAssetKind,
+					title: item.title,
+					content: item.content,
+					originRequirementId: requirementId,
+					originArtifactId: artifact.id,
+					originApprovalId: options?.originApprovalId ?? approval?.id ?? null,
+				});
+				this.buildStakeholderInvolvementRelations(workspaceId, item.assetKind, promoted.assetId, promoted.revisionId, item.content);
+			}
 			counts[kind] = items.length;
-		}
+	}
+	}
 		return counts;
 	}
 
@@ -3311,6 +3336,49 @@ deleteWorkspace(workspaceId: number): boolean {
 				break;
 		}
 		return items;
+	}
+
+	private extractHierarchyNodes(kind: string, contentJson: string): Array<{ title: string; content: unknown; assetKind: string; nodeId: string; parentNodeId: string | undefined; position: number }> {
+		const content = parseJson<Record<string, unknown>>(contentJson);
+		const nodes: Array<{ title: string; content: unknown; assetKind: string; nodeId: string; parentNodeId: string | undefined; position: number }> = [];
+		if (kind === "scenario") {
+			const domains = content.domains as ReadonlyArray<{ nodeId?: string; title?: string; scenarios?: ReadonlyArray<{ nodeId?: string; title?: string; variants?: ReadonlyArray<Record<string, unknown>> }> }> | undefined;
+			for (let di = 0; di < (domains ?? []).length; di++) {
+				const domain = domains![di]!;
+				const dNodeId = domain.nodeId ?? `d${di}`;
+			nodes.push({ title: domain.title ?? dNodeId, content: { schemaVersion: "asset/scenario-domain/v1", nodeId: dNodeId, title: domain.title ?? dNodeId }, assetKind: "scenario-domain", nodeId: dNodeId, parentNodeId: undefined, position: di });
+				for (let si = 0; si < (domain.scenarios ?? []).length; si++) {
+					const scenario = domain.scenarios![si]!;
+					const sNodeId = scenario.nodeId ?? `s${di}-${si}`;
+				nodes.push({ title: scenario.title ?? sNodeId, content: { schemaVersion: "asset/scenario/v1", nodeId: sNodeId, title: scenario.title ?? sNodeId }, assetKind: "scenario", nodeId: sNodeId, parentNodeId: dNodeId, position: si });
+					for (let vi = 0; vi < (scenario.variants ?? []).length; vi++) {
+						const variant = scenario.variants![vi]!;
+						const vNodeId = typeof variant.nodeId === "string" ? variant.nodeId : `v${di}-${si}-${vi}`;
+						const vTitle = typeof variant.title === "string" ? variant.title : vNodeId;
+						nodes.push({ title: vTitle, content: { ...variant, nodeId: vNodeId }, assetKind: "scenario-variant", nodeId: vNodeId, parentNodeId: sNodeId, position: vi });
+					}
+				}
+			}
+		} else if (kind === "function") {
+			const domains = content.domains as ReadonlyArray<{ nodeId?: string; title?: string; items?: ReadonlyArray<{ nodeId?: string; title?: string; points?: ReadonlyArray<Record<string, unknown>> }> }> | undefined;
+			for (let di = 0; di < (domains ?? []).length; di++) {
+				const domain = domains![di]!;
+				const dNodeId = domain.nodeId ?? `fd${di}`;
+			nodes.push({ title: domain.title ?? dNodeId, content: { schemaVersion: "asset/function-domain/v1", nodeId: dNodeId, title: domain.title ?? dNodeId }, assetKind: "function-domain", nodeId: dNodeId, parentNodeId: undefined, position: di });
+				for (let ii = 0; ii < (domain.items ?? []).length; ii++) {
+					const item = domain.items![ii]!;
+					const iNodeId = item.nodeId ?? `fi${di}-${ii}`;
+				nodes.push({ title: item.title ?? iNodeId, content: { schemaVersion: "asset/function-item/v1", nodeId: iNodeId, title: item.title ?? iNodeId }, assetKind: "function-item", nodeId: iNodeId, parentNodeId: dNodeId, position: ii });
+					for (let pi = 0; pi < (item.points ?? []).length; pi++) {
+						const point = item.points![pi]!;
+						const pNodeId = typeof point.nodeId === "string" ? point.nodeId : `fp${di}-${ii}-${pi}`;
+						const pName = typeof point.name === "string" ? point.name : pNodeId;
+						nodes.push({ title: pName, content: { ...point, nodeId: pNodeId }, assetKind: "function-point", nodeId: pNodeId, parentNodeId: iNodeId, position: pi });
+					}
+				}
+			}
+		}
+		return nodes;
 	}
 
 	updateReusableAsset(input: { workspaceId: number; assetId: number; expectedRevisionId: number; title: string; content: unknown; relations: readonly AssetRelationInput[] }): { assetId: number; revisionId: number; revisionNo: number } | undefined {

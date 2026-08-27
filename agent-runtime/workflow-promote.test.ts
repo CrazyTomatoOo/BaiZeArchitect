@@ -202,9 +202,9 @@ test("promote 覆盖 architecture/data/api/design/content 拆细", async () => {
 
 	const counts = runtime.promoteRequirementArtifacts(workflowId, ["analysis", "scenario", "usecase", "function", "design", "architecture", "data", "api"]);
 		assert.equal(counts["analysis"] ?? 0, 0, "analysis has no extractable items (impactProfile is not a titled list)");
-		assert.equal(counts["scenario"], 1);
+		assert.equal(counts["scenario"], 3, "scenario tree: domain + scenario + variant");
 		assert.equal(counts["usecase"], 1);
-		assert.equal(counts["function"], 1);
+		assert.equal(counts["function"], 3, "function tree: domain + item + point");
 		assert.equal(counts["design"], 1);
 		assert.equal(counts["architecture"], 1);
 		assert.equal(counts["data"], 1);

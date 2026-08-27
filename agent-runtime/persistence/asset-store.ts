@@ -429,7 +429,8 @@ export class AssetStore {
 			const existing = this.database
 				.prepare("select id, current_revision_id from reusable_assets where workspace_id = ? and kind = ? and title = ? order by id desc limit 1")
 				.get(input.workspaceId, input.kind, input.title) as { id: number; current_revision_id: number | null } | undefined;
-			const document = this.snapshotStore.insertSnapshot("reusable_asset_content", `artifact/${input.kind}/v1`, input.content, timestamp);
+		const schemaRef = HIERARCHY_ASSET_KINDS[input.kind] === true ? `asset/${input.kind}/v1` : `artifact/${input.kind}/v1`;
+		const document = this.snapshotStore.insertSnapshot("reusable_asset_content", schemaRef, input.content, timestamp);
 			if (existing) {
 				const currentNo = existing.current_revision_id === null
 					? 0
