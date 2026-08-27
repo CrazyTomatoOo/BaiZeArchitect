@@ -256,7 +256,7 @@ test("full cascade delete: deep subtree and sibling workspace isolation, Store F
 	await withCascadeRuntime(async ({ runtime, databasePath }) => {
 		const deep = await buildDeepWorkflow(runtime, databasePath);
 		runtime.createReusableAsset({ workspaceId: deep.workspaceId, kind: "stakeholder", title: "operator", content: { name: "Operator", description: "System operator" } });
-		runtime.createReusableAsset({ workspaceId: deep.workspaceId, kind: "scenario", title: "happy path", content: { title: "happy path", steps: [] } });
+		runtime.createReusableAsset({ workspaceId: deep.workspaceId, kind: "scenario", title: "happy path", content: { nodeId: "s1", title: "happy path" } });
 		seedNicheRows(databasePath, deep);
 
 		const sibling = runtime.createWorkspace({ repoPath: "/tmp/sibling", name: "Sibling" });
@@ -268,7 +268,7 @@ test("full cascade delete: deep subtree and sibling workspace isolation, Store F
 			type: "start",
 			operator: OPERATOR,
 		});
-		const siblingAsset = runtime.createReusableAsset({ workspaceId: sibling, kind: "scenario", title: "sibling asset", content: { title: "sibling", steps: [] } });
+		const siblingAsset = runtime.createReusableAsset({ workspaceId: sibling, kind: "scenario", title: "sibling asset", content: { nodeId: "s1", title: "sibling" } });
 		// Cross-workspace trace link: deep workspace's revision cited from the sibling's evidence.
 		const siblingEvidence = runtime.bindEvidenceSnapshot(siblingRequirement.workflowId, "sha256:sibling-evidence", { files: [] });
 		const deepAnalysisRevisionId = getRevisionId(databasePath, "analysis");

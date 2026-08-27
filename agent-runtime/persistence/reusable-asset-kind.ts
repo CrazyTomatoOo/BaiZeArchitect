@@ -5,7 +5,7 @@
  * 注意：设计阶段 Artifact kind（artifact-content-v1）与本枚举是两套词汇，
  * 此处的 stakeholder 是 workspace 级资产 kind，不进入设计 Artifact schema。
  */
-export const REUSABLE_ASSET_KINDS = ["scenario", "usecase", "function", "design", "architecture", "data", "api", "stakeholder"] as const;
+export const REUSABLE_ASSET_KINDS = ["scenario-domain", "scenario", "scenario-variant", "function-domain", "function-item", "function-point", "usecase", "design", "architecture", "data", "api", "stakeholder"] as const;
 
 export type ReusableAssetKind = (typeof REUSABLE_ASSET_KINDS)[number];
 

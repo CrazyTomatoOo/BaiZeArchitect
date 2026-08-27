@@ -93,16 +93,28 @@ function scenarioContent(): unknown {
 		artifactKind: "scenario",
 		summary: "Scenarios of points expiry",
 		sourceRefs: [{ type: "requirement_revision", revisionId: 1 }],
-		scenarios: [
+		domains: [
 			{
-				id: "s1",
-				title: "Points expire after grace period",
-				actors: ["Member"],
-				preconditions: ["Member holds points"],
-				trigger: "Grace period ends",
-				mainFlow: ["System notifies member", "System expires points"],
-				alternateFlows: [],
-				expectedOutcome: "Points expired",
+				nodeId: "sd1",
+				title: "Member domain",
+				scenarios: [
+					{
+						nodeId: "sn1",
+						title: "Points expire after grace period",
+						variants: [
+							{
+								nodeId: "sv1",
+								title: "Points expire after grace period",
+								actors: ["Member"],
+								preconditions: ["Member holds points"],
+								trigger: "Grace period ends",
+								mainFlow: ["System notifies member", "System expires points"],
+								alternateFlows: [],
+								expectedOutcome: "Points expired",
+							},
+						],
+					},
+				],
 			},
 		],
 	};
@@ -134,15 +146,27 @@ function functionContent(): unknown {
 		artifactKind: "function",
 		summary: "Functions of points expiry",
 		sourceRefs: [{ type: "requirement_revision", revisionId: 1 }],
-		functions: [
+		domains: [
 			{
-				id: "f1",
-				name: "Expiry scheduler",
-				responsibility: "Expire points after grace period",
-				inputs: [],
-				outputs: [],
-				businessRules: [],
-				acceptanceCriteria: ["Expired points never negative"],
+				nodeId: "fd1",
+				title: "Expiry domain",
+				items: [
+					{
+						nodeId: "fi1",
+						title: "Scheduler item",
+						points: [
+							{
+								nodeId: "fp1",
+								name: "Expiry scheduler",
+								responsibility: "Expire points after grace period",
+								inputs: [],
+								outputs: [],
+								businessRules: [],
+								acceptanceCriteria: ["Expired points never negative"],
+							},
+						],
+					},
+				],
 			},
 		],
 	};
@@ -170,11 +194,10 @@ function architectureContent(): unknown {
 		artifactKind: "architecture",
 		summary: "Architecture of points expiry solution",
 		sourceRefs: [{ type: "requirement_revision", revisionId: 1 }],
-		components: [{ id: "c1", name: "Expiry service", responsibility: "Runs expiry batch" }],
+		components: [{ componentId: "c1", name: "Expiry service", responsibility: "Runs expiry batch" }],
 		relationships: [],
 		constraints: [],
 		nonFunctionalRequirements: ["Batch completes within window"],
-		decisions: [],
 	};
 }
 
@@ -184,11 +207,25 @@ function dataContent(): unknown {
 		artifactKind: "data",
 		summary: "Data model of points expiry",
 		sourceRefs: [{ type: "requirement_revision", revisionId: 1 }],
-		entities: [{ name: "points_ledger", purpose: "Track point balances", fields: ["member_id", "balance", "expires_at"], lifecycle: "append-mostly" }],
-		relationships: [],
-		migrationPlan: "Add expiry column",
-		rollbackPlan: "Drop expiry column",
-		privacyAndRetention: ["Ledger retained 24 months"],
+		entities: [
+			{
+				entityId: "points_ledger",
+				name: "Points ledger",
+				fields: [
+					{ fieldId: "member_id", name: "Member ID", type: "string" },
+					{ fieldId: "balance", name: "Balance", type: "integer" },
+					{ fieldId: "expires_at", name: "Expires at", type: "datetime" },
+				],
+			},
+		],
+		relations: [
+			{
+				fromEntityId: "points_ledger",
+				fromFieldIds: ["member_id"],
+				toEntityId: "member_profile",
+				cardinality: "many-to-one",
+			},
+		],
 	};
 }
 
@@ -198,10 +235,19 @@ function apiContent(): unknown {
 		artifactKind: "api",
 		summary: "API surface of points expiry",
 		sourceRefs: [{ type: "requirement_revision", revisionId: 1 }],
-		interfaces: [{ id: "api1", kind: "http", name: "expiry-run", contract: "POST /internal/expiry/run", errors: [], compatibility: "additive" }],
-		security: ["Internal only"],
-		versioning: "uri",
-		testStrategy: ["Contract tests"],
+		openapi: "3.1.0",
+		info: { title: "Expiry API", version: "1.0.0" },
+		paths: {
+			"/internal/expiry/run": {
+				summary: "Run expiry batch",
+				post: {
+					summary: "Run expiry batch",
+					responses: {
+						"200": { description: "Expiry completed" },
+					},
+				},
+			},
+		},
 	};
 }
 

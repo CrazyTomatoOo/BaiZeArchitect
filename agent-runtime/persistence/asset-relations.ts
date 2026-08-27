@@ -8,8 +8,8 @@ export type AssetRelationType = (typeof ASSET_RELATION_TYPES)[number];
 export interface AssetRelationInput {
 	toAssetId: number;
 	type: AssetRelationType;
+	position?: number;
 }
-
 export interface AssetRelationRecord {
 	id: number;
 	fromAssetId: number;
@@ -17,6 +17,7 @@ export interface AssetRelationRecord {
 	fromRevisionId: number;
 	toRevisionId: number;
 	type: AssetRelationType;
+	position: number;
 	createdAt: string;
 }
 
@@ -42,6 +43,7 @@ export interface AssetRelationExport {
 	toTitle: string;
 	toKind: ReusableAssetKind;
 	type: AssetRelationType;
+	position?: number;
 }
 
 export interface ReusableAssetExportBundle {
@@ -53,14 +55,19 @@ export class AssetRelationValidationError extends Error {
 		super("Asset relation validation failed");
 	}
 }
-
 const RELATION_KIND_PAIRS: Record<string, true> = {
-	"scenario->usecase:contains": true,
-	"usecase->function:contains": true,
-	"function->api:contains": true,
-	"function->data:contains": true,
+	"scenario-domain->scenario:contains": true,
+	"scenario->scenario-variant:contains": true,
+	"function-domain->function-item:contains": true,
+	"function-item->function-point:contains": true,
+	"scenario-variant->usecase:contains": true,
+	"usecase->function-domain:contains": true,
+	"function-point->api:contains": true,
+	"function-point->data:contains": true,
 	"design->architecture:contains": true,
-	"scenario->stakeholder:involves": true,
+	"architecture->api:contains": true,
+	"architecture->data:contains": true,
+	"scenario-variant->stakeholder:involves": true,
 	"usecase->stakeholder:involves": true,
 };
 

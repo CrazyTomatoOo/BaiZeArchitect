@@ -106,7 +106,30 @@ function scenarioContent(): unknown {
 		artifactKind: "scenario",
 		summary: "Scenarios for points expiry",
 		sourceRefs: [{ type: "requirement_revision", revisionId: 1 }],
-		scenarios: [{ id: "sc1", title: "User redeems before expiry", actors: ["User"], preconditions: ["Points exist"], trigger: "Expiry reminder received", mainFlow: ["Open wallet", "Redeem points"], alternateFlows: ["Points already expired"], expectedOutcome: "Points redeemed" }],
+		domains: [
+			{
+				nodeId: "domain-points",
+				title: "Points domain",
+				scenarios: [
+					{
+						nodeId: "sc1",
+						title: "User redeems before expiry",
+						variants: [
+							{
+								nodeId: "sc1-v1",
+								title: "User redeems before expiry",
+								actors: ["User"],
+								preconditions: ["Points exist"],
+								trigger: "Expiry reminder received",
+								mainFlow: ["Open wallet", "Redeem points"],
+								alternateFlows: ["Points already expired"],
+								expectedOutcome: "Points redeemed",
+							},
+						],
+					},
+				],
+			},
+		],
 	};
 }
 
@@ -126,7 +149,29 @@ function functionContent(): unknown {
 		artifactKind: "function",
 		summary: "Functions for points expiry",
 		sourceRefs: [{ type: "requirement_revision", revisionId: 1 }],
-		functions: [{ id: "fn1", name: "Expiry scheduler", responsibility: "Expire points past threshold", inputs: ["points ledger"], outputs: ["expiry events"], businessRules: ["Expiry after 365 days"], acceptanceCriteria: ["Expired points are removed"] }],
+		domains: [
+			{
+				nodeId: "domain-functions",
+				title: "Function domain",
+				items: [
+					{
+						nodeId: "fi1",
+						title: "Expiry functions",
+						points: [
+							{
+								nodeId: "fn1",
+								name: "Expiry scheduler",
+								responsibility: "Expire points past threshold",
+								inputs: ["points ledger"],
+								outputs: ["expiry events"],
+								businessRules: ["Expiry after 365 days"],
+								acceptanceCriteria: ["Expired points are removed"],
+							},
+						],
+					},
+				],
+			},
+		],
 	};
 }
 
@@ -136,11 +181,20 @@ function architectureContent(): unknown {
 		artifactKind: "architecture",
 		summary: "Architecture of points expiry solution",
 		sourceRefs: [{ type: "requirement_revision", revisionId: 1 }],
-		components: [{ id: "c1", name: "Expiry service", responsibility: "Schedule and execute expiry" }],
-		relationships: [{ from: "c1", to: "Points ledger", interaction: "reads and writes balances" }],
+		components: [
+			{ componentId: "c1", name: "Expiry service", responsibility: "Schedule and execute expiry" },
+			{ componentId: "c2", name: "Points ledger", responsibility: "Store point balances" },
+		],
+		relationships: [
+			{
+				relationshipId: "r1",
+				fromComponentId: "c1",
+				toComponentId: "c2",
+				interaction: "reads and writes balances",
+			},
+		],
 		constraints: ["No downtime during expiry runs"],
 		nonFunctionalRequirements: ["Expiry completes within the nightly window"],
-		decisions: [],
 	};
 }
 
@@ -150,11 +204,26 @@ function dataContent(): unknown {
 		artifactKind: "data",
 		summary: "Data model for points expiry",
 		sourceRefs: [{ type: "requirement_revision", revisionId: 1 }],
-		entities: [{ name: "points_ledger", purpose: "Track point balances and expiries", fields: ["id", "user_id", "balance", "expires_at"], lifecycle: "append-heavy with nightly expiry updates" }],
-		relationships: ["points_ledger.user_id -> users.id"],
-		migrationPlan: "Add expires_at column with backfill",
-		rollbackPlan: "Drop expires_at column",
-		privacyAndRetention: ["Expiry records retained for 90 days"],
+		entities: [
+			{
+				entityId: "points_ledger",
+				name: "points_ledger",
+				fields: [
+					{ fieldId: "id", name: "id", type: "uuid" },
+					{ fieldId: "user_id", name: "user_id", type: "uuid" },
+					{ fieldId: "balance", name: "balance", type: "integer" },
+					{ fieldId: "expires_at", name: "expires_at", type: "timestamp" },
+				],
+			},
+		],
+		relations: [
+			{
+				fromEntityId: "points_ledger",
+				fromFieldIds: ["user_id"],
+				toEntityId: "users",
+				cardinality: "many-to-one",
+			},
+		],
 	};
 }
 
@@ -164,10 +233,33 @@ function apiContent(): unknown {
 		artifactKind: "api",
 		summary: "API surface for points expiry",
 		sourceRefs: [{ type: "requirement_revision", revisionId: 1 }],
-		interfaces: [{ id: "api1", kind: "http", name: "GET /points", contract: "Returns balance with expiry dates", errors: ["404 not found"], compatibility: "Additive fields only" }],
-		security: ["Operator token required"],
-		versioning: "URL path versioning",
-		testStrategy: ["Contract tests against the public surface"],
+		openapi: "3.1.0",
+		info: { title: "Points API", version: "1.0.0" },
+		paths: {
+			"/points": {
+				summary: "Points balance",
+				get: {
+					summary: "Get points balance",
+					responses: {
+						"200": {
+							description: "Balance with expiry dates",
+							content: {
+								"application/json": {
+									schema: {
+										type: "object",
+										properties: {
+											balance: { type: "integer" },
+											expiresAt: { type: "string", format: "date-time" },
+										},
+									},
+								},
+							},
+						},
+						"404": { description: "Not found" },
+					},
+				},
+			},
+		},
 	};
 }
 
@@ -639,7 +731,7 @@ test("approve-packet archives atomically: approval record, revisions approved, s
 			const packetEvent = db.prepare("select type from workflow_events where workflow_id = ? and type = 'packet_approved'").get(workflowId);
 			assert.ok(packetEvent);
 			const promoted = db.prepare("select count(*) as count from reusable_assets where workspace_id = ? and origin_approval_id = ?").get(workspaceId, approval.id) as { count: number };
-			assert.equal(promoted.count, 7, "archive promotes all seven asset kinds except analysis and stakeholder");
+			assert.equal(promoted.count, 8, "archive promotes every artifact item except analysis and stakeholder (scenario variant, usecase, function point, design unit, two architecture components, data entity, api path)");
 			const involves = db.prepare("select count(*) as count from asset_relations where relationship_type = 'involves'").get() as { count: number };
 			assert.ok(involves.count >= 2, "archive promotes stakeholder involves relations from scenario and usecase content");
 		} finally {

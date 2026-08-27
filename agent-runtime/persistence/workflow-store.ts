@@ -28,6 +28,7 @@ import { REUSABLE_ASSET_WORKFLOW_MIGRATION } from "./migrations/0016-reusable-as
 import { FINALIZE_ROLE_SET_MIGRATION } from "./migrations/0017-finalize-role-set.js";
 import { FTS_ASSET_SEARCH_MIGRATION } from "./migrations/0018-fts-asset-search.js";
 import { ASSET_RELATIONS_MIGRATION } from "./migrations/0019-asset-relations.js";
+import { ASSET_KIND_EXPANSION_MIGRATION } from "./migrations/0020-asset-kind-expansion.js";
 import type { ReusableAssetKind } from "./reusable-asset-kind.js";
 import { parseJson } from "./json.js";
 import { AssetStore } from "./asset-store.js";
@@ -50,8 +51,7 @@ import { type WorkflowCommandType } from "../workflow/command-types.js";
 import { ARTIFACT_OWNERSHIP, type InputBinding, type TaskOutputInput } from "../workflow/plan-types.js";
 import type { RoleResult, ContextManifest, RoleContract, BeginAttemptResult, CompleteAttemptResult, TraceLinkProposal, CriticReport, FindingProposal, FindingSeverity, AssetReference } from "../workflow/role-result.js";
 import type { ModelRolesOverride } from "../workflow/model-driver.js";
-
-const MIGRATIONS = [WORKFLOW_GOVERNANCE_MIGRATION, COMMAND_GOVERNANCE_MIGRATION, RECOVERY_GOVERNANCE_MIGRATION, PLANNING_GOVERNANCE_MIGRATION, ATTEMPT_EXECUTION_MIGRATION, DEPENDENT_TASK_SAFETY_MIGRATION, REQUIRED_ARTIFACTS_AND_EVIDENCE_MIGRATION, CRITIC_GOVERNANCE_MIGRATION, DECISIONS_AND_READINESS_MIGRATION, HUMAN_GOVERNANCE_MIGRATION, READ_MODEL_GOVERNANCE_MIGRATION, RUN_EVENT_STREAM_MIGRATION, STAKEHOLDER_KIND_MIGRATION, MODEL_ROLES_MIGRATION, PRODUCTION_ROLE_KIND_MIGRATION, REUSABLE_ASSET_WORKFLOW_MIGRATION, FINALIZE_ROLE_SET_MIGRATION, FTS_ASSET_SEARCH_MIGRATION, ASSET_RELATIONS_MIGRATION] as const;
+const MIGRATIONS = [WORKFLOW_GOVERNANCE_MIGRATION, COMMAND_GOVERNANCE_MIGRATION, RECOVERY_GOVERNANCE_MIGRATION, PLANNING_GOVERNANCE_MIGRATION, ATTEMPT_EXECUTION_MIGRATION, DEPENDENT_TASK_SAFETY_MIGRATION, REQUIRED_ARTIFACTS_AND_EVIDENCE_MIGRATION, CRITIC_GOVERNANCE_MIGRATION, DECISIONS_AND_READINESS_MIGRATION, HUMAN_GOVERNANCE_MIGRATION, READ_MODEL_GOVERNANCE_MIGRATION, RUN_EVENT_STREAM_MIGRATION, STAKEHOLDER_KIND_MIGRATION, MODEL_ROLES_MIGRATION, PRODUCTION_ROLE_KIND_MIGRATION, REUSABLE_ASSET_WORKFLOW_MIGRATION, FINALIZE_ROLE_SET_MIGRATION, FTS_ASSET_SEARCH_MIGRATION, ASSET_RELATIONS_MIGRATION, ASSET_KIND_EXPANSION_MIGRATION] as const;
 const ALL_PROMOTABLE_ASSET_KINDS = ["design", "architecture", "data", "api", "scenario", "usecase", "function"] as const;
 export type CommandOutcome =
 	| "accepted"
@@ -3150,18 +3150,18 @@ deleteWorkspace(workspaceId: number): boolean {
 				.prepare("select id from approval_records where workflow_id = ? and record_type = 'artifact_approval' and subject_type = 'artifact_revision' and subject_id = ? order by id desc limit 1")
 				.get(workflowId, revision.id) as { id: number } | undefined;
 			const items = this.extractAssetItems(kind, revision.content);
-			for (const item of items) {
-				const promoted = this.assetStore.upsertReusableAssetByTitle({
-					workspaceId,
-					kind: kind as ReusableAssetKind,
-					title: item.title,
-					content: item.content,
-					originRequirementId: requirementId,
-					originArtifactId: artifact.id,
-					originApprovalId: options?.originApprovalId ?? approval?.id ?? null,
-				});
-				this.buildStakeholderInvolvementRelations(workspaceId, kind, promoted.assetId, promoted.revisionId, item.content);
-			}
+		for (const item of items) {
+			const promoted = this.assetStore.upsertReusableAssetByTitle({
+				workspaceId,
+				kind: item.assetKind as ReusableAssetKind,
+				title: item.title,
+				content: item.content,
+				originRequirementId: requirementId,
+				originArtifactId: artifact.id,
+				originApprovalId: options?.originApprovalId ?? approval?.id ?? null,
+			});
+			this.buildStakeholderInvolvementRelations(workspaceId, item.assetKind, promoted.assetId, promoted.revisionId, item.content);
+		}
 			counts[kind] = items.length;
 		}
 		return counts;
@@ -3174,12 +3174,12 @@ deleteWorkspace(workspaceId: number): boolean {
 		fromRevisionId: number,
 		content: unknown,
 	): void {
-		if (kind !== "scenario" && kind !== "usecase") return;
+		if (kind !== "scenario-variant" && kind !== "usecase") return;
 		this.assetStore.deleteOutgoingRelations(fromAssetId, "involves");
 		const actorNames: string[] = [];
 		if (typeof content !== "object" || content === null || Array.isArray(content)) return;
 		const record = content as { actors?: unknown; actor?: unknown };
-		if (kind === "scenario" && Array.isArray(record.actors)) {
+		if (kind === "scenario-variant" && Array.isArray(record.actors)) {
 			for (const actor of record.actors) if (typeof actor === "string") actorNames.push(actor);
 		}
 		if (kind === "usecase" && typeof record.actor === "string") actorNames.push(record.actor);
@@ -3192,15 +3192,19 @@ deleteWorkspace(workspaceId: number): boolean {
 	}
 
 	/** 条目级拆解（#14 决议）：按 kind 结构抽条目（标题 + 内容对象）。 */
-	private extractAssetItems(kind: string, contentJson: string): Array<{ title: string; content: unknown }> {
+	private extractAssetItems(kind: string, contentJson: string): Array<{ title: string; content: unknown; assetKind: string }> {
 		const content = parseJson<Record<string, unknown>>(contentJson);
-		const items: Array<{ title: string; content: unknown }> = [];
+		const items: Array<{ title: string; content: unknown; assetKind: string }> = [];
 		switch (kind) {
 			case "scenario": {
-				const scenarios = content.scenarios as ReadonlyArray<{ title?: unknown }> | undefined;
-				for (const scenario of scenarios ?? []) {
-					if (typeof scenario.title !== "string" || scenario.title.length === 0) continue;
-					items.push({ title: scenario.title, content: scenario });
+				const domains = content.domains as ReadonlyArray<{ scenarios?: ReadonlyArray<{ variants?: ReadonlyArray<{ title?: unknown; nodeId?: unknown }> }> }> | undefined;
+				for (const domain of domains ?? []) {
+					for (const scenario of domain.scenarios ?? []) {
+						for (const variant of scenario.variants ?? []) {
+							if (typeof variant.title !== "string" || variant.title.length === 0) continue;
+						items.push({ title: variant.title, content: { ...variant, nodeId: variant.nodeId ?? variant.title }, assetKind: "scenario-variant" });
+						}
+					}
 				}
 				break;
 			}
@@ -3208,15 +3212,19 @@ deleteWorkspace(workspaceId: number): boolean {
 				const useCases = content.useCases as ReadonlyArray<{ goal?: unknown }> | undefined;
 				for (const useCase of useCases ?? []) {
 					if (typeof useCase.goal !== "string" || useCase.goal.length === 0) continue;
-					items.push({ title: useCase.goal, content: useCase });
+				items.push({ title: useCase.goal, content: useCase, assetKind: "usecase" });
 				}
 				break;
 			}
 			case "function": {
-				const functions = content.functions as ReadonlyArray<{ name?: unknown }> | undefined;
-				for (const fn of functions ?? []) {
-					if (typeof fn.name !== "string" || fn.name.length === 0) continue;
-					items.push({ title: fn.name, content: fn });
+				const domains = content.domains as ReadonlyArray<{ items?: ReadonlyArray<{ points?: ReadonlyArray<{ name?: unknown; nodeId?: unknown }> }> }> | undefined;
+				for (const domain of domains ?? []) {
+					for (const item of domain.items ?? []) {
+						for (const point of item.points ?? []) {
+							if (typeof point.name !== "string" || point.name.length === 0) continue;
+						items.push({ title: point.name, content: { ...point, nodeId: point.nodeId ?? point.name }, assetKind: "function-point" });
+						}
+					}
 				}
 				break;
 			}
@@ -3226,7 +3234,7 @@ deleteWorkspace(workspaceId: number): boolean {
 					const area = typeof unit.area === "string" ? unit.area : "";
 					const change = typeof unit.change === "string" ? unit.change : "";
 					if (area.length === 0 && change.length === 0) continue;
-					items.push({ title: `${area}${change ? `: ${change}` : ""}`, content: unit });
+				items.push({ title: `${area}${change ? `: ${change}` : ""}`, content: unit, assetKind: "design" });
 				}
 				break;
 			}
@@ -3234,7 +3242,7 @@ deleteWorkspace(workspaceId: number): boolean {
 				const components = content.components as ReadonlyArray<{ name?: unknown }> | undefined;
 				for (const component of components ?? []) {
 					if (typeof component.name !== "string" || component.name.length === 0) continue;
-					items.push({ title: component.name, content: component });
+				items.push({ title: component.name, content: component, assetKind: "architecture" });
 				}
 				break;
 			}
@@ -3242,15 +3250,19 @@ deleteWorkspace(workspaceId: number): boolean {
 				const entities = content.entities as ReadonlyArray<{ name?: unknown }> | undefined;
 				for (const entity of entities ?? []) {
 					if (typeof entity.name !== "string" || entity.name.length === 0) continue;
-					items.push({ title: entity.name, content: entity });
+				items.push({ title: entity.name, content: entity, assetKind: "data" });
 				}
 				break;
 			}
 			case "api": {
-				const interfaces = content.interfaces as ReadonlyArray<{ name?: unknown }> | undefined;
-				for (const iface of interfaces ?? []) {
-					if (typeof iface.name !== "string" || iface.name.length === 0) continue;
-					items.push({ title: iface.name, content: iface });
+				const paths = content.paths as Record<string, unknown> | undefined;
+				if (paths && typeof paths === "object") {
+					for (const [path, item] of Object.entries(paths)) {
+						if (typeof item !== "object" || item === null) continue;
+						const record = item as Record<string, unknown>;
+						const summary = typeof record.summary === "string" ? record.summary : path;
+					items.push({ title: summary, content: { path, ...record }, assetKind: "api" });
+					}
 				}
 				break;
 			}
@@ -3593,10 +3605,10 @@ deleteWorkspace(workspaceId: number): boolean {
 
 	private mapLegacyArtifactKind(
 		kind: string,
-	): "scenario" | "usecase" | "function" | null {
-		if (kind === "scenario") return "scenario";
+	): ReusableAssetKind | null {
+		if (kind === "scenario") return "scenario-variant";
 		if (kind === "usecase") return "usecase";
-		if (kind === "function") return "function";
+		if (kind === "function") return "function-point";
 		return null;
 	}
 

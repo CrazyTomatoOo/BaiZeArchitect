@@ -128,15 +128,15 @@ test("stakeholder kind survives the 0011-era table rebuild (rows preserved, CHEC
 
 test("the shared kind predicate classifies stakeholder and rejects unknown kinds", async () => {
 	const { REUSABLE_ASSET_KINDS, isReusableAssetKind } = await import("./persistence/reusable-asset-kind.js");
-	assert.deepEqual([...REUSABLE_ASSET_KINDS], ["scenario", "usecase", "function", "design", "architecture", "data", "api", "stakeholder"]);
+	assert.deepEqual([...REUSABLE_ASSET_KINDS], ["scenario-domain", "scenario", "scenario-variant", "function-domain", "function-item", "function-point", "usecase", "design", "architecture", "data", "api", "stakeholder"]);
 	assert.equal(isReusableAssetKind("stakeholder"), true);
 	assert.equal(isReusableAssetKind("actor"), false);
 	assert.equal(isReusableAssetKind("bogus"), false);
 });
 
 
-// #22 review（S1/S3/S4）：0016 重建后不可变触发器/工作区索引/cascade FK/8 kinds/workflow source 全部保留。
-test("0016 asset-workflow rebuild preserves trigger, index, cascade FK, 8 kinds, workflow source", async () => {
+// #22 review（S1/S3/S4）：0016 重建后不可变触发器/工作区索引/cascade FK/12 kinds/workflow source 全部保留。
+test("0016 asset-workflow rebuild preserves trigger, index, cascade FK, 12 kinds, workflow source", async () => {
 	await withRuntime(async ({ databasePath, runtime }) => {
 		const db = new Database(databasePath);
 		try {
@@ -148,7 +148,7 @@ test("0016 asset-workflow rebuild preserves trigger, index, cascade FK, 8 kinds,
 			const fkSql = db.prepare("select sql from sqlite_master where type='table' and name='reusable_asset_revisions'").get() as { sql: string };
 			assert.match(fkSql.sql, /on delete cascade/, "revision FK keeps 0011 cascade semantics");
 			const assetSql = db.prepare("select sql from sqlite_master where type='table' and name='reusable_assets'").get() as { sql: string };
-			assert.match(assetSql.sql, /'scenario','usecase','function','design','architecture','data','api','stakeholder'/);
+		assert.match(assetSql.sql, /'scenario-domain','scenario','scenario-variant','function-domain','function-item','function-point','usecase','design','architecture','data','api','stakeholder'/);
 			const revisionSql = db.prepare("select sql from sqlite_master where type='table' and name='reusable_asset_revisions'").get() as { sql: string };
 			assert.match(revisionSql.sql, /'manual','import','migration','workflow'/);
 			// 走完整 store 路径建 asset + workflow-source revision（触发器必须放行合法插入）
@@ -156,7 +156,7 @@ test("0016 asset-workflow rebuild preserves trigger, index, cascade FK, 8 kinds,
 				workspaceId,
 				kind: "scenario",
 				title: "S",
-				content: { steps: ["a"] },
+				content: { nodeId: "s1", title: "S" },
 				source: "workflow",
 			});
 			// 不可变触发器拦截 revision 修改

@@ -767,14 +767,18 @@ export function gateCategoryLabel(category: GateCategory): string {
 /** 资产类别中文标签。 */
 export function assetKindLabel(kind: string): string {
 	const map: Record<string, string> = {
-		design: "设计",
-		architecture: "架构",
-		data: "数据",
-		api: "接口",
-		scenario: "场景",
-		usecase: "用例",
-		function: "功能",
-		stakeholder: "干系人",
+		"scenario-domain": "场景域",
+		"scenario": "场景",
+		"scenario-variant": "场景变体",
+		"function-domain": "功能域",
+		"function-item": "功能项",
+		"function-point": "功能点",
+		"design": "设计",
+		"architecture": "架构",
+		"data": "数据",
+		"api": "接口",
+		"usecase": "用例",
+		"stakeholder": "干系人",
 	};
 	return map[kind] ?? kind;
 }
@@ -794,11 +798,10 @@ export function journeySteps(projection: WorkflowProjection): readonly JourneySt
 	];
 }
 
-// ---------------------------------------------------------------------------
+export const ASSET_KINDS = ["scenario-domain", "scenario", "scenario-variant", "function-domain", "function-item", "function-point", "usecase", "design", "architecture", "data", "api", "stakeholder"] as const;
 // 资产库 API（Workspace Reusable Asset 列表、详情、关系和操作）
 // ---------------------------------------------------------------------------
 
-export const ASSET_KINDS = ["design", "architecture", "data", "api", "scenario", "usecase", "function", "stakeholder"] as const;
 export type AssetKind = (typeof ASSET_KINDS)[number];
 
 export interface AssetListQuery {
@@ -832,6 +835,7 @@ export interface AssetRelationExport {
 	toTitle: string;
 	toKind: AssetKind;
 	type: "contains" | "involves";
+	position?: number;
 }
 
 export interface AssetResolvedRelation {
@@ -894,7 +898,7 @@ async function throwAssetMutationError(response: Response, operation: string): P
 export async function createAsset(
 	apiBase: string,
 	workspaceId: number,
-	input: { kind: AssetKind; title: string; content: unknown; relations?: readonly { toAssetId: number; type: "contains" | "involves" }[] },
+	input: { kind: AssetKind; title: string; content: unknown; relations?: readonly { toAssetId: number; type: "contains" | "involves"; position?: number }[] },
 ): Promise<{ assetId: number; revisionId: number; revisionNo: number }> {
 	const response = await fetch(`${apiBase}/api/assets`, {
 		method: "POST",
@@ -908,7 +912,7 @@ export async function createAsset(
 export async function updateAsset(
 	apiBase: string,
 	assetId: number,
-	input: { expectedRevisionId: number; title: string; content: unknown; relations: readonly { toAssetId: number; type: "contains" | "involves" }[] },
+	input: { expectedRevisionId: number; title: string; content: unknown; relations: readonly { toAssetId: number; type: "contains" | "involves"; position?: number }[] },
 ): Promise<{ assetId: number; revisionId: number; revisionNo: number }> {
 	const response = await fetch(`${apiBase}/api/assets/${assetId}`, {
 		method: "PUT",

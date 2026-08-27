@@ -131,7 +131,36 @@ function scenarioContent(title: string, actor = "Customer"): Record<string, unkn
 		artifactKind: "scenario",
 		summary: title,
 		sourceRefs: [],
-		scenarios: [{ id: title.toLowerCase().replace(/\s+/g, "-"), title, actors: [actor], preconditions: [], trigger: "Start", mainFlow: ["Complete"], alternateFlows: [], expectedOutcome: "Done" }],
+		domains: [{
+			nodeId: "d1",
+			title: "Domain",
+			scenarios: [{
+				nodeId: "s1",
+				title,
+				variants: [{
+					nodeId: "v1",
+					title,
+					actors: [actor],
+					preconditions: [],
+					trigger: "Start",
+					mainFlow: ["Complete"],
+					alternateFlows: [],
+					expectedOutcome: "Done",
+				}],
+			}],
+		}],
+	};
+}
+function scenarioVariantContent(title: string, actor = "Customer"): Record<string, unknown> {
+	return {
+		nodeId: title.toLowerCase().replace(/\s+/g, "-"),
+		title,
+		actors: [actor],
+		preconditions: [],
+		trigger: "Start",
+		mainFlow: ["Complete"],
+		alternateFlows: [],
+		expectedOutcome: "Done",
 	};
 }
 
@@ -685,9 +714,9 @@ test("asset relation create, detail enrich, and workspace graph are exposed over
 		const stakeholderBody = (await stakeholder.json()) as { assetId: number; revisionId: number };
 		const scenario = await createAsset(server.url, cookie, {
 			workspaceId,
-			kind: "scenario",
+			kind: "scenario-variant",
 			title: "Checkout",
-			content: scenarioContent("Checkout"),
+			content: scenarioVariantContent("Checkout"),
 			relations: [{ toAssetId: stakeholderBody.assetId, type: "involves" }],
 		});
 		assert.equal(scenario.status, 201);
@@ -709,7 +738,7 @@ test("asset relation create, detail enrich, and workspace graph are exposed over
 		assert.deepEqual(await graph.json(), {
 			nodes: [
 				{ assetId: stakeholderBody.assetId, kind: "stakeholder", title: "Customer" },
-				{ assetId: scenarioBody.assetId, kind: "scenario", title: "Checkout" },
+				{ assetId: scenarioBody.assetId, kind: "scenario-variant", title: "Checkout" },
 			],
 			edges: [{ fromAssetId: scenarioBody.assetId, toAssetId: stakeholderBody.assetId, type: "involves" }],
 		});
@@ -753,9 +782,9 @@ test("asset export and import preserve portable relationship edges", async () =>
 		const stakeholderBody = (await stakeholder.json()) as { assetId: number };
 		const scenario = await createAsset(server.url, cookie, {
 			workspaceId,
-			kind: "scenario",
+			kind: "scenario-variant",
 			title: "Checkout",
-			content: scenarioContent("Checkout"),
+			content: scenarioVariantContent("Checkout"),
 			relations: [{ toAssetId: stakeholderBody.assetId, type: "involves" }],
 		});
 		assert.equal(scenario.status, 201);
@@ -764,9 +793,9 @@ test("asset export and import preserve portable relationship edges", async () =>
 		assert.equal(exported.status, 200);
 		const bundle = await exported.json() as {
 			assets: Array<{ kind: string; title: string; revisions: Array<{ content: unknown }> }>;
-			relations: Array<{ fromTitle: string; fromKind: string; toTitle: string; toKind: string; type: string }>;
+			relations: Array<{ fromTitle: string; fromKind: string; toTitle: string; toKind: string; type: string; position: number }>;
 		};
-		assert.deepEqual(bundle.relations, [{ fromTitle: "Checkout", fromKind: "scenario", toTitle: "Customer", toKind: "stakeholder", type: "involves" }]);
+		assert.deepEqual(bundle.relations, [{ fromTitle: "Checkout", fromKind: "scenario-variant", toTitle: "Customer", toKind: "stakeholder", type: "involves", position: 0 }]);
 		assert.equal("assetId" in bundle.relations[0], false);
 
 		const destinationWorkspaceId = runtime.createWorkspace({ repoPath: "/destination", name: "destination" });
@@ -792,9 +821,9 @@ test("relation import reuses title-kind assets and rolls back malformed edges", 
 			workspaceId: destinationWorkspaceId,
 			assets: [
 				{ kind: "stakeholder", title: "Customer", content: { name: "Customer" } },
-				{ kind: "scenario", title: "Checkout", content: scenarioContent("Checkout") },
+				{ kind: "scenario-variant", title: "Checkout", content: scenarioVariantContent("Checkout") },
 			],
-			relations: [{ fromTitle: "Checkout", fromKind: "scenario", toTitle: "Customer", toKind: "stakeholder", type: "involves" }],
+			relations: [{ fromTitle: "Checkout", fromKind: "scenario-variant", toTitle: "Customer", toKind: "stakeholder", type: "involves" }],
 		});
 		assert.equal(first.status, 201);
 		const firstIds = (await first.json() as { assetIds: number[] }).assetIds;
@@ -802,16 +831,16 @@ test("relation import reuses title-kind assets and rolls back malformed edges", 
 			workspaceId: destinationWorkspaceId,
 			assets: [
 				{ kind: "stakeholder", title: "Customer", content: { name: "Customer", description: "Ignored" } },
-				{ kind: "scenario", title: "Checkout", content: { title: "Checkout", changed: true } },
+				{ kind: "scenario-variant", title: "Checkout", content: scenarioVariantContent("Checkout") },
 			],
-			relations: [{ fromTitle: "Checkout", fromKind: "scenario", toTitle: "Customer", toKind: "stakeholder", type: "involves" }],
+			relations: [{ fromTitle: "Checkout", fromKind: "scenario-variant", toTitle: "Customer", toKind: "stakeholder", type: "involves" }],
 		});
 		assert.equal(repeated.status, 201);
 		assert.deepEqual((await repeated.json() as { assetIds: number[] }).assetIds, firstIds);
 
 		const malformed = await importAssets(server.url, cookie, {
 			workspaceId,
-			assets: [{ kind: "scenario", title: "Broken", content: { title: "Broken" } }],
+			assets: [{ kind: "scenario", title: "Broken", content: { nodeId: "broken", title: "Broken" } }],
 			relations: [{ fromTitle: "Broken", fromKind: "scenario", toTitle: "Missing", toKind: "stakeholder", type: "involves" }],
 		});
 		assert.equal(malformed.status, 400);
@@ -820,7 +849,7 @@ test("relation import reuses title-kind assets and rolls back malformed edges", 
 			workspaceId: destinationWorkspaceId,
 			assets: [
 				{ kind: "stakeholder", title: "Customer", content: { name: "Customer" } },
-				{ kind: "scenario", title: "Checkout", content: { title: "Checkout" } },
+				{ kind: "scenario-variant", title: "Checkout", content: scenarioVariantContent("Checkout") },
 			],
 			relations: [],
 		});
@@ -841,9 +870,9 @@ test("asset deletion scans relation edges in both directions and unified update 
 		const stakeholderBody = (await stakeholder.json()) as { assetId: number; revisionId: number };
 		const scenario = await createAsset(server.url, cookie, {
 			workspaceId,
-			kind: "scenario",
+			kind: "scenario-variant",
 			title: "Checkout",
-			content: scenarioContent("Checkout"),
+			content: scenarioVariantContent("Checkout"),
 			relations: [{ toAssetId: stakeholderBody.assetId, type: "involves" }],
 		});
 		const scenarioBody = (await scenario.json()) as { assetId: number; revisionId: number };
@@ -859,7 +888,7 @@ test("asset deletion scans relation edges in both directions and unified update 
 
 		const deleteTarget = await fetch(`${server.url}/api/assets/${stakeholderBody.assetId}`, { method: "DELETE", headers: { cookie } });
 		assert.equal(deleteTarget.status, 409);
-		assert.deepEqual((await deleteTarget.json() as { error: string; refs: Array<{ assetId: number; kind: string; type: string }> }).refs, [{ assetId: scenarioBody.assetId, kind: "scenario", title: "Checkout", type: "involves" }]);
+		assert.deepEqual((await deleteTarget.json() as { error: string; refs: Array<{ assetId: number; kind: string; type: string }> }).refs, [{ assetId: scenarioBody.assetId, kind: "scenario-variant", title: "Checkout", type: "involves" }]);
 		const deleteSource = await fetch(`${server.url}/api/assets/${scenarioBody.assetId}`, { method: "DELETE", headers: { cookie } });
 		assert.equal(deleteSource.status, 409);
 	});

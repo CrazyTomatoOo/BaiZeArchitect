@@ -159,9 +159,9 @@ test("trigram 中文子串命中双语料 + workspace 隔离", async () => {
 		// asset 语料：直接入库一条含支付网关回调签名的资产
 		runtime.createReusableAsset({
 			workspaceId,
-			kind: "scenario",
+			kind: "scenario-variant",
 			title: "支付网关回调签名场景",
-			content: { steps: ["接收支付网关回调", "校验回调签名", "落账"] },
+			content: { nodeId: "sv1", title: "支付网关回调签名场景", actors: ["用户", "系统"], preconditions: [], trigger: "回调", mainFlow: ["接收支付网关回调", "校验回调签名", "落账"], alternateFlows: [], expectedOutcome: "落账成功" },
 		});
 		// artifact 语料：批准 analysis 产物（内容含回调签名校验）
 		await produceApproveAnalysis(runtime, workflowId);
@@ -209,7 +209,7 @@ test("增量回填：新资产在游标推进后仍可被检索", async () => {
 	await withRuntime(async ({ runtime }) => {
 		const workflowId = await startAndPlan(runtime);
 		const workspaceId = workspaceIdOf(runtime, workflowId);
-		runtime.createReusableAsset({ workspaceId, kind: "function", title: "签名函数", content: { detail: "支付网关回调签名验签步骤" } });
+		runtime.createReusableAsset({ workspaceId, kind: "function-point", title: "签名函数", content: { nodeId: "fp1", title: "签名函数", name: "签名函数", responsibility: "支付验签步骤", inputs: [], outputs: [], businessRules: [], acceptanceCriteria: ["验签"] } });
 		// 首次搜索推进游标 + 命中存量
 		const first = runtime.searchWorkspaceContent(workspaceId, "验签步骤");
 		assert.ok(first.length >= 1);
@@ -226,7 +226,7 @@ test("增量回填幂等：游标推进后重复搜索不重插 FTS 行", async 
 	await withRuntime(async ({ runtime, databasePath }) => {
 		const workflowId = await startAndPlan(runtime);
 		const workspaceId = workspaceIdOf(runtime, workflowId);
-		runtime.createReusableAsset({ workspaceId, kind: "scenario", title: "幂等验证场景", content: { detail: "支付网关回调签名重复回填不发散" } });
+		runtime.createReusableAsset({ workspaceId, kind: "scenario-variant", title: "幂等验证场景", content: { nodeId: "sv1", title: "幂等验证场景", actors: ["系统"], preconditions: [], trigger: "回调", mainFlow: ["支付网关回调签名重复回填不发散"], alternateFlows: [], expectedOutcome: "不发散" } });
 		runtime.searchWorkspaceContent(workspaceId, "回调签名");
 		const db = new Database(databasePath);
 		const before = (db.prepare("select count(*) as n from reusable_asset_search").get() as { n: number }).n;
@@ -244,7 +244,7 @@ test("<3 unicode 字符查询零命中（trigram 边界）", async () => {
 	await withRuntime(async ({ runtime }) => {
 		const workflowId = await startAndPlan(runtime);
 		const workspaceId = workspaceIdOf(runtime, workflowId);
-		runtime.createReusableAsset({ workspaceId, kind: "scenario", title: "支付网关", content: { steps: ["支付网关回调"] } });
+		runtime.createReusableAsset({ workspaceId, kind: "scenario-variant", title: "支付网关", content: { nodeId: "sv1", title: "支付网关", actors: ["用户"], preconditions: [], trigger: "请求", mainFlow: ["支付网关回调"], alternateFlows: [], expectedOutcome: "成功" } });
 		// 2 字符无法构成 trigram
 		const hits = runtime.searchWorkspaceContent(workspaceId, "支付");
 		assert.equal(hits.length, 0);
@@ -260,9 +260,9 @@ test("同内容多资产（snapshot 全局去重）各自入检索，无 rowid �
 		const workflowId = await startAndPlan(runtime);
 		const workspaceId = workspaceIdOf(runtime, workflowId);
 		// 同 kind 同内容 → snapshot_documents unique(kind,digest) 复用同一 doc id（schemaRef 相同）
-		const content = { steps: ["支付网关回调签名复用同一快照"] };
-		runtime.createReusableAsset({ workspaceId, kind: "scenario", title: "资产甲", content });
-		runtime.createReusableAsset({ workspaceId, kind: "scenario", title: "资产乙", content });
+		const content = { nodeId: "sv1", title: "复用快照场景", actors: ["系统"], preconditions: [], trigger: "定时", mainFlow: ["支付网关回调签名复用同一快照"], alternateFlows: [], expectedOutcome: "复用成功" };
+		runtime.createReusableAsset({ workspaceId, kind: "scenario-variant", title: "资产甲", content });
+		runtime.createReusableAsset({ workspaceId, kind: "scenario-variant", title: "资产乙", content });
 		const hits = runtime.searchWorkspaceContent(workspaceId, "复用同一快照");
 		assert.ok(hits.length >= 2, `both shared-doc assets must hit, got ${hits.length}`);
 		const titles = hits.map((h) => h.title).sort();

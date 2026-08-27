@@ -164,7 +164,7 @@ const MANUAL_ASSET_MANIFEST: LegacyFixtureManifest = {
 			artifacts: [
 				{
 					kind: "scenario",
-					revisions: [{ content: { name: "scenario 1" }, status: "approved" }],
+					revisions: [{ content: { nodeId: "sv1", title: "scenario 1", actors: ["User"], mainFlow: ["Start"], trigger: "Start", expectedOutcome: "Complete" }, status: "approved" }],
 				},
 			],
 		},
@@ -209,7 +209,7 @@ const MIXED_MANIFEST: LegacyFixtureManifest = {
 			artifacts: [
 				{
 					kind: "scenario",
-					revisions: [{ content: { name: "scenario 1" }, status: "approved" }],
+					revisions: [{ content: { nodeId: "sv2", title: "scenario 2", actors: ["User"], mainFlow: ["Start"], trigger: "Start", expectedOutcome: "Complete" }, status: "approved" }],
 				},
 			],
 		},
@@ -348,7 +348,7 @@ test("apply: manual asset source — reusable assets, no fake Requirement or Run
 		const workspaceId = store.workspaceExists(1) ? 1 : 1;
 		const assets = store.listReusableAssets(workspaceId);
 		assert.strictEqual(assets.length, 1);
-		assert.strictEqual(assets[0].kind, "scenario");
+		assert.strictEqual(assets[0].kind, "scenario-variant");
 		assert.ok(assets[0].legacyOriginRequirementId !== null, "legacy origin must be recorded");
 	} finally {
 		store.close();

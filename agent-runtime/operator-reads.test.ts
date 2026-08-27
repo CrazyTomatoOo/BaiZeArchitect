@@ -142,7 +142,24 @@ function scenarioContent(): unknown {
 		artifactKind: "scenario",
 		summary: "Scenarios for read model",
 		sourceRefs: [{ type: "requirement_revision", revisionId: 1 }],
-		scenarios: [{ id: "sc1", title: "Read a requirement", actors: ["Operator"], preconditions: ["Requirement exists"], trigger: "Requirement list opened", mainFlow: ["Open workspace", "Read requirement"], alternateFlows: [], expectedOutcome: "Requirement is read" }],
+		domains: [{
+			nodeId: "d1",
+			title: "Read model",
+			scenarios: [{
+				nodeId: "sc1",
+				title: "Read a requirement",
+				variants: [{
+					nodeId: "v1",
+					title: "Read a requirement",
+					actors: ["Operator"],
+					preconditions: ["Requirement exists"],
+					trigger: "Requirement list opened",
+					mainFlow: ["Open workspace", "Read requirement"],
+					alternateFlows: [],
+					expectedOutcome: "Requirement is read",
+				}],
+			}],
+		}],
 	};
 }
 
@@ -162,7 +179,23 @@ function functionContent(): unknown {
 		artifactKind: "function",
 		summary: "Functions for read model",
 		sourceRefs: [{ type: "requirement_revision", revisionId: 1 }],
-		functions: [{ id: "fn1", name: "Requirement listing", responsibility: "Return workflow summaries in stable order", inputs: ["workspaceId"], outputs: ["requirement summaries"], businessRules: ["Stable ordering by creation"], acceptanceCriteria: ["List returns newest workflows with state"] }],
+		domains: [{
+			nodeId: "fd1",
+			title: "Read model",
+			items: [{
+				nodeId: "fi1",
+				title: "Requirement queries",
+				points: [{
+					nodeId: "fp1",
+					name: "Requirement listing",
+					responsibility: "Return workflow summaries in stable order",
+					inputs: ["workspaceId"],
+					outputs: ["requirement summaries"],
+					businessRules: ["Stable ordering by creation"],
+					acceptanceCriteria: ["List returns newest workflows with state"],
+				}],
+			}],
+		}],
 	};
 }
 
@@ -172,11 +205,10 @@ function architectureContent(): unknown {
 		artifactKind: "architecture",
 		summary: "Architecture of read model",
 		sourceRefs: [{ type: "requirement_revision", revisionId: 1 }],
-		components: [{ id: "c1", name: "Operator server", responsibility: "Serve bounded read projections" }],
-		relationships: [{ from: "c1", to: "Workflow store", interaction: "reads projections" }],
+		components: [{ componentId: "c1", name: "Operator server", responsibility: "Serve bounded read projections" }],
+		relationships: [{ relationshipId: "r1", fromComponentId: "c1", toComponentId: "workflow-store", interaction: "reads projections" }],
 		constraints: ["Reads never mutate state"],
 		nonFunctionalRequirements: ["Reads respond within the operator budget"],
-		decisions: [],
 	};
 }
 
@@ -186,11 +218,22 @@ function dataContent(): unknown {
 		artifactKind: "data",
 		summary: "Data model for read model",
 		sourceRefs: [{ type: "requirement_revision", revisionId: 1 }],
-		entities: [{ name: "requirements", purpose: "Store requirement baselines", fields: ["id", "workspace_id", "title"], lifecycle: "created with workflow, archived on approval" }],
-		relationships: ["requirements.workspace_id -> workspaces.id"],
-		migrationPlan: "No migration needed",
-		rollbackPlan: "No rollback needed",
-		privacyAndRetention: ["Operator data retained per policy"],
+		entities: [{
+			entityId: "ent-requirements",
+			name: "requirements",
+			fields: [
+				{ fieldId: "f-id", name: "id", type: "integer" },
+				{ fieldId: "f-workspace-id", name: "workspace_id", type: "integer" },
+				{ fieldId: "f-title", name: "title", type: "string" },
+			],
+		}],
+		relations: [{
+			fromEntityId: "ent-requirements",
+			fromFieldIds: ["f-workspace-id"],
+			toEntityId: "ent-workspaces",
+			toFieldIds: ["f-id"],
+			cardinality: "many-to-one",
+		}],
 	};
 }
 
@@ -200,10 +243,20 @@ function apiContent(): unknown {
 		artifactKind: "api",
 		summary: "API surface for read model",
 		sourceRefs: [{ type: "requirement_revision", revisionId: 1 }],
-		interfaces: [{ id: "api1", kind: "http", name: "GET /api/requirements", contract: "Returns requirement summaries", errors: ["404 unknown workspace"], compatibility: "Additive fields only" }],
-		security: ["Session cookie required"],
-		versioning: "URL path versioning",
-		testStrategy: ["Contract tests for read endpoints"],
+		openapi: "3.1.0",
+		info: { title: "Read model API", version: "1.0.0" },
+		paths: {
+			"/api/requirements": {
+				summary: "Requirement summaries",
+				get: {
+					summary: "List requirement summaries",
+					responses: {
+						"200": { description: "Requirement summaries" },
+						"404": { description: "Unknown workspace" },
+					},
+				},
+			},
+		},
 	};
 }
 
@@ -720,7 +773,7 @@ test("reusable assets support list, create, detail, delete, export and import wi
 		const created = await fetch(`${context.server.url}/api/assets`, {
 			method: "POST",
 			headers: { "content-type": "application/json", cookie: context.cookie },
-			body: JSON.stringify({ workspaceId: context.workspaceId, kind: "scenario", title: "Expiry scenario", content: { schemaVersion: "artifact/scenario/v1", artifactKind: "scenario", summary: "Expiry scenario", sourceRefs: [], scenarios: [{ id: "expiry", title: "Expiry", actors: ["Customer"], preconditions: [], trigger: "Date reached", mainFlow: ["Expire"], alternateFlows: [], expectedOutcome: "Expired" }] } }),
+			body: JSON.stringify({ workspaceId: context.workspaceId, kind: "scenario", title: "Expiry scenario", content: { schemaVersion: "artifact/scenario/v1", artifactKind: "scenario", summary: "Expiry scenario", sourceRefs: [], domains: [{ nodeId: "d-expiry", title: "Expiry domain", scenarios: [{ nodeId: "s-expiry", title: "Expiry", variants: [{ nodeId: "v-expiry", title: "Expiry variant", actors: ["Customer"], preconditions: [], trigger: "Date reached", mainFlow: ["Expire"], alternateFlows: [], expectedOutcome: "Expired" }] }] }] } }),
 		});
 		assert.equal(created.status, 201);
 		const { assetId } = (await created.json()) as { assetId: number; revisionId: number };
@@ -733,7 +786,7 @@ test("reusable assets support list, create, detail, delete, export and import wi
 		assert.equal(detail.title, "Expiry scenario");
 		assert.equal(detail.revisions.length, 1);
 		assert.equal(detail.revisions[0].source, "manual");
-		assert.deepEqual(detail.revisions[0].content, { schemaVersion: "artifact/scenario/v1", artifactKind: "scenario", summary: "Expiry scenario", sourceRefs: [], scenarios: [{ id: "expiry", title: "Expiry", actors: ["Customer"], preconditions: [], trigger: "Date reached", mainFlow: ["Expire"], alternateFlows: [], expectedOutcome: "Expired" }] });
+		assert.deepEqual(detail.revisions[0].content, { schemaVersion: "artifact/scenario/v1", artifactKind: "scenario", summary: "Expiry scenario", sourceRefs: [], domains: [{ nodeId: "d-expiry", title: "Expiry domain", scenarios: [{ nodeId: "s-expiry", title: "Expiry", variants: [{ nodeId: "v-expiry", title: "Expiry variant", actors: ["Customer"], preconditions: [], trigger: "Date reached", mainFlow: ["Expire"], alternateFlows: [], expectedOutcome: "Expired" }] }] }] });
 		const exported = (await (await get(context, `/api/assets/export?workspaceId=${context.workspaceId}`)).json()) as { assets: Array<{ title: string }> };
 		assert.equal(exported.assets.length, 1);
 		const imported = await fetch(`${context.server.url}/api/assets/import`, {
@@ -755,14 +808,14 @@ test("reusable assets support list, create, detail, delete, export and import wi
 			headers: { "content-type": "application/json", cookie: context.cookie },
 			body: JSON.stringify({ workspaceId: context.workspaceId, kind: "analysis", title: "wrong", content: {} }),
 		});
-		assert.equal(badKind.status, 400, "asset kinds are restricted to scenario/usecase/function");
+		assert.equal(badKind.status, 400, "asset kinds are restricted to the reusable asset kinds");
 	});
 });
 
 test("asset list route returns a paginated kind-filtered envelope", async () => {
 	await withReadServer(async (context) => {
-		context.runtime.createReusableAsset({ workspaceId: context.workspaceId, kind: "scenario", title: "Flow A", content: { steps: ["a"] } });
-		context.runtime.createReusableAsset({ workspaceId: context.workspaceId, kind: "scenario", title: "Flow B", content: { steps: ["b"] } });
+		context.runtime.createReusableAsset({ workspaceId: context.workspaceId, kind: "scenario", title: "Flow A", content: { nodeId: "s1", title: "Flow A" } });
+		context.runtime.createReusableAsset({ workspaceId: context.workspaceId, kind: "scenario", title: "Flow B", content: { nodeId: "s2", title: "Flow B" } });
 		context.runtime.createReusableAsset({ workspaceId: context.workspaceId, kind: "usecase", title: "Flow use case", content: { flow: ["c"] } });
 
 		const response = await get(context, `/api/assets?workspaceId=${context.workspaceId}&page=2&pageSize=1&kind=scenario&q=FLOW`);
@@ -781,9 +834,13 @@ test("asset list route returns a paginated kind-filtered envelope", async () => 
 		assert.equal(body.assets[0]?.kind, "scenario");
 		assert.equal("resolvedGraph" in (body.assets[0] ?? {}), false);
 		assert.deepEqual(body.kindCounts, {
+			"scenario-domain": 0,
 			scenario: 2,
+			"scenario-variant": 0,
+			"function-domain": 0,
+			"function-item": 0,
+			"function-point": 0,
 			usecase: 1,
-			function: 0,
 			design: 0,
 			architecture: 0,
 			data: 0,
@@ -829,7 +886,7 @@ test("promote route rejects unknown kinds and unknown requirement at HTTP bounda
 // #23 FTS5 检索 HTTP 边界：GET /api/search 200 命中 + unknown workspace 404。
 test("search route returns hits for workspace query and 404 for unknown workspace", async () => {
 	await withReadServer(async ({ runtime, server, cookie, workspaceId }) => {
-		runtime.createReusableAsset({ workspaceId, kind: "scenario", title: "支付网关回调", content: { steps: ["支付网关回调签名验证"] } });
+		runtime.createReusableAsset({ workspaceId, kind: "scenario", title: "支付网关回调签名", content: { nodeId: "s1", title: "支付网关回调签名" } });
 		const ok = await fetch(`${server.url}/api/search?workspaceId=${workspaceId}&q=${encodeURIComponent("回调签名")}`, { headers: { cookie } });
 		assert.equal(ok.status, 200);
 		const body = (await ok.json()) as { query: string; hits: Array<{ corpus: string; title: string }> };

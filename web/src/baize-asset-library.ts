@@ -7,6 +7,7 @@ type AssetView = AssetKind | "graph";
 
 type Renderable = ReturnType<typeof html> | typeof nothing;
 const ASSET_VIEWS: readonly AssetView[] = [...ASSET_KINDS, "graph"];
+const HIERARCHY_KINDS: readonly string[] = ["scenario-domain", "scenario", "scenario-variant", "function-domain", "function-item", "function-point"];
 const PAGE_SIZE_OPTIONS = [12, 24, 48] as const;
 
 function emptyKindCounts(): Record<AssetKind, number> {
@@ -41,35 +42,41 @@ function assetKey(kind: AssetKind, title: string): string {
 function assetContentWarning(kind: AssetKind, content: unknown): string | null {
 	if (typeof content !== "object" || content === null || Array.isArray(content)) return "内容不是结构化对象，按原始内容展示。";
 	const record = content as Record<string, unknown>;
-	if (!("schemaVersion" in record) && !("artifactKind" in record)) return isPromotedAssetItem(kind, record) ? null : "该版本未声明 v1 schema，按历史内容展示。";
+	if (kind === "stakeholder") {
+		if (typeof record.name !== "string" || record.name.trim().length === 0) return "内容缺少有效名称。";
+		return null;
+	}
+	if (HIERARCHY_KINDS.includes(kind)) {
+		if (record.schemaVersion !== `asset/${kind}/v1`) return "内容 schema 与资产类型不匹配。";
+		if (typeof record.nodeId !== "string" || record.nodeId.length === 0) return "内容缺少有效节点标识。";
+		return null;
+	}
 	if (record.schemaVersion !== `artifact/${kind}/v1` || record.artifactKind !== kind) return "内容 schema 与资产类型不匹配。";
 	if (typeof record.summary !== "string" || record.summary.trim().length === 0) return "内容缺少有效摘要。";
-	const requiredArrays: Partial<Record<Exclude<AssetKind, "stakeholder">, readonly string[]>> = {
-		scenario: ["scenarios"],
+	const requiredArrays: Partial<Record<string, readonly string[]>> = {
+		scenario: ["domains"],
+		function: ["domains"],
 		usecase: ["useCases"],
-		function: ["functions"],
 		design: ["changeUnits", "alternatives", "failureHandling", "testStrategy", "implementationOrder"],
 		architecture: ["components", "nonFunctionalRequirements"],
-		data: ["entities", "privacyAndRetention"],
-		api: ["interfaces", "security", "testStrategy"],
+		data: ["entities"],
+		api: ["paths"],
 	};
-	for (const key of (kind === "stakeholder" ? [] : requiredArrays[kind]) ?? []) if (!Array.isArray(record[key]) || record[key].length === 0) return `内容缺少有效${fieldTitle(key)}。`;
+	for (const key of requiredArrays[kind] ?? []) if (!Array.isArray(record[key]) || (record[key] as unknown[]).length === 0) return `内容缺少有效${fieldTitle(key)}。`;
 	return null;
 }
-
 function isPromotedAssetItem(kind: AssetKind, record: Record<string, unknown>): boolean {
 	switch (kind) {
-		case "scenario": return typeof record.id === "string" && typeof record.title === "string" && Array.isArray(record.actors);
+		case "scenario-variant": return typeof record.nodeId === "string" && typeof record.title === "string" && Array.isArray(record.actors);
 		case "usecase": return typeof record.id === "string" && typeof record.actor === "string" && typeof record.goal === "string";
-		case "function": return typeof record.id === "string" && typeof record.name === "string" && typeof record.responsibility === "string";
+		case "function-point": return typeof record.nodeId === "string" && typeof record.name === "string" && typeof record.responsibility === "string";
 		case "design": return typeof record.id === "string" && typeof record.area === "string" && typeof record.change === "string";
-		case "architecture": return typeof record.id === "string" && typeof record.name === "string" && typeof record.responsibility === "string";
-		case "data": return typeof record.name === "string" && typeof record.purpose === "string" && Array.isArray(record.fields);
-		case "api": return typeof record.id === "string" && typeof record.name === "string" && typeof record.contract === "string";
+		case "architecture": return typeof record.componentId === "string" && typeof record.name === "string" && typeof record.responsibility === "string";
+		case "data": return typeof record.entityId === "string" && typeof record.name === "string" && Array.isArray(record.fields);
 		case "stakeholder": return typeof record.name === "string";
+		default: return false;
 	}
 }
-
 type FormFieldType = "text" | "number" | "textarea" | "list" | "number-list" | "object-list";
 interface FormField {
 	key: string;
@@ -78,8 +85,8 @@ interface FormField {
 	itemFields?: readonly FormField[];
 }
 
-const scenarioFields: readonly FormField[] = [
-	{ key: "id", label: "标识", type: "text" },
+const scenarioVariantFields: readonly FormField[] = [
+	{ key: "nodeId", label: "节点标识", type: "text" },
 	{ key: "title", label: "标题", type: "text" },
 	{ key: "actors", label: "干系人", type: "list" },
 	{ key: "preconditions", label: "前置条件", type: "list" },
@@ -97,8 +104,8 @@ const usecaseFields: readonly FormField[] = [
 	{ key: "alternativeFlows", label: "备选流程", type: "list" },
 	{ key: "postconditions", label: "后置条件", type: "list" },
 ];
-const functionFields: readonly FormField[] = [
-	{ key: "id", label: "标识", type: "text" },
+const functionPointFields: readonly FormField[] = [
+	{ key: "nodeId", label: "节点标识", type: "text" },
 	{ key: "name", label: "名称", type: "text" },
 	{ key: "responsibility", label: "职责", type: "textarea" },
 	{ key: "inputs", label: "输入", type: "list" },
@@ -106,11 +113,15 @@ const functionFields: readonly FormField[] = [
 	{ key: "businessRules", label: "业务规则", type: "list" },
 	{ key: "acceptanceCriteria", label: "验收标准", type: "list" },
 ];
+const orgNodeFields: readonly FormField[] = [
+	{ key: "nodeId", label: "节点标识", type: "text" },
+	{ key: "title", label: "标题", type: "text" },
+	{ key: "description", label: "描述", type: "textarea" },
+];
 const designChangeUnitFields: readonly FormField[] = [{ key: "id", label: "标识", type: "text" }, { key: "area", label: "区域", type: "text" }, { key: "change", label: "变更", type: "textarea" }, { key: "rationale", label: "理由", type: "textarea" }, { key: "sourceRefs", label: "来源引用", type: "object-list", itemFields: [{ key: "type", label: "类型", type: "text" }, { key: "revisionId", label: "版本号", type: "number" }] }];
-const architectureComponentFields: readonly FormField[] = [{ key: "id", label: "标识", type: "text" }, { key: "name", label: "名称", type: "text" }, { key: "responsibility", label: "职责", type: "textarea" }];
-const architectureRelationshipFields: readonly FormField[] = [{ key: "from", label: "起点", type: "text" }, { key: "to", label: "终点", type: "text" }, { key: "interaction", label: "交互", type: "textarea" }];
-const dataEntityFields: readonly FormField[] = [{ key: "name", label: "名称", type: "text" }, { key: "purpose", label: "用途", type: "textarea" }, { key: "fields", label: "字段", type: "list" }, { key: "lifecycle", label: "生命周期", type: "textarea" }];
-const apiInterfaceFields: readonly FormField[] = [{ key: "id", label: "标识", type: "text" }, { key: "kind", label: "类型", type: "text" }, { key: "name", label: "名称", type: "text" }, { key: "contract", label: "契约", type: "textarea" }, { key: "errors", label: "错误", type: "list" }, { key: "compatibility", label: "兼容性", type: "textarea" }];
+const architectureComponentFields: readonly FormField[] = [{ key: "componentId", label: "组件标识", type: "text" }, { key: "name", label: "名称", type: "text" }, { key: "responsibility", label: "职责", type: "textarea" }, { key: "layer", label: "层级", type: "text" }, { key: "boundary", label: "边界", type: "text" }];
+const architectureRelationshipFields: readonly FormField[] = [{ key: "relationshipId", label: "关系标识", type: "text" }, { key: "fromComponentId", label: "起点组件", type: "text" }, { key: "toComponentId", label: "终点组件", type: "text" }, { key: "interaction", label: "交互", type: "textarea" }, { key: "type", label: "类型", type: "text" }];
+const dataEntityFields: readonly FormField[] = [{ key: "entityId", label: "实体标识", type: "text" }, { key: "name", label: "名称", type: "text" }, { key: "description", label: "描述", type: "textarea" }, { key: "fields", label: "字段", type: "object-list", itemFields: [{ key: "fieldId", label: "字段标识", type: "text" }, { key: "name", label: "名称", type: "text" }, { key: "type", label: "类型", type: "text" }, { key: "nullable", label: "可空", type: "text" }, { key: "description", label: "描述", type: "textarea" }] }, { key: "primaryKey", label: "主键", type: "list" }, { key: "indexes", label: "索引", type: "object-list", itemFields: [{ key: "name", label: "名称", type: "text" }, { key: "fields", label: "字段", type: "list" }] }];
 const designFields: readonly FormField[] = [
 	{ key: "summary", label: "摘要", type: "textarea" },
 	{ key: "changeUnits", label: "变更单元", type: "object-list", itemFields: designChangeUnitFields },
@@ -127,51 +138,53 @@ const architectureFields: readonly FormField[] = [
 	{ key: "relationships", label: "关系", type: "object-list", itemFields: architectureRelationshipFields },
 	{ key: "constraints", label: "约束", type: "list" },
 	{ key: "nonFunctionalRequirements", label: "非功能需求", type: "list" },
-	{ key: "decisions", label: "决策引用", type: "number-list" },
 ];
 const dataFields: readonly FormField[] = [
 	{ key: "summary", label: "摘要", type: "textarea" },
 	{ key: "entities", label: "实体", type: "object-list", itemFields: dataEntityFields },
-	{ key: "relationships", label: "关系", type: "list" },
-	{ key: "migrationPlan", label: "迁移计划", type: "textarea" },
-	{ key: "rollbackPlan", label: "回滚计划", type: "textarea" },
-	{ key: "privacyAndRetention", label: "隐私与留存", type: "list" },
+	{ key: "relations", label: "关系", type: "object-list", itemFields: [{ key: "fromEntityId", label: "起点实体", type: "text" }, { key: "fromFieldIds", label: "起点字段", type: "list" }, { key: "toEntityId", label: "终点实体", type: "text" }, { key: "cardinality", label: "基数", type: "text" }] },
 ];
 const apiFields: readonly FormField[] = [
 	{ key: "summary", label: "摘要", type: "textarea" },
-	{ key: "interfaces", label: "接口", type: "object-list", itemFields: apiInterfaceFields },
-	{ key: "security", label: "安全", type: "list" },
-	{ key: "versioning", label: "版本策略", type: "textarea" },
-	{ key: "testStrategy", label: "测试策略", type: "list" },
+	{ key: "openapi", label: "OpenAPI版本", type: "text" },
+	{ key: "info", label: "接口信息(JSON)", type: "textarea" },
+	{ key: "paths", label: "路径", type: "textarea" },
 ];
 const FORM_FIELDS: Record<AssetKind, readonly FormField[]> = {
+	"scenario-domain": orgNodeFields,
+	scenario: orgNodeFields,
+	"scenario-variant": scenarioVariantFields,
+	"function-domain": orgNodeFields,
+	"function-item": orgNodeFields,
+	"function-point": functionPointFields,
 	design: designFields,
 	architecture: architectureFields,
 	data: dataFields,
 	api: apiFields,
-	scenario: [{ key: "summary", label: "摘要", type: "textarea" }, { key: "scenarios", label: "场景", type: "object-list", itemFields: scenarioFields }],
 	usecase: [{ key: "summary", label: "摘要", type: "textarea" }, { key: "useCases", label: "用例", type: "object-list", itemFields: usecaseFields }],
-	function: [{ key: "summary", label: "摘要", type: "textarea" }, { key: "functions", label: "功能", type: "object-list", itemFields: functionFields }],
 	stakeholder: [{ key: "name", label: "名称", type: "text" }, { key: "description", label: "描述", type: "textarea" }],
 };
 const PROMOTED_ITEM_FIELDS: Partial<Record<AssetKind, readonly FormField[]>> = {
-	scenario: scenarioFields,
+	"scenario-variant": scenarioVariantFields,
 	usecase: usecaseFields,
-	function: functionFields,
+	"function-point": functionPointFields,
 	design: designChangeUnitFields,
 	architecture: architectureComponentFields,
 	data: dataEntityFields,
-	api: apiInterfaceFields,
 };
 
 const RELATION_TARGETS: Record<AssetKind, readonly { kind: AssetKind; type: "contains" | "involves" }[]> = {
-	design: [{ kind: "architecture", type: "contains" }],
-	architecture: [],
+	"scenario-domain": [{ kind: "scenario" as AssetKind, type: "contains" as const }],
+	scenario: [{ kind: "scenario-variant" as AssetKind, type: "contains" as const }],
+	"scenario-variant": [{ kind: "usecase" as AssetKind, type: "contains" as const }, { kind: "stakeholder" as AssetKind, type: "involves" as const }],
+	"function-domain": [{ kind: "function-item" as AssetKind, type: "contains" as const }],
+	"function-item": [{ kind: "function-point" as AssetKind, type: "contains" as const }],
+	"function-point": [{ kind: "api" as AssetKind, type: "contains" as const }, { kind: "data" as AssetKind, type: "contains" as const }],
+	usecase: [{ kind: "function-domain" as AssetKind, type: "contains" as const }, { kind: "stakeholder" as AssetKind, type: "involves" as const }],
+	design: [{ kind: "architecture" as AssetKind, type: "contains" as const }],
+	architecture: [{ kind: "api" as AssetKind, type: "contains" as const }, { kind: "data" as AssetKind, type: "contains" as const }],
 	data: [],
 	api: [],
-	scenario: [{ kind: "usecase", type: "contains" }, { kind: "stakeholder", type: "involves" }],
-	usecase: [{ kind: "function", type: "contains" }, { kind: "stakeholder", type: "involves" }],
-	function: [{ kind: "api", type: "contains" }, { kind: "data", type: "contains" }],
 	stakeholder: [],
 };
 
@@ -569,10 +582,12 @@ class BaizeAssetLibrary extends LitElement {
 	}
 
 	private createDraft(kind: AssetKind): Record<string, unknown> {
+		if (kind === "stakeholder") return { name: "", description: "" };
+		const isHierarchy = HIERARCHY_KINDS.includes(kind);
 		const draft: Record<string, unknown> = {
-			schemaVersion: `artifact/${kind}/v1`,
-			artifactKind: kind,
-			sourceRefs: [],
+			schemaVersion: isHierarchy ? `asset/${kind}/v1` : `artifact/${kind}/v1`,
+			...(isHierarchy ? {} : { artifactKind: kind }),
+			...(isHierarchy ? {} : { sourceRefs: [] as unknown[] }),
 		};
 		for (const field of FORM_FIELDS[kind]) draft[field.key] = field.type === "list" || field.type === "number-list" || field.type === "object-list" ? [] : "";
 		return draft;

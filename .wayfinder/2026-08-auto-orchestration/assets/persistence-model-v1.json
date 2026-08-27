@@ -704,9 +704,13 @@
         "legacy_origin_requirement_id is audit metadata and has no foreign key because manual-assets Requirements are removed"
       ],
       "kindEnum": [
+        "scenario-domain",
         "scenario",
+        "scenario-variant",
+        "function-domain",
+        "function-item",
+        "function-point",
         "usecase",
-        "function",
         "design",
         "architecture",
         "data",
@@ -741,6 +745,33 @@
         "import",
         "migration",
         "workflow"
+      ]
+    },
+    "asset_relations": {
+      "purpose": "Workspace asset relationship graph edges between reusable assets",
+      "key": [
+        "id"
+      ],
+      "unique": [
+        [
+          "from_asset_id",
+          "to_asset_id",
+          "relationship_type"
+        ]
+      ],
+      "fields": [
+        "id",
+        "from_asset_id",
+        "to_asset_id",
+        "from_revision_id",
+        "to_revision_id",
+        "relationship_type",
+        "position",
+        "created_at"
+      ],
+      "relationshipTypeEnum": [
+        "contains",
+        "involves"
       ]
     },
     "artifacts": {

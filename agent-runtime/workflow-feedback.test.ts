@@ -108,7 +108,7 @@ test("规划期注入：按需求标题检索 top-N 历史资产（预算截断�
 		const ws = createWorkspace(runtime, "a");
 		const wfA = await createStartedWorkflow(runtime, ws, BASELINE_A);
 		for (let i = 1; i <= 5; i += 1) {
-			runtime.createReusableAsset({ workspaceId: ws, kind: "scenario", title: `回调场景 ${i}`, content: { steps: [`支付网关回调签名校验步骤 ${i}`] } });
+			runtime.createReusableAsset({ workspaceId: ws, kind: "scenario-variant", title: `回调场景 ${i}`, content: { nodeId: `sv${i}`, title: `回调场景 ${i}`, actors: ["a"], preconditions: [], trigger: "t", mainFlow: [`支付网关回调签名校验步骤 ${i}`], alternateFlows: [], expectedOutcome: "o" } });
 		}
 		await plan(runtime, wfA);
 		// 同 workspace 新需求（标题命中历史）→ 规划期注入
@@ -129,7 +129,7 @@ test("规划期注入：按需求标题检索 top-N 历史资产（预算截断�
 		for (const ref of refs) {
 			assert.ok(ref.title.includes("回调场景"), "references come from historical assets");
 			assert.ok(ref.excerpt.length > 0, "excerpt present");
-			assert.ok(ref.kind === "scenario", "kind preserved");
+			assert.ok(ref.kind === "scenario-variant", "kind preserved");
 		}
 	});
 });
@@ -139,7 +139,7 @@ test("生产角色注入：manifest 带 relevantAssets；critic 无注入", asyn
 		const ws = createWorkspace(runtime, "prod");
 		const db = new Database(databasePath);
 		const wfProd = await createStartedWorkflow(runtime, ws, BASELINE_A);
-		runtime.createReusableAsset({ workspaceId: ws, kind: "scenario", title: "回调脱敏场景", content: { steps: ["支付网关回调签名脱敏处理"] } });
+		runtime.createReusableAsset({ workspaceId: ws, kind: "scenario-variant", title: "回调脱敏场景", content: { nodeId: "v2", title: "回调脱敏场景", actors: ["a"], preconditions: [], trigger: "t", mainFlow: ["支付网关回调签名脱敏处理"], alternateFlows: [], expectedOutcome: "o" } });
 		await plan(runtime, wfProd);
 		// 生产角色（analysis-analyst 为首个模板任务）→ manifest 注入 relevantAssets
 		const beginProd = runtime.beginAttempt(wfProd);
@@ -188,7 +188,7 @@ test("冻结语义：Manifest 冻结后检索库变化不影响已注入引用",
 	await withRuntime(async ({ runtime }) => {
 		const ws = createWorkspace(runtime, "x");
 		const wfA = await createStartedWorkflow(runtime, ws, BASELINE_A);
-		runtime.createReusableAsset({ workspaceId: ws, kind: "scenario", title: "回调场景甲", content: { steps: ["支付网关回调签名校验"] } });
+		runtime.createReusableAsset({ workspaceId: ws, kind: "scenario-variant", title: "回调场景甲", content: { nodeId: "v3", title: "回调场景甲", actors: ["a"], preconditions: [], trigger: "t", mainFlow: ["支付网关回调签名校验"], alternateFlows: [], expectedOutcome: "o" } });
 		await plan(runtime, wfA);
 		const begin1 = runtime.beginAttempt(wfA);
 		assert.ok(begin1.taskId > 0);
@@ -206,7 +206,7 @@ test("预算截断：>3 命中只注入 top-3", async () => {
 		const ws = createWorkspace(runtime, "x");
 		const wfA = await createStartedWorkflow(runtime, ws, BASELINE_A);
 		for (let i = 1; i <= 5; i += 1) {
-			runtime.createReusableAsset({ workspaceId: ws, kind: "function", title: `回调函数 ${i}`, content: { body: `支付网关回调签名函数实现 ${i}` } });
+		runtime.createReusableAsset({ workspaceId: ws, kind: "function-point", title: `支付网关回调签名函数 ${i}`, content: { nodeId: `fp${i}`, title: `支付网关回调签名函数 ${i}`, name: `支付网关回调签名函数 ${i}`, responsibility: "支付", inputs: [], outputs: [], businessRules: [], acceptanceCriteria: ["支付网关回调签名验收"] } });
 		}
 		const refs = runtime.getFeedbackAssetReferences(wfA, "支付网关回调签名", 3);
 		assert.equal(refs.length, 3, "budget trims to exactly 3");
@@ -222,7 +222,7 @@ test("注入摘要为命中窗口（非全文头部）+ 本需求 promote 资产
 		const db = new Database(databasePath);
 		// 历史资产：标题/内容含标题子串（滑窗命中）
 		const wfHis = await createStartedWorkflow(runtime, ws, BASELINE_A);
-		runtime.createReusableAsset({ workspaceId: ws, kind: "scenario", title: "旧回调场景", content: { detail: "前置说明部分较长内容占位占位占位支付网关回调签名校验逻辑是重点内容后续还有" } });
+		runtime.createReusableAsset({ workspaceId: ws, kind: "scenario-variant", title: "旧回调场景", content: { nodeId: "v4", title: "旧回调场景", actors: ["a"], preconditions: [], trigger: "t", mainFlow: ["前置说明部分较长内容占位占位占位支付网关回调签名校验逻辑是重点内容后续还有"], alternateFlows: [], expectedOutcome: "o" } });
 		await plan(runtime, wfHis);
 		// 本需求自身 promote 一条命中资产（应被 own-requirement 排除）
 		// 新需求标题命中：注入只含 wfHis 的历史资产，不含本需求自己 promote 的

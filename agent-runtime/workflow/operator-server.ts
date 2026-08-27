@@ -58,9 +58,14 @@ function parseOutgoingRelations(value: unknown): readonly AssetRelationInput[] |
 	const relations: AssetRelationInput[] = [];
 	for (const item of value) {
 		if (typeof item !== "object" || item === null || Array.isArray(item)) return undefined;
-		const record = item as { toAssetId?: unknown; type?: unknown };
+		const record = item as { toAssetId?: unknown; type?: unknown; position?: unknown };
 		if (!Number.isInteger(record.toAssetId) || typeof record.type !== "string") return undefined;
-		relations.push({ toAssetId: record.toAssetId as number, type: record.type as AssetRelationInput["type"] });
+		const relation: AssetRelationInput = { toAssetId: record.toAssetId as number, type: record.type as AssetRelationInput["type"] };
+		if (record.position !== undefined) {
+			if (!Number.isInteger(record.position)) return undefined;
+		relation.position = record.position as number;
+		}
+		relations.push(relation);
 	}
 	return relations;
 }
@@ -69,7 +74,7 @@ function parseImportedRelations(value: unknown): readonly AssetRelationExport[] 
 	const relations: AssetRelationExport[] = [];
 	for (const item of value) {
 		if (typeof item !== "object" || item === null || Array.isArray(item)) return undefined;
-		const record = item as { fromTitle?: unknown; fromKind?: unknown; toTitle?: unknown; toKind?: unknown; type?: unknown };
+		const record = item as { fromTitle?: unknown; fromKind?: unknown; toTitle?: unknown; toKind?: unknown; type?: unknown; position?: unknown };
 		if (
 			typeof record.fromTitle !== "string"
 			|| !isReusableAssetKind(record.fromKind)
@@ -77,13 +82,18 @@ function parseImportedRelations(value: unknown): readonly AssetRelationExport[] 
 			|| !isReusableAssetKind(record.toKind)
 			|| typeof record.type !== "string"
 		) return undefined;
-		relations.push({
+		const relation: AssetRelationExport = {
 			fromTitle: record.fromTitle,
 			fromKind: record.fromKind,
 			toTitle: record.toTitle,
 			toKind: record.toKind,
 			type: record.type as AssetRelationExport["type"],
-		});
+		};
+		if (record.position !== undefined) {
+			if (!Number.isInteger(record.position)) return undefined;
+		relation.position = record.position as number;
+		}
+		relations.push(relation);
 	}
 	return relations;
 }

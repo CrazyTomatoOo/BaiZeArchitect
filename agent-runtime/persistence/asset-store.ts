@@ -124,36 +124,63 @@ function normalizeStakeholderContent(content: unknown): { name: string; descript
 function stakeholderNameKey(name: string): string {
 	return name.trim().toLowerCase();
 }
+const HIERARCHY_ASSET_KINDS: Record<string, true> = { "scenario-domain": true, "scenario": true, "scenario-variant": true, "function-domain": true, "function-item": true, "function-point": true };
 
 interface StructuredAssetValidator {
 	check(value: unknown): boolean;
 }
 
-function promotedAssetDocument(kind: Exclude<ReusableAssetKind, "stakeholder">, item: Record<string, unknown>): Record<string, unknown> {
+function promotedAssetDocument(kind: "scenario" | "usecase" | "function" | "design" | "architecture" | "data" | "api", item: Record<string, unknown>): Record<string, unknown> {
 	const common = { schemaVersion: `artifact/${kind}/v1`, artifactKind: kind, summary: "Reusable Asset item", sourceRefs: [{ type: "requirement_revision", revisionId: 1 }] };
 	switch (kind) {
-		case "scenario": return { ...common, scenarios: [item] };
+		case "scenario": return { ...common, domains: [{ nodeId: "d1", title: "Domain", scenarios: [{ nodeId: "s1", title: "Scenario", variants: [item] }] }] };
 		case "usecase": return { ...common, useCases: [item] };
-		case "function": return { ...common, functions: [item] };
+		case "function": return { ...common, domains: [{ nodeId: "d1", title: "Domain", items: [{ nodeId: "i1", title: "Item", points: [item] }] }] };
 		case "design": return { ...common, changeUnits: [item], alternatives: ["manual"], failureHandling: ["manual"], testStrategy: ["manual"], implementationOrder: ["manual"], rolloutStrategy: "manual", rollbackStrategy: "manual" };
-		case "architecture": return { ...common, components: [item], relationships: [], constraints: [], nonFunctionalRequirements: ["manual"], decisions: [] };
-		case "data": return { ...common, entities: [item], relationships: [], migrationPlan: "manual", rollbackPlan: "manual", privacyAndRetention: ["manual"] };
-		case "api": return { ...common, interfaces: [item], security: ["manual"], versioning: "manual", testStrategy: ["manual"] };
+		case "architecture": return { ...common, components: [item], relationships: [], constraints: [], nonFunctionalRequirements: ["manual"] };
+		case "data": return { ...common, entities: [item], relations: [] };
+		case "api": return { ...common, openapi: "3.1.0", info: { title: "API", version: "1" }, paths: {} };
 	}
+}
+
+function normalizeHierarchyAssetContent(kind: string, content: unknown): Record<string, unknown> | undefined {
+	if (typeof content !== "object" || content === null || Array.isArray(content)) return undefined;
+	const record = content as Record<string, unknown>;
+	if (typeof record.nodeId !== "string" || record.nodeId.length === 0) return undefined;
+	if (kind !== "function-point") {
+		if (typeof record.title !== "string" || record.title.length === 0) return undefined;
+	}
+	if (kind === "scenario-variant") {
+		const actors = Array.isArray(record.actors) ? record.actors : [];
+		const mainFlow = Array.isArray(record.mainFlow) ? record.mainFlow : [];
+		if (actors.length === 0 || mainFlow.length === 0) return undefined;
+		if (typeof record.trigger !== "string" || record.trigger.length === 0) return undefined;
+		if (typeof record.expectedOutcome !== "string" || record.expectedOutcome.length === 0) return undefined;
+	} else if (kind === "function-point") {
+		if (typeof record.name !== "string" || record.name.length === 0) return undefined;
+		if (typeof record.responsibility !== "string" || record.responsibility.length === 0) return undefined;
+		const acceptanceCriteria = Array.isArray(record.acceptanceCriteria) ? record.acceptanceCriteria : [];
+		if (acceptanceCriteria.length === 0) return undefined;
+	}
+	return record;
 }
 
 function isStructuredAssetContentValid(kind: ReusableAssetKind, content: unknown, validator: StructuredAssetValidator | undefined, strict: boolean): boolean {
 	if (kind === "stakeholder") return normalizeStakeholderContent(content) !== undefined;
 	if (typeof content !== "object" || content === null || Array.isArray(content)) return false;
 	const record = content as Record<string, unknown>;
-	if (!("schemaVersion" in record) && !("artifactKind" in record)) {
-		return !strict || (validator !== undefined && validator.check(promotedAssetDocument(kind, record)));
+	if (record.schemaVersion === `artifact/${kind}/v1`) {
+		if (record.artifactKind !== kind || !validator) return false;
+		const sourceRefs = Array.isArray(record.sourceRefs) && record.sourceRefs.length > 0
+			? record.sourceRefs
+			: [{ type: "requirement_revision", revisionId: 1 }];
+		return validator.check({ ...record, sourceRefs });
 	}
-	if (record.schemaVersion !== `artifact/${kind}/v1` || record.artifactKind !== kind || !validator) return false;
-	const sourceRefs = Array.isArray(record.sourceRefs) && record.sourceRefs.length > 0
-		? record.sourceRefs
-		: [{ type: "requirement_revision", revisionId: 1 }];
-	return validator.check({ ...record, sourceRefs });
+	if (HIERARCHY_ASSET_KINDS[kind] === true) return normalizeHierarchyAssetContent(kind, content) !== undefined;
+	if (!("schemaVersion" in record) && !("artifactKind" in record)) {
+		return !strict || (validator !== undefined && validator.check(promotedAssetDocument(kind as "scenario" | "usecase" | "function" | "design" | "architecture" | "data" | "api", record)));
+	}
+	return false;
 }
 
 
@@ -203,46 +230,47 @@ export class AssetStore {
 				throw new AssetRelationValidationError([{ reason: "stale_from_revision" }]);
 			}
 			const records: AssetRelationRecord[] = [];
-			for (const relation of input.relations) {
-				if (!isAssetRelationType(relation.type)) {
-					issues.push({ toAssetId: relation.toAssetId, type: String(relation.type), reason: "unknown_relation_type" });
-					continue;
-				}
-				const target = this.database
-					.prepare("select id, kind, current_revision_id from reusable_assets where id = ? and workspace_id = ?")
-					.get(relation.toAssetId, input.workspaceId) as { id: number; kind: ReusableAssetKind; current_revision_id: number | null } | undefined;
-				if (!target) {
-					issues.push({ toAssetId: relation.toAssetId, type: relation.type, reason: "unknown_asset" });
-					continue;
-				}
-				if (target.id === from.id) {
-					issues.push({ toAssetId: relation.toAssetId, type: relation.type, reason: "self_loop" });
-					continue;
-				}
-				if (!isValidAssetRelation(from.kind, target.kind, relation.type)) {
-					issues.push({ toAssetId: relation.toAssetId, type: relation.type, reason: "invalid_kind_pair" });
-					continue;
-				}
-				if (target.current_revision_id === null) {
-					issues.push({ toAssetId: relation.toAssetId, type: relation.type, reason: "target_without_revision" });
-					continue;
-				}
-				this.database
-					.prepare("insert or ignore into asset_relations(from_asset_id, to_asset_id, from_revision_id, to_revision_id, relationship_type, created_at) values (?, ?, ?, ?, ?, ?)")
-					.run(input.fromAssetId, target.id, input.fromRevisionId, target.current_revision_id, relation.type, timestamp);
-				const row = this.database
-					.prepare("select id, from_asset_id, to_asset_id, from_revision_id, to_revision_id, relationship_type, created_at from asset_relations where from_asset_id = ? and to_asset_id = ? and relationship_type = ?")
-					.get(input.fromAssetId, target.id, relation.type) as { id: number; from_asset_id: number; to_asset_id: number; from_revision_id: number; to_revision_id: number; relationship_type: string; created_at: string };
-				records.push({
-					id: row.id,
-					fromAssetId: row.from_asset_id,
-					toAssetId: row.to_asset_id,
-					fromRevisionId: row.from_revision_id,
-					toRevisionId: row.to_revision_id,
-					type: row.relationship_type as AssetRelationRecord["type"],
-					createdAt: row.created_at,
-				});
+		for (const relation of input.relations) {
+			if (!isAssetRelationType(relation.type)) {
+				issues.push({ toAssetId: relation.toAssetId, type: String(relation.type), reason: "unknown_relation_type" });
+				continue;
 			}
+			const target = this.database
+				.prepare("select id, kind, current_revision_id from reusable_assets where id = ? and workspace_id = ?")
+				.get(relation.toAssetId, input.workspaceId) as { id: number; kind: ReusableAssetKind; current_revision_id: number | null } | undefined;
+			if (!target) {
+				issues.push({ toAssetId: relation.toAssetId, type: relation.type, reason: "unknown_asset" });
+				continue;
+			}
+			if (target.id === from.id) {
+				issues.push({ toAssetId: relation.toAssetId, type: relation.type, reason: "self_loop" });
+				continue;
+			}
+			if (!isValidAssetRelation(from.kind, target.kind, relation.type)) {
+				issues.push({ toAssetId: relation.toAssetId, type: relation.type, reason: "invalid_kind_pair" });
+				continue;
+			}
+			if (target.current_revision_id === null) {
+				issues.push({ toAssetId: relation.toAssetId, type: relation.type, reason: "target_without_revision" });
+				continue;
+			}
+			this.database
+				.prepare("insert or ignore into asset_relations(from_asset_id, to_asset_id, from_revision_id, to_revision_id, relationship_type, position, created_at) values (?, ?, ?, ?, ?, ?, ?)")
+				.run(input.fromAssetId, target.id, input.fromRevisionId, target.current_revision_id, relation.type, relation.position ?? 0, timestamp);
+			const row = this.database
+				.prepare("select id, from_asset_id, to_asset_id, from_revision_id, to_revision_id, relationship_type, position, created_at from asset_relations where from_asset_id = ? and to_asset_id = ? and relationship_type = ?")
+				.get(input.fromAssetId, target.id, relation.type) as { id: number; from_asset_id: number; to_asset_id: number; from_revision_id: number; to_revision_id: number; relationship_type: string; position: number; created_at: string };
+			records.push({
+				id: row.id,
+				fromAssetId: row.from_asset_id,
+				toAssetId: row.to_asset_id,
+				fromRevisionId: row.from_revision_id,
+				toRevisionId: row.to_revision_id,
+				type: row.relationship_type as AssetRelationRecord["type"],
+				position: row.position,
+				createdAt: row.created_at,
+			});
+		}
 			if (issues.length > 0) {
 				throw new AssetRelationValidationError(issues);
 			}
@@ -254,8 +282,8 @@ export class AssetStore {
 
 	readRelations(assetId: number): readonly AssetRelationRecord[] {
 		const rows = this.database
-			.prepare("select id, from_asset_id, to_asset_id, from_revision_id, to_revision_id, relationship_type, created_at from asset_relations where from_asset_id = ? or to_asset_id = ? order by id")
-			.all(assetId, assetId) as Array<{ id: number; from_asset_id: number; to_asset_id: number; from_revision_id: number; to_revision_id: number; relationship_type: string; created_at: string }>;
+		.prepare("select id, from_asset_id, to_asset_id, from_revision_id, to_revision_id, relationship_type, position, created_at from asset_relations where from_asset_id = ? or to_asset_id = ? order by id")
+		.all(assetId, assetId) as Array<{ id: number; from_asset_id: number; to_asset_id: number; from_revision_id: number; to_revision_id: number; relationship_type: string; position: number; created_at: string }>;
 		return rows.map((row) => ({
 			id: row.id,
 			fromAssetId: row.from_asset_id,
@@ -263,6 +291,7 @@ export class AssetStore {
 			fromRevisionId: row.from_revision_id,
 			toRevisionId: row.to_revision_id,
 			type: row.relationship_type as AssetRelationRecord["type"],
+			position: row.position,
 			createdAt: row.created_at,
 		}));
 	}
@@ -280,7 +309,7 @@ export class AssetStore {
 		if (input.kind === "stakeholder" && !content) throw new ReusableAssetMalformedBodyError();
 		if (!isStructuredAssetContentValid(input.kind, content, this.structuredValidator, input.strict === true)) throw new ReusableAssetMalformedBodyError();
 		const title = input.kind === "stakeholder" ? (content as { name: string }).name : input.title;
-		const schemaRef = input.kind === "stakeholder" ? "asset/stakeholder/v1" : `artifact/${input.kind}/v1`;
+	const schemaRef = input.kind === "stakeholder" ? "asset/stakeholder/v1" : typeof content === "object" && content !== null && !Array.isArray(content) && (content as Record<string, unknown>).schemaVersion === `artifact/${input.kind}/v1` ? `artifact/${input.kind}/v1` : HIERARCHY_ASSET_KINDS[input.kind] === true ? `asset/${input.kind}/v1` : `artifact/${input.kind}/v1`;
 		const transaction = this.database.transaction(() => {
 			if (input.kind === "stakeholder" && this.stakeholderNameExists(input.workspaceId, (content as { name: string }).name)) {
 				throw new ReusableAssetNameConflictError();
@@ -573,13 +602,13 @@ export class AssetStore {
 		const assets = this.exportReusableAssets(workspaceId);
 		const relations = this.database
 			.prepare(`select from_asset.title as from_title, from_asset.kind as from_kind,
-				to_asset.title as to_title, to_asset.kind as to_kind, ar.relationship_type
+			to_asset.title as to_title, to_asset.kind as to_kind, ar.relationship_type, ar.position
 				from asset_relations ar
 				join reusable_assets from_asset on from_asset.id = ar.from_asset_id
 				join reusable_assets to_asset on to_asset.id = ar.to_asset_id
 				where from_asset.workspace_id = ? and to_asset.workspace_id = ?
 				order by ar.id`)
-			.all(workspaceId, workspaceId) as Array<{ from_title: string; from_kind: ReusableAssetKind; to_title: string; to_kind: ReusableAssetKind; relationship_type: string }>;
+		.all(workspaceId, workspaceId) as Array<{ from_title: string; from_kind: ReusableAssetKind; to_title: string; to_kind: ReusableAssetKind; relationship_type: string; position: number }>;
 		return {
 			assets,
 			relations: relations.map((relation): AssetRelationExport => ({
@@ -588,6 +617,7 @@ export class AssetStore {
 				toTitle: relation.to_title,
 				toKind: relation.to_kind,
 				type: relation.relationship_type as AssetRelationExport["type"],
+				position: relation.position,
 			})),
 		};
 	}
@@ -655,7 +685,7 @@ export class AssetStore {
 					continue;
 				}
 				const group = relationGroups.get(from.assetId) ?? { fromRevisionId: from.revisionId, relations: [] };
-				group.relations.push({ toAssetId: to.assetId, type: relation.type });
+			group.relations.push({ toAssetId: to.assetId, type: relation.type, position: relation.position });
 				relationGroups.set(from.assetId, group);
 			}
 			if (issues.length > 0) throw new AssetRelationValidationError(issues);
