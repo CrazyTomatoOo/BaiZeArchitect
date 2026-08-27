@@ -197,7 +197,7 @@ test("stakeholder asset import maps stakeholder validation errors to public resp
 			assets: [{ kind: "stakeholder", title: "Ignored", content: { name: "   " } }],
 		});
 		assert.equal(malformed.status, 400);
-		assert.deepEqual(await malformed.json(), { error: "malformed_body" });
+		assert.deepEqual(await malformed.json(), { error: "validation_errors", errors: [{ type: "invalid_stakeholder", path: "", message: "stakeholder content must have name and description" }] });
 
 		const seeded = await createAsset(server.url, cookie, {
 			workspaceId,
@@ -241,14 +241,12 @@ test("stakeholder assets create with normalized content, mirrored title, and nam
 		assert.equal(duplicate.status, 409);
 		assert.deepEqual(await duplicate.json(), { error: "name_conflict" });
 
-		for (const body of [
-			{ workspaceId, kind: "stakeholder" },
-			{ workspaceId, kind: "stakeholder", content: { name: "   " } },
-		]) {
-			const malformed = await createAsset(server.url, cookie, body);
-			assert.equal(malformed.status, 400, JSON.stringify(body));
-			assert.deepEqual(await malformed.json(), { error: "malformed_body" });
-		}
+		const noContent = await createAsset(server.url, cookie, { workspaceId, kind: "stakeholder" });
+		assert.equal(noContent.status, 400);
+		assert.deepEqual(await noContent.json(), { error: "malformed_body" });
+		const whitespaceName = await createAsset(server.url, cookie, { workspaceId, kind: "stakeholder", content: { name: "   " } });
+		assert.equal(whitespaceName.status, 400);
+		assert.deepEqual(await whitespaceName.json(), { error: "validation_errors", errors: [{ type: "invalid_stakeholder", path: "", message: "stakeholder content must have name and description" }] });
 	});
 });
 

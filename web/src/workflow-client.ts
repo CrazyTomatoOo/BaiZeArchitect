@@ -882,10 +882,28 @@ export function getAsset(apiBase: string, assetId: number): Promise<AssetDetail>
 	return fetchJson(apiBase, `/api/assets/${assetId}`);
 }
 
+export interface AssetValidationError {
+	type: string;
+	path: string;
+	message: string;
+}
+export class AssetMutationError extends Error {
+	readonly validationErrors: AssetValidationError[];
+	constructor(message: string, validationErrors: AssetValidationError[] = []) {
+		super(message);
+		this.name = "AssetMutationError";
+		this.validationErrors = validationErrors;
+	}
+}
 async function throwAssetMutationError(response: Response, operation: string): Promise<never> {
 	const body: unknown = await response.json().catch(() => null);
 	if (typeof body === "object" && body !== null && !Array.isArray(body)) {
 		const record = body as Record<string, unknown>;
+		if (record.error === "validation_errors" && Array.isArray(record.errors)) {
+			const errors = record.errors as AssetValidationError[];
+			const details = errors.map((e) => `${e.path || "(root)"}: ${e.message}`).join("；");
+			throw new AssetMutationError(`${operation} 校验失败：${details}`, errors);
+		}
 		if (record.error === "invalid_relations" && Array.isArray(record.invalidRelations)) {
 			const details = record.invalidRelations.map((item) => typeof item === "string" ? item : JSON.stringify(item)).join("；");
 			throw new Error(`${operation} 关系校验失败：${details}`);
@@ -962,17 +980,7 @@ export async function importAssets(apiBase: string, workspaceId: number, assets:
 		credentials: "same-origin",
 		body: JSON.stringify({ workspaceId, assets, ...(relations === undefined ? {} : { relations }) }),
 	});
-	if (!response.ok) {
-		const body: unknown = await response.json().catch(() => null);
-		if (typeof body === "object" && body !== null && !Array.isArray(body)) {
-			const record = body as Record<string, unknown>;
-			if (record.error === "invalid_relations" && Array.isArray(record.invalidRelations)) {
-				const details = record.invalidRelations.map((item) => typeof item === "string" ? item : JSON.stringify(item)).join("；");
-				throw new Error(`导入关系校验失败：${details}`);
-			}
-		}
-		throw new Error(`import assets failed: ${response.status}`);
-	}
+	if (!response.ok) await throwAssetMutationError(response, "import");
 	const body = (await response.json()) as { assetIds: number[] };
 	return body.assetIds;
 }

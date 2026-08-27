@@ -98,6 +98,30 @@ function parseImportedRelations(value: unknown): readonly AssetRelationExport[] 
 	return relations;
 }
 
+function sendAssetError(response: ServerResponse, error: unknown): boolean {
+	if (error instanceof ReusableAssetMalformedBodyError) {
+		if (error.validationErrors && error.validationErrors.length > 0) {
+			sendJson(response, 400, { error: "validation_errors", errors: error.validationErrors });
+		} else {
+			sendJson(response, 400, { error: "malformed_body" });
+		}
+		return true;
+	}
+	if (error instanceof ReusableAssetNameConflictError) {
+		sendJson(response, 409, { error: "name_conflict" });
+		return true;
+	}
+	if (error instanceof ReusableAssetVersionConflictError) {
+		sendJson(response, 409, { error: "version_conflict" });
+		return true;
+	}
+	if (error instanceof AssetRelationValidationError) {
+		sendJson(response, 400, { error: "invalid_relations", invalidRelations: error.issues });
+		return true;
+	}
+	return false;
+}
+
 function parsePositiveQueryInteger(value: string | null, fallback: number, maximum?: number): number | undefined {
 	if (value === null || value === "") return fallback;
 	const parsed = Number(value);
@@ -798,18 +822,7 @@ export async function startOperatorServer(
 				);
 				sendJson(response, 201, { assetIds: ids });
 			} catch (error) {
-				if (error instanceof AssetRelationValidationError) {
-					sendJson(response, 400, { error: "invalid_relations", invalidRelations: error.issues });
-					return;
-				}
-				if (error instanceof ReusableAssetMalformedBodyError) {
-					sendJson(response, 400, { error: "malformed_body" });
-					return;
-				}
-				if (error instanceof ReusableAssetNameConflictError) {
-					sendJson(response, 409, { error: "name_conflict" });
-					return;
-				}
+				if (sendAssetError(response, error)) return;
 				throw error;
 			}
 			return;
@@ -925,22 +938,15 @@ export async function startOperatorServer(
 					options.runtime.writeRelations({ workspaceId, fromAssetId: created.assetId, fromRevisionId: created.revisionId, relations });
 				}
 				sendJson(response, 201, created);
-			} catch (error) {
-				if (error instanceof AssetRelationValidationError) {
-					if (created) options.runtime.deleteReusableAsset(created.assetId);
-					sendJson(response, 400, { error: "invalid_relations", invalidRelations: error.issues });
-					return;
-				}
-				if (error instanceof ReusableAssetMalformedBodyError) {
-					sendJson(response, 400, { error: "malformed_body" });
-					return;
-				}
-				if (error instanceof ReusableAssetNameConflictError) {
-					sendJson(response, 409, { error: "name_conflict" });
-					return;
-				}
-				throw error;
+		} catch (error) {
+			if (error instanceof AssetRelationValidationError) {
+				if (created) options.runtime.deleteReusableAsset(created.assetId);
+				sendJson(response, 400, { error: "invalid_relations", invalidRelations: error.issues });
+				return;
 			}
+			if (sendAssetError(response, error)) return;
+			throw error;
+		}
 			return;
 		}
 
@@ -982,25 +988,10 @@ export async function startOperatorServer(
 					return;
 				}
 				sendJson(response, 200, updated);
-			} catch (error) {
-				if (error instanceof ReusableAssetVersionConflictError) {
-					sendJson(response, 409, { error: "version_conflict" });
-					return;
-				}
-				if (error instanceof ReusableAssetMalformedBodyError) {
-					sendJson(response, 400, { error: "malformed_body" });
-					return;
-				}
-				if (error instanceof ReusableAssetNameConflictError) {
-					sendJson(response, 409, { error: "name_conflict" });
-					return;
-				}
-				if (error instanceof AssetRelationValidationError) {
-					sendJson(response, 400, { error: "invalid_relations", invalidRelations: error.issues });
-					return;
-				}
-				throw error;
-			}
+		} catch (error) {
+			if (sendAssetError(response, error)) return;
+			throw error;
+		}
 			return;
 		}
 

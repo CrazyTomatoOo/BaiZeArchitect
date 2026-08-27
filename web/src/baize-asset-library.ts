@@ -1,6 +1,6 @@
 import { LitElement, html, css, nothing } from "lit";
 import { sharedStyles } from "./baize-styles.js";
-import { ASSET_KINDS, assetKindLabel, createAsset, deleteAsset, exportAssets, getAsset, getAssetGraph, importAssets, listAssets, updateAsset, type AssetDetail, type AssetGraph, type AssetKind, type AssetPage, type AssetRelationExport, type AssetResolvedRelation, type AssetSummary } from "./workflow-client.js";
+import { ASSET_KINDS, assetKindLabel, createAsset, deleteAsset, exportAssets, getAsset, getAssetGraph, importAssets, listAssets, updateAsset, AssetMutationError, type AssetDetail, type AssetGraph, type AssetKind, type AssetPage, type AssetRelationExport, type AssetResolvedRelation, type AssetSummary, type AssetValidationError } from "./workflow-client.js";
 import { fieldTitle } from "./artifact-labels.js";
 
 type AssetView = AssetKind | "graph";
@@ -222,6 +222,7 @@ class BaizeAssetLibrary extends LitElement {
 		formDraft: { state: true },
 		formRelations: { state: true },
 		formError: { state: true },
+		formFieldErrors: { state: true },
 		formSubmitting: { state: true },
 		importDraft: { state: true },
 		importError: { state: true },
@@ -259,6 +260,7 @@ class BaizeAssetLibrary extends LitElement {
 	declare formDraft: Record<string, unknown> | null;
 	declare formRelations: readonly { toAssetId: number; type: "contains" | "involves" }[];
 	declare formError: string | null;
+	declare formFieldErrors: Record<string, string>;
 	declare formSubmitting: boolean;
 	declare importDraft: ImportDraft | null;
 	declare importError: string | null;
@@ -415,6 +417,7 @@ class BaizeAssetLibrary extends LitElement {
 		this.formDraft = null;
 		this.formRelations = [];
 		this.formError = null;
+		this.formFieldErrors = {};
 		this.formSubmitting = false;
 		this.importDraft = null;
 		this.importError = null;
@@ -739,8 +742,9 @@ class BaizeAssetLibrary extends LitElement {
 				${field.type === "textarea"
 					? html`<textarea rows="3" .value=${valueText} @input=${(event: Event) => this.setDraftValue(path, (event.target as HTMLTextAreaElement).value)}></textarea>`
 					: html`<input type=${field.type === "number" ? "number" : "text"} .value=${valueText} @input=${(event: Event) => this.setDraftValue(path, field.type === "number" ? Number((event.target as HTMLInputElement).value) : (event.target as HTMLInputElement).value)} />`}
-			</label>
-		</div>`;
+		</label>
+		${this.formFieldErrors[field.key] ? html`<p class="form-error form-field-error">${this.formFieldErrors[field.key]}</p>` : nothing}
+	</div>`;
 	}
 	private renderFormRelations(): Renderable {
 		if (!this.formKind) return nothing;
@@ -790,11 +794,21 @@ class BaizeAssetLibrary extends LitElement {
 			this.updateUrl({ kind, q: "", page: 1, selectedAssetId: result.assetId });
 			await this.load();
 			await this.loadDetail(result.assetId);
-		} catch (error) {
+	} catch (error) {
+		if (error instanceof AssetMutationError) {
+			this.formError = error.message;
+			this.formFieldErrors = {};
+			for (const ve of error.validationErrors) {
+				const key = ve.path.split("/").filter(Boolean).pop() ?? "";
+				if (key) this.formFieldErrors[key] = ve.message;
+			}
+		} else {
 			this.formError = error instanceof Error ? error.message : String(error);
-		} finally {
-			this.formSubmitting = false;
+			this.formFieldErrors = {};
 		}
+	} finally {
+		this.formSubmitting = false;
+	}
 	}
 	private async handleImportFile(event: Event): Promise<void> {
 		const input = event.target as HTMLInputElement;

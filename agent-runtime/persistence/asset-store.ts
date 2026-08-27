@@ -5,10 +5,13 @@ import { AssetRelationValidationError, isAssetRelationType, isValidAssetRelation
 import { REUSABLE_ASSET_KINDS, type ReusableAssetKind } from "./reusable-asset-kind.js";
 import { parseJson } from "./json.js";
 import type { SnapshotStore } from "./snapshot-store.js";
+import { validateAssetContent, pointer, type AssetValidationError, type AssetContentValidationError } from "./asset-content-validator.js";
 
 export class ReusableAssetMalformedBodyError extends Error {
-	constructor() {
+	readonly validationErrors?: readonly AssetValidationError[];
+	constructor(validationErrors?: readonly AssetValidationError[]) {
 		super("Reusable Asset request body is malformed");
+		this.validationErrors = validationErrors;
 	}
 }
 
@@ -165,23 +168,37 @@ function normalizeHierarchyAssetContent(kind: string, content: unknown): Record<
 	return record;
 }
 
-function isStructuredAssetContentValid(kind: ReusableAssetKind, content: unknown, validator: StructuredAssetValidator | undefined, strict: boolean): boolean {
-	if (kind === "stakeholder") return normalizeStakeholderContent(content) !== undefined;
-	if (typeof content !== "object" || content === null || Array.isArray(content)) return false;
+function validateStructuredAssetContent(kind: ReusableAssetKind, content: unknown, validator: StructuredAssetValidator | undefined, strict: boolean): readonly AssetValidationError[] {
+	if (kind === "stakeholder") return normalizeStakeholderContent(content) === undefined ? [{ type: "invalid_stakeholder", path: "", message: "stakeholder content must have name and description" }] : [];
+	if (typeof content !== "object" || content === null || Array.isArray(content)) return [{ type: "invalid_content", path: "", message: "Content must be an object" }];
 	const record = content as Record<string, unknown>;
 	if (record.schemaVersion === `artifact/${kind}/v1`) {
-		if (record.artifactKind !== kind || !validator) return false;
+		if (record.artifactKind !== kind) return [{ type: "invalid_artifact_kind", path: pointer("artifactKind"), message: `artifactKind must be ${kind}` }];
+		if (!validator) return [];
 		const sourceRefs = Array.isArray(record.sourceRefs) && record.sourceRefs.length > 0
 			? record.sourceRefs
 			: [{ type: "requirement_revision", revisionId: 1 }];
-		return validator.check({ ...record, sourceRefs });
+	if (!validator.check({ ...record, sourceRefs })) return [{ type: "schema_validation_failed", path: "", message: "Content failed artifact schema validation" }];
+	if (kind === "api" || kind === "data" || kind === "architecture") return validateAssetContent(kind, record);
+	return [];
 	}
-	if (HIERARCHY_ASSET_KINDS[kind] === true) return normalizeHierarchyAssetContent(kind, content) !== undefined;
+	if (HIERARCHY_ASSET_KINDS[kind] === true) {
+		const normalized = normalizeHierarchyAssetContent(kind, content);
+		if (!normalized) return validateAssetContent(kind, content);
+		return [];
+	}
 	if (!("schemaVersion" in record) && !("artifactKind" in record)) {
-		return !strict || (validator !== undefined && validator.check(promotedAssetDocument(kind as "scenario" | "usecase" | "function" | "design" | "architecture" | "data" | "api", record)));
+		if (strict) {
+			if (!validator || !validator.check(promotedAssetDocument(kind as "scenario" | "usecase" | "function" | "design" | "architecture" | "data" | "api", record))) {
+				return [{ type: "schema_validation_failed", path: "", message: "Content failed schema validation" }];
+			}
+			return validateAssetContent(kind, record);
+		}
+		return [];
 	}
-	return false;
+	return [{ type: "invalid_schema_version", path: pointer("schemaVersion"), message: `schemaVersion must be artifact/${kind}/v1` }];
 }
+
 
 
 function sourceReferencesFingerprint(value: unknown): string {
@@ -306,8 +323,9 @@ export class AssetStore {
 	createReusableAsset(input: { workspaceId: number; kind: ReusableAssetKind; title: string; content: unknown; source?: "manual" | "import" | "migration" | "workflow"; strict?: boolean; legacyOriginRequirementId?: number | null; actorSnapshotDocumentId?: number | null; migrationAttestationDocumentId?: number | null }): { assetId: number; revisionId: number; revisionNo: number } {
 		const timestamp = this.clock.now().toISOString();
 		const content = input.kind === "stakeholder" ? normalizeStakeholderContent(input.content) : input.content;
-		if (input.kind === "stakeholder" && !content) throw new ReusableAssetMalformedBodyError();
-		if (!isStructuredAssetContentValid(input.kind, content, this.structuredValidator, input.strict === true)) throw new ReusableAssetMalformedBodyError();
+		if (input.kind === "stakeholder" && !content) throw new ReusableAssetMalformedBodyError([{ type: "invalid_stakeholder", path: "", message: "stakeholder content must have name and description" }]);
+		const contentErrors = validateStructuredAssetContent(input.kind, content, this.structuredValidator, input.strict === true);
+		if (contentErrors.length > 0) throw new ReusableAssetMalformedBodyError(contentErrors);
 		const title = input.kind === "stakeholder" ? (content as { name: string }).name : input.title;
 	const schemaRef = input.kind === "stakeholder" ? "asset/stakeholder/v1" : typeof content === "object" && content !== null && !Array.isArray(content) && (content as Record<string, unknown>).schemaVersion === `artifact/${input.kind}/v1` ? `artifact/${input.kind}/v1` : HIERARCHY_ASSET_KINDS[input.kind] === true ? `asset/${input.kind}/v1` : `artifact/${input.kind}/v1`;
 		const transaction = this.database.transaction(() => {
@@ -350,8 +368,8 @@ export class AssetStore {
 			if (title.length === 0) throw new ReusableAssetMalformedBodyError();
 			const stakeholderContent = asset.kind === "stakeholder" ? normalizeStakeholderContent(input.content) : undefined;
 			const content = asset.kind === "stakeholder" ? stakeholderContent : input.content;
-			if (asset.kind === "stakeholder" && (!stakeholderContent || stakeholderContent.name !== title)) throw new ReusableAssetMalformedBodyError();
-			if (!isStructuredAssetContentValid(asset.kind, content, this.structuredValidator, true)) throw new ReusableAssetMalformedBodyError();
+			const updateErrors = validateStructuredAssetContent(asset.kind, content, this.structuredValidator, true);
+			if (updateErrors.length > 0) throw new ReusableAssetMalformedBodyError(updateErrors);
 			if (asset.kind === "stakeholder" && this.stakeholderNameExists(input.workspaceId, title, asset.id)) throw new ReusableAssetNameConflictError();
 			if (asset.origin_artifact_id !== null && asset.content !== null && sourceReferencesFingerprint(parseJson<unknown>(asset.content)) !== sourceReferencesFingerprint(content)) {
 				throw new ReusableAssetMalformedBodyError();
