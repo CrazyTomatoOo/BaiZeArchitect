@@ -15,7 +15,7 @@ import { resolve } from "node:path";
 import { readFile } from "node:fs/promises";
 import type { AddressInfo } from "node:net";
 import type { HeadlessWorkflowRuntime } from "./headless-runtime.js";
-import { AssetRelationValidationError, BusyWorkspaceError, ReusableAssetMalformedBodyError, ReusableAssetNameConflictError, ReusableAssetReferencedError, ReusableAssetVersionConflictError } from "../persistence/workflow-store.js";
+import { AssetRelationValidationError, BusyWorkspaceError, ImportDigestConflictError, ReusableAssetMalformedBodyError, ReusableAssetNameConflictError, ReusableAssetReferencedError, ReusableAssetVersionConflictError } from "../persistence/workflow-store.js";
 import type { AssetRelationExport, AssetRelationInput, SubtreeNode } from "../persistence/workflow-store.js";
 import { WORKFLOW_COMMAND_TYPES, type WorkflowCommandType } from "./command-types.js";
 import type { RequirementBaseline } from "./requirement.js";
@@ -98,6 +98,31 @@ function parseImportedRelations(value: unknown): readonly AssetRelationExport[] 
 	return relations;
 }
 
+interface ImportBundleInput {
+	readonly assets: { kind: ReusableAssetKind; title: string; content: unknown }[];
+	readonly relations?: readonly AssetRelationExport[];
+}
+
+function parseImportBundle(value: unknown): ImportBundleInput | undefined {
+	if (typeof value !== "object" || value === null || Array.isArray(value)) return undefined;
+	const bundle = value as { assets?: unknown; relations?: unknown };
+	if (!Array.isArray(bundle.assets) || bundle.assets.length === 0) return undefined;
+	for (const asset of bundle.assets) {
+		if (
+			typeof asset !== "object"
+			|| asset === null
+			|| !isReusableAssetKind((asset as { kind?: unknown }).kind)
+			|| typeof (asset as { title?: unknown }).title !== "string"
+			|| !("content" in (asset as object))
+		) {
+			return undefined;
+		}
+	}
+	const relations = bundle.relations === undefined ? undefined : parseImportedRelations(bundle.relations);
+	if (bundle.relations !== undefined && relations === undefined) return undefined;
+	return { assets: bundle.assets as { kind: ReusableAssetKind; title: string; content: unknown }[], relations };
+}
+
 function parseSubtreeNode(value: unknown): SubtreeNode | undefined {
 	if (typeof value !== "object" || value === null || Array.isArray(value)) return undefined;
 	const node = value as { kind?: unknown; title?: unknown; nodeId?: unknown; content?: unknown; children?: unknown };
@@ -133,6 +158,10 @@ function sendAssetError(response: ServerResponse, error: unknown): boolean {
 	}
 	if (error instanceof ReusableAssetVersionConflictError) {
 		sendJson(response, 409, { error: "version_conflict" });
+		return true;
+	}
+	if (error instanceof ImportDigestConflictError) {
+		sendJson(response, 409, { error: "digest_conflict" });
 		return true;
 	}
 	if (error instanceof AssetRelationValidationError) {
@@ -839,6 +868,81 @@ export async function startOperatorServer(
 					importBody.assets as { kind: ReusableAssetKind; title: string; content: unknown }[],
 					relations,
 					true,
+				);
+				sendJson(response, 201, { assetIds: ids });
+			} catch (error) {
+				if (sendAssetError(response, error)) return;
+				throw error;
+			}
+			return;
+		}
+
+		if (request.method === "POST" && url.pathname === "/api/assets/import/preview") {
+			let body: unknown;
+			try {
+				body = JSON.parse(await readBody(request));
+			} catch {
+				sendJson(response, 400, { error: "malformed_body" });
+				return;
+			}
+			if (typeof body !== "object" || body === null || Array.isArray(body)) {
+				sendJson(response, 400, { error: "malformed_body" });
+				return;
+			}
+			const previewBody = body as { workspaceId?: unknown; bundle?: unknown };
+			const workspaceId = Number(previewBody.workspaceId);
+			if (!Number.isInteger(workspaceId) || !options.runtime.workspaceExists(workspaceId)) {
+				sendJson(response, 404, { error: "unknown_workspace" });
+				return;
+			}
+			const bundle = parseImportBundle(previewBody.bundle);
+			if (bundle === undefined) {
+				sendJson(response, 400, { error: "malformed_body" });
+				return;
+			}
+			try {
+				const preview = options.runtime.previewImportBundle(workspaceId, bundle.assets, bundle.relations);
+				sendJson(response, 200, preview);
+			} catch (error) {
+				if (sendAssetError(response, error)) return;
+				throw error;
+			}
+			return;
+		}
+
+		if (request.method === "POST" && url.pathname === "/api/assets/import/commit") {
+			let body: unknown;
+			try {
+				body = JSON.parse(await readBody(request));
+			} catch {
+				sendJson(response, 400, { error: "malformed_body" });
+				return;
+			}
+			if (typeof body !== "object" || body === null || Array.isArray(body)) {
+				sendJson(response, 400, { error: "malformed_body" });
+				return;
+			}
+			const commitBody = body as { workspaceId?: unknown; bundle?: unknown; previewDigest?: unknown };
+			const workspaceId = Number(commitBody.workspaceId);
+			if (!Number.isInteger(workspaceId) || !options.runtime.workspaceExists(workspaceId)) {
+				sendJson(response, 404, { error: "unknown_workspace" });
+				return;
+			}
+			if (typeof commitBody.previewDigest !== "string") {
+				sendJson(response, 400, { error: "malformed_body" });
+				return;
+			}
+			const bundle = parseImportBundle(commitBody.bundle);
+			if (bundle === undefined) {
+				sendJson(response, 400, { error: "malformed_body" });
+				return;
+			}
+			try {
+				const ids = options.runtime.commitImportBundle(
+					workspaceId,
+					bundle.assets,
+					bundle.relations ?? [],
+					commitBody.previewDigest,
 				);
 				sendJson(response, 201, { assetIds: ids });
 			} catch (error) {

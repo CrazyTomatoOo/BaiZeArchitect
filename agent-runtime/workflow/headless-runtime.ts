@@ -13,7 +13,7 @@ import { FEEDBACK_REFERENCE_BUDGET } from "../persistence/workflow-store.js";
 import { instantiatePlanTemplate } from "./plan-template.js";
 import type { TaskRole } from "./plan-types.js";
 import type { PlanProposal } from "./plan-types.js";
-import type { AssetGraph, AssetRelationExport, AssetRelationInput, AssetRelationRecord, ReusableAssetExportBundle, HierarchyNode, SubtreeNode } from "../persistence/workflow-store.js";
+import type { AssetGraph, AssetRelationExport, AssetRelationInput, AssetRelationRecord, ReusableAssetExportBundle, HierarchyNode, SubtreeNode, ImportPreview } from "../persistence/workflow-store.js";
 import type { RequirementBaseline } from "./requirement.js";
 
 export type { RequirementBaseline } from "./requirement.js";
@@ -119,6 +119,8 @@ export interface HeadlessWorkflowRuntime {
 	importReusableAssets(workspaceId: number, assets: readonly { kind: ReusableAssetKind; title: string; content: unknown }[]): readonly number[];
 	exportReusableAssetBundle(workspaceId: number): ReusableAssetExportBundle;
 	importReusableAssetBundle(workspaceId: number, assets: readonly { kind: ReusableAssetKind; title: string; content: unknown }[], relations?: readonly AssetRelationExport[], strict?: boolean): readonly number[];
+	previewImportBundle(workspaceId: number, assets: readonly { kind: ReusableAssetKind; title: string; content: unknown }[], relations?: readonly AssetRelationExport[]): ImportPreview;
+	commitImportBundle(workspaceId: number, assets: readonly { kind: ReusableAssetKind; title: string; content: unknown }[], relations: readonly AssetRelationExport[], previewDigest: string): readonly number[];
 	getHierarchyRoots(workspaceId: number, rootKind: string, query: { page: number; pageSize: number; q?: string }): { roots: readonly HierarchyNode[]; total: number; kindCounts: Record<string, number> };
 	getHierarchyChildren(parentAssetId: number): readonly HierarchyNode[];
 	searchHierarchyNodes(workspaceId: number, q: string): readonly { assetId: number; kind: ReusableAssetKind; title: string; matchedPath: string[] }[];
@@ -518,6 +520,12 @@ function buildTaskInstruction(role: string, objective: string, baseline: Require
 	},
 	importReusableAssets(workspaceId, assets) {
 		return store.importReusableAssets(workspaceId, assets);
+	},
+	previewImportBundle(workspaceId, assets, relations) {
+		return store.previewImportBundle(workspaceId, assets, relations);
+	},
+	commitImportBundle(workspaceId, assets, relations, previewDigest) {
+		return store.commitImportBundle(workspaceId, assets, relations, previewDigest);
 	},
 	getHierarchyRoots(workspaceId, rootKind, query) {
 		return store.getHierarchyRoots(workspaceId, rootKind, query);

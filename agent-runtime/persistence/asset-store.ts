@@ -210,6 +210,25 @@ function sourceReferencesFingerprint(value: unknown): string {
 		.sort()
 		.join("|");
 }
+
+export interface ImportPreview {
+	summary: {
+		createCount: number;
+		reuseCount: number;
+		relationChanges: number;
+		kindBreakdown: Record<string, number>;
+		pathConflicts: number;
+		validationErrors: Array<{ title: string; errors: readonly AssetValidationError[] }>;
+	};
+	previewDigest: string;
+}
+
+export class ImportDigestConflictError extends Error {
+	constructor() {
+		super("Import preview digest does not match");
+		this.name = "ImportDigestConflictError";
+	}
+}
 /**
  * asset-store.ts — Store（存储域）子域：Reusable Asset 资产库面。
  *
@@ -224,6 +243,7 @@ export class AssetStore {
 		private readonly clock: FixtureClock,
 		private readonly snapshotStore: SnapshotStore,
 		private readonly structuredValidator?: StructuredAssetValidator,
+		private readonly hashProvider?: { digest(value: string): string },
 	) {}
 	writeRelations(input: {
 		workspaceId: number;
@@ -718,6 +738,87 @@ export class AssetStore {
 			return ids;
 		}).immediate;
 		return transaction();
+	}
+
+	previewImportBundle(workspaceId: number, assets: readonly { kind: ReusableAssetKind; title: string; content: unknown }[], relations?: readonly AssetRelationExport[]): ImportPreview {
+		const previewAssets = assets.map((a) => this.normalizeImportAsset(a));
+		const createCount: number[] = [];
+		const reuseCount: number[] = [];
+		const kindBreakdown: Record<string, number> = {};
+		const validationErrors: Array<{ title: string; errors: readonly AssetValidationError[] }> = [];
+		for (const asset of previewAssets) {
+			kindBreakdown[asset.kind] = (kindBreakdown[asset.kind] ?? 0) + 1;
+			const existing = this.findAssetByNodePath(workspaceId, asset.kind, asset.content);
+			if (existing) {
+				reuseCount.push(existing.assetId);
+			} else {
+				const errors = validateStructuredAssetContent(asset.kind, asset.content, this.structuredValidator, true);
+				if (errors.length > 0) validationErrors.push({ title: asset.title, errors });
+				else createCount.push(0);
+			}
+		}
+		const bundleJson = JSON.stringify({ assets: previewAssets, relations: relations ?? [] });
+	const previewDigest = this.hashProvider?.digest(bundleJson) ?? this.clock.now().toISOString();
+		return {
+			summary: {
+				createCount: createCount.length,
+				reuseCount: reuseCount.length,
+				relationChanges: relations?.length ?? 0,
+				kindBreakdown,
+				pathConflicts: 0,
+				validationErrors,
+			},
+			previewDigest,
+		};
+	}
+
+	commitImportBundle(workspaceId: number, assets: readonly { kind: ReusableAssetKind; title: string; content: unknown }[], relations: readonly AssetRelationExport[], previewDigest: string): readonly number[] {
+		const bundleJson = JSON.stringify({ assets: assets.map((a) => this.normalizeImportAsset(a)), relations });
+	const computedDigest = this.hashProvider?.digest(bundleJson) ?? this.clock.now().toISOString();
+		if (computedDigest !== previewDigest) {
+			throw new ImportDigestConflictError();
+		}
+		return this.importReusableAssetBundle(workspaceId, assets.map((a) => this.normalizeImportAsset(a)), relations, true);
+	}
+
+	private normalizeImportAsset(asset: { kind: ReusableAssetKind; title: string; content: unknown }): { kind: ReusableAssetKind; title: string; content: unknown } {
+		if (asset.kind === "api" && typeof asset.content === "object" && asset.content !== null && !Array.isArray(asset.content)) {
+			const record = asset.content as Record<string, unknown>;
+			if (!("schemaVersion" in record) && "openapi" in record) {
+				const title = typeof record.info === "object" && record.info !== null && !Array.isArray(record.info) && typeof (record.info as Record<string, unknown>).title === "string" ? (record.info as Record<string, unknown>).title as string : asset.title;
+			return { ...asset, content: { ...record, schemaVersion: "artifact/api/v1", artifactKind: "api", summary: title, sourceRefs: [] }, title };
+			}
+		}
+		return asset;
+	}
+
+	private findAssetByNodePath(workspaceId: number, kind: string, content: unknown): { assetId: number; revisionId: number } | undefined {
+		if (typeof content !== "object" || content === null || Array.isArray(content)) return undefined;
+		const record = content as Record<string, unknown>;
+		const nodeId = typeof record.nodeId === "string" ? record.nodeId : undefined;
+		const title = typeof record.title === "string" ? record.title : typeof record.name === "string" ? record.name : undefined;
+		if (nodeId) {
+			const rows = this.database
+				.prepare("select a.id, a.current_revision_id, d.content from reusable_assets a join reusable_asset_revisions r on r.id = a.current_revision_id join snapshot_documents d on d.id = r.content_document_id where a.workspace_id = ? and a.kind = ? order by a.id")
+				.all(workspaceId, kind) as Array<{ id: number; current_revision_id: number; content: string }>;
+			for (const row of rows) {
+				try {
+					const existing = JSON.parse(row.content) as Record<string, unknown>;
+					if (typeof existing.nodeId === "string" && existing.nodeId === nodeId) {
+						return { assetId: row.id, revisionId: row.current_revision_id };
+					}
+				} catch { continue; }
+			}
+		}
+		if (title) {
+			const existing = this.database
+				.prepare("select id, current_revision_id from reusable_assets where workspace_id = ? and kind = ? and title = ? order by id desc limit 1")
+				.get(workspaceId, kind, title) as { id: number; current_revision_id: number | null } | undefined;
+			if (existing?.current_revision_id !== null && existing !== undefined) {
+				return { assetId: existing.id, revisionId: existing.current_revision_id };
+			}
+		}
+		return undefined;
 	}
 
 	// --- Hierarchy tree operations ---

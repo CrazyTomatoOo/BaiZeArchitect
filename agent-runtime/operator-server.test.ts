@@ -125,6 +125,30 @@ async function createAsset(
 	});
 }
 
+async function previewImport(
+	url: string,
+	cookie: string,
+	body: unknown,
+): Promise<Response> {
+	return fetch(`${url}/api/assets/import/preview`, {
+		method: "POST",
+		headers: { "content-type": "application/json", cookie },
+		body: JSON.stringify(body),
+	});
+}
+
+async function commitImport(
+	url: string,
+	cookie: string,
+	body: unknown,
+): Promise<Response> {
+	return fetch(`${url}/api/assets/import/commit`, {
+		method: "POST",
+		headers: { "content-type": "application/json", cookie },
+		body: JSON.stringify(body),
+	});
+}
+
 function scenarioContent(title: string, actor = "Customer"): Record<string, unknown> {
 	return {
 		schemaVersion: "artifact/scenario/v1",
@@ -889,6 +913,70 @@ test("asset deletion scans relation edges in both directions and unified update 
 		assert.deepEqual((await deleteTarget.json() as { error: string; refs: Array<{ assetId: number; kind: string; type: string }> }).refs, [{ assetId: scenarioBody.assetId, kind: "scenario-variant", title: "Checkout", type: "involves" }]);
 		const deleteSource = await fetch(`${server.url}/api/assets/${scenarioBody.assetId}`, { method: "DELETE", headers: { cookie } });
 		assert.equal(deleteSource.status, 409);
+	});
+});
+
+test("two-step import preview returns summary and digest", async () => {
+	await withServer(async ({ server, workspaceId }) => {
+		const cookie = await bootstrap(server.url);
+		const bundle = {
+			assets: [
+				{ kind: "stakeholder", title: "Customer", content: { name: "Customer" } },
+				{ kind: "scenario-variant", title: "Browse", content: scenarioVariantContent("Browse") },
+			],
+			relations: [
+				{ fromTitle: "Browse", fromKind: "scenario-variant", toTitle: "Customer", toKind: "stakeholder", type: "involves" },
+			],
+		};
+		const preview = await previewImport(server.url, cookie, { workspaceId, bundle });
+		assert.equal(preview.status, 200);
+		const previewBody = (await preview.json()) as { summary: { createCount: number; reuseCount: number }; previewDigest: string };
+		assert.equal(previewBody.summary.createCount, 2);
+		assert.equal(previewBody.summary.reuseCount, 0);
+		assert.ok(typeof previewBody.previewDigest === "string" && previewBody.previewDigest.length > 0);
+	});
+});
+
+test("two-step import commit with matching digest creates assets", async () => {
+	await withServer(async ({ server, workspaceId }) => {
+		const cookie = await bootstrap(server.url);
+		const bundle = {
+			assets: [
+				{ kind: "stakeholder", title: "Customer", content: { name: "Customer" } },
+				{ kind: "scenario-variant", title: "Browse", content: scenarioVariantContent("Browse") },
+			],
+			relations: [
+				{ fromTitle: "Browse", fromKind: "scenario-variant", toTitle: "Customer", toKind: "stakeholder", type: "involves" },
+			],
+		};
+		const preview = await previewImport(server.url, cookie, { workspaceId, bundle });
+		assert.equal(preview.status, 200);
+		const { previewDigest } = (await preview.json()) as { previewDigest: string };
+
+		const commit = await commitImport(server.url, cookie, { workspaceId, bundle, previewDigest });
+		assert.equal(commit.status, 201);
+		const commitBody = (await commit.json()) as { assetIds: number[] };
+		assert.equal(commitBody.assetIds.length, 2);
+
+		const graph = await fetch(`${server.url}/api/assets/graph?workspaceId=${workspaceId}`, { headers: { cookie } });
+		assert.deepEqual((await graph.json() as { edges: unknown[] }).edges, [
+			{ fromAssetId: commitBody.assetIds[1], toAssetId: commitBody.assetIds[0], type: "involves" },
+		]);
+	});
+});
+
+test("two-step import commit with wrong digest returns 409 digest_conflict", async () => {
+	await withServer(async ({ server, workspaceId }) => {
+		const cookie = await bootstrap(server.url);
+		const bundle = {
+			assets: [{ kind: "stakeholder", title: "Customer", content: { name: "Customer" } }],
+		};
+		const preview = await previewImport(server.url, cookie, { workspaceId, bundle });
+		assert.equal(preview.status, 200);
+
+		const commit = await commitImport(server.url, cookie, { workspaceId, bundle, previewDigest: "wrong-digest" });
+		assert.equal(commit.status, 409);
+		assert.deepEqual(await commit.json(), { error: "digest_conflict" });
 	});
 });
 

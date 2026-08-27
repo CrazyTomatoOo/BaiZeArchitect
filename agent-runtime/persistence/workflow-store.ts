@@ -43,10 +43,10 @@ import type { WorkspaceSummary } from "./workspace-store.js";
 // 继续从 workflow-store 引用，保持既有导入路径稳定（ADR-006 门面形态）。
 export { BusyWorkspaceError } from "./workspace-store.js";
 export type { WorkspaceSummary } from "./workspace-store.js";
-export { ReusableAssetMalformedBodyError, ReusableAssetNameConflictError, ReusableAssetReferencedError, ReusableAssetVersionConflictError } from "./asset-store.js";
+export { ReusableAssetMalformedBodyError, ReusableAssetNameConflictError, ReusableAssetReferencedError, ReusableAssetVersionConflictError, ImportDigestConflictError } from "./asset-store.js";
 export { AssetRelationValidationError } from "./asset-relations.js";
 export type { AssetGraph, AssetRelationExport, AssetRelationInput, AssetRelationRecord, ReusableAssetExportBundle } from "./asset-relations.js";
-export type { ReusableAssetDetail, ReusableAssetListQuery, ReusableAssetPage, ReusableAssetSummary, HierarchyNode, SubtreeNode } from "./asset-store.js";
+export type { ReusableAssetDetail, ReusableAssetListQuery, ReusableAssetPage, ReusableAssetSummary, HierarchyNode, SubtreeNode, ImportPreview } from "./asset-store.js";
 import { type WorkflowCommandType } from "../workflow/command-types.js";
 import { ARTIFACT_OWNERSHIP, type InputBinding, type TaskOutputInput } from "../workflow/plan-types.js";
 import type { RoleResult, ContextManifest, RoleContract, BeginAttemptResult, CompleteAttemptResult, TraceLinkProposal, CriticReport, FindingProposal, FindingSeverity, AssetReference } from "../workflow/role-result.js";
@@ -320,7 +320,7 @@ this.database.pragma("busy_timeout = 5000");
 		this.applyMigrations();
 		this.snapshotStore = new SnapshotStore(this.database, this.options.hashProvider);
 		this.workspaceStore = new WorkspaceStore(this.database, this.options.clock);
-		this.assetStore = new AssetStore(this.database, this.options.clock, this.snapshotStore, this.options.artifactValidator);
+	this.assetStore = new AssetStore(this.database, this.options.clock, this.snapshotStore, this.options.artifactValidator, this.options.hashProvider);
 		this.createRequirementTransaction = this.database.transaction((input) =>
 			this.createRequirementRows(input),
 		).immediate;
@@ -3135,6 +3135,15 @@ deleteWorkspace(workspaceId: number): boolean {
 	}
 	hasIncomingCrossAssetRelations(assetId: number) {
 		return this.assetStore.hasIncomingCrossAssetRelations(assetId);
+	}
+
+	previewImportBundle(workspaceId: number, assets: readonly { kind: ReusableAssetKind; title: string; content: unknown }[], relations?: readonly AssetRelationExport[]) {
+		if (!this.workspaceStore.workspaceExists(workspaceId)) throw new Error("Workspace not found");
+		return this.assetStore.previewImportBundle(workspaceId, assets, relations);
+	}
+	commitImportBundle(workspaceId: number, assets: readonly { kind: ReusableAssetKind; title: string; content: unknown }[], relations: readonly AssetRelationExport[], previewDigest: string) {
+		if (!this.workspaceStore.workspaceExists(workspaceId)) throw new Error("Workspace not found");
+		return this.assetStore.commitImportBundle(workspaceId, assets, relations, previewDigest);
 	}
 
 	/** #22 promote：按 kind 条目拆细入库（幂等、可批选）。返回每 kind 入资产条数。 */
