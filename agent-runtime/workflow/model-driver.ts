@@ -47,6 +47,8 @@ export interface ModelDriverInput {
 	contextDigest: string;
 	instruction: string;
 	modelRoles?: ModelRolesOverride;
+	/** 受限领域工具白名单（Role Contract 工具权限具体化）；装配层按名解析成 ToolDefinition 传 pi-agent。 */
+	toolNames?: readonly string[];
 }
 
 export interface ModelTool {
@@ -59,11 +61,21 @@ export interface ModelUsage {
 	modelId: string;
 	inputTokens: number;
 	outputTokens: number;
+	/** 缓存读取 token（来自 pi-ai Usage.cacheRead）。 */
+	cacheReadTokens?: number;
+	/** 缓存写入 token（来自 pi-ai Usage.cacheWrite）。 */
+	cacheCreationTokens?: number;
+	/** 推理 token 子集（来自 pi-ai Usage.reasoning，已含于 outputTokens）。 */
+	reasoningTokens?: number;
+	/** 美元成本（来自 pi-ai Usage.cost.total）。 */
+	cost?: number;
 }
 
 export interface ModelDriverResult {
 	structuredResult: unknown;
 	modelUsage: ModelUsage;
+	/** 结构化产出来源：终止型工具名（submit_role_result 等）；未用终止工具而走末条文本回退时为 undefined。 */
+	terminationTool?: string;
 }
 
 export interface ModelDriver {

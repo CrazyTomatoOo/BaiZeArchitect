@@ -217,13 +217,13 @@ function buildTaskInstruction(role: string, objective: string, baseline: Require
 		base.push(
 			"",
 			"你是评审者,负责审查产物的完整性与质量,不产出产物。",
-			"输出纯 JSON 格式的 RoleResult,不要 Markdown 代码块或解释。",
+			"完成后必须调用 submit_role_result 工具提交结构化 RoleResult,禁止以自由文本回复。",
 			`RoleResult 结构:{schemaVersion:"role-result/v1",workflowId:${workflowId},attemptId:${attemptId},effects:[],criticReport:{schemaVersion:"critic-report/v1",workflowId:${workflowId},attemptId:${attemptId},coverageAttestation:{reviewTargets:[${targetsJson}],complete:true},findings:[]}}`,
 			"effects 必须为空数组(critic 不产出产物)。",
 			"criticReport.coverageAttestation.complete 必须为 true。",
 			`reviewTargets 必须包含全部以下目标:${targetsJson}`,
 			"findings 为空数组表示无问题;如有问题,每条含 fingerprint、severity、summary、targetRevisionId、targetArtifactKind、sourceRef。",
-			"保持简洁,直接以 { 开头输出完整闭合的 JSON。",
+			"将完整 RoleResult 作为 submit_role_result 工具的 roleResult 参数提交。",
 		);
 	} else {
 		// 构造 effects 数组:每个 expectedArtifactKind 一个 effect
@@ -235,10 +235,10 @@ function buildTaskInstruction(role: string, objective: string, baseline: Require
 		base.push(
 			"",
 			"请基于以上需求,完成本角色的设计任务。",
-			"输出纯 JSON 格式的 RoleResult,不要 Markdown 代码块或解释。",
-			`RoleResult 结构:{schemaVersion:"role-result/v1",workflowId:${workflowId},attemptId:${attemptId},effects:[${effectsArr.join(",")}]}`,
-			"每个 effect 的 content 必须严格只含 schema 声明的字段(禁止额外字段)。",
-			"保持简洁,直接以 { 开头输出完整闭合的 JSON。",
+		"完成后必须调用 submit_role_result 工具提交结构化 RoleResult,禁止以自由文本回复。",
+		`RoleResult 结构:{schemaVersion:"role-result/v1",workflowId:${workflowId},attemptId:${attemptId},effects:[${effectsArr.join(",")}]}`,
+		"每个 effect 的 content 必须严格只含 schema 声明的字段(禁止额外字段)。",
+		"将完整 RoleResult 作为 submit_role_result 工具的 roleResult 参数提交。",
 		);
 	}
 	return base.join("\n");
@@ -357,11 +357,11 @@ function buildTaskInstruction(role: string, objective: string, baseline: Require
 	const instruction = ctx
 		? buildTaskInstruction(ctx.role, ctx.objective, ctx.requirementBaseline, workflowId, begin.attemptId, evidenceSnapshotId, firstReviewTarget?.resolvedRevisionId ?? 0, firstReviewTarget?.artifactKind ?? "", ctx.expectedArtifactKinds, reviewTargets ?? [])
 		: "Produce the required output.";
-			result = await modelDriver.execute(
-				{ role: begin.taskRole as TaskRole, contextDigest: begin.contextDigest, instruction, modelRoles },
-				[],
-			);
-			store.appendRunEvent(begin.runId, "token", { role: begin.taskRole, provider: result.modelUsage.provider, modelId: result.modelUsage.modelId, inputTokens: result.modelUsage.inputTokens, outputTokens: result.modelUsage.outputTokens });
+		result = await modelDriver.execute(
+			{ role: begin.taskRole as TaskRole, contextDigest: begin.contextDigest, instruction, modelRoles, toolNames: ["submit_role_result"] },
+			[],
+		);
+		store.appendRunEvent(begin.runId, "token", { role: begin.taskRole, provider: result.modelUsage.provider, modelId: result.modelUsage.modelId, inputTokens: result.modelUsage.inputTokens, outputTokens: result.modelUsage.outputTokens, cacheReadTokens: result.modelUsage.cacheReadTokens, cacheCreationTokens: result.modelUsage.cacheCreationTokens, reasoningTokens: result.modelUsage.reasoningTokens, cost: result.modelUsage.cost, terminationTool: result.terminationTool });
 			store.appendRunEvent(begin.runId, "model_result", { role: begin.taskRole, produced: "role-result/v1" });
 			const complete = completeAttemptInternal(workflowId, begin.attemptId, result.structuredResult);
 				if (complete.outcome === "published") {

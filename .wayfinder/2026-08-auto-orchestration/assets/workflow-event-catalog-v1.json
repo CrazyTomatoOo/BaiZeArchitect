@@ -110,7 +110,7 @@
     "late_result_discarded"
   ],
   "runEventNotes": {
-    "token": "usage payload: role, inputTokens, outputTokens, provider, modelId; provider/modelId from role→model resolution (model-config/v1)",
+    "token": "usage payload: role, inputTokens, outputTokens, provider, modelId; optional cost, cacheReadTokens, cacheCreationTokens, reasoningTokens, terminationTool; provider/modelId from role→model resolution (model-config/v1)",
     "model_tokens": "legacy name for token in run events written before the multi-provider model layer; append-only history keeps it, new writes use token"
   },
   "transactionRules": {

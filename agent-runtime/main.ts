@@ -30,9 +30,12 @@ import {
 import type { WorkflowAgentRole } from "./workflow/model-driver.js";
 import {
 	createAgentSession,
+	defineTool,
 	DefaultResourceLoader,
 	getAgentDir,
+	SessionManager,
 } from "@earendil-works/pi-coding-agent";
+import { Type } from "typebox";
 
 process.env.BAIZE_GATEWAY = "1";
 
@@ -114,7 +117,7 @@ const SYSTEM_PROMPT = [
 	"通过已注册的受限领域工具获取仓库事实，不得假设未读取的代码事实。",
 	"禁止使用 bash/read/grep/find 或任何原始 shell/filesystem 工具。",
 	"涉及代码证据时，只引用受限领域工具返回的真实相对路径和行号，禁止编造证据。",
-	"遵循当前 Run 的任务与角色 Skill，以结构化结果或已注册领域工具完成工作。",
+	"遵循当前 Run 的任务与角色 Skill，完成后必须调用 submit_role_result 工具提交结构化 RoleResult，禁止以自由文本回复。",
 ].join("\n");
 
 const PROJECT_ROOT =
@@ -128,57 +131,126 @@ const resourceLoader = new DefaultResourceLoader({
 });
 await resourceLoader.reload({ resolveProjectTrust: async () => true });
 
+/** 从 session.getSessionStats() 返回值提取 ModelUsage 字段(SessionStats.tokens 形状 → BaiZe ModelUsage 映射)。 */
+function extractUsage(stats: unknown): {
+	inputTokens?: number;
+	outputTokens?: number;
+	cacheReadTokens?: number;
+	cacheCreationTokens?: number;
+	reasoningTokens?: number;
+	cost?: number;
+} {
+	if (!stats || typeof stats !== "object") return {};
+	const s = stats as Record<string, unknown>;
+	const tokens = s.tokens;
+	if (!tokens || typeof tokens !== "object") {
+		return { cost: typeof s.cost === "number" ? s.cost : undefined };
+	}
+	const t = tokens as Record<string, unknown>;
+	return {
+		inputTokens: typeof t.input === "number" ? t.input : undefined,
+		outputTokens: typeof t.output === "number" ? t.output : undefined,
+		cacheReadTokens: typeof t.cacheRead === "number" ? t.cacheRead : undefined,
+		cacheCreationTokens: typeof t.cacheWrite === "number" ? t.cacheWrite : undefined,
+		cost: typeof s.cost === "number" ? s.cost : undefined,
+	};
+}
+/** 终止型工具：角色以它提交结构化 RoleResult 并结束 turn（terminate:true + details=params）。 */
+const submitRoleResultTool = defineTool({
+	name: "submit_role_result",
+	label: "Submit Role Result",
+	description: "Submit the final structured RoleResult and end the turn. This is the only way to return your result — never reply with free text.",
+	promptSnippet: "Submit your final RoleResult via submit_role_result.",
+	parameters: Type.Object({
+		roleResult: Type.Any({ description: "Complete RoleResult JSON matching the role-result/v1 schema given in the instruction" }),
+	}),
+	async execute(_toolCallId, params) {
+		return {
+			content: [{ type: "text" as const, text: "RoleResult submitted" }],
+			details: params.roleResult,
+			terminate: true,
+		};
+	},
+});
+
 async function createPiExecutor(): Promise<PiModelExecutor> {
-	return async (input, _tools) => {
-		void _tools;
+	return async (input) => {
 		const model = resolveRoleModel(input.role as WorkflowAgentRole, input.modelRoles);
+		const sessionManager = SessionManager.inMemory(PROJECT_ROOT);
+		// 按 Role Contract 声明的 toolNames 解析工具白名单(Q2.4/C);submit_role_result 永远可用(所有角色收尾)。
+		// 未知名静默丢弃——域工具(@ladybugdb/core 只读探查)是后续票,当前仅 submit 注册。
+		const registeredTools: Record<string, typeof submitRoleResultTool> = { submit_role_result: submitRoleResultTool };
+		const requested = input.toolNames ?? ["submit_role_result"];
+		const resolvedTools = requested
+			.filter((name) => name in registeredTools)
+			.map((name) => registeredTools[name]);
 		const { session } = await createAgentSession({
 			cwd: PROJECT_ROOT,
 			model,
 			modelRuntime,
 			resourceLoader,
-			tools: [],
+			sessionManager,
+			customTools: resolvedTools,
+			tools: requested.filter((name) => name in registeredTools),
 		});
 		await session.prompt(input.instruction);
-		const messages =
-			(session as {
-				state?: { messages?: Array<{ role?: string; content?: unknown }> };
-			}).state?.messages ?? [];
-		let text = "";
-		for (let index = messages.length - 1; index >= 0; index -= 1) {
-			const message = messages[index];
-			if (message.role !== "assistant") continue;
-			if (typeof message.content === "string") {
-				text = message.content;
-				break;
-			}
-			if (Array.isArray(message.content)) {
-			text = (message.content as Array<{ type?: string; text?: string }>)
-					.filter((part) => part.type === "text")
-					.map((part) => part.text ?? "")
-					.join("");
-				break;
-			}
-		}
+		// 优先取终止型工具 details(submit_role_result);无则回退最近一条 assistant 文本 JSON.parse
+		// pi-ai 0.83 message shape: toolResult 消息 role="toolResult" + toolName + details
 		let structuredResult: unknown;
-		try {
-			structuredResult = JSON.parse(text);
-		} catch {
-			structuredResult = { raw: text };
+		let terminationTool: string | undefined;
+		let lastAssistantText = "";
+		const state = "state" in session ? (session as { state?: unknown }).state : undefined;
+		const messages = (state && typeof state === "object" && "messages" in state ? (state as { messages?: unknown }).messages : undefined) ?? [];
+		if (Array.isArray(messages)) {
+			for (let index = messages.length - 1; index >= 0; index -= 1) {
+				const message = messages[index];
+				if (!message || typeof message !== "object") continue;
+				const msg = message as Record<string, unknown>;
+				// 终止型工具结果:role=toolResult,带 details(pi-ai ToolResultMessage)
+				if (msg.role === "toolResult" && msg.details !== undefined) {
+					structuredResult = msg.details;
+					terminationTool = typeof msg.toolName === "string" ? msg.toolName : "unknown";
+					break;
+				}
+				// 已找到终止 details 后不再回退取文本
+				if (terminationTool || lastAssistantText) continue;
+				if (msg.role !== "assistant") continue;
+				if (typeof msg.content === "string") {
+					lastAssistantText = msg.content;
+				} else if (Array.isArray(msg.content)) {
+					lastAssistantText = msg.content
+						.filter((part): part is { type?: string; text?: string } => typeof part === "object" && part !== null && "text" in part)
+						.map((part) => part.text ?? "")
+						.join("");
+				}
+			}
 		}
-		const usage = (session as { state?: { usage?: { inputTokens?: number; outputTokens?: number } } }).state?.usage;
+		if (structuredResult === undefined) {
+			try {
+				structuredResult = JSON.parse(lastAssistantText);
+			} catch {
+				structuredResult = { raw: lastAssistantText };
+			}
+		}
+		// usage: getSessionStats() 聚合(pi-agent 0.83 无 state.usage;旧读法恒返 0)
+		const usage = typeof session.getSessionStats === "function" ? extractUsage(session.getSessionStats()) : {};
 		try {
-			await (session as unknown as { dispose?: () => unknown }).dispose?.();
+			session.dispose();
 		} catch {
 			/* session disposal failure is non-fatal */
 		}
 		return {
 			structuredResult,
+			terminationTool,
 			modelUsage: {
 				provider: model.provider,
 				modelId: model.id,
-				inputTokens: usage?.inputTokens ?? 0,
-				outputTokens: usage?.outputTokens ?? 0,
+				inputTokens: usage.inputTokens ?? 0,
+				outputTokens: usage.outputTokens ?? 0,
+				cacheReadTokens: usage.cacheReadTokens,
+				cacheCreationTokens: usage.cacheCreationTokens,
+				reasoningTokens: usage.reasoningTokens,
+			cost: usage.cost,
 			},
 		};
 	};
