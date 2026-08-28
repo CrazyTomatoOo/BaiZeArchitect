@@ -163,8 +163,16 @@ _Avoid_: pi-ai 全量注册表、模型库、可选一切模型
 _Avoid_: 单模型设置、运行时切换、部分角色覆盖
 
 **Model Usage（模型用量）**:
-Run 记录中的 token 计数与所用 provider/model 身份（token run 事件），支持跨提供方对账。
+Run 记录中的 token 计数、provider/model 身份与计费维度（input/output/cache read/cache creation/reasoning tokens + cost），支持跨提供方对账。
 _Avoid_: 无身份 token 计数、usage 本地日志
+
+**Restricted Domain Tool（受限领域工具）**:
+角色会话可调用、限定 cwd（BAIZE_PROJECT_ROOT）、只读无副作用（无 bash/exec/write）的仓库事实探查工具；工具集白名单由 Role Contract 的 toolNames 声明，装配层按名解析。
+_Avoid_: 任意 shell、模型自律禁令、跨 workspace 工具
+
+**Terminating Tool（终止型工具）**:
+以 `terminate:true` 收尾、用 `details` 载荷提交结构化产出的工具；角色通过它提交 RoleResult，取代自由文本末条解析。
+_Avoid_: response_format 强制、末条文本 JSON.parse 回退为唯一路径
 
 **Outbox Job（事务发件任务）**:
 与治理变化同事务创建、在提交后幂等执行 Run 派发、收尾、中止或再次调度的持久任务。
