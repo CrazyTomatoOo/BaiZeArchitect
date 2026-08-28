@@ -973,16 +973,133 @@ export async function exportAssets(apiBase: string, workspaceId: number): Promis
 	return body;
 }
 
-export async function importAssets(apiBase: string, workspaceId: number, assets: readonly { kind: AssetKind; title: string; content: unknown }[], relations?: readonly AssetRelationExport[]): Promise<readonly number[]> {
-	const response = await fetch(`${apiBase}/api/assets/import`, {
+export interface ImportPreviewSummary {
+	createCount: number;
+	reuseCount: number;
+	relationChanges: number;
+	kindBreakdown: Readonly<Record<AssetKind, number>>;
+	pathConflicts: number;
+	validationErrors: number;
+}
+export interface ImportPreviewResult {
+	summary: ImportPreviewSummary;
+	previewDigest: string;
+}
+export async function previewImportBundle(apiBase: string, workspaceId: number, assets: readonly { kind: AssetKind; title: string; content: unknown }[], relations?: readonly AssetRelationExport[]): Promise<ImportPreviewResult> {
+	const response = await fetch(`${apiBase}/api/assets/import/preview`, {
 		method: "POST",
 		headers: { "Content-Type": "application/json" },
 		credentials: "same-origin",
-		body: JSON.stringify({ workspaceId, assets, ...(relations === undefined ? {} : { relations }) }),
+		body: JSON.stringify({ workspaceId, bundle: { assets, ...(relations === undefined ? {} : { relations }) } }),
 	});
-	if (!response.ok) await throwAssetMutationError(response, "import");
+	if (!response.ok) await throwAssetMutationError(response, "import preview");
+	return (await response.json()) as ImportPreviewResult;
+}
+export async function commitImportBundle(apiBase: string, workspaceId: number, assets: readonly { kind: AssetKind; title: string; content: unknown }[], relations: readonly AssetRelationExport[], previewDigest: string): Promise<readonly number[]> {
+	const response = await fetch(`${apiBase}/api/assets/import/commit`, {
+		method: "POST",
+		headers: { "Content-Type": "application/json" },
+		credentials: "same-origin",
+		body: JSON.stringify({ workspaceId, bundle: { assets, relations }, previewDigest }),
+	});
+	if (!response.ok) await throwAssetMutationError(response, "import commit");
 	const body = (await response.json()) as { assetIds: number[] };
 	return body.assetIds;
+}
+
+// --- Hierarchy API ---
+
+export interface HierarchyRoot {
+	assetId: number;
+	kind: AssetKind;
+	title: string;
+	childCount: number;
+}
+export interface HierarchyPage {
+	roots: readonly HierarchyRoot[];
+	total: number;
+	page: number;
+	pageSize: number;
+	kindCounts: Readonly<Record<AssetKind, number>>;
+}
+export interface HierarchyChild {
+	assetId: number;
+	kind: AssetKind;
+	title: string;
+	childCount: number;
+	position: number;
+}
+export interface HierarchySearchHit {
+	assetId: number;
+	kind: AssetKind;
+	title: string;
+	matchedPath: string[];
+}
+export interface HierarchySearchResult {
+	query: string;
+	hits: readonly HierarchySearchHit[];
+}
+export interface SubtreeNodeInput {
+	kind: AssetKind;
+	title: string;
+	content: unknown;
+	children?: readonly SubtreeNodeInput[];
+}
+export interface SubtreeCreateResult {
+	assets: readonly { assetId: number; kind: AssetKind; title: string }[];
+	relations: readonly { fromAssetId: number; toAssetId: number; type: "contains" | "involves"; position: number }[];
+}
+
+export function getHierarchyRoots(apiBase: string, workspaceId: number, root: AssetKind, opts: { page: number; pageSize: number }): Promise<HierarchyPage> {
+	const params = new URLSearchParams({ workspaceId: String(workspaceId), root, page: String(opts.page), pageSize: String(opts.pageSize) });
+	return fetchJson(apiBase, `/api/assets/hierarchy?${params.toString()}`);
+}
+export function getHierarchyChildren(apiBase: string, parentAssetId: number): Promise<{ children: readonly HierarchyChild[] }> {
+	return fetchJson(apiBase, `/api/assets/hierarchy?parentAssetId=${parentAssetId}`);
+}
+export function searchHierarchyNodes(apiBase: string, workspaceId: number, q: string): Promise<HierarchySearchResult> {
+	const params = new URLSearchParams({ workspaceId: String(workspaceId), q });
+	return fetchJson(apiBase, `/api/assets/hierarchy?${params.toString()}`);
+}
+export async function createHierarchySubtree(apiBase: string, workspaceId: number, tree: SubtreeNodeInput, parentAssetId?: number | null): Promise<SubtreeCreateResult> {
+	const body: Record<string, unknown> = { workspaceId, tree };
+	if (parentAssetId !== undefined && parentAssetId !== null) body.parentAssetId = parentAssetId;
+	const response = await fetch(`${apiBase}/api/assets/hierarchy`, {
+		method: "POST",
+		headers: { "Content-Type": "application/json" },
+		credentials: "same-origin",
+		body: JSON.stringify(body),
+	});
+	if (!response.ok) await throwAssetMutationError(response, "create subtree");
+	return (await response.json()) as SubtreeCreateResult;
+}
+export async function moveHierarchySubtree(apiBase: string, workspaceId: number, assetId: number, expectedRevisionId: number, newParentAssetId: number | null): Promise<void> {
+	const response = await fetch(`${apiBase}/api/assets/hierarchy/move`, {
+		method: "PUT",
+		headers: { "Content-Type": "application/json" },
+		credentials: "same-origin",
+		body: JSON.stringify({ workspaceId, assetId, expectedRevisionId, newParentAssetId }),
+	});
+	if (!response.ok) await throwAssetMutationError(response, "move subtree");
+}
+export async function deleteAssetSubtree(apiBase: string, assetId: number, cascadeSubtree: boolean): Promise<void> {
+	const response = await fetch(`${apiBase}/api/assets/${assetId}`, {
+		method: "DELETE",
+		headers: { "Content-Type": "application/json" },
+		credentials: "same-origin",
+		body: JSON.stringify({ cascadeSubtree }),
+	});
+	if (!response.ok) await throwAssetMutationError(response, "delete subtree");
+}
+export async function previewSubtreeDeletion(apiBase: string, assetId: number): Promise<{ affected: readonly { assetId: number; kind: AssetKind; title: string }[] }> {
+	const response = await fetch(`${apiBase}/api/assets/${assetId}?preview=true`, {
+		method: "DELETE",
+		headers: { "Content-Type": "application/json" },
+		credentials: "same-origin",
+		body: JSON.stringify({}),
+	});
+	if (!response.ok) await throwAssetMutationError(response, "preview deletion");
+	return (await response.json()) as { affected: readonly { assetId: number; kind: AssetKind; title: string }[] };
 }
 
 // ---------------------------------------------------------------------------

@@ -1,13 +1,62 @@
-import { LitElement, html, css, nothing } from "lit";
+import { LitElement, html, css, nothing, type PropertyValues } from "lit";
 import { sharedStyles } from "./baize-styles.js";
-import { ASSET_KINDS, assetKindLabel, createAsset, deleteAsset, exportAssets, getAsset, getAssetGraph, importAssets, listAssets, updateAsset, AssetMutationError, type AssetDetail, type AssetGraph, type AssetKind, type AssetPage, type AssetRelationExport, type AssetResolvedRelation, type AssetSummary, type AssetValidationError } from "./workflow-client.js";
+import {
+	ASSET_KINDS, assetKindLabel, createAsset, deleteAsset, exportAssets, getAsset, getAssetGraph, listAssets, updateAsset,
+	previewImportBundle, commitImportBundle, getHierarchyRoots, getHierarchyChildren, searchHierarchyNodes, createHierarchySubtree, moveHierarchySubtree, deleteAssetSubtree, previewSubtreeDeletion,
+	AssetMutationError,
+	type AssetDetail, type AssetGraph, type AssetKind, type AssetPage, type AssetRelationExport, type AssetResolvedRelation, type AssetSummary, type AssetValidationError,
+	type HierarchyPage, type HierarchyRoot, type HierarchyChild, type HierarchySearchResult, type ImportPreviewResult, type SubtreeCreateResult,
+} from "./workflow-client.js";
 import { fieldTitle } from "./artifact-labels.js";
+import { BaizeApiSwagger } from "./baize-api-swagger.js";
+import { BaizeDataCatalog } from "./baize-data-catalog.js";
+import { BaizeArchitectureDiagram } from "./baize-architecture-diagram.js";
+import { BaizeHierarchyTree } from "./baize-hierarchy-tree.js";
 
-type AssetView = AssetKind | "graph";
+// --- 9 aggregated workbench tabs (fixed order) ---
+
+type WorkbenchTab = "scenario" | "function" | "usecase" | "design" | "architecture" | "data" | "api" | "stakeholder" | "graph";
+
+const TAB_ORDER: readonly WorkbenchTab[] = ["scenario", "function", "usecase", "design", "architecture", "data", "api", "stakeholder", "graph"];
+
+const TAB_LABELS: Record<WorkbenchTab, string> = {
+	scenario: "场景库",
+	function: "功能库",
+	usecase: "用例库",
+	design: "设计库",
+	architecture: "架构库",
+	data: "数据库",
+	api: "接口库",
+	stakeholder: "干系人库",
+	graph: "关系图",
+};
+
+/** Kinds aggregated by each non-graph tab. */
+const TAB_KINDS: Record<Exclude<WorkbenchTab, "graph">, readonly AssetKind[]> = {
+	scenario: ["scenario-domain", "scenario", "scenario-variant"],
+	function: ["function-domain", "function-item", "function-point"],
+	usecase: ["usecase"],
+	design: ["design"],
+	architecture: ["architecture"],
+	data: ["data"],
+	api: ["api"],
+	stakeholder: ["stakeholder"],
+};
+
+/** Map kind → tab for navigation from graph/detail. */
+const KIND_TO_TAB: Record<AssetKind, WorkbenchTab> = Object.fromEntries(
+	ASSET_KINDS.map((kind) => {
+		for (const [tab, kinds] of Object.entries(TAB_KINDS)) {
+			if ((kinds as readonly string[]).includes(kind)) return [kind, tab as WorkbenchTab];
+		}
+		return [kind, "stakeholder" as WorkbenchTab];
+	}),
+) as Record<AssetKind, WorkbenchTab>;
+
+/** Kinds that use the hierarchy tree view. */
+const HIERARCHY_KINDS: readonly string[] = ["scenario-domain", "scenario", "scenario-variant", "function-domain", "function-item", "function-point"];
 
 type Renderable = ReturnType<typeof html> | typeof nothing;
-const ASSET_VIEWS: readonly AssetView[] = [...ASSET_KINDS, "graph"];
-const HIERARCHY_KINDS: readonly string[] = ["scenario-domain", "scenario", "scenario-variant", "function-domain", "function-item", "function-point"];
 const PAGE_SIZE_OPTIONS = [12, 24, 48] as const;
 
 function emptyKindCounts(): Record<AssetKind, number> {
@@ -19,14 +68,14 @@ function positiveInteger(value: string | null, fallback: number): number {
 	return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : fallback;
 }
 
-function isAssetView(value: string | null): value is AssetView {
-	return value !== null && ASSET_VIEWS.includes(value as AssetView);
+function isWorkbenchTab(value: string | null): value is WorkbenchTab {
+	return value !== null && (TAB_ORDER as readonly string[]).includes(value);
 }
-
 
 function relationTypeLabel(type: AssetResolvedRelation["type"]): string {
 	return type === "contains" ? "包含" : "涉及";
 }
+
 function arrayItemLabel(value: unknown, index: number): string {
 	if (typeof value === "object" && value !== null && !Array.isArray(value)) {
 		const record = value as Record<string, unknown>;
@@ -36,9 +85,11 @@ function arrayItemLabel(value: unknown, index: number): string {
 	}
 	return `条目 ${index + 1}`;
 }
+
 function assetKey(kind: AssetKind, title: string): string {
 	return `${kind}\u0000${title}`;
 }
+
 function assetContentWarning(kind: AssetKind, content: unknown): string | null {
 	if (typeof content !== "object" || content === null || Array.isArray(content)) return "内容不是结构化对象，按原始内容展示。";
 	const record = content as Record<string, unknown>;
@@ -51,32 +102,11 @@ function assetContentWarning(kind: AssetKind, content: unknown): string | null {
 		if (typeof record.nodeId !== "string" || record.nodeId.length === 0) return "内容缺少有效节点标识。";
 		return null;
 	}
-	if (record.schemaVersion !== `artifact/${kind}/v1` || record.artifactKind !== kind) return "内容 schema 与资产类型不匹配。";
-	if (typeof record.summary !== "string" || record.summary.trim().length === 0) return "内容缺少有效摘要。";
-	const requiredArrays: Partial<Record<string, readonly string[]>> = {
-		scenario: ["domains"],
-		function: ["domains"],
-		usecase: ["useCases"],
-		design: ["changeUnits", "alternatives", "failureHandling", "testStrategy", "implementationOrder"],
-		architecture: ["components", "nonFunctionalRequirements"],
-		data: ["entities"],
-		api: ["paths"],
-	};
-	for (const key of requiredArrays[kind] ?? []) if (!Array.isArray(record[key]) || (record[key] as unknown[]).length === 0) return `内容缺少有效${fieldTitle(key)}。`;
 	return null;
 }
-function isPromotedAssetItem(kind: AssetKind, record: Record<string, unknown>): boolean {
-	switch (kind) {
-		case "scenario-variant": return typeof record.nodeId === "string" && typeof record.title === "string" && Array.isArray(record.actors);
-		case "usecase": return typeof record.id === "string" && typeof record.actor === "string" && typeof record.goal === "string";
-		case "function-point": return typeof record.nodeId === "string" && typeof record.name === "string" && typeof record.responsibility === "string";
-		case "design": return typeof record.id === "string" && typeof record.area === "string" && typeof record.change === "string";
-		case "architecture": return typeof record.componentId === "string" && typeof record.name === "string" && typeof record.responsibility === "string";
-		case "data": return typeof record.entityId === "string" && typeof record.name === "string" && Array.isArray(record.fields);
-		case "stakeholder": return typeof record.name === "string";
-		default: return false;
-	}
-}
+
+// --- Form field definitions (for non-specialized kinds: usecase, design, stakeholder) ---
+
 type FormFieldType = "text" | "number" | "textarea" | "list" | "number-list" | "object-list";
 interface FormField {
 	key: string;
@@ -85,16 +115,6 @@ interface FormField {
 	itemFields?: readonly FormField[];
 }
 
-const scenarioVariantFields: readonly FormField[] = [
-	{ key: "nodeId", label: "节点标识", type: "text" },
-	{ key: "title", label: "标题", type: "text" },
-	{ key: "actors", label: "干系人", type: "list" },
-	{ key: "preconditions", label: "前置条件", type: "list" },
-	{ key: "trigger", label: "触发条件", type: "textarea" },
-	{ key: "mainFlow", label: "主流程", type: "list" },
-	{ key: "alternateFlows", label: "备选流程", type: "list" },
-	{ key: "expectedOutcome", label: "预期结果", type: "textarea" },
-];
 const usecaseFields: readonly FormField[] = [
 	{ key: "id", label: "标识", type: "text" },
 	{ key: "actor", label: "干系人", type: "text" },
@@ -104,24 +124,7 @@ const usecaseFields: readonly FormField[] = [
 	{ key: "alternativeFlows", label: "备选流程", type: "list" },
 	{ key: "postconditions", label: "后置条件", type: "list" },
 ];
-const functionPointFields: readonly FormField[] = [
-	{ key: "nodeId", label: "节点标识", type: "text" },
-	{ key: "name", label: "名称", type: "text" },
-	{ key: "responsibility", label: "职责", type: "textarea" },
-	{ key: "inputs", label: "输入", type: "list" },
-	{ key: "outputs", label: "输出", type: "list" },
-	{ key: "businessRules", label: "业务规则", type: "list" },
-	{ key: "acceptanceCriteria", label: "验收标准", type: "list" },
-];
-const orgNodeFields: readonly FormField[] = [
-	{ key: "nodeId", label: "节点标识", type: "text" },
-	{ key: "title", label: "标题", type: "text" },
-	{ key: "description", label: "描述", type: "textarea" },
-];
 const designChangeUnitFields: readonly FormField[] = [{ key: "id", label: "标识", type: "text" }, { key: "area", label: "区域", type: "text" }, { key: "change", label: "变更", type: "textarea" }, { key: "rationale", label: "理由", type: "textarea" }, { key: "sourceRefs", label: "来源引用", type: "object-list", itemFields: [{ key: "type", label: "类型", type: "text" }, { key: "revisionId", label: "版本号", type: "number" }] }];
-const architectureComponentFields: readonly FormField[] = [{ key: "componentId", label: "组件标识", type: "text" }, { key: "name", label: "名称", type: "text" }, { key: "responsibility", label: "职责", type: "textarea" }, { key: "layer", label: "层级", type: "text" }, { key: "boundary", label: "边界", type: "text" }];
-const architectureRelationshipFields: readonly FormField[] = [{ key: "relationshipId", label: "关系标识", type: "text" }, { key: "fromComponentId", label: "起点组件", type: "text" }, { key: "toComponentId", label: "终点组件", type: "text" }, { key: "interaction", label: "交互", type: "textarea" }, { key: "type", label: "类型", type: "text" }];
-const dataEntityFields: readonly FormField[] = [{ key: "entityId", label: "实体标识", type: "text" }, { key: "name", label: "名称", type: "text" }, { key: "description", label: "描述", type: "textarea" }, { key: "fields", label: "字段", type: "object-list", itemFields: [{ key: "fieldId", label: "字段标识", type: "text" }, { key: "name", label: "名称", type: "text" }, { key: "type", label: "类型", type: "text" }, { key: "nullable", label: "可空", type: "text" }, { key: "description", label: "描述", type: "textarea" }] }, { key: "primaryKey", label: "主键", type: "list" }, { key: "indexes", label: "索引", type: "object-list", itemFields: [{ key: "name", label: "名称", type: "text" }, { key: "fields", label: "字段", type: "list" }] }];
 const designFields: readonly FormField[] = [
 	{ key: "summary", label: "摘要", type: "textarea" },
 	{ key: "changeUnits", label: "变更单元", type: "object-list", itemFields: designChangeUnitFields },
@@ -132,45 +135,9 @@ const designFields: readonly FormField[] = [
 	{ key: "rolloutStrategy", label: "上线策略", type: "textarea" },
 	{ key: "rollbackStrategy", label: "回滚策略", type: "textarea" },
 ];
-const architectureFields: readonly FormField[] = [
-	{ key: "summary", label: "摘要", type: "textarea" },
-	{ key: "components", label: "组件", type: "object-list", itemFields: architectureComponentFields },
-	{ key: "relationships", label: "关系", type: "object-list", itemFields: architectureRelationshipFields },
-	{ key: "constraints", label: "约束", type: "list" },
-	{ key: "nonFunctionalRequirements", label: "非功能需求", type: "list" },
-];
-const dataFields: readonly FormField[] = [
-	{ key: "summary", label: "摘要", type: "textarea" },
-	{ key: "entities", label: "实体", type: "object-list", itemFields: dataEntityFields },
-	{ key: "relations", label: "关系", type: "object-list", itemFields: [{ key: "fromEntityId", label: "起点实体", type: "text" }, { key: "fromFieldIds", label: "起点字段", type: "list" }, { key: "toEntityId", label: "终点实体", type: "text" }, { key: "cardinality", label: "基数", type: "text" }] },
-];
-const apiFields: readonly FormField[] = [
-	{ key: "summary", label: "摘要", type: "textarea" },
-	{ key: "openapi", label: "OpenAPI版本", type: "text" },
-	{ key: "info", label: "接口信息(JSON)", type: "textarea" },
-	{ key: "paths", label: "路径", type: "textarea" },
-];
-const FORM_FIELDS: Record<AssetKind, readonly FormField[]> = {
-	"scenario-domain": orgNodeFields,
-	scenario: orgNodeFields,
-	"scenario-variant": scenarioVariantFields,
-	"function-domain": orgNodeFields,
-	"function-item": orgNodeFields,
-	"function-point": functionPointFields,
+const FORM_FIELDS: Partial<Record<AssetKind, readonly FormField[]>> = {
 	design: designFields,
-	architecture: architectureFields,
-	data: dataFields,
-	api: apiFields,
 	usecase: [{ key: "summary", label: "摘要", type: "textarea" }, { key: "useCases", label: "用例", type: "object-list", itemFields: usecaseFields }],
-	stakeholder: [{ key: "name", label: "名称", type: "text" }, { key: "description", label: "描述", type: "textarea" }],
-};
-const PROMOTED_ITEM_FIELDS: Partial<Record<AssetKind, readonly FormField[]>> = {
-	"scenario-variant": scenarioVariantFields,
-	usecase: usecaseFields,
-	"function-point": functionPointFields,
-	design: designChangeUnitFields,
-	architecture: architectureComponentFields,
-	data: dataEntityFields,
 };
 
 const RELATION_TARGETS: Record<AssetKind, readonly { kind: AssetKind; type: "contains" | "involves" }[]> = {
@@ -189,22 +156,19 @@ const RELATION_TARGETS: Record<AssetKind, readonly { kind: AssetKind; type: "con
 };
 
 interface ImportDraft {
+	preview: ImportPreviewResult;
 	assets: readonly { kind: AssetKind; title: string; content: unknown }[];
-	relations?: readonly AssetRelationExport[];
-	createdCount: number;
-	reusedCount: number;
-	kindCounts: Readonly<Record<AssetKind, number>>;
-	relationAddedCount: number;
-	relationRemovedCount: number;
-	relationKeptCount: number;
+	relations: readonly AssetRelationExport[];
 }
+
+/** Kinds that use specialized views instead of generic forms. */
+const SPECIALIZED_VIEW_KINDS: ReadonlySet<string> = new Set(["api", "data", "architecture", ...HIERARCHY_KINDS]);
 
 class BaizeAssetLibrary extends LitElement {
 	static properties = {
 		apiBase: { type: String, attribute: "api-base" },
 		workspaceId: { type: Number, attribute: "workspace-id" },
-		assets: { state: true },
-		activeView: { state: true },
+		activeTab: { state: true },
 		query: { state: true },
 		page: { state: true },
 		pageSize: { state: true },
@@ -237,12 +201,13 @@ class BaizeAssetLibrary extends LitElement {
 		relationError: { state: true },
 		loading: { state: true },
 		error: { state: true },
+		expandedNodes: { state: true },
+		narrowView: { state: true },
 	};
 
 	declare apiBase: string;
 	declare workspaceId: number;
-	declare assets: readonly AssetSummary[];
-	declare activeView: AssetView;
+	declare activeTab: WorkbenchTab;
 	declare query: string;
 	declare page: number;
 	declare pageSize: number;
@@ -275,7 +240,10 @@ class BaizeAssetLibrary extends LitElement {
 	declare relationError: string | null;
 	declare loading: boolean;
 	declare error: string | null;
+	declare expandedNodes: ReadonlySet<number>;
+	declare narrowView: boolean;
 	private detailRequestNo = 0;
+	private mediaQuery: MediaQueryList | null = null;
 
 	static styles = [sharedStyles, css`
 		:host {
@@ -292,14 +260,9 @@ class BaizeAssetLibrary extends LitElement {
 		}
 		.workspace { display: grid; gap: var(--gap); }
 		.toolbar {
-			position: sticky;
-			top: 0;
-			z-index: 2;
-			display: grid;
-			gap: var(--gap);
-			padding: var(--pad) 0;
-			background: var(--bg);
-			border-bottom: 1px solid var(--border);
+			position: sticky; top: 0; z-index: 2;
+			display: grid; gap: var(--gap); padding: var(--pad) 0;
+			background: var(--bg); border-bottom: 1px solid var(--border);
 		}
 		.toolbar-head { display: flex; align-items: start; justify-content: space-between; gap: var(--gap); }
 		.heading { min-width: 0; }
@@ -309,15 +272,10 @@ class BaizeAssetLibrary extends LitElement {
 		.toolbar-actions { display: flex; align-items: center; justify-content: flex-start; gap: var(--gap); flex-wrap: wrap; }
 		.search { width: min(280px, 30vw); }
 		.tabs {
-			position: sticky;
-			top: var(--asset-toolbar-offset);
-			z-index: 2;
-			display: flex;
-			gap: var(--space-2xs);
-			overflow-x: auto;
+			position: sticky; top: var(--asset-toolbar-offset); z-index: 2;
+			display: flex; gap: var(--space-2xs); overflow-x: auto;
 			padding: var(--space-2xs) 0;
-			background: var(--bg);
-			border-bottom: 1px solid var(--border);
+			background: var(--bg); border-bottom: 1px solid var(--border);
 		}
 		.tab { border: 0; border-bottom: 2px solid transparent; border-radius: 0; padding: var(--space-2xs) var(--gap); color: var(--text-muted); }
 		.tab:hover { color: var(--text); }
@@ -385,6 +343,7 @@ class BaizeAssetLibrary extends LitElement {
 		.file-button { display: inline-flex; align-items: center; position: relative; padding: var(--space-2xs) var(--pad); border: 1px solid var(--border-strong); border-radius: var(--radius); color: var(--text); cursor: pointer; white-space: nowrap; }
 		.file-button:hover { background: var(--surface-hover); }
 		.file-button:focus-within { outline: var(--focus-ring); outline-offset: 1px; }
+		.mobile-back { display: none; }
 		@media (max-width: 900px) {
 			.toolbar { top: 0; }
 			.toolbar-actions { align-items: stretch; }
@@ -393,6 +352,7 @@ class BaizeAssetLibrary extends LitElement {
 			.content { grid-template-columns: minmax(0, 1fr); }
 			.pane { height: auto; max-height: none; overflow: visible; }
 			.detail-pane { min-height: var(--asset-placeholder-height); }
+			.mobile-back { display: inline-flex; }
 		}
 	`];
 
@@ -400,8 +360,7 @@ class BaizeAssetLibrary extends LitElement {
 		super();
 		this.apiBase = "";
 		this.workspaceId = 0;
-		this.assets = [];
-		this.activeView = "design";
+		this.activeTab = "scenario";
 		this.query = "";
 		this.page = 1;
 		this.pageSize = 12;
@@ -432,18 +391,24 @@ class BaizeAssetLibrary extends LitElement {
 		this.relationError = null;
 		this.loading = true;
 		this.error = null;
+		this.expandedNodes = new Set();
+		this.narrowView = false;
 		this.readUrl();
 	}
 
 	connectedCallback(): void {
 		super.connectedCallback();
 		window.addEventListener("popstate", this.handlePopState);
+		this.mediaQuery = window.matchMedia("(max-width: 1023px)");
+		this.narrowView = this.mediaQuery.matches;
+		this.mediaQuery.addEventListener("change", this.handleMediaChange);
 		void this.load();
 		if (this.selectedAssetId !== null) void this.loadDetail(this.selectedAssetId);
 	}
 
 	disconnectedCallback(): void {
 		window.removeEventListener("popstate", this.handlePopState);
+		this.mediaQuery?.removeEventListener("change", this.handleMediaChange);
 		super.disconnectedCallback();
 	}
 
@@ -457,10 +422,14 @@ class BaizeAssetLibrary extends LitElement {
 		if (this.selectedAssetId !== null) void this.loadDetail(this.selectedAssetId);
 	};
 
+	private readonly handleMediaChange = (event: MediaQueryListEvent): void => {
+		this.narrowView = event.matches;
+	};
+
 	private readUrl(): void {
 		const params = new URLSearchParams(window.location.search);
-		const view = params.get("kind");
-		this.activeView = isAssetView(view) ? view : "design";
+		const tab = params.get("tab");
+		this.activeTab = isWorkbenchTab(tab) ? tab : "scenario";
 		this.query = params.get("q") ?? "";
 		this.page = positiveInteger(params.get("page"), 1);
 		this.pageSize = positiveInteger(params.get("pageSize"), 12);
@@ -471,11 +440,17 @@ class BaizeAssetLibrary extends LitElement {
 		const zoom = Number(params.get("graphZoom"));
 		this.graphZoom = Number.isFinite(zoom) && zoom >= 0.6 && zoom <= 2 ? zoom : 1;
 		this.graphOffset = { x: Number(params.get("graphX")) || 0, y: Number(params.get("graphY")) || 0 };
+		const expanded = params.get("expandedNodes");
+		if (expanded !== null) {
+			this.expandedNodes = new Set(expanded.split(",").map(Number).filter((n) => Number.isInteger(n) && n > 0));
+		} else {
+			this.expandedNodes = new Set();
+		}
 	}
 
-	private updateUrl(changes: Partial<{ kind: AssetView; q: string; page: number; pageSize: number; selectedAssetId: number | null; graphKind: AssetKind | null; graphZoom: number; graphX: number; graphY: number }>, replace = false): void {
+	private updateUrl(changes: Partial<{ tab: WorkbenchTab; q: string; page: number; pageSize: number; selectedAssetId: number | null; graphKind: AssetKind | null; graphZoom: number; graphX: number; graphY: number; expandedNodes: string }>, replace = false): void {
 		const params = new URLSearchParams(window.location.search);
-		if (changes.kind !== undefined) params.set("kind", changes.kind);
+		if (changes.tab !== undefined) params.set("tab", changes.tab);
 		if (changes.q !== undefined) changes.q.length > 0 ? params.set("q", changes.q) : params.delete("q");
 		if (changes.page !== undefined) params.set("page", String(changes.page));
 		if (changes.pageSize !== undefined) params.set("pageSize", String(changes.pageSize));
@@ -490,6 +465,10 @@ class BaizeAssetLibrary extends LitElement {
 		if (changes.graphZoom !== undefined) params.set("graphZoom", String(changes.graphZoom));
 		if (changes.graphX !== undefined) params.set("graphX", String(changes.graphX));
 		if (changes.graphY !== undefined) params.set("graphY", String(changes.graphY));
+		if (changes.expandedNodes !== undefined) {
+			if (changes.expandedNodes.length > 0) params.set("expandedNodes", changes.expandedNodes);
+			else params.delete("expandedNodes");
+		}
 		const query = params.toString();
 		const url = query.length > 0 ? `/assets?${query}` : "/assets";
 		if (replace) window.history.replaceState({}, "", url);
@@ -499,18 +478,21 @@ class BaizeAssetLibrary extends LitElement {
 
 	private async load(): Promise<void> {
 		if (this.workspaceId <= 0) return;
-		if (this.activeView === "graph") {
+		if (this.activeTab === "graph") {
 			await Promise.all([this.loadGraph(), this.loadKindCounts()]);
+			return;
+		}
+		const tabKinds = TAB_KINDS[this.activeTab];
+		if (this.activeTab === "scenario" || this.activeTab === "function") {
+			await this.loadHierarchyRoots(tabKinds[0]!);
 			return;
 		}
 		this.loading = true;
 		this.error = null;
 		try {
+			const kind = tabKinds[0]!;
 			const result: AssetPage = await listAssets(this.apiBase, this.workspaceId, {
-				page: this.page,
-				pageSize: this.pageSize,
-				kind: this.activeView,
-				q: this.query,
+				page: this.page, pageSize: this.pageSize, kind, q: this.query,
 			});
 			this.assets = result.assets;
 			this.total = result.total;
@@ -528,6 +510,31 @@ class BaizeAssetLibrary extends LitElement {
 			this.loading = false;
 		}
 	}
+
+	declare assets: readonly (AssetSummary | HierarchyRoot)[];
+
+	private async loadHierarchyRoots(rootKind: AssetKind): Promise<void> {
+		this.loading = true;
+		this.error = null;
+		try {
+			const result: HierarchyPage = await getHierarchyRoots(this.apiBase, this.workspaceId, rootKind, { page: this.page, pageSize: this.pageSize });
+			this.assets = result.roots;
+			this.total = result.total;
+			this.page = result.page;
+			this.pageSize = result.pageSize;
+			this.kindCounts = result.kindCounts;
+			if (this.selectedAssetId === null && result.roots[0]) {
+				this.selectedAssetId = result.roots[0].assetId;
+				this.updateUrl({ selectedAssetId: this.selectedAssetId }, true);
+				void this.loadDetail(this.selectedAssetId);
+			}
+		} catch (error) {
+			this.error = error instanceof Error ? error.message : String(error);
+		} finally {
+			this.loading = false;
+		}
+	}
+
 	private async loadDetail(assetId: number): Promise<void> {
 		const requestNo = ++this.detailRequestNo;
 		this.detailLoading = true;
@@ -544,10 +551,7 @@ class BaizeAssetLibrary extends LitElement {
 			if (requestNo === this.detailRequestNo) this.detailLoading = false;
 		}
 	}
-	private fieldsForDraft(kind: AssetKind, draft: Record<string, unknown>): readonly FormField[] {
-		if (kind !== "stakeholder" && !("schemaVersion" in draft) && !("artifactKind" in draft)) return PROMOTED_ITEM_FIELDS[kind] ?? FORM_FIELDS[kind];
-		return FORM_FIELDS[kind];
-	}
+
 	private async loadGraph(): Promise<void> {
 		this.loading = true;
 		this.error = null;
@@ -559,6 +563,7 @@ class BaizeAssetLibrary extends LitElement {
 			this.loading = false;
 		}
 	}
+
 	private async loadKindCounts(): Promise<void> {
 		try {
 			const result = await listAssets(this.apiBase, this.workspaceId, { page: 1, pageSize: 1, kind: "design" });
@@ -567,6 +572,7 @@ class BaizeAssetLibrary extends LitElement {
 			this.error = error instanceof Error ? error.message : String(error);
 		}
 	}
+
 	private async loadRelationCandidates(kind: AssetKind): Promise<void> {
 		const targetKinds = new Set(RELATION_TARGETS[kind].map((target) => target.kind));
 		if (targetKinds.size === 0) {
@@ -592,7 +598,8 @@ class BaizeAssetLibrary extends LitElement {
 			...(isHierarchy ? {} : { artifactKind: kind }),
 			...(isHierarchy ? {} : { sourceRefs: [] as unknown[] }),
 		};
-		for (const field of FORM_FIELDS[kind]) draft[field.key] = field.type === "list" || field.type === "number-list" || field.type === "object-list" ? [] : "";
+		const fields = FORM_FIELDS[kind] ?? [];
+		for (const field of fields) draft[field.key] = field.type === "list" || field.type === "number-list" || field.type === "object-list" ? [] : "";
 		return draft;
 	}
 
@@ -618,18 +625,22 @@ class BaizeAssetLibrary extends LitElement {
 	}
 
 	private openCreate(): void {
-		if (this.activeView === "graph") return;
-		this.formKind = this.activeView;
+		if (this.activeTab === "graph") return;
+		const kinds = TAB_KINDS[this.activeTab];
+		const kind = kinds[0]!;
+		if (SPECIALIZED_VIEW_KINDS.has(kind)) return; // specialized views handle creation internally
+		this.formKind = kind;
 		this.formMode = "create";
 		this.formAssetId = null;
 		this.formExpectedRevisionId = null;
 		this.formTitle = "";
-		this.formDraft = this.createDraft(this.activeView);
+		this.formDraft = this.createDraft(kind);
 		this.formRelations = [];
 		this.formError = null;
 		this.relationError = null;
-		void this.loadRelationCandidates(this.activeView);
+		void this.loadRelationCandidates(kind);
 	}
+
 	private openEdit(): void {
 		const detail = this.detail;
 		const current = detail?.revisions.find((revision) => revision.id === detail.currentRevisionId) ?? detail?.revisions.at(-1);
@@ -648,7 +659,6 @@ class BaizeAssetLibrary extends LitElement {
 		this.relationError = null;
 		void this.loadRelationCandidates(detail.kind);
 	}
-
 
 	private cancelForm(): void {
 		this.formMode = null;
@@ -742,10 +752,11 @@ class BaizeAssetLibrary extends LitElement {
 				${field.type === "textarea"
 					? html`<textarea rows="3" .value=${valueText} @input=${(event: Event) => this.setDraftValue(path, (event.target as HTMLTextAreaElement).value)}></textarea>`
 					: html`<input type=${field.type === "number" ? "number" : "text"} .value=${valueText} @input=${(event: Event) => this.setDraftValue(path, field.type === "number" ? Number((event.target as HTMLInputElement).value) : (event.target as HTMLInputElement).value)} />`}
-		</label>
-		${this.formFieldErrors[field.key] ? html`<p class="form-error form-field-error">${this.formFieldErrors[field.key]}</p>` : nothing}
-	</div>`;
+			</label>
+			${this.formFieldErrors[field.key] ? html`<p class="form-error form-field-error">${this.formFieldErrors[field.key]}</p>` : nothing}
+		</div>`;
 	}
+
 	private renderFormRelations(): Renderable {
 		if (!this.formKind) return nothing;
 		const validTargets = RELATION_TARGETS[this.formKind];
@@ -791,25 +802,26 @@ class BaizeAssetLibrary extends LitElement {
 			if (!result) throw new Error("无法确定待更新的资产版本。");
 			this.cancelForm();
 			this.selectedAssetId = result.assetId;
-			this.updateUrl({ kind, q: "", page: 1, selectedAssetId: result.assetId });
+			this.updateUrl({ selectedAssetId: result.assetId });
 			await this.load();
 			await this.loadDetail(result.assetId);
-	} catch (error) {
-		if (error instanceof AssetMutationError) {
-			this.formError = error.message;
-			this.formFieldErrors = {};
-			for (const ve of error.validationErrors) {
-				const key = ve.path.split("/").filter(Boolean).pop() ?? "";
-				if (key) this.formFieldErrors[key] = ve.message;
+		} catch (error) {
+			if (error instanceof AssetMutationError) {
+				this.formError = error.message;
+				this.formFieldErrors = {};
+				for (const ve of error.validationErrors) {
+					const key = ve.path.split("/").filter(Boolean).pop() ?? "";
+					if (key) this.formFieldErrors[key] = ve.message;
+				}
+			} else {
+				this.formError = error instanceof Error ? error.message : String(error);
+				this.formFieldErrors = {};
 			}
-		} else {
-			this.formError = error instanceof Error ? error.message : String(error);
-			this.formFieldErrors = {};
+		} finally {
+			this.formSubmitting = false;
 		}
-	} finally {
-		this.formSubmitting = false;
 	}
-	}
+
 	private async handleImportFile(event: Event): Promise<void> {
 		const input = event.target as HTMLInputElement;
 		const file = input.files?.[0];
@@ -832,11 +844,19 @@ class BaizeAssetLibrary extends LitElement {
 					if (typeof current === "object" && current !== null && !Array.isArray(current)) content = (current as Record<string, unknown>).content;
 				}
 				if (typeof kind !== "string" || !ASSET_KINDS.includes(kind as AssetKind) || typeof title !== "string" || content === undefined) throw new Error("资产条目必须包含有效 kind、title 和 content。");
+				// Auto-supplement BaiZe extension fields for pure OpenAPI import
+				if (kind === "api" && typeof content === "object" && content !== null && !Array.isArray(content) && !("schemaVersion" in content)) {
+					const apiContent = content as Record<string, unknown>;
+					const info = apiContent.info as Record<string, unknown> | undefined;
+					apiContent.schemaVersion = "asset/api/v1";
+					apiContent.artifactKind = "api";
+					apiContent.summary = typeof info?.title === "string" ? info.title : "Imported API";
+					apiContent.sourceRefs = [];
+					content = apiContent;
+				}
 				assets.push({ kind: kind as AssetKind, title, content });
 			}
-			const kindCounts = emptyKindCounts();
-			for (const asset of assets) kindCounts[asset.kind] += 1;
-			let relations: AssetRelationExport[] | undefined;
+			let relations: AssetRelationExport[] = [];
 			if (record.relations !== undefined) {
 				if (!Array.isArray(record.relations)) throw new Error("relations 必须是数组。");
 				relations = [];
@@ -848,28 +868,8 @@ class BaizeAssetLibrary extends LitElement {
 					relations.push({ fromTitle: value.fromTitle, fromKind: value.fromKind as AssetKind, toTitle: value.toTitle, toKind: value.toKind as AssetKind, type: value.type });
 				}
 			}
-			let existingGraph = this.graph;
-			if (!existingGraph) {
-				try {
-					existingGraph = await getAssetGraph(this.apiBase, this.workspaceId);
-				} catch {
-					existingGraph = null;
-				}
-			}
-			const existingByKey = new Map((existingGraph?.nodes ?? []).map((node) => [assetKey(node.kind, node.title), node.assetId]));
-			const reusedCount = assets.filter((asset) => existingByKey.has(assetKey(asset.kind, asset.title))).length;
-			const importedRelationKeys = new Set((relations ?? []).map((relation) => `${assetKey(relation.fromKind, relation.fromTitle)}→${assetKey(relation.toKind, relation.toTitle)}:${relation.type}`));
-			const existingNodeKeys = new Map((existingGraph?.nodes ?? []).map((node) => [node.assetId, assetKey(node.kind, node.title)]));
-			const bundleKeys = new Set(assets.map((asset) => assetKey(asset.kind, asset.title)));
-			const existingRelationKeys = new Set((existingGraph?.edges ?? []).flatMap((edge) => {
-				const from = existingNodeKeys.get(edge.fromAssetId);
-				const to = existingNodeKeys.get(edge.toAssetId);
-				return from && to && bundleKeys.has(from) ? [`${from}→${to}:${edge.type}`] : [];
-			}));
-			const relationAddedCount = [...importedRelationKeys].filter((key) => !existingRelationKeys.has(key)).length;
-			const relationRemovedCount = relations === undefined ? 0 : [...existingRelationKeys].filter((key) => !importedRelationKeys.has(key)).length;
-			const relationKeptCount = [...importedRelationKeys].filter((key) => existingRelationKeys.has(key)).length;
-			this.importDraft = { assets, relations, createdCount: assets.length - reusedCount, reusedCount, kindCounts, relationAddedCount, relationRemovedCount, relationKeptCount };
+			const preview = await previewImportBundle(this.apiBase, this.workspaceId, assets, relations);
+			this.importDraft = { preview, assets, relations };
 			this.importError = null;
 		} catch (error) {
 			this.importDraft = null;
@@ -882,7 +882,7 @@ class BaizeAssetLibrary extends LitElement {
 		this.importSubmitting = true;
 		this.importError = null;
 		try {
-			const ids = await importAssets(this.apiBase, this.workspaceId, this.importDraft.assets, this.importDraft.relations);
+			const ids = await commitImportBundle(this.apiBase, this.workspaceId, this.importDraft.assets, this.importDraft.relations, this.importDraft.preview.previewDigest);
 			this.importDraft = null;
 			if (ids[0]) {
 				this.selectedAssetId = ids[0];
@@ -901,10 +901,10 @@ class BaizeAssetLibrary extends LitElement {
 		try {
 			const bundle = await exportAssets(this.apiBase, this.workspaceId);
 			const url = URL.createObjectURL(new Blob([JSON.stringify(bundle, null, 2)], { type: "application/json" }));
-			const link = document.createElement("a");
-			link.href = url;
-			link.download = "baize-assets.json";
-			link.click();
+			const a = document.createElement("a");
+			a.href = url;
+			a.download = `assets-${this.workspaceId}.json`;
+			a.click();
 			URL.revokeObjectURL(url);
 		} catch (error) {
 			this.error = error instanceof Error ? error.message : String(error);
@@ -936,12 +936,14 @@ class BaizeAssetLibrary extends LitElement {
 			this.deleteError = error instanceof Error ? error.message : String(error);
 		}
 	}
+
 	private renderForm(): Renderable {
 		if (this.formMode === null || this.formKind === null || this.formDraft === null) return nothing;
+		const fields = FORM_FIELDS[this.formKind] ?? [];
 		return html`<form class="form" @submit=${(event: Event) => void this.submitForm(event)}>
 			<header><h2>${this.formMode === "create" ? "新建" : "编辑"}${assetKindLabel(this.formKind)}资产</h2><p class="detail-sub">严格遵循当前类型 v1 业务字段。</p></header>
 			<div class="form-field"><label>资产标题<input required .value=${this.formTitle} @input=${(event: Event) => { const value = (event.target as HTMLInputElement).value; this.formTitle = value; if (this.formKind === "stakeholder") this.setDraftValue(["name"], value); }} /></label></div>
-			${this.fieldsForDraft(this.formKind, this.formDraft).map((field) => this.renderFormField(field, [field.key]))}
+			${fields.map((field) => this.renderFormField(field, [field.key]))}
 			${this.renderFormRelations()}
 			${this.formError ? html`<p class="form-error" role="alert">${this.formError}</p>` : ""}
 			<div class="form-actions">
@@ -951,12 +953,12 @@ class BaizeAssetLibrary extends LitElement {
 		</form>`;
 	}
 
-
-	private chooseView(view: AssetView): void {
-		this.updateUrl({ kind: view, page: 1 });
+	private chooseTab(tab: WorkbenchTab): void {
+		this.updateUrl({ tab, page: 1, q: "" });
 		this.assets = [];
 		this.total = 0;
 		this.formMode = null;
+		this.selectedAssetId = null;
 		void this.load();
 	}
 
@@ -980,16 +982,19 @@ class BaizeAssetLibrary extends LitElement {
 
 	private renderTabs() {
 		return html`<nav class="tabs" aria-label="资产类型">
-			${ASSET_VIEWS.map((view) => html`
-				<button
-					class="tab ${this.activeView === view ? "active" : ""}"
-					aria-current=${this.activeView === view ? "page" : "false"}
-					@click=${() => this.chooseView(view)}
-				>
-					${view === "graph" ? "关系图" : assetKindLabel(view)}
-					${view !== "graph" ? html`<span class="tab-count">${this.kindCounts[view]}</span>` : ""}
-				</button>
-			`)}
+			${TAB_ORDER.map((tab) => {
+				const count = tab === "graph" ? null : TAB_KINDS[tab].reduce((sum, kind) => sum + (this.kindCounts[kind] ?? 0), 0);
+				return html`
+					<button
+						class="tab ${this.activeTab === tab ? "active" : ""}"
+						aria-current=${this.activeTab === tab ? "page" : "false"}
+						@click=${() => this.chooseTab(tab)}
+					>
+						${TAB_LABELS[tab]}
+						${count !== null ? html`<span class="tab-count">${count}</span>` : ""}
+					</button>
+				`;
+			})}
 		</nav>`;
 	}
 
@@ -1005,11 +1010,11 @@ class BaizeAssetLibrary extends LitElement {
 	private renderList() {
 		if (this.loading) return html`<div class="empty">正在加载资产…</div>`;
 		if (this.error) return html`<div class="empty error">资产加载失败：${this.error}</div>`;
-		const selectedHidden = this.selectedAssetId !== null && !this.assets.some((asset) => asset.id === this.selectedAssetId);
-		if (this.assets.length === 0) return html`${selectedHidden ? html`<p class="selected-note">当前选中的资产不在此筛选结果中。</p>` : ""}<div class="empty">${this.query ? "没有匹配当前标题过滤条件的资产。" : `暂无${assetKindLabel(this.activeView)}资产。归档或创建后，资产会出现在这里。`}</div>`;
+		const selectedHidden = this.selectedAssetId !== null && !this.assets.some((asset) => "id" in asset && asset.id === this.selectedAssetId);
+		if (this.assets.length === 0) return html`${selectedHidden ? html`<p class="selected-note">当前选中的资产不在此筛选结果中。</p>` : ""}<div class="empty">${this.query ? "没有匹配当前标题过滤条件的资产。" : `暂无${TAB_LABELS[this.activeTab]}资产。归档或创建后，资产会出现在这里。`}</div>`;
 		return html`
 			${selectedHidden ? html`<p class="selected-note">当前选中的资产不在此筛选结果中。</p>` : ""}
-			<div class="list" role="list">${this.assets.map((asset) => html`<div role="listitem">${this.renderAssetRow(asset)}</div>`)}</div>
+			<div class="list" role="list">${this.assets.map((asset) => html`<div role="listitem">${this.renderAssetRow(asset as AssetSummary)}</div>`)}</div>
 			<div class="pager">
 				<span>第 ${this.page} / ${Math.max(1, Math.ceil(this.total / this.pageSize))} 页 · ${this.total} 项</span>
 				<label>每页
@@ -1048,7 +1053,8 @@ class BaizeAssetLibrary extends LitElement {
 	}
 
 	private openRelated(relation: AssetResolvedRelation): void {
-		this.updateUrl({ kind: relation.kind, q: "", page: 1, selectedAssetId: relation.assetId });
+		const tab = KIND_TO_TAB[relation.kind];
+		this.updateUrl({ tab, q: "", page: 1, selectedAssetId: relation.assetId });
 		this.assets = [];
 		this.total = 0;
 		void this.load();
@@ -1071,11 +1077,12 @@ class BaizeAssetLibrary extends LitElement {
 	private renderImportPreview() {
 		if (this.importError) return html`<p class="form-error" role="alert">${this.importError}</p>`;
 		if (!this.importDraft) return nothing;
+		const s = this.importDraft.preview.summary;
 		return html`<section class="card import-preview" aria-label="导入预览">
 			<h2>导入预览</h2>
-			<p class="detail-sub">${this.importDraft.assets.length} 个资产 · ${(this.importDraft.relations ?? []).length} 条关系</p>
-			<p class="detail-sub">新建 ${this.importDraft.createdCount} · 复用 ${this.importDraft.reusedCount} · 关系新增 ${this.importDraft.relationAddedCount} · 删除 ${this.importDraft.relationRemovedCount} · 保持 ${this.importDraft.relationKeptCount}</p>
-			<p class="detail-sub">类型分布：${ASSET_KINDS.map((kind) => `${assetKindLabel(kind)} ${this.importDraft?.kindCounts[kind] ?? 0}`).join(" · ")}</p>
+			<p class="detail-sub">${this.importDraft.assets.length} 个资产 · ${this.importDraft.relations.length} 条关系</p>
+			<p class="detail-sub">新建 ${s.createCount} · 复用 ${s.reuseCount} · 关系变更 ${s.relationChanges} · 路径冲突 ${s.pathConflicts} · 校验错误 ${s.validationErrors}</p>
+			<p class="detail-sub">类型分布：${ASSET_KINDS.map((kind) => `${assetKindLabel(kind)} ${s.kindBreakdown[kind] ?? 0}`).join(" · ")}</p>
 			<div class="form-actions">
 				<button class="primary" ?disabled=${this.importSubmitting} @click=${() => void this.confirmImport()}>${this.importSubmitting ? "导入中…" : "确认导入"}</button>
 				<button @click=${() => { this.importDraft = null; }}>取消</button>
@@ -1090,9 +1097,11 @@ class BaizeAssetLibrary extends LitElement {
 		const detail = this.detail;
 		const current = detail.revisions.find((revision) => revision.id === detail.currentRevisionId) ?? detail.revisions.at(-1);
 		const warning = current ? assetContentWarning(detail.kind, current.content) : null;
+		const isSpecialized = detail.kind === "api" || detail.kind === "data" || detail.kind === "architecture";
 		return html`<article class="detail">
 			<header class="detail-head">
 				<div>
+					${this.narrowView && this.selectedAssetId !== null ? html`<button class="mobile-back" @click=${() => { this.selectedAssetId = null; this.updateUrl({ selectedAssetId: null }, true); }}>← 返回列表</button>` : nothing}
 					<h2 class="detail-title">${detail.title}</h2>
 					<p class="detail-sub">${assetKindLabel(detail.kind)} · Asset #${detail.id}</p>
 				</div>
@@ -1126,7 +1135,7 @@ class BaizeAssetLibrary extends LitElement {
 			<section class="detail-block">
 				<h2>结构化内容</h2>
 				${warning ? html`<p class="form-error" role="status">校验警告：${warning}</p>` : ""}
-				${current ? this.renderValue(current.content) : html`<p class="detail-sub">暂无可展示内容。</p>`}
+				${isSpecialized && current ? this.renderSpecializedDetail(detail.kind, current.content, detail) : current ? this.renderValue(current.content) : html`<p class="detail-sub">暂无可展示内容。</p>`}
 			</section>
 			<section class="detail-block">
 				<h2>关联信息</h2>
@@ -1139,11 +1148,61 @@ class BaizeAssetLibrary extends LitElement {
 					<strong>Revision ${revision.revisionNo}</strong> · ${revision.source} · ${revision.digest}
 				</div>`)}</div>
 			</details>
-			<details class="detail-block">
-				<summary>原始 JSON</summary>
-				${current ? html`<pre class="raw mono">${JSON.stringify(current.content, null, 2)}</pre>` : ""}
-			</details>
 		</article>`;
+	}
+
+	private renderSpecializedDetail(kind: AssetKind, content: unknown, detail: AssetDetail): Renderable {
+		if (kind === "api") {
+			return html`<baize-api-swagger
+				.apiBase=${this.apiBase}
+				.assetId=${detail.id}
+				.expectedRevisionId=${detail.currentRevisionId ?? detail.revisions.at(-1)?.id ?? 0}
+				.content=${content}
+				.title=${detail.title}
+				@save=${(event: CustomEvent<{ content: unknown; title: string }>) => this.handleSpecializedSave(event, detail)}
+			></baize-api-swagger>`;
+		}
+		if (kind === "data") {
+			return html`<baize-data-catalog
+				.apiBase=${this.apiBase}
+				.assetId=${detail.id}
+				.expectedRevisionId=${detail.currentRevisionId ?? detail.revisions.at(-1)?.id ?? 0}
+				.content=${content}
+				.title=${detail.title}
+				@save=${(event: CustomEvent<{ content: unknown; title: string }>) => this.handleSpecializedSave(event, detail)}
+			></baize-data-catalog>`;
+		}
+		if (kind === "architecture") {
+			return html`<baize-architecture-diagram
+				.apiBase=${this.apiBase}
+				.assetId=${detail.id}
+				.expectedRevisionId=${detail.currentRevisionId ?? detail.revisions.at(-1)?.id ?? 0}
+				.content=${content}
+				.title=${detail.title}
+				@save=${(event: CustomEvent<{ content: unknown; title: string }>) => this.handleSpecializedSave(event, detail)}
+			></baize-architecture-diagram>`;
+		}
+		return nothing;
+	}
+
+	private async handleSpecializedSave(event: CustomEvent<{ content: unknown; title: string }>, detail: AssetDetail): Promise<void> {
+		try {
+			const result = await updateAsset(this.apiBase, detail.id, {
+				expectedRevisionId: detail.currentRevisionId ?? detail.revisions.at(-1)?.id ?? 0,
+				title: event.detail.title,
+				content: event.detail.content,
+				relations: detail.resolvedGraph.outgoing.map((r) => ({ toAssetId: r.assetId, type: r.type })),
+			});
+			await this.loadDetail(result.assetId);
+			await this.load();
+		} catch (error) {
+			if (error instanceof AssetMutationError) {
+				// Dispatch error back to the specialized component
+				window.dispatchEvent(new CustomEvent("baize-asset-save-error", { detail: { errors: error.validationErrors } }));
+			} else {
+				window.dispatchEvent(new CustomEvent("baize-asset-save-error", { detail: { errors: [], message: error instanceof Error ? error.message : String(error) } }));
+			}
+		}
 	}
 
 	private setGraphKindFilter(event: Event): void {
@@ -1169,8 +1228,9 @@ class BaizeAssetLibrary extends LitElement {
 	private openGraphNode(assetId: number): void {
 		const node = this.graph?.nodes.find((candidate) => candidate.assetId === assetId);
 		if (!node) return;
-		this.updateUrl({ kind: node.kind, q: "", page: 1, selectedAssetId: node.assetId }, false);
-		this.activeView = node.kind;
+		const tab = KIND_TO_TAB[node.kind];
+		this.updateUrl({ tab, q: "", page: 1, selectedAssetId: node.assetId }, false);
+		this.activeTab = tab;
 		this.assets = [];
 		this.total = 0;
 		void this.load();
@@ -1197,7 +1257,6 @@ class BaizeAssetLibrary extends LitElement {
 						${ASSET_KINDS.map((kind) => html`<option value=${kind} ?selected=${this.graphKindFilter === kind}>${assetKindLabel(kind)}</option>`)}
 					</select>
 				</label>
-				<button @click=${() => { const graphZoom = Math.min(2, this.graphZoom + 0.1); this.updateUrl({ graphZoom }, true); }}>放大</button>
 				<button @click=${() => { const graphZoom = Math.max(0.6, this.graphZoom - 0.1); this.updateUrl({ graphZoom }, true); }}>缩小</button>
 				<button aria-label="向左平移" @click=${() => this.updateUrl({ graphX: this.graphOffset.x - 30 }, true)}>←</button>
 				<button aria-label="向右平移" @click=${() => this.updateUrl({ graphX: this.graphOffset.x + 30 }, true)}>→</button>
@@ -1231,6 +1290,9 @@ class BaizeAssetLibrary extends LitElement {
 	}
 
 	render() {
+		const isHierarchyTab = this.activeTab === "scenario" || this.activeTab === "function";
+		const showDetail = this.narrowView ? this.selectedAssetId !== null : true;
+		const showList = this.narrowView ? this.selectedAssetId === null : true;
 		return html`
 			<section class="workspace" aria-labelledby="asset-library-title">
 				<header class="toolbar">
@@ -1239,14 +1301,14 @@ class BaizeAssetLibrary extends LitElement {
 							<h1 id="asset-library-title">设计模型资产</h1>
 							<p class="sub">按类型浏览 Workspace 内可复用的设计事实，并追溯资产关系。</p>
 						</div>
-						<span class="count">${this.loading ? "…" : this.activeView === "graph" ? "关系图" : this.total}</span>
+						<span class="count">${this.loading ? "…" : this.activeTab === "graph" ? "关系图" : this.total}</span>
 					</div>
 					<div class="toolbar-actions">
-						${this.activeView !== "graph" ? html`
+						${this.activeTab !== "graph" ? html`
 							<label class="search">标题过滤
 								<input type="search" .value=${this.query} placeholder="搜索当前类型" @input=${(event: Event) => this.updateQuery(event)} />
 							</label>
-							<button class="primary" @click=${() => this.openCreate()}>新建${assetKindLabel(this.activeView)}</button>
+						${!isHierarchyTab && !SPECIALIZED_VIEW_KINDS.has(TAB_KINDS[this.activeTab as Exclude<WorkbenchTab, "graph">][0]!) ? html`<button class="primary" @click=${() => this.openCreate()}>新建${assetKindLabel(TAB_KINDS[this.activeTab as Exclude<WorkbenchTab, "graph">][0]!)}</button>` : nothing}
 						` : ""}
 						<button @click=${() => void this.exportWorkspace()}>导出</button>
 						<label class="file-button">导入<input class="file-input" type="file" accept="application/json" @change=${(event: Event) => void this.handleImportFile(event)} /></label>
@@ -1255,9 +1317,29 @@ class BaizeAssetLibrary extends LitElement {
 				${this.renderTabs()}
 				${this.renderImportPreview()}
 				<div class="content">
-					<section class="card pane list-pane" aria-label="资产列表">${this.activeView === "graph" ? this.renderGraph() : this.renderList()}</section>
-					<section class="card pane detail-pane" aria-label="资产详情">${this.activeView === "graph" ? html`<div class="detail-placeholder">关系图节点详情将在此展示。</div>` : this.formMode ? this.renderForm() : this.renderDetail()}</section>
+					${showList ? html`<section class="card pane list-pane" aria-label="资产列表">
+						${isHierarchyTab && this.activeTab !== "graph"
+							? html`<baize-hierarchy-tree
+								.apiBase=${this.apiBase}
+								.workspaceId=${this.workspaceId}
+								.rootKind=${TAB_KINDS[this.activeTab as Exclude<WorkbenchTab, "graph">][0]!}
+								.selectedAssetId=${this.selectedAssetId ?? 0}
+								.expandedNodes=${this.expandedNodes}
+								.page=${this.page}
+								.pageSize=${this.pageSize}
+								.query=${this.query}
+								.narrowView=${this.narrowView}
+								@select=${(event: CustomEvent<number>) => { this.selectedAssetId = event.detail; this.updateUrl({ selectedAssetId: event.detail }); void this.loadDetail(event.detail); }}
+								@expand=${(event: CustomEvent<number>) => { const next = new Set(this.expandedNodes); next.has(event.detail) ? next.delete(event.detail) : next.add(event.detail); this.expandedNodes = next; this.updateUrl({ expandedNodes: [...next].join(",") }, true); }}
+								@navigate=${(event: CustomEvent<{ tab: WorkbenchTab; assetId: number }>) => { this.chooseTab(event.detail.tab); this.selectedAssetId = event.detail.assetId; this.updateUrl({ selectedAssetId: event.detail.assetId }); void this.loadDetail(event.detail.assetId); }}
+							></baize-hierarchy-tree>`
+							: this.renderList()}
+					</section>` : nothing}
+					${showDetail ? html`<section class="card pane detail-pane" aria-label="资产详情">
+						${this.activeTab === "graph" ? html`<div class="detail-placeholder">关系图节点详情将在此展示。</div>` : this.formMode ? this.renderForm() : this.renderDetail()}
+					</section>` : nothing}
 				</div>
+				${this.activeTab === "graph" ? this.renderGraph() : nothing}
 			</section>
 		`;
 	}
