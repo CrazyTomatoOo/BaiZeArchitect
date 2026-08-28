@@ -198,6 +198,8 @@ const ARTIFACT_SCHEMA_HINTS: Record<string, string> = {
 	api: "schemaVersion:\"artifact/api/v1\",artifactKind:\"api\",summary(string),sourceRefs:[{type:\"requirement_revision\",revisionId:1}],openapi:\"3.1.0\",info:{title:string,version:string},paths:{\"/path\":{summary:string,get?:{summary:string,responses:{\"200\":{description:string}}},post?:...}},servers?:[{url:string,description?:string}],tags?:[{name:string,description?:string}],components?:{schemas:object,securitySchemes:object},security?:[object]",
 };
 /** 把 contextManifest 的任务上下文拼成模型可理解的 instruction。 */
+const SUBMIT_INSTRUCTION = "完成后必须调用 submit_role_result 工具提交结构化 RoleResult,禁止以自由文本回复。";
+const SUBMIT_PARAM_HINT = "将完整 RoleResult 作为 submit_role_result 工具的 roleResult 参数提交。";
 function buildTaskInstruction(role: string, objective: string, baseline: RequirementBaseline, workflowId: number, attemptId: number, evidenceSnapshotId: number, reviewRevisionId: number, reviewArtifactKind: string, expectedArtifactKinds: readonly string[], reviewTargets: ReadonlyArray<{ resolvedRevisionId?: number; artifactKind?: string }>): string {
 	const base = [
 		`你是 BaiZe Architect 的 ${role} 角色。`,
@@ -216,14 +218,13 @@ function buildTaskInstruction(role: string, objective: string, baseline: Require
 		const targetsJson = targets.map((t) => `{revisionId:${t.resolvedRevisionId ?? 0},artifactKind:"${t.artifactKind ?? ""}"}`).join(",");
 		base.push(
 			"",
-			"你是评审者,负责审查产物的完整性与质量,不产出产物。",
-			"完成后必须调用 submit_role_result 工具提交结构化 RoleResult,禁止以自由文本回复。",
+		SUBMIT_INSTRUCTION,
 			`RoleResult 结构:{schemaVersion:"role-result/v1",workflowId:${workflowId},attemptId:${attemptId},effects:[],criticReport:{schemaVersion:"critic-report/v1",workflowId:${workflowId},attemptId:${attemptId},coverageAttestation:{reviewTargets:[${targetsJson}],complete:true},findings:[]}}`,
 			"effects 必须为空数组(critic 不产出产物)。",
 			"criticReport.coverageAttestation.complete 必须为 true。",
 			`reviewTargets 必须包含全部以下目标:${targetsJson}`,
 			"findings 为空数组表示无问题;如有问题,每条含 fingerprint、severity、summary、targetRevisionId、targetArtifactKind、sourceRef。",
-			"将完整 RoleResult 作为 submit_role_result 工具的 roleResult 参数提交。",
+		SUBMIT_PARAM_HINT,
 		);
 	} else {
 		// 构造 effects 数组:每个 expectedArtifactKind 一个 effect
@@ -235,10 +236,10 @@ function buildTaskInstruction(role: string, objective: string, baseline: Require
 		base.push(
 			"",
 			"请基于以上需求,完成本角色的设计任务。",
-		"完成后必须调用 submit_role_result 工具提交结构化 RoleResult,禁止以自由文本回复。",
+		SUBMIT_INSTRUCTION,
 		`RoleResult 结构:{schemaVersion:"role-result/v1",workflowId:${workflowId},attemptId:${attemptId},effects:[${effectsArr.join(",")}]}`,
 		"每个 effect 的 content 必须严格只含 schema 声明的字段(禁止额外字段)。",
-		"将完整 RoleResult 作为 submit_role_result 工具的 roleResult 参数提交。",
+		SUBMIT_PARAM_HINT,
 		);
 	}
 	return base.join("\n");

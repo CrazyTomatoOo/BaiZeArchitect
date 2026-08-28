@@ -155,6 +155,24 @@ function extractUsage(stats: unknown): {
 		cost: typeof s.cost === "number" ? s.cost : undefined,
 	};
 }
+
+/** 遍历 assistant messages 累加 usage.reasoning(SessionStats 不聚 reasoning,需按消息粒度取)。 */
+function aggregateReasoning(messages: unknown): number | undefined {
+	if (!Array.isArray(messages)) return undefined;
+	let total: number | undefined;
+	for (const message of messages) {
+		if (!message || typeof message !== "object") continue;
+		const msg = message as Record<string, unknown>;
+		if (msg.role !== "assistant") continue;
+		const usage = msg.usage;
+		if (!usage || typeof usage !== "object") continue;
+		const reasoning = (usage as Record<string, unknown>).reasoning;
+		if (typeof reasoning === "number") {
+			total = (total ?? 0) + reasoning;
+		}
+	}
+	return total;
+}
 /** 终止型工具：角色以它提交结构化 RoleResult 并结束 turn（terminate:true + details=params）。 */
 const submitRoleResultTool = defineTool({
 	name: "submit_role_result",
@@ -234,6 +252,8 @@ async function createPiExecutor(): Promise<PiModelExecutor> {
 		}
 		// usage: getSessionStats() 聚合(pi-agent 0.83 无 state.usage;旧读法恒返 0)
 		const usage = typeof session.getSessionStats === "function" ? extractUsage(session.getSessionStats()) : {};
+		// reasoning: SessionStats 不聚,需遍历 assistant messages 累加 usage.reasoning
+		const reasoningTokens = aggregateReasoning(messages);
 		try {
 			session.dispose();
 		} catch {
@@ -249,8 +269,8 @@ async function createPiExecutor(): Promise<PiModelExecutor> {
 				outputTokens: usage.outputTokens ?? 0,
 				cacheReadTokens: usage.cacheReadTokens,
 				cacheCreationTokens: usage.cacheCreationTokens,
-				reasoningTokens: usage.reasoningTokens,
-			cost: usage.cost,
+				reasoningTokens,
+				cost: usage.cost,
 			},
 		};
 	};
