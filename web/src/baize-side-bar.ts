@@ -5,7 +5,7 @@ import "./baize-requirements.js";
 import "./baize-workspace-manager.js";
 
 /** Side Bar 当前承载的顶层视图。 */
-type ActiveView = "requirements" | "assets" | "manage";
+type ActiveView = "workspace" | "manage";
 
 /** 资产库九大分类。 */
 type AssetTab = "scenario" | "function" | "usecase" | "design" | "architecture" | "data" | "api" | "stakeholder" | "graph";
@@ -23,8 +23,7 @@ const ASSET_TABS: readonly { tab: AssetTab; label: string }[] = [
 ];
 
 const TITLE_MAP: Record<ActiveView, string> = {
-	requirements: "需求",
-	assets: "资产库",
+	workspace: "工作空间",
 	manage: "工作空间",
 };
 
@@ -38,10 +37,12 @@ class BaizeSideBar extends LitElement {
 		apiBase: { type: String, attribute: "api-base" },
 		workspaceId: { type: Number, attribute: "workspace-id" },
 		workspaces: { state: true },
+		subView: { state: true },
 	};
 
 	declare activeView: ActiveView;
 	declare apiBase: string;
+	declare subView: "requirements" | "assets";
 	declare workspaces: readonly WorkspaceSummary[];
 	declare workspaceId: number;
 
@@ -94,19 +95,52 @@ class BaizeSideBar extends LitElement {
 			color: var(--text-muted);
 			font-size: var(--text-sm);
 		}
+		.sub-tabs {
+			display: flex;
+			gap: 0;
+			width: 100%;
+		}
+		.sub-tab {
+			flex: 1;
+			padding: var(--gap-dense) 0;
+			background: none;
+			border: none;
+			border-bottom: var(--accent-border-w) solid transparent;
+			color: var(--text-muted);
+			font-size: var(--text-sm);
+			font-weight: 600;
+			cursor: pointer;
+			text-align: center;
+		}
+		.sub-tab:hover {
+			color: var(--text);
+			background: var(--surface-hover);
+		}
+		.sub-tab.active {
+			color: var(--accent);
+			border-bottom-color: var(--accent);
+		}
 	`];
 
 	constructor() {
 		super();
-		this.activeView = "requirements";
+		this.activeView = "workspace";
 		this.apiBase = "";
 		this.workspaceId = 0;
 		this.workspaces = [];
+		this.subView = "requirements";
 	}
 
 	connectedCallback(): void {
 		super.connectedCallback();
 		void this.loadWorkspaces();
+	}
+
+	protected override willUpdate(): void {
+		if (this.activeView === "workspace") {
+			const path = window.location.pathname;
+			this.subView = path.startsWith("/assets") ? "assets" : "requirements";
+		}
 	}
 
 	private async loadWorkspaces(): Promise<void> {
@@ -161,17 +195,30 @@ class BaizeSideBar extends LitElement {
 
 	render(): TemplateResult {
 		return html`
-			<div class="header">${TITLE_MAP[this.activeView]}</div>
+			<div class="header">
+				${this.activeView === "workspace" ? html`
+					<div class="sub-tabs">
+						<button class="sub-tab ${this.subView === "requirements" ? "active" : ""}"
+							@click=${() => { this.subView = "requirements"; this.dispatchEvent(new CustomEvent("baize-sub-view-change", { detail: { subView: "requirements" }, bubbles: true, composed: true })); }}>
+							需求
+						</button>
+						<button class="sub-tab ${this.subView === "assets" ? "active" : ""}"
+							@click=${() => { this.subView = "assets"; this.dispatchEvent(new CustomEvent("baize-sub-view-change", { detail: { subView: "assets" }, bubbles: true, composed: true })); }}>
+							资产
+						</button>
+					</div>
+				` : html`<span>${TITLE_MAP[this.activeView]}</span>`}
+			</div>
 			<div class="content">
-				${this.activeView === "requirements" ? html`
+				${this.activeView === "workspace" && this.subView === "requirements" ? html`
 					<baize-requirements
 						.apiBase=${this.apiBase}
 						.workspaceId=${this.workspaceId}
 						@baize-open-requirement=${this.onOpenRequirement}
 					></baize-requirements>
 				` : nothing}
-				${this.activeView === "assets" ? this.renderAssetsNav() : nothing}
-			${this.activeView === "manage" ? this.renderWorkspaceList() : nothing}
+				${this.activeView === "workspace" && this.subView === "assets" ? this.renderAssetsNav() : nothing}
+				${this.activeView === "manage" ? this.renderWorkspaceList() : nothing}
 			</div>
 		`;
 	}

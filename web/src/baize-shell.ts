@@ -42,7 +42,7 @@ export type PanelEntry =
 type Theme = "system" | "light" | "dark";
 
 /** Activity Bar 顶层视图。 */
-type ActiveView = "requirements" | "assets" | "manage";
+type ActiveView = "workspace" | "manage";
 
 /** 解析主题偏好 → 实际应用到 <html> 的 data-theme 值。 */
 function resolveTheme(pref: Theme): "light" | "dark" | null {
@@ -312,7 +312,7 @@ class BaizeShell extends LitElement {
 		this.loginToken = "";
 		this.loginError = null;
 		this.initializing = true;
-		this.activeView = "requirements";
+		this.activeView = "workspace";
 		this.theme = "system";
 		this.sidebarCollapsed = false;
 	this.drawerOpen = false;
@@ -375,9 +375,7 @@ class BaizeShell extends LitElement {
 		} else {
 			this.activeView = view;
 			this.sidebarCollapsed = false;
-			// 路由切换
-			if (view === "requirements") this.navigate("/");
-			else if (view === "assets") this.navigate("/assets");
+			if (view === "workspace") this.navigate("/");
 			else if (view === "manage") this.navigate("/manage");
 		}
 	}
@@ -416,7 +414,7 @@ class BaizeShell extends LitElement {
 			if (resolved.clearKey) localStorage.removeItem("baize.workspaceId");
 			if (resolved.workspaceId !== null) {
 				this.workspaceId = resolved.workspaceId;
-				this.activeView = "requirements";
+				this.activeView = "workspace";
 				if (window.location.pathname === "/" || window.location.pathname === "") {
 					this.navigate("/");
 				}
@@ -450,7 +448,7 @@ class BaizeShell extends LitElement {
 		const id = (event as CustomEvent<{ id: number }>).detail.id;
 		this.workspaceId = id;
 		localStorage.setItem("baize.workspaceId", String(id));
-		this.activeView = "requirements";
+		this.activeView = "workspace";
 		this.navigate("/");
 	}
 
@@ -546,9 +544,8 @@ class BaizeShell extends LitElement {
 	protected override willUpdate(): void {
 		// 从路径推断 activeView（路由可能在不含视图切换的情况下变化，如 /workflow/:id）
 		const path = window.location.pathname;
-		if (path.startsWith("/assets")) this.activeView = "assets";
-		else if (path.startsWith("/manage")) this.activeView = "manage";
-		else this.activeView = "requirements";
+		if (path.startsWith("/manage")) this.activeView = "manage";
+		else this.activeView = "workspace";
 	}
 
 	render() {
@@ -609,6 +606,11 @@ class BaizeShell extends LitElement {
 					}}
 					@baize-enter-workspace=${(e: Event) => this.handleEnterWorkspace(e)}
 					@baize-workspace-deleted=${(e: Event) => this.handleWorkspaceDeleted(e)}
+					@baize-sub-view-change=${(e: Event) => {
+						const sv = (e as CustomEvent<{ subView: string }>).detail.subView;
+						if (sv === "assets") this.navigate("/assets");
+						else this.navigate("/");
+					}}
 				></baize-side-bar>
 			</div>
 			${this.drawerOpen ? html`<button class="drawer-scrim" aria-label="关闭导航" @click=${() => this.closeDrawer()}></button>` : nothing}

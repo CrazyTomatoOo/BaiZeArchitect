@@ -7,19 +7,20 @@ import { expect, test } from "@playwright/test";
  */
 
 test.describe("VS Code 式五层布局重新设计", () => {
-	test("Activity Bar 四视图切换 + Side Bar 内容跟随", async ({ page }) => {
+	test("Activity Bar 视图切换 + Side Bar 内容跟随", async ({ page }) => {
 		await page.goto("/");
 		await page.getByLabel("Operator Token").fill("demo-token");
 		await page.getByRole("button", { name: "登录" }).click();
-		// 进入工作空间后 Side Bar 显示需求视图
+		// 进入工作空间后 Side Bar 显示工作空间视图(需求/资产 sub-tabs)
 		await page.getByRole("button", { name: "进入" }).click();
-		await expect(page.locator("baize-side-bar .header")).toHaveText("需求");
+		await expect(page.locator("baize-side-bar .sub-tab").first()).toHaveText("需求");
+		await expect(page.locator("baize-side-bar .sub-tab").nth(1)).toHaveText("资产");
 		// 切到管理视图
 		await page.goto("/manage");
-		await expect(page.locator("baize-side-bar .header")).toHaveText("工作空间");
-		// 切到资产视图
+		await expect(page.locator("baize-side-bar .header")).toContainText("工作空间");
+		// 资产是工作空间内的 sub-view
 		await page.goto("/assets");
-		await expect(page.locator("baize-side-bar .header")).toHaveText("资产库");
+		await expect(page.locator("baize-side-bar .sub-tab.active")).toHaveText("资产");
 	});
 
 	test("顶栏显示工作空间标签", async ({ page }) => {
