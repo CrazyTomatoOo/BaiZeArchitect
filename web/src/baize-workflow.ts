@@ -1,13 +1,13 @@
 import { LitElement, html, css, nothing } from "lit";
 import mermaid from "mermaid";
 import { sharedStyles } from "./baize-styles.js";
+import "./baize-workflow-hero.js";
+import "./baize-tab-bar.js";
+
+import { type StatusSnapshot } from "./baize-shell.js";
 
 import {
-	artifactSummary,
-	bootstrapSession,
 	checkSession,
-	createRequirement,
-	designStages,
 	gateQueue,
 	getApprovalPacket,
 	getArtifactRevision,
@@ -15,18 +15,14 @@ import {
 	getModelConfig,
 	getRequirement,
 	getWorkflowProjection,
-	listRequirements,
 	packetReviewDrift,
 	pendingCounts,
 	recoveryActions,
 	sendWorkflowCommand,
 	stateHero,
-	journeySteps,
-	stateLabel,
 	commandLabel,
 	statusLabel,
 	severityLabel,
-	gateCategoryLabel,
 	subscribeRunEvents,
 	subscribeWorkflowEvents,
 	type ApprovalPacketDetail,
@@ -39,7 +35,6 @@ import {
 	type OperatorSession,
 	type PacketReviewContext,
 	type RequirementDetail,
-	type RequirementSummary,
 	type WorkflowProjection,
 } from "./workflow-client.js";
 import { graphToMermaid, isGraphDiagram, type GraphDiagram } from "./diagram-render.js";
@@ -48,12 +43,15 @@ import { renderArtifactFields } from "./artifact-content.js";
 import { ARTIFACT_KIND_LABELS, ARTIFACT_VIEW_KINDS, schemaRefLabel } from "./artifact-labels.js";
 import { readinessCheckLabel, readinessCheckDetail } from "./readiness-labels.js";
 /**
- * baize-workflow — 自动优先的引导式 Requirement 页面(票15+票16)。
- * 状态 hero(每态一个主动作)+ 概览 + 同页详情 + 高级接管。
+ * baize-workflow — 自动优先的引导式 Requirement 工作流页面容器(票15+票16+#81)。
+ * 页面结构:主区(hero/模型档/回执/三 tab)+ 右栏(gate 队列/恢复/批准审阅)。
+ * hero 与 tab-bar 已拆分为 baize-workflow-hero / baize-tab-bar 子组件,本组件
+ * 持有数据与命令路径,经 baize-status-update / baize-panel-announce /
+ * baize-panel-receipt 事件向上供给 shell 的 Status Bar 与 Panel。
  * 票16:确定性 Gate Queue(一次一个 exact subject)、按 Incident 类型的恢复组合、
  * stale 表单冻结(保留 draft、显示 expected/actual、显式 reload)、双流断线禁用命令。
  * 只调用新 Projection / detail / Command / SSE 契约;不做乐观状态变更。
- * 仅在测试装配中挂载,生产 shell 在 S7 前不引用本组件。
+ * 登录与会话管理在 baize-shell;本组件由 shell 在 /workflow/:id 路由挂载。
  */
 
 /** 从产物内容提取可选 diagrams（#11 决议：内容内嵌结构化图 JSON）。 */
@@ -77,13 +75,6 @@ class BaizeWorkflow extends LitElement {
 		workspaceId: { type: Number, attribute: "workspace-id" },
 		apiBase: { type: String, attribute: "api-base" },
 		session: { state: true },
-		loginToken: { state: true },
-		loginError: { state: true },
-		requirements: { state: true },
-		createTitle: { state: true },
-		createSummary: { state: true },
-		createDescription: { state: true },
-		creating: { state: true },
 		requirement: { state: true },
 		projection: { state: true },
 		modelConfig: { state: true },
@@ -103,7 +94,7 @@ class BaizeWorkflow extends LitElement {
 		approvalStale: { state: true },
 		approvalReceipt: { state: true },
 		rejectOpen: { state: true },
-		navOpen: { state: true },
+
 		pendingGate: { type: String, attribute: "pending-gate" },
 		pendingApproval: { type: Boolean, attribute: "pending-approval" },
 		artifactView: { state: true },
@@ -114,13 +105,6 @@ class BaizeWorkflow extends LitElement {
 	declare workspaceId: number;
 	declare apiBase: string;
 	declare session: OperatorSession | null;
-	declare loginToken: string;
-	declare loginError: string | null;
-	declare requirements: readonly RequirementSummary[];
-	declare createTitle: string;
-	declare createSummary: string;
-	declare createDescription: string;
-	declare creating: boolean;
 	declare requirement: RequirementDetail | null;
 	declare projection: WorkflowProjection | null;
 	declare modelConfig: ModelConfig | null;
@@ -140,7 +124,6 @@ class BaizeWorkflow extends LitElement {
 	declare approvalStale: boolean;
 	declare approvalReceipt: CommandReceipt | null;
 	declare rejectOpen: boolean;
-	declare navOpen: boolean;
 	declare pendingGate: string | null;
 	declare pendingApproval: boolean;
 	declare artifactView: ArtifactViewState | null;
@@ -161,13 +144,6 @@ class BaizeWorkflow extends LitElement {
 		this.workspaceId = 1;
 		this.apiBase = "";
 		this.session = null;
-		this.loginToken = "";
-		this.loginError = null;
-		this.requirements = [];
-		this.createTitle = "";
-		this.createSummary = "";
-		this.createDescription = "";
-		this.creating = false;
 		this.requirement = null;
 		this.projection = null;
 		this.modelConfig = null;
@@ -186,9 +162,7 @@ class BaizeWorkflow extends LitElement {
 		this.approvalPacket = null;
 		this.approvalStale = false;
 		this.approvalReceipt = null;
-		this.rejectOpen = false;
-		this.navOpen = false;
-		this.pendingGate = null;
+		this.rejectOpen = false;		this.pendingGate = null;
 		this.pendingApproval = false;
 	this.artifactView = null;
 	this.activeTab = "tasks";
@@ -196,38 +170,13 @@ class BaizeWorkflow extends LitElement {
 
 	static styles = [sharedStyles, css`
 		/* Hallmark · genre: atmospheric · macrostructure: Workbench · design-system: DESIGN.md · designed-as-app */
-		:host { display: block; min-height: 100vh; background: var(--bg); color: var(--text); font-family: var(--font-ui); font-size: var(--text-base); line-height: 1.55; }
-		.page { max-width: var(--content-max); margin: 0 auto; padding: var(--pad) calc(var(--pad) * 1.4) 3rem; }
+		:host { display: block; height: 100%; background: var(--bg); color: var(--text); font-family: var(--font-ui); font-size: var(--text-base); line-height: 1.55; }
 
-		/* — 返回链接 — */
-		.back {
-			display: inline-flex; align-items: center; gap: 6px;
-			background: none; border: none; padding: 4px 0;
-			color: var(--text-muted); font-size: var(--text-sm); cursor: pointer;
-			margin-bottom: var(--gap);
-		}
-		.back:hover { color: var(--accent); background: none; }
-
-		/* — 状态卡 — */
-		.hero {
-			border: 1px solid var(--border);
-			border-left: 3px solid var(--accent);
-			border-radius: var(--radius);
-			padding: calc(var(--pad) + 6px);
-			background: var(--surface);
-			margin-top: var(--gap);
-		}
-		.hero .state {
-			display: inline-block;
-			font-size: var(--text-xs);
-			letter-spacing: 0.08em;
-			color: var(--accent);
-			margin-bottom: 6px;
-			font-family: var(--font-mono);
-		}
-		.hero h2 { margin: 0 0 4px; font-size: var(--text-xl); font-family: var(--font-display); font-weight: 600; overflow-wrap: anywhere; min-width: 0; }
-		.hero p { margin: 4px 0 12px; color: var(--text-muted); }
-		.hero .journey { margin-bottom: 14px; }
+		/* — 工作流页面容器:主区 + 右栏内部分栏 — */
+		.workflow-page { min-height: 100%; }
+		.workflow-content { display: flex; gap: var(--gap); padding: var(--pad) calc(var(--pad) * 1.2); min-height: 0; align-items: flex-start; }
+		.main-area { flex: 1 1 0; min-width: 0; }
+		.rail-area { flex: 0 0 var(--rail-w); border-left: 1px solid var(--border); background: var(--surface); padding-left: var(--gap); }
 
 		/* — 回执 — */
 		.receipt {
@@ -334,22 +283,9 @@ class BaizeWorkflow extends LitElement {
 		/* — 设计包 — */
 		.package { margin-top: 16px; border: 1px solid var(--ok); background: var(--ok-soft); border-radius: var(--radius); padding: var(--pad); }
 
-		/* — 登录 — */
-		.login-wrap { min-height: 100vh; display: grid; place-items: center; padding: var(--pad); box-sizing: border-box; }
-		.login-form { width: min(420px, 100%); box-sizing: border-box; }
-		.login-brand { font-size: var(--text-xl); margin-bottom: 6px; font-family: var(--font-display); font-weight: 600; }
-		.login-brand .dot { color: var(--accent); }
-		.login-form p { margin: 4px 0 14px; color: var(--text-muted); }
-		.login-form input { width: 100%; }
-		.login-form button { margin-top: 10px; width: 100%; }
-
 		.sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
 
-		/* — 标签页 — */
-		.tab-bar { display: flex; gap: 0; margin-top: 16px; border-bottom: 1px solid var(--border); }
-		.tab { background: none; border: none; padding: 8px 16px; cursor: pointer; font-size: var(--text-sm); color: var(--text-muted); border-bottom: 2px solid transparent; margin-bottom: -1px; }
-		.tab:hover { color: var(--text); }
-		.tab.active { color: var(--accent); border-bottom-color: var(--accent); }
+		/* — 标签页内容(tab-bar 自身样式在 baize-tab-bar 组件内) — */
 		.tab-content { margin-top: 0; }
 		.tab-content .details { margin-top: var(--gap); }
 
@@ -364,6 +300,12 @@ class BaizeWorkflow extends LitElement {
 		.readiness-row { display: flex; align-items: center; gap: 8px; padding: 4px 0; border-bottom: 1px solid var(--border); font-size: var(--text-sm); }
 		.readiness-label { font-weight: 500; min-width: 120px; }
 		.readiness-detail { color: var(--text-muted); font-size: var(--text-xs); }
+
+		/* — <900px:右栏坍缩回主区纵排(DESIGN.md 响应式) — */
+		@media (max-width: 899.98px) {
+			.workflow-content { flex-direction: column; }
+			.rail-area { flex: 0 0 auto; border-left: none; border-top: 1px solid var(--border); padding-left: 0; padding-top: var(--gap); width: 100%; }
+		}
 	`];
 
 	connectedCallback(): void {
@@ -387,6 +329,25 @@ class BaizeWorkflow extends LitElement {
 
 	private announce(message: string): void {
 		this.liveMessage = message;
+		this.dispatchEvent(new CustomEvent("baize-panel-announce", { detail: { text: message, timestamp: Date.now() }, bubbles: true, composed: true }));
+	}
+
+	/** 从当前 Projection 构造 Status Bar 快照并向上 emit(shell 接管展示)。 */
+	private emitStatusUpdate(): void {
+		const projection = this.projection;
+		const counts = projection ? pendingCounts(projection) : { gates: 0, decisions: 0, findings: 0 };
+		const snapshot: StatusSnapshot = {
+			connected: this.connected,
+			workflowState: projection?.workflow.state ?? "unknown",
+			workflowVersion: projection?.workflow.version ?? 0,
+			lastEventSeq: projection?.workflow.lastEventSeq ?? 0,
+			pendingGates: counts.gates,
+			pendingDecisions: counts.decisions,
+			pendingFindings: counts.findings,
+			hasActiveRun: projection?.activeRun != null,
+			runRole: projection?.activeRun?.role ?? null,
+		};
+		this.dispatchEvent(new CustomEvent("baize-status-update", { detail: snapshot, bubbles: true, composed: true }));
 	}
 
 	private async checkAndLoad(): Promise<void> {
@@ -398,56 +359,7 @@ class BaizeWorkflow extends LitElement {
 		}
 		if (this.requirementId > 0) {
 			void this.load();
-		} else {
-			void this.loadRequirements();
 		}
-	}
-
-	private async handleLogin(event: Event): Promise<void> {
-		event.preventDefault();
-		try {
-			this.session = await bootstrapSession(this.apiBase, this.loginToken);
-			this.loginError = null;
-			void this.loadRequirements();
-		} catch (error) {
-			this.loginError = error instanceof Error ? error.message : String(error);
-		}
-	}
-
-	private async loadRequirements(): Promise<void> {
-		try {
-			this.requirements = await listRequirements(this.apiBase, this.workspaceId);
-		} catch (error) {
-			this.loadError = error instanceof Error ? error.message : String(error);
-		}
-	}
-
-	private async handleCreateRequirement(event: Event): Promise<void> {
-		event.preventDefault();
-		this.creating = true;
-		try {
-			const created = await createRequirement(this.apiBase, this.workspaceId, {
-				title: this.createTitle,
-				summary: this.createSummary,
-				description: this.createDescription,
-			});
-			this.requirementId = created.requirementId;
-			void this.loadRequirements();
-			this.createTitle = "";
-			this.createSummary = "";
-			this.createDescription = "";
-			void this.load();
-		} catch (error) {
-			this.loadError = error instanceof Error ? error.message : String(error);
-		} finally {
-			this.creating = false;
-		}
-	}
-
-	private selectRequirement(id: number): void {
-		this.requirementId = id;
-		this.navOpen = false;
-		void this.load();
 	}
 
 	private async load(): Promise<void> {
@@ -468,6 +380,7 @@ class BaizeWorkflow extends LitElement {
 	private async refreshProjection(): Promise<void> {
 		if (!this.requirement) return;
 		this.projection = await getWorkflowProjection(this.apiBase, this.requirement.workflowId);
+		this.emitStatusUpdate();
 		this.connectRunStream();
 		this.detectStaleForm();
 		this.detectApprovalStale();
@@ -492,6 +405,7 @@ class BaizeWorkflow extends LitElement {
 			() => void this.refreshProjection(),
 			(connected) => {
 				this.workflowConnected = connected;
+				this.emitStatusUpdate();
 				if (connected) {
 					this.announce("Workflow 事件流已连接");
 					void this.refreshProjection();
@@ -522,6 +436,7 @@ class BaizeWorkflow extends LitElement {
 			() => void this.refreshProjection(),
 			(connected) => {
 				this.runConnected = connected;
+				this.emitStatusUpdate();
 				this.announce(connected ? "Run 事件流已连接" : "连接断开,正在重连;治理命令已禁用");
 			},
 		);
@@ -541,6 +456,7 @@ class BaizeWorkflow extends LitElement {
 				...(reason ? { reason } : {}),
 			});
 			this.receipt = result.receipt;
+			this.dispatchEvent(new CustomEvent("baize-panel-receipt", { detail: { commandType: type, outcome: result.receipt.outcome, httpStatus: result.httpStatus, timestamp: Date.now() }, bubbles: true, composed: true }));
 			this.announce(`命令 ${type} 回执:${result.receipt.outcome}`);
 			await this.refreshProjection();
 		} catch (error) {
@@ -570,32 +486,6 @@ class BaizeWorkflow extends LitElement {
 	private async openDesignPackage(): Promise<void> {
 		if (!this.requirement || this.requirement.designPackageId === null) return;
 		this.packageDetail = await getDesignPackage(this.apiBase, this.requirement.designPackageId);
-	}
-
-	private renderHero() {
-		const projection = this.projection;
-		if (!projection) return nothing;
-		const hero = stateHero(projection.workflow.state);
-		const steps = journeySteps(projection);
-		return html`
-			<section class="hero" data-testid="hero" data-state=${projection.workflow.state}>
-				<span class="state">${stateLabel(projection.workflow.state)}</span>
-				<h2>${this.requirement?.title ?? ""}</h2>
-				<div class="journey" data-testid="stages" aria-label="设计旅程">
-					${steps.map(
-						(step, i) => html`${i > 0 ? html`<span class="step-link ${steps[i - 1]!.status === "done" ? "done" : ""}"></span>` : nothing}
-						<span class="step" data-testid="stage-${step.key}" data-status=${step.status}>
-							<span class="dot">${step.status === "done" ? "✓" : i + 1}</span>
-							<span class="name">${step.label}</span>
-						</span>`,
-					)}
-				</div>
-				<p>${hero.description}</p>
-				<button class="primary" data-testid="primary-action" ?disabled=${this.busy || !this.connected} @click=${() => void this.onPrimaryAction()}>
-					${hero.action.label}
-				</button>
-			</section>
-		`;
 	}
 
 	private renderReceipt() {
@@ -724,6 +614,7 @@ class BaizeWorkflow extends LitElement {
 				payload: { packetDigest: context.digest },
 			});
 			this.approvalReceipt = result.receipt;
+			this.dispatchEvent(new CustomEvent("baize-panel-receipt", { detail: { commandType: "approve-packet", outcome: result.receipt.outcome, httpStatus: result.httpStatus, timestamp: Date.now() }, bubbles: true, composed: true }));
 			this.announce(`批准回执:${result.receipt.outcome}`);
 			await this.refreshProjection();
 			if (result.receipt.outcome === "accepted") {
@@ -754,6 +645,7 @@ class BaizeWorkflow extends LitElement {
 				payload: { reason, targets },
 			});
 			this.approvalReceipt = result.receipt;
+			this.dispatchEvent(new CustomEvent("baize-panel-receipt", { detail: { commandType: "reject-packet", outcome: result.receipt.outcome, httpStatus: result.httpStatus, timestamp: Date.now() }, bubbles: true, composed: true }));
 			this.announce(`打回回执:${result.receipt.outcome}`);
 			await this.refreshProjection();
 			if (result.receipt.outcome === "accepted") {
@@ -861,6 +753,7 @@ class BaizeWorkflow extends LitElement {
 				payload,
 			});
 			this.formReceipt = result.receipt;
+			this.dispatchEvent(new CustomEvent("baize-panel-receipt", { detail: { commandType: item.commandType, outcome: result.receipt.outcome, httpStatus: result.httpStatus, timestamp: Date.now() }, bubbles: true, composed: true }));
 			this.announce(`门禁处置回执:${result.receipt.outcome}`);
 			await this.refreshProjection();
 			if (result.receipt.outcome === "accepted") {
@@ -1121,33 +1014,12 @@ class BaizeWorkflow extends LitElement {
 	}
 
 	render() {
-		if (!this.session) {
-			return html`<div class="login-wrap">
-				<form class="hero login-form" @submit=${(e: Event) => this.handleLogin(e)}>
-					<div class="brand login-brand"><span class="dot">◇</span> BaiZe Architect</div>
-					<p>输入 Operator Token 建立会话。</p>
-					<input
-						type="password"
-						placeholder="Operator Token"
-						aria-label="Operator Token"
-						.value=${this.loginToken}
-						@input=${(e: Event) => (this.loginToken = (e.target as HTMLInputElement).value)}
-						autocomplete="off"
-					/>
-					<button class="primary" type="submit">登录</button>
-					${this.loginError ? html`<div class="error">${this.loginError}</div>` : nothing}
-				</form>
-			</div>`;
-		}
-		// — 已登录:详情页(由 shell 提供导航) —
 		return html`
-		<div class="page">
-			<button class="back" @click=${() => this.dispatchEvent(new CustomEvent("baize-goto", { detail: { tab: "requirements" }, bubbles: true, composed: true }))}>← 返回需求列表</button>
-			${this.loadError ? html`<div class="error" data-testid="load-error">${this.loadError}</div>` : nothing}
-			${this.renderWorkflowView()}
-		</div>`;
+			<div class="workflow-page">
+				${this.loadError ? html`<div class="error" data-testid="load-error">${this.loadError}</div>` : nothing}
+				${this.renderWorkflowView()}
+			</div>`;
 	}
-
 
 	private async openArtifactView(kind: ClientArtifactKind): Promise<void> {
 		if (!this.requirement) return;
@@ -1221,37 +1093,38 @@ class BaizeWorkflow extends LitElement {
 
 	private switchTab(tab: string): void {
 		this.activeTab = tab;
-		this.dispatchEvent(new CustomEvent("baize-tab-change", { detail: { tab }, bubbles: true, composed: true }));
-	}
-
-	private renderTabBar(): ReturnType<typeof html> {
-		const tabs = [
-			{ id: "tasks", label: "任务" },
-			{ id: "artifacts", label: "产物" },
-			{ id: "governance", label: "治理" },
-		];
-		return html`<div class="tab-bar" data-testid="tab-bar">
-			${tabs.map((t) => html`<button class="tab ${this.activeTab === t.id ? "active" : ""}" data-testid="tab-${t.id}" @click=${() => this.switchTab(t.id)}>${t.label}</button>`)}
-		</div>`;
 	}
 
 	private renderWorkflowView() {
 		if (!this.projection) return html`<div data-testid="loading">加载中…</div>`;
 		return html`
-			${this.renderConnectionBanner()}
-			${this.renderHero()}
-			${this.renderModelProfile()}
-			${this.renderReceipt()}
-			${this.renderGateQueue()}
-			${this.renderRecovery()}
-			${this.renderTabBar()}
-			<div class="tab-content">
-				${this.activeTab === "tasks" ? this.renderTasksTab() : nothing}
-				${this.activeTab === "artifacts" ? this.renderArtifactsTab() : nothing}
-				${this.activeTab === "governance" ? this.renderGovernanceTab() : nothing}
+			<div class="workflow-content">
+				<div class="main-area">
+					${this.renderConnectionBanner()}
+					<baize-workflow-hero
+						.projection=${this.projection}
+						.requirement=${this.requirement}
+						.busy=${this.busy}
+						.connected=${this.connected}
+						@baize-primary-action=${() => void this.onPrimaryAction()}
+						@baize-open-package=${() => void this.openDesignPackage()}
+					></baize-workflow-hero>
+					${this.renderModelProfile()}
+					${this.renderReceipt()}
+					<baize-tab-bar .activeTab=${this.activeTab} @baize-tab-change=${(e: Event) => this.switchTab((e as CustomEvent<{ tab: string }>).detail.tab)}></baize-tab-bar>
+					<div class="tab-content">
+						${this.activeTab === "tasks" ? this.renderTasksTab() : nothing}
+						${this.activeTab === "artifacts" ? this.renderArtifactsTab() : nothing}
+						${this.activeTab === "governance" ? this.renderGovernanceTab() : nothing}
+					</div>
+					${this.renderPackage()}
+				</div>
+				<div class="rail-area">
+					${this.renderGateQueue()}
+					${this.renderRecovery()}
+					${this.renderApprovalReview()}
+				</div>
 			</div>
-			${this.renderApprovalReview()}
-			${this.renderPackage()}
 			<div class="sr-only" aria-live="polite" data-testid="live-region">${this.liveMessage}</div>
 		`;
 	}

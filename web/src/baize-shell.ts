@@ -11,6 +11,10 @@ import "./baize-requirements.js";
 import "./baize-asset-library.js";
 import "./baize-workflow.js";
 import "./baize-workspace-manager.js";
+import "./baize-activity-bar.js";
+import "./baize-side-bar.js";
+import "./baize-panel.js";
+import "./baize-status-bar.js";
 
 // URLPattern polyfill for non-Chromium browsers (Firefox/Safari)
 import "urlpattern-polyfill";
@@ -63,7 +67,7 @@ class BaizeShell extends LitElement {
 		initializing: { state: true },
 		activeView: { state: true },
 		theme: { state: true },
-		sidebarCollapsed: { state: true },
+		sidebarCollapsed: { type: Boolean, reflect: true, attribute: "data-sidebar-collapsed" },
 		statusSnapshot: { state: true },
 		panelEntries: { state: true },
 		panelOpen: { state: true },
@@ -530,12 +534,33 @@ class BaizeShell extends LitElement {
 				<span class="spacer"></span>
 				<button @click=${() => { this.session = null; }}>退出</button>
 			</div>
-			<div class="workbench-row" ?data-sidebar-collapsed=${this.sidebarCollapsed}>
+			<div class="workbench-row">
 				<div class="activity-bar-slot">
-					<div class="placeholder">Activity Bar</div>
+					<baize-activity-bar
+						.activeView=${this.activeView}
+						.theme=${this.theme}
+						.sidebarCollapsed=${this.sidebarCollapsed}
+						@baize-view-change=${(e: Event) => this.switchView((e as CustomEvent<{ view: ActiveView }>).detail.view)}
+						@baize-theme-toggle=${() => this.cycleTheme()}
+						@baize-sidebar-toggle=${() => { this.sidebarCollapsed = !this.sidebarCollapsed; }}
+					></baize-activity-bar>
 				</div>
 				<div class="side-bar-slot">
-					<div class="placeholder">Side Bar</div>
+					<baize-side-bar
+						.activeView=${this.activeView}
+						.apiBase=${this.apiBase}
+						.workspaceId=${this.workspaceId}
+						@baize-open-requirement=${(e: Event) => {
+							const id = (e as CustomEvent<{ id: number }>).detail.id;
+							this.navigate(`/workflow/${id}`);
+						}}
+						@baize-asset-tab-change=${(e: Event) => {
+							const tab = (e as CustomEvent<{ tab: string }>).detail.tab;
+							this.navigate(`/assets?tab=${tab}`);
+						}}
+						@baize-enter-workspace=${(e: Event) => this.handleEnterWorkspace(e)}
+						@baize-workspace-deleted=${(e: Event) => this.handleWorkspaceDeleted(e)}
+					></baize-side-bar>
 				</div>
 				<main class="main-slot">
 					${this.router.outlet()}
@@ -545,10 +570,15 @@ class BaizeShell extends LitElement {
 				</div>
 			</div>
 			<div class="panel-slot ${this.panelOpen ? "open" : ""}">
-				<div class="placeholder">Panel</div>
+				<baize-panel .entries=${this.panelEntries}></baize-panel>
 			</div>
 			<div class="status-bar-slot" @keydown=${(e: KeyboardEvent) => this.handleKeydown(e)}>
-				<div class="placeholder">Status Bar</div>
+				<baize-status-bar
+					.statusSnapshot=${this.statusSnapshot}
+					.workspaceName=${"Workspace " + this.workspaceId}
+					.panelOpen=${this.panelOpen}
+					@baize-panel-toggle=${() => this.togglePanel()}
+				></baize-status-bar>
 			</div>
 		`;
 	}
