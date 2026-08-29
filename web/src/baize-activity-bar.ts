@@ -75,6 +75,24 @@ class BaizeActivityBar extends LitElement {
 			flex: 1;
 			min-height: 0;
 		}
+
+	/* <900px: 底部横排 bar */
+	@media (max-width: 899.98px) {
+		:host {
+			flex-direction: row;
+			justify-content: space-around;
+			padding-top: 0;
+			height: 48px;
+		}
+		.icon-btn {
+			border-left: none;
+			border-bottom: 3px solid transparent;
+		}
+		.icon-btn.active {
+			border-bottom-color: var(--accent);
+		}
+		.spacer { display: none; }
+	}
 	`];
 
 	constructor() {

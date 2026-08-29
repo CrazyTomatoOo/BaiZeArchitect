@@ -68,6 +68,7 @@ class BaizeShell extends LitElement {
 		activeView: { state: true },
 		theme: { state: true },
 		sidebarCollapsed: { type: Boolean, reflect: true, attribute: "data-sidebar-collapsed" },
+		drawerOpen: { state: true },
 		statusSnapshot: { state: true },
 		panelEntries: { state: true },
 		panelOpen: { state: true },
@@ -81,6 +82,7 @@ class BaizeShell extends LitElement {
 	declare activeView: ActiveView;
 	declare theme: Theme;
 	declare sidebarCollapsed: boolean;
+	declare drawerOpen: boolean;
 	declare statusSnapshot: StatusSnapshot | null;
 	declare panelEntries: PanelEntry[];
 	declare panelOpen: boolean;
@@ -247,20 +249,55 @@ class BaizeShell extends LitElement {
 			text-align: center;
 		}
 
-		/* — <900px 坍缩骨架 — */
-		@media (max-width: 899.98px) {
-			.workbench-row {
-				grid-template-columns: minmax(0, 1fr);
-			}
-			/* Activity Bar 转底部 bar（占位暂时隐藏，票 #79 实现真实底部 bar） */
-			.activity-bar-slot { display: none; }
-			/* Side Bar 转 off-canvas 抽屉（占位暂时隐藏，票 #79 实现真实抽屉） */
-			.side-bar-slot { display: none; }
-			/* 右栏隐藏 */
-			.rail-slot { display: none; }
-			/* Panel 隐藏 */
-			.panel-slot { display: none; }
+	/* — <900px 坍缩:Activity Bar→底部 bar / Side Bar→off-canvas 抽屉 / 右栏隐藏 / Panel 隐藏 — */
+	.menu-button, .drawer-scrim { display: none; }
+	@media (max-width: 899.98px) {
+		/* workbench-row 单列 */
+		.workbench-row {
+			grid-template-columns: minmax(0, 1fr);
 		}
+		/* Activity Bar → 底部固定横排 bar 48px,在 Status Bar 之上 */
+		.activity-bar-slot {
+			position: fixed;
+			bottom: var(--status-bar-h);
+			left: 0;
+			right: 0;
+			z-index: 3;
+			height: 48px;
+			border-right: none;
+			border-top: 1px solid var(--border);
+		}
+		/* 顶栏显示汉堡按钮 */
+		.menu-button { display: inline-flex; }
+		/* Side Bar → off-canvas 抽屉 */
+		.side-bar-slot {
+			position: fixed;
+			inset: 0 auto 0 0;
+			z-index: 4;
+			width: min(var(--side-bar-w), 80vw);
+			box-sizing: border-box;
+			transform: translateX(-100%);
+			transition: transform var(--dur-2) var(--ease-out);
+			border-right: 1px solid var(--border);
+		}
+		.side-bar-slot.drawer-open { transform: translateX(0); }
+		/* scrim 遮罩 */
+		.drawer-scrim {
+			display: block;
+			position: fixed;
+			inset: 0;
+			z-index: 3;
+			border: 0;
+			border-radius: 0;
+			background: var(--scrim);
+		}
+		/* 右栏隐藏 */
+		.rail-slot { display: none; }
+		/* Panel 隐藏 */
+		.panel-slot { display: none; }
+		/* Status Bar 底部留出 Activity Bar 空间 */
+		.status-bar-slot { margin-bottom: 48px; }
+	}
 	`];
 
 	constructor() {
@@ -273,6 +310,7 @@ class BaizeShell extends LitElement {
 		this.activeView = "requirements";
 		this.theme = "system";
 		this.sidebarCollapsed = false;
+	this.drawerOpen = false;
 		this.statusSnapshot = null;
 		this.panelEntries = [];
 		this.panelOpen = false;
@@ -339,6 +377,14 @@ class BaizeShell extends LitElement {
 			else if (view === "assets") this.navigate("/assets");
 			else if (view === "manage") this.navigate("/manage");
 		}
+	}
+
+	private toggleDrawer(): void {
+		this.drawerOpen = !this.drawerOpen;
+	}
+
+	private closeDrawer(): void {
+		this.drawerOpen = false;
 	}
 
 	// — Session + 路由 —
@@ -417,6 +463,7 @@ class BaizeShell extends LitElement {
 		if (window.location.pathname !== path || window.location.search !== "") {
 			window.history.pushState({}, "", path);
 		}
+		this.closeDrawer();
 		void this.router.goto(path);
 	}
 
@@ -430,6 +477,10 @@ class BaizeShell extends LitElement {
 		if ((event.metaKey || event.ctrlKey) && event.key === "j") {
 			event.preventDefault();
 			this.togglePanel();
+		}
+		// Esc → close drawer
+		if (event.key === "Escape" && this.drawerOpen) {
+			this.closeDrawer();
 		}
 	}
 
@@ -458,14 +509,7 @@ class BaizeShell extends LitElement {
 		if (this.workspaceId === 0) {
 			return html`<div class="empty">请先选择或创建工作空间。</div>`;
 		}
-		return html`<baize-requirements
-			.apiBase=${this.apiBase}
-			.workspaceId=${this.workspaceId}
-			@baize-open-requirement=${(e: Event) => {
-				const id = (e as CustomEvent<{ id: number }>).detail.id;
-				this.navigate(`/workflow/${id}`);
-			}}
-		></baize-requirements>`;
+		return html`<div class="empty">从侧栏选择一个需求查看详情。</div>`;
 	}
 
 	private renderAssets(): ReturnType<typeof html> {
@@ -528,59 +572,61 @@ class BaizeShell extends LitElement {
 			return html`<div class="placeholder">加载中…</div>`;
 		}
 
-		return html`
-			<div class="topbar">
-				<div class="brand"><span class="dot">◇</span> BaiZe Architect</div>
-				<span class="spacer"></span>
-				<button @click=${() => { this.session = null; }}>退出</button>
+	return html`
+		<div class="topbar">
+			<button class="menu-button" aria-label="打开工作台导航" aria-expanded=${this.drawerOpen} @click=${() => this.toggleDrawer()}>菜单</button>
+			<div class="brand"><span class="dot">◇</span> BaiZe Architect</div>
+			<span class="spacer"></span>
+			<button @click=${() => { this.session = null; }}>退出</button>
+		</div>
+		<div class="workbench-row">
+			<div class="activity-bar-slot">
+				<baize-activity-bar
+					.activeView=${this.activeView}
+					.theme=${this.theme}
+					.sidebarCollapsed=${this.sidebarCollapsed}
+					@baize-view-change=${(e: Event) => this.switchView((e as CustomEvent<{ view: ActiveView }>).detail.view)}
+					@baize-theme-toggle=${() => this.cycleTheme()}
+					@baize-sidebar-toggle=${() => { this.sidebarCollapsed = !this.sidebarCollapsed; }}
+				></baize-activity-bar>
 			</div>
-			<div class="workbench-row">
-				<div class="activity-bar-slot">
-					<baize-activity-bar
-						.activeView=${this.activeView}
-						.theme=${this.theme}
-						.sidebarCollapsed=${this.sidebarCollapsed}
-						@baize-view-change=${(e: Event) => this.switchView((e as CustomEvent<{ view: ActiveView }>).detail.view)}
-						@baize-theme-toggle=${() => this.cycleTheme()}
-						@baize-sidebar-toggle=${() => { this.sidebarCollapsed = !this.sidebarCollapsed; }}
-					></baize-activity-bar>
-				</div>
-				<div class="side-bar-slot">
-					<baize-side-bar
-						.activeView=${this.activeView}
-						.apiBase=${this.apiBase}
-						.workspaceId=${this.workspaceId}
-						@baize-open-requirement=${(e: Event) => {
-							const id = (e as CustomEvent<{ id: number }>).detail.id;
-							this.navigate(`/workflow/${id}`);
-						}}
-						@baize-asset-tab-change=${(e: Event) => {
-							const tab = (e as CustomEvent<{ tab: string }>).detail.tab;
-							this.navigate(`/assets?tab=${tab}`);
-						}}
-						@baize-enter-workspace=${(e: Event) => this.handleEnterWorkspace(e)}
-						@baize-workspace-deleted=${(e: Event) => this.handleWorkspaceDeleted(e)}
-					></baize-side-bar>
-				</div>
-				<main class="main-slot">
-					${this.router.outlet()}
-				</main>
-				<div class="rail-slot">
-					<div class="placeholder">右栏</div>
-				</div>
+			<div class="side-bar-slot ${this.drawerOpen ? "drawer-open" : ""}">
+				<baize-side-bar
+					.activeView=${this.activeView}
+					.apiBase=${this.apiBase}
+					.workspaceId=${this.workspaceId}
+					@baize-open-requirement=${(e: Event) => {
+						const id = (e as CustomEvent<{ id: number }>).detail.id;
+						this.navigate(`/workflow/${id}`);
+					}}
+					@baize-asset-tab-change=${(e: Event) => {
+						const tab = (e as CustomEvent<{ tab: string }>).detail.tab;
+						this.navigate(`/assets?tab=${tab}`);
+					}}
+					@baize-enter-workspace=${(e: Event) => this.handleEnterWorkspace(e)}
+					@baize-workspace-deleted=${(e: Event) => this.handleWorkspaceDeleted(e)}
+				></baize-side-bar>
 			</div>
-			<div class="panel-slot ${this.panelOpen ? "open" : ""}">
-				<baize-panel .entries=${this.panelEntries}></baize-panel>
+			${this.drawerOpen ? html`<button class="drawer-scrim" aria-label="关闭导航" @click=${() => this.closeDrawer()}></button>` : nothing}
+			<main class="main-slot">
+				${this.router.outlet()}
+			</main>
+			<div class="rail-slot">
+				<div class="placeholder">右栏</div>
 			</div>
-			<div class="status-bar-slot" @keydown=${(e: KeyboardEvent) => this.handleKeydown(e)}>
-				<baize-status-bar
-					.statusSnapshot=${this.statusSnapshot}
-					.workspaceName=${"Workspace " + this.workspaceId}
-					.panelOpen=${this.panelOpen}
-					@baize-panel-toggle=${() => this.togglePanel()}
-				></baize-status-bar>
-			</div>
-		`;
+		</div>
+		<div class="panel-slot ${this.panelOpen ? "open" : ""}">
+			<baize-panel .entries=${this.panelEntries}></baize-panel>
+		</div>
+		<div class="status-bar-slot" @keydown=${(e: KeyboardEvent) => this.handleKeydown(e)}>
+			<baize-status-bar
+				.statusSnapshot=${this.statusSnapshot}
+				.workspaceName=${"Workspace " + this.workspaceId}
+				.panelOpen=${this.panelOpen}
+				@baize-panel-toggle=${() => this.togglePanel()}
+			></baize-status-bar>
+		</div>
+	`;
 	}
 }
 

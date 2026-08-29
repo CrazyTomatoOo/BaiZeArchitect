@@ -464,6 +464,45 @@ describe("baize-shell — 首屏与选中态安全约定(票 05)", () => {
 		expect(indexSource).not.toMatch(/workspace-id\s*=/);
 	});
 });
+
+describe("baize-shell — VS Code 五层组件注册(#78/#79/#80)", () => {
+	it("注册并挂载四层新组件", () => {
+		expect(shellSource).toContain("baize-activity-bar");
+		expect(shellSource).toContain("baize-side-bar");
+		expect(shellSource).toContain("baize-status-bar");
+		expect(shellSource).toContain("baize-panel");
+	});
+	it("不含已删除的旧布局 class/token", () => {
+		expect(shellSource).not.toMatch(/workbench-frame/);
+		expect(shellSource).not.toMatch(/workbench-rail/);
+		expect(shellSource).not.toMatch(/content-max/);
+	});
+	it("index.html 不含已删除 token", () => {
+		expect(indexSource).not.toMatch(/content-max/);
+		expect(indexSource).not.toMatch(/workbench-rail-width/);
+		expect(indexSource).toContain("activity-bar-w");
+		expect(indexSource).toContain("data-theme");
+	});
+});
+
+describe("baize-workflow — 子组件提取(#81/#82/#83)", () => {
+	it("导入并挂载七个子组件", () => {
+		expect(workflowComponentSource).toContain("baize-workflow-hero");
+		expect(workflowComponentSource).toContain("baize-tab-bar");
+		expect(workflowComponentSource).toContain("baize-gate-queue");
+		expect(workflowComponentSource).toContain("baize-approval-review");
+		expect(workflowComponentSource).toContain("baize-tasks-tab");
+		expect(workflowComponentSource).toContain("baize-artifacts-tab");
+		expect(workflowComponentSource).toContain("baize-governance-tab");
+	});
+	it("不再含重复的需求列表/登录逻辑", () => {
+		expect(workflowComponentSource).not.toMatch(/loadRequirements/);
+		expect(workflowComponentSource).not.toMatch(/handleCreateRequirement/);
+		expect(workflowComponentSource).not.toMatch(/handleLogin/);
+		expect(workflowComponentSource).not.toMatch(/loginToken/);
+		expect(workflowComponentSource).not.toMatch(/loginError/);
+	});
+});
 describe("workspace asset surface", () => {
 	it("renders workspace asset information after entering a workspace", () => {
 		expect(shellSource).toMatch(/baize-asset-library/);

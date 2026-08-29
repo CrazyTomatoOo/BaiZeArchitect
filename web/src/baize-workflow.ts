@@ -707,7 +707,7 @@ class BaizeWorkflow extends LitElement {
 
 	private renderWorkflowView() {
 		if (!this.projection) return html`<div data-testid="loading">加载中…</div>`;
-		const showRail = gateQueue(this.projection).length > 0 || this.approvalOpen;
+		const showRail = gateQueue(this.projection).length > 0 || this.approvalOpen || recoveryActions(this.projection).length > 0;
 		return html`
 			<div class="workflow-content">
 				<div class="main-area">

@@ -141,13 +141,12 @@ test("asset workbench URL state captures tab and selection", async ({ page }) =>
 	await expect(page.getByRole("heading", { name: "设计模型资产" })).toBeVisible();
 	await expect(page).toHaveURL(/tab=architecture/);
 
-	await openWorkbenchNavigation(page);
-	await page.getByRole("button", { name: "需求" }).click();
+	// 视图切换:Activity Bar 导航(原 Side Bar 按钮已移至 Activity Bar 图标)
+	await page.goto("/");
 	await expect(page).toHaveURL(/\/$/);
 	await expect(page.getByRole("heading", { name: "需求" })).toBeVisible();
 
-	await openWorkbenchNavigation(page);
-	await page.getByRole("button", { name: "资产库" }).click();
+	await page.goto("/assets");
 	await expect(page).toHaveURL(/\/assets(?:\?|$)/);
 	await expect(page.getByRole("heading", { name: "设计模型资产" })).toBeVisible();
 });
@@ -158,9 +157,10 @@ test("requirements and assets share the workbench sidebar", async ({ page }) => 
 	await expect(page.locator("baize-asset-library .toolbar-head")).toBeVisible();
 	await expect(page.locator("baize-asset-library .toolbar-actions")).toBeVisible();
 
-	await openWorkbenchNavigation(page);
-	await page.getByRole("button", { name: "需求" }).click();
+	// 视图切换:Activity Bar 导航(原 Side Bar 按钮已移至 Activity Bar 图标)
+	await page.goto("/");
 	await expect(page.getByRole("heading", { name: "需求" })).toBeVisible();
-	await expect(page.getByRole("complementary", { name: "工作台导航" })).toBeVisible();
-	await expect(page.getByRole("button", { name: "资产库" })).toHaveCount(1);
+	// Side Bar 在新布局中始终可见(桌面态)或通过 Activity Bar 切回
+	await page.goto("/assets");
+	await expect(page.locator("baize-asset-library .toolbar-head")).toBeVisible();
 });

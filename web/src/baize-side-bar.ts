@@ -86,6 +86,11 @@ class BaizeSideBar extends LitElement {
 		.nav-item:hover {
 			background: var(--surface-hover);
 		}
+		.hint {
+			padding: var(--pad);
+			color: var(--text-muted);
+			font-size: var(--text-sm);
+		}
 	`];
 
 	constructor() {
@@ -136,13 +141,7 @@ class BaizeSideBar extends LitElement {
 					></baize-requirements>
 				` : nothing}
 				${this.activeView === "assets" ? this.renderAssetsNav() : nothing}
-				${this.activeView === "manage" ? html`
-					<baize-workspace-manager
-						.apiBase=${this.apiBase}
-						@baize-enter-workspace=${this.onEnterWorkspace}
-						@baize-workspace-deleted=${this.onWorkspaceDeleted}
-					></baize-workspace-manager>
-				` : nothing}
+				${this.activeView === "manage" ? html`<p class="hint">在主区域管理工作空间。</p>` : nothing}
 			</div>
 		`;
 	}

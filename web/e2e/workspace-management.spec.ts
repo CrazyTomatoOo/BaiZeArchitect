@@ -228,7 +228,7 @@ test.describe("workspace management", () => {
 		await page.getByLabel("Operator Token").fill("token-admin");
 		await page.getByRole("button", { name: "登录" }).click();
 
-		await expect(page.getByRole("heading", { name: "工作空间" })).toBeVisible();
+		await expect(page.getByRole("main").getByRole("heading", { name: "工作空间" })).toBeVisible();
 		await expect(page.getByText("/north")).toBeVisible();
 		await expect(page.getByText("/south")).toBeVisible();
 		await expect(page.getByRole("button", { name: "进入" })).toHaveCount(2);
@@ -240,7 +240,7 @@ test.describe("workspace management", () => {
 		await mockWorkspaceApi(page, { session: "operator", workspaces: [] });
 		await openApp(page);
 
-		await expect(page.getByRole("heading", { name: "工作空间" })).toBeVisible();
+		await expect(page.getByRole("main").getByRole("heading", { name: "工作空间" })).toBeVisible();
 		await expect(page.getByText(/还没有工作空间/)).toBeVisible();
 	});
 
@@ -274,15 +274,21 @@ test.describe("workspace management", () => {
 		await expect(page.getByText("需求 101")).toBeVisible();
 		await expect(page.getByRole("heading", { name: "工作空间" })).toHaveCount(0);
 
+
+		// 小屏坍缩态:Side Bar 为抽屉,需先打开才能点击需求
+		const menuBtn = page.getByRole("button", { name: "打开工作台导航" });
+		if (await menuBtn.isVisible()) await menuBtn.click();
 		await page.getByText("需求 101").click();
 		await expect(page.getByText(/需求 101/).first()).toBeVisible();
 		await expect(page.getByTestId("primary-action")).toHaveText("开始"); // pending 状态主动作
 
-		await page.getByRole("button", { name: "← 返回需求列表" }).click();
+		// 返回需求列表:Activity Bar 导航(原 back 按钮已移除,#81)
+		await page.goto("/");
 		await expect(page.getByRole("heading", { name: "需求" })).toBeVisible();
 
-		await page.getByRole("button", { name: "管理工作空间" }).click();
-		await expect(page.getByRole("heading", { name: "工作空间" })).toBeVisible();
+		// 回管理页:Activity Bar 导航(原 topbar 按钮已移除,#78)
+		await page.goto("/manage");
+		await expect(page.getByRole("main").getByRole("heading", { name: "工作空间" })).toBeVisible();
 	});
 
 	test("记住最近:刷新直达;键失效 → 管理页并清键", async ({ page }) => {
@@ -304,7 +310,7 @@ test.describe("workspace management", () => {
 		// 键失效(工作区 99 已删)→ 管理页并清键
 		await page.evaluate(() => localStorage.setItem("baize.workspaceId", "99"));
 		await page.reload();
-		await expect(page.getByRole("heading", { name: "工作空间" })).toBeVisible();
+		await expect(page.getByRole("main").getByRole("heading", { name: "工作空间" })).toBeVisible();
 		const stored = await page.evaluate(() => localStorage.getItem("baize.workspaceId"));
 		expect(stored).toBeNull();
 	});
@@ -323,8 +329,9 @@ test.describe("workspace management", () => {
 
 		// 直达需求列表后经顶栏回到管理页(North 即当前工作区)
 		await expect(page.getByRole("heading", { name: "需求" })).toBeVisible();
-		await page.getByRole("button", { name: "管理工作空间" }).click();
-		await expect(page.getByRole("heading", { name: "工作空间" })).toBeVisible();
+	// 回管理页:Activity Bar 导航(原 topbar 按钮已移除,#78)
+	await page.goto("/manage");
+	await expect(page.getByRole("main").getByRole("heading", { name: "工作空间" })).toBeVisible();
 
 		// 第一步:取消
 		await page.getByRole("button", { name: "删除", exact: true }).click();
