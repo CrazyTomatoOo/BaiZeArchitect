@@ -707,7 +707,7 @@ class BaizeWorkflow extends LitElement {
 
 	private renderWorkflowView() {
 		if (!this.projection) return html`<div data-testid="loading">加载中…</div>`;
-		const showRail = gateQueue(this.projection).length > 0 || this.approvalOpen || recoveryActions(this.projection).length > 0;
+		const showRail = gateQueue(this.projection).length > 0 || this.approvalOpen;
 		return html`
 			<div class="workflow-content">
 				<div class="main-area">
@@ -742,8 +742,8 @@ class BaizeWorkflow extends LitElement {
 							@baize-open-approval=${() => void this.openApprovalReview()}
 						></baize-governance-tab>` : nothing}
 					</div>
+					${this.renderRecovery()}
 					${this.renderPackage()}
-				</div>
 				${showRail ? html`
 					<div class="rail-area">
 						<baize-gate-queue
@@ -765,7 +765,6 @@ class BaizeWorkflow extends LitElement {
 							@baize-close-gate=${() => this.closeGateForm()}
 							@baize-reload-gate=${() => this.reloadGateForm()}
 						></baize-gate-queue>
-						${this.renderRecovery()}
 						${this.approvalOpen ? html`
 							<baize-approval-review
 								.projection=${this.projection}

@@ -1,5 +1,6 @@
 import { LitElement, html, css, nothing, type TemplateResult } from "lit";
 import { sharedStyles } from "./baize-styles.js";
+import { listWorkspaces, type WorkspaceSummary } from "./workflow-client.js";
 import "./baize-requirements.js";
 import "./baize-workspace-manager.js";
 
@@ -36,10 +37,12 @@ class BaizeSideBar extends LitElement {
 		activeView: { type: String, attribute: "active-view" },
 		apiBase: { type: String, attribute: "api-base" },
 		workspaceId: { type: Number, attribute: "workspace-id" },
+		workspaces: { state: true },
 	};
 
 	declare activeView: ActiveView;
 	declare apiBase: string;
+	declare workspaces: readonly WorkspaceSummary[];
 	declare workspaceId: number;
 
 	static styles = [sharedStyles, css`
@@ -98,6 +101,20 @@ class BaizeSideBar extends LitElement {
 		this.activeView = "requirements";
 		this.apiBase = "";
 		this.workspaceId = 0;
+		this.workspaces = [];
+	}
+
+	connectedCallback(): void {
+		super.connectedCallback();
+		void this.loadWorkspaces();
+	}
+
+	private async loadWorkspaces(): Promise<void> {
+		try {
+			this.workspaces = await listWorkspaces(this.apiBase);
+		} catch {
+			this.workspaces = [];
+		}
 	}
 
 	private onAssetTabChange(tab: AssetTab): void {
@@ -129,6 +146,19 @@ class BaizeSideBar extends LitElement {
 		`;
 	}
 
+	private renderWorkspaceList(): TemplateResult {
+		return html`
+			<div class="nav-list" role="list">
+				${this.workspaces.length === 0 ? html`<p class="hint">暂无工作空间。</p>` : nothing}
+				${this.workspaces.map((ws) => html`
+					<button class="nav-item ${ws.id === this.workspaceId ? "active" : ""}" role="listitem"
+						@click=${() => this.dispatchEvent(new CustomEvent("baize-enter-workspace", { detail: { id: ws.id }, bubbles: true, composed: true }))}
+					>${ws.name}</button>
+				`)}
+			</div>
+		`;
+	}
+
 	render(): TemplateResult {
 		return html`
 			<div class="header">${TITLE_MAP[this.activeView]}</div>
@@ -141,7 +171,7 @@ class BaizeSideBar extends LitElement {
 					></baize-requirements>
 				` : nothing}
 				${this.activeView === "assets" ? this.renderAssetsNav() : nothing}
-				${this.activeView === "manage" ? html`<p class="hint">在主区域管理工作空间。</p>` : nothing}
+			${this.activeView === "manage" ? this.renderWorkspaceList() : nothing}
 			</div>
 		`;
 	}

@@ -1,5 +1,5 @@
 import { LitElement, html, css, nothing } from "lit";
-import { sharedStyles } from "./baize-styles.js";
+import { sharedStyles, cycleTheme } from "./baize-styles.js";
 import {
 	bootstrapSession,
 	checkSession,
@@ -127,6 +127,11 @@ class BaizeShell extends LitElement {
 		}
 		.topbar .brand .dot { color: var(--accent); }
 		.topbar .spacer { flex: 1; }
+	.topbar .workspace-label {
+			color: var(--text-muted);
+			font-size: var(--text-sm);
+			font-family: var(--font-mono);
+		}
 
 		/* — workbench-row: 横向 grid 四列 — */
 		.workbench-row {
@@ -263,7 +268,7 @@ class BaizeShell extends LitElement {
 			left: 0;
 			right: 0;
 			z-index: 3;
-			height: 48px;
+			height: var(--activity-bar-w);
 			border-right: none;
 			border-top: 1px solid var(--border);
 		}
@@ -296,7 +301,7 @@ class BaizeShell extends LitElement {
 		/* Panel 隐藏 */
 		.panel-slot { display: none; }
 		/* Status Bar 底部留出 Activity Bar 空间 */
-		.status-bar-slot { margin-bottom: 48px; }
+		.status-bar-slot { margin-bottom: var(--activity-bar-w); }
 	}
 	`];
 
@@ -357,10 +362,8 @@ class BaizeShell extends LitElement {
 
 	/** Activity Bar 主题切换三态循环。 */
 	private cycleTheme(): void {
-		const order: Theme[] = ["system", "light", "dark"];
-		const next = order[(order.indexOf(this.theme) + 1) % order.length];
-		this.theme = next;
-		localStorage.setItem("baize.theme", next);
+		this.theme = cycleTheme(this.theme);
+		localStorage.setItem("baize.theme", this.theme);
 		this.applyTheme();
 	}
 
@@ -577,9 +580,10 @@ class BaizeShell extends LitElement {
 			<button class="menu-button" aria-label="打开工作台导航" aria-expanded=${this.drawerOpen} @click=${() => this.toggleDrawer()}>菜单</button>
 			<div class="brand"><span class="dot">◇</span> BaiZe Architect</div>
 			<span class="spacer"></span>
+			<span class="workspace-label">${this.workspaceId > 0 ? `Workspace #${this.workspaceId}` : ""}</span>
 			<button @click=${() => { this.session = null; }}>退出</button>
 		</div>
-		<div class="workbench-row">
+		<div class="workbench-row" style="--rail-w: ${window.location.pathname.startsWith("/workflow/") ? "var(--rail-w)" : "0px"}">
 			<div class="activity-bar-slot">
 				<baize-activity-bar
 					.activeView=${this.activeView}
@@ -608,17 +612,15 @@ class BaizeShell extends LitElement {
 				></baize-side-bar>
 			</div>
 			${this.drawerOpen ? html`<button class="drawer-scrim" aria-label="关闭导航" @click=${() => this.closeDrawer()}></button>` : nothing}
-			<main class="main-slot">
+			<main class="main-slot" @keydown=${(e: KeyboardEvent) => this.handleKeydown(e)}>
 				${this.router.outlet()}
 			</main>
-			<div class="rail-slot">
-				<div class="placeholder">右栏</div>
-			</div>
+			${window.location.pathname.startsWith("/workflow/") ? html`<div class="rail-slot"></div>` : nothing}
 		</div>
 		<div class="panel-slot ${this.panelOpen ? "open" : ""}">
 			<baize-panel .entries=${this.panelEntries}></baize-panel>
 		</div>
-		<div class="status-bar-slot" @keydown=${(e: KeyboardEvent) => this.handleKeydown(e)}>
+		<div class="status-bar-slot">
 			<baize-status-bar
 				.statusSnapshot=${this.statusSnapshot}
 				.workspaceName=${"Workspace " + this.workspaceId}

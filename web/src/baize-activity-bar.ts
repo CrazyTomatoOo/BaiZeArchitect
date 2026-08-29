@@ -1,6 +1,6 @@
 import { LitElement, html, css, type TemplateResult } from "lit";
 import { unsafeHTML } from "lit/directives/unsafe-html.js";
-import { sharedStyles } from "./baize-styles.js";
+import { sharedStyles, cycleTheme } from "./baize-styles.js";
 
 /** 主题三态。 */
 type Theme = "system" | "light" | "dark";
@@ -46,15 +46,15 @@ class BaizeActivityBar extends LitElement {
 		}
 		.icon-btn {
 			position: relative;
-			width: 48px;
-			height: 48px;
+			width: var(--activity-bar-w);
+			height: var(--activity-bar-w);
 			display: flex;
 			align-items: center;
 			justify-content: center;
 			color: var(--text-muted);
 			background: transparent;
 			border: none;
-			border-left: 3px solid transparent;
+			border-left: var(--accent-border-w) solid transparent;
 			border-radius: 0;
 			cursor: pointer;
 			padding: 0;
@@ -68,8 +68,8 @@ class BaizeActivityBar extends LitElement {
 			border-left-color: var(--accent);
 		}
 		.icon-btn svg {
-			width: 20px;
-			height: 20px;
+			width: var(--icon-size);
+			height: var(--icon-size);
 		}
 		.spacer {
 			flex: 1;
@@ -82,11 +82,11 @@ class BaizeActivityBar extends LitElement {
 			flex-direction: row;
 			justify-content: space-around;
 			padding-top: 0;
-			height: 48px;
+		height: var(--activity-bar-w);
 		}
 		.icon-btn {
 			border-left: none;
-			border-bottom: 3px solid transparent;
+		border-bottom: var(--accent-border-w) solid transparent;
 		}
 		.icon-btn.active {
 			border-bottom-color: var(--accent);
@@ -111,8 +111,7 @@ class BaizeActivityBar extends LitElement {
 	}
 
 	private onThemeClick(): void {
-		const order: Theme[] = ["system", "light", "dark"];
-		const next = order[(order.indexOf(this.theme) + 1) % order.length];
+		const next = cycleTheme(this.theme);
 		this.dispatchEvent(new CustomEvent("baize-theme-toggle", { detail: { theme: next }, bubbles: true, composed: true }));
 	}
 

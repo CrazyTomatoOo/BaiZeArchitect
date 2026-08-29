@@ -62,10 +62,6 @@ class BaizeApprovalReview extends LitElement {
 		.reject-form { margin-top: 10px; border: 1px solid var(--danger); border-radius: var(--radius); padding: 10px 12px; background: var(--warn-soft); }
 		.reject-form label { display: inline-flex; gap: 4px; align-items: center; margin-right: 10px; font-size: var(--text-sm); }
 
-		.stale-box { margin: 8px 0; border: 1px solid var(--danger); background: var(--warn-soft); border-radius: var(--radius-sm); padding: 8px 10px; font-size: var(--text-sm); color: var(--danger); }
-		.context-receipt { margin-top: 8px; font-size: var(--text-sm); border-radius: var(--radius-sm); padding: 8px 10px; }
-		.context-receipt[data-outcome="accepted"] { border: 1px solid var(--ok); background: var(--ok-soft); }
-		.context-receipt:not([data-outcome="accepted"]) { border: 1px solid var(--danger); background: var(--warn-soft); color: var(--danger); }
 	`];
 
 	private handleKeydown(event: KeyboardEvent): void {

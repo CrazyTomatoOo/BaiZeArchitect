@@ -91,8 +91,8 @@ class BaizeArtifactsTab extends LitElement {
 		.diagram-holder svg { display: block; margin: 0 auto; max-width: 100%; }
 		.artifact-json { font-size: var(--text-xs); overflow-x: auto; max-height: 360px; }
 
-		.artifact-view { display: flex; flex-direction: column; gap: var(--gap); }
-		.artifact-summary { font-size: var(--text-sm); color: var(--text-muted); line-height: 1.6; margin-bottom: 4px; }
+		.artifact-view { display: flex; flex-direction: column; gap: var(--gap); max-width: 72ch; }
+		.artifact-summary { font-size: var(--text-sm); color: var(--text-muted); line-height: 1.6; margin-bottom: var(--gap-dense); }
 		.artifact-fields { display: flex; flex-direction: column; gap: var(--gap); }
 		.field-row { display: flex; flex-direction: column; gap: 4px; }
 		.field-label { font-size: var(--text-xs); color: var(--text-subtle); letter-spacing: 0.06em; font-weight: 500; }

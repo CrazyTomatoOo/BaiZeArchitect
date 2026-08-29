@@ -37,9 +37,9 @@ class BaizeStatusBar extends LitElement {
 		}
 
 		.dot {
-			width: 8px;
-			height: 8px;
-			border-radius: 999px;
+			width: var(--status-dot-size);
+			height: var(--status-dot-size);
+			border-radius: var(--radius-pill);
 			background: var(--text-subtle);
 		}
 		.dot.ok { background: var(--ok); }

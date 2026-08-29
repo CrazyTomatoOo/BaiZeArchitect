@@ -1,5 +1,11 @@
 import { css } from "lit";
 
+/** 主题三态循环:system → light → dark → system。 */
+export function cycleTheme(current: "system" | "light" | "dark"): "system" | "light" | "dark" {
+	const order: ("system" | "light" | "dark")[] = ["system", "light", "dark"];
+	return order[(order.indexOf(current) + 1) % order.length];
+}
+
 /**
  * baize-styles — 页面级共享样式(按钮/卡片/徽章/表单/空态/步骤条)。
  * 仅引用 DESIGN.md token,不引入裸值。各 Lit 组件 shadow DOM 内组合使用。
@@ -156,4 +162,10 @@ export const sharedStyles = css`
 	@media (max-width: 480px) {
 		.step-link { width: 14px; flex-basis: 14px; margin: 0 5px; }
 	}
+
+	/* — stale/receipt 共享样式(gate-queue + approval-review 共用) — */
+	.stale-box { margin: var(--gap-dense) 0; border: 1px solid var(--danger); background: var(--warn-soft); border-radius: var(--radius-sm); padding: var(--gap-dense) var(--gap); font-size: var(--text-sm); color: var(--danger); }
+	.context-receipt { margin-top: var(--gap-dense); font-size: var(--text-sm); border-radius: var(--radius-sm); padding: var(--gap-dense) var(--gap); }
+	.context-receipt[data-outcome="accepted"] { border: 1px solid var(--ok); background: var(--ok-soft); }
+	.context-receipt:not([data-outcome="accepted"]) { border: 1px solid var(--danger); background: var(--warn-soft); color: var(--danger); }
 `;

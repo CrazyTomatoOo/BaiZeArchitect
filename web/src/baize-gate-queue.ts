@@ -65,10 +65,6 @@ class BaizeGateQueue extends LitElement {
 		.gate-form form { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
 		.gate-form input, .gate-form textarea, .gate-form select { min-width: 200px; }
 
-		.stale-box { margin: 8px 0; border: 1px solid var(--danger); background: var(--warn-soft); border-radius: var(--radius-sm); padding: 8px 10px; font-size: var(--text-sm); color: var(--danger); }
-		.context-receipt { margin-top: 8px; font-size: var(--text-sm); border-radius: var(--radius-sm); padding: 8px 10px; }
-		.context-receipt[data-outcome="accepted"] { border: 1px solid var(--ok); background: var(--ok-soft); }
-		.context-receipt:not([data-outcome="accepted"]) { border: 1px solid var(--danger); background: var(--warn-soft); color: var(--danger); }
 	`];
 
 	private gateCategoryLabel(category: GateCategory): string {
