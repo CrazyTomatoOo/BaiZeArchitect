@@ -16,8 +16,9 @@ test.describe("VS Code 式五层布局重新设计", () => {
 		await expect(page.locator("baize-side-bar .sub-tab").first()).toHaveText("需求");
 		await expect(page.locator("baize-side-bar .sub-tab").nth(1)).toHaveText("资产");
 		// 切到管理视图
+		// 管理页是独立路由(主区渲染 baize-workspace-manager)
 		await page.goto("/manage");
-		await expect(page.locator("baize-side-bar .header")).toContainText("工作空间");
+		await expect(page.locator("main baize-workspace-manager")).toBeVisible();
 		// 资产是工作空间内的 sub-view
 		await page.goto("/assets");
 		await expect(page.locator("baize-side-bar .sub-tab.active")).toHaveText("资产");
@@ -29,7 +30,7 @@ test.describe("VS Code 式五层布局重新设计", () => {
 		await page.getByRole("button", { name: "登录" }).click();
 		// 进入工作空间后顶栏显示 Workspace 标签
 		await page.getByRole("button", { name: "进入" }).click();
-		await expect(page.locator(".workspace-label")).toBeVisible();
+		await expect(page.locator(".switcher-btn")).toBeVisible();
 	});
 
 	test("Status Bar 显示连接状态指示灯", async ({ page }) => {

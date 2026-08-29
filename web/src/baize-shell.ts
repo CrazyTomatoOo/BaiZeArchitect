@@ -42,7 +42,7 @@ export type PanelEntry =
 type Theme = "system" | "light" | "dark";
 
 /** Activity Bar 顶层视图。 */
-type ActiveView = "workspace" | "manage";
+type ActiveView = "workspace";
 
 /** 解析主题偏好 → 实际应用到 <html> 的 data-theme 值。 */
 function resolveTheme(pref: Theme): "light" | "dark" | null {
@@ -72,6 +72,8 @@ class BaizeShell extends LitElement {
 		statusSnapshot: { state: true },
 		panelEntries: { state: true },
 		panelOpen: { state: true },
+		workspaces: { state: true },
+		switcherOpen: { state: true },
 	};
 	declare apiBase: string;
 	declare session: OperatorSession | null;
@@ -84,6 +86,8 @@ class BaizeShell extends LitElement {
 	declare sidebarCollapsed: boolean;
 	declare drawerOpen: boolean;
 	declare statusSnapshot: StatusSnapshot | null;
+	declare workspaces: readonly import("./workflow-client.js").WorkspaceSummary[];
+	declare switcherOpen: boolean;
 	declare panelEntries: PanelEntry[];
 	declare panelOpen: boolean;
 
@@ -127,10 +131,53 @@ class BaizeShell extends LitElement {
 		}
 		.topbar .brand .dot { color: var(--accent); }
 		.topbar .spacer { flex: 1; }
-	.topbar .workspace-label {
-			color: var(--text-muted);
+	.workspace-switcher {
+			position: relative;
+		}
+		.switcher-btn {
+			background: var(--surface-2);
+			border: 1px solid var(--border);
+			border-radius: var(--radius);
+			padding: var(--gap-dense) var(--pad);
+			color: var(--text);
 			font-size: var(--text-sm);
-			font-family: var(--font-mono);
+			cursor: pointer;
+			white-space: nowrap;
+		}
+		.switcher-btn:hover { background: var(--surface-hover); }
+		.switcher-dropdown {
+			position: absolute;
+			right: 0;
+			top: calc(100% + var(--gap-dense));
+			min-width: 200px;
+			background: var(--surface);
+			border: 1px solid var(--border);
+			border-radius: var(--radius);
+			box-shadow: 0 var(--gap) var(--space-md) var(--shadow-1);
+			z-index: 10;
+			overflow: hidden;
+		}
+		.switcher-item {
+			display: block;
+			width: 100%;
+			text-align: left;
+			padding: var(--gap) var(--pad);
+			background: transparent;
+			border: none;
+			color: var(--text);
+			font-size: var(--text-sm);
+			cursor: pointer;
+		}
+		.switcher-item:hover { background: var(--surface-hover); }
+		.switcher-item.active { color: var(--accent); }
+		.switcher-item.manage-link { border-top: 1px solid var(--border); color: var(--text-muted); }
+		.switcher-scrim {
+			position: fixed;
+			inset: 0;
+			z-index: 9;
+			border: 0;
+			background: transparent;
+			cursor: default;
 		}
 
 		/* — workbench-row: 横向 grid 四列 — */
@@ -319,6 +366,8 @@ class BaizeShell extends LitElement {
 		this.statusSnapshot = null;
 		this.panelEntries = [];
 		this.panelOpen = false;
+		this.workspaces = [];
+		this.switcherOpen = false;
 	}
 
 	connectedCallback(): void {
@@ -370,13 +419,11 @@ class BaizeShell extends LitElement {
 	/** Activity Bar 视图切换。 */
 	private switchView(view: ActiveView): void {
 		if (view === this.activeView) {
-			// 点击已激活项 → 切换 Side Bar 折叠
 			this.sidebarCollapsed = !this.sidebarCollapsed;
 		} else {
 			this.activeView = view;
 			this.sidebarCollapsed = false;
-			if (view === "workspace") this.navigate("/");
-			else if (view === "manage") this.navigate("/manage");
+			this.navigate("/");
 		}
 	}
 
@@ -404,17 +451,15 @@ class BaizeShell extends LitElement {
 	private async resolveInitialView(): Promise<void> {
 		try {
 			const stored = localStorage.getItem("baize.workspaceId");
-			let workspaces: readonly import("./workflow-client.js").WorkspaceSummary[] | null = null;
 			try {
-				workspaces = await listWorkspaces(this.apiBase);
+				this.workspaces = await listWorkspaces(this.apiBase);
 			} catch {
-				workspaces = null;
+				this.workspaces = [];
 			}
-			const resolved = resolveStoredWorkspace(stored, workspaces);
+			const resolved = resolveStoredWorkspace(stored, this.workspaces);
 			if (resolved.clearKey) localStorage.removeItem("baize.workspaceId");
 			if (resolved.workspaceId !== null) {
 				this.workspaceId = resolved.workspaceId;
-				this.activeView = "workspace";
 				if (window.location.pathname === "/" || window.location.pathname === "") {
 					this.navigate("/");
 				}
@@ -424,7 +469,6 @@ class BaizeShell extends LitElement {
 			// localStorage 不可用 → 不持久化
 		}
 		this.workspaceId = 0;
-		this.activeView = "manage";
 		if (window.location.pathname === "/" || window.location.pathname === "") {
 			this.navigate("/manage");
 		}
@@ -447,8 +491,9 @@ class BaizeShell extends LitElement {
 	private handleEnterWorkspace(event: Event): void {
 		const id = (event as CustomEvent<{ id: number }>).detail.id;
 		this.workspaceId = id;
+		this.switcherOpen = false;
 		localStorage.setItem("baize.workspaceId", String(id));
-		this.activeView = "workspace";
+		void this.refreshWorkspaces();
 		this.navigate("/");
 	}
 
@@ -458,6 +503,27 @@ class BaizeShell extends LitElement {
 			this.workspaceId = 0;
 			localStorage.removeItem("baize.workspaceId");
 		}
+	}
+
+	private async refreshWorkspaces(): Promise<void> {
+		try {
+			this.workspaces = await listWorkspaces(this.apiBase);
+		} catch {
+			// 保持现有列表
+		}
+	}
+
+	private toggleSwitcher(): void {
+		this.switcherOpen = !this.switcherOpen;
+	}
+
+	private closeSwitcher(): void {
+		this.switcherOpen = false;
+	}
+
+	private get currentWorkspaceName(): string {
+		const ws = this.workspaces.find((w) => w.id === this.workspaceId);
+		return ws ? ws.name : `Workspace #${this.workspaceId}`;
 	}
 
 	private navigate(path: string): void {
@@ -542,10 +608,8 @@ class BaizeShell extends LitElement {
 	}
 
 	protected override willUpdate(): void {
-		// 从路径推断 activeView（路由可能在不含视图切换的情况下变化，如 /workflow/:id）
-		const path = window.location.pathname;
-		if (path.startsWith("/manage")) this.activeView = "manage";
-		else this.activeView = "workspace";
+		// activeView 始终为 workspace(管理页是独立路由,不经 Activity Bar)
+		this.activeView = "workspace";
 	}
 
 	render() {
@@ -577,7 +641,26 @@ class BaizeShell extends LitElement {
 			<button class="menu-button" aria-label="打开工作台导航" aria-expanded=${this.drawerOpen} @click=${() => this.toggleDrawer()}>菜单</button>
 			<div class="brand"><span class="dot">◇</span> BaiZe Architect</div>
 			<span class="spacer"></span>
-			<span class="workspace-label">${this.workspaceId > 0 ? `Workspace #${this.workspaceId}` : ""}</span>
+			<div class="workspace-switcher">
+				<button class="switcher-btn" @click=${() => this.toggleSwitcher()} aria-expanded=${this.switcherOpen}>
+					${this.workspaceId > 0 ? this.currentWorkspaceName : "选择工作空间"}
+				</button>
+				${this.switcherOpen ? html`
+					<div class="switcher-dropdown" role="menu">
+						${this.workspaces.map((ws) => html`
+							<button class="switcher-item ${ws.id === this.workspaceId ? "active" : ""}" role="menuitem"
+								@click=${() => { this.workspaceId = ws.id; localStorage.setItem("baize.workspaceId", String(ws.id)); this.closeSwitcher(); this.navigate("/"); }}>
+								${ws.name}
+							</button>
+						`)}
+						<button class="switcher-item manage-link" role="menuitem"
+							@click=${() => { this.closeSwitcher(); this.navigate("/manage"); }}>
+							管理工作空间…
+						</button>
+					</div>
+					<button class="switcher-scrim" aria-label="关闭切换器" @click=${() => this.closeSwitcher()}></button>
+				` : nothing}
+			</div>
 			<button @click=${() => { this.session = null; }}>退出</button>
 		</div>
 		<div class="workbench-row" style="--rail-w: ${window.location.pathname.startsWith("/workflow/") ? "var(--rail-w)" : "0px"}">

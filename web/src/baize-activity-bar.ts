@@ -6,7 +6,7 @@ import { sharedStyles, cycleTheme } from "./baize-styles.js";
 type Theme = "system" | "light" | "dark";
 
 /** Activity Bar 顶层视图。workspace = 进入工作空间后的需求+资产视图。 */
-type ActiveView = "workspace" | "manage";
+type ActiveView = "workspace";
 
 /** 20×20 图标 SVG 字符串。 */
 const ICONS: Record<string, string> = {
@@ -131,7 +131,6 @@ class BaizeActivityBar extends LitElement {
 	render() {
 		return html`
 			${this.renderIcon("workspace", this.activeView === "workspace", "工作空间", () => this.onViewClick("workspace"))}
-			${this.renderIcon("manage", this.activeView === "manage", "管理", () => this.onViewClick("manage"))}
 			<div class="spacer"></div>
 			${this.renderIcon(`theme-${this.theme}`, false, "主题切换", () => this.onThemeClick())}
 		`;

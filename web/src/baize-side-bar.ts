@@ -1,11 +1,8 @@
 import { LitElement, html, css, nothing, type TemplateResult } from "lit";
 import { sharedStyles } from "./baize-styles.js";
-import { listWorkspaces, type WorkspaceSummary } from "./workflow-client.js";
-import "./baize-requirements.js";
-import "./baize-workspace-manager.js";
 
 /** Side Bar 当前承载的顶层视图。 */
-type ActiveView = "workspace" | "manage";
+type ActiveView = "workspace";
 
 /** 资产库九大分类。 */
 type AssetTab = "scenario" | "function" | "usecase" | "design" | "architecture" | "data" | "api" | "stakeholder" | "graph";
@@ -22,28 +19,20 @@ const ASSET_TABS: readonly { tab: AssetTab; label: string }[] = [
 	{ tab: "graph", label: "关系图" },
 ];
 
-const TITLE_MAP: Record<ActiveView, string> = {
-	workspace: "工作空间",
-	manage: "工作空间",
-};
-
 /**
  * baize-side-bar — 240px 左侧辅助面板。
- * 根据 activeView 委托给需求列表、资产导航或工作区管理器。
  */
 class BaizeSideBar extends LitElement {
 	static properties = {
 		activeView: { type: String, attribute: "active-view" },
 		apiBase: { type: String, attribute: "api-base" },
 		workspaceId: { type: Number, attribute: "workspace-id" },
-		workspaces: { state: true },
 		subView: { state: true },
 	};
 
 	declare activeView: ActiveView;
 	declare apiBase: string;
 	declare subView: "requirements" | "assets";
-	declare workspaces: readonly WorkspaceSummary[];
 	declare workspaceId: number;
 
 	static styles = [sharedStyles, css`
@@ -127,29 +116,14 @@ class BaizeSideBar extends LitElement {
 		this.activeView = "workspace";
 		this.apiBase = "";
 		this.workspaceId = 0;
-		this.workspaces = [];
 		this.subView = "requirements";
 	}
 
-	connectedCallback(): void {
-		super.connectedCallback();
-		void this.loadWorkspaces();
-	}
-
 	protected override willUpdate(): void {
-		if (this.activeView === "workspace") {
-			const path = window.location.pathname;
-			this.subView = path.startsWith("/assets") ? "assets" : "requirements";
-		}
+		const path = window.location.pathname;
+		this.subView = path.startsWith("/assets") ? "assets" : "requirements";
 	}
 
-	private async loadWorkspaces(): Promise<void> {
-		try {
-			this.workspaces = await listWorkspaces(this.apiBase);
-		} catch {
-			this.workspaces = [];
-		}
-	}
 
 	private onAssetTabChange(tab: AssetTab): void {
 		this.dispatchEvent(new CustomEvent("baize-asset-tab-change", { detail: { tab }, bubbles: true, composed: true }));
@@ -160,15 +134,6 @@ class BaizeSideBar extends LitElement {
 		this.dispatchEvent(new CustomEvent("baize-open-requirement", { detail, bubbles: true, composed: true }));
 	}
 
-	private onEnterWorkspace(e: Event): void {
-		const detail = (e as CustomEvent<{ id: number }>).detail;
-		this.dispatchEvent(new CustomEvent("baize-enter-workspace", { detail, bubbles: true, composed: true }));
-	}
-
-	private onWorkspaceDeleted(e: Event): void {
-		const detail = (e as CustomEvent<{ id: number }>).detail;
-		this.dispatchEvent(new CustomEvent("baize-workspace-deleted", { detail, bubbles: true, composed: true }));
-	}
 
 	private renderAssetsNav(): TemplateResult {
 		return html`
@@ -180,45 +145,30 @@ class BaizeSideBar extends LitElement {
 		`;
 	}
 
-	private renderWorkspaceList(): TemplateResult {
-		return html`
-			<div class="nav-list" role="list">
-				${this.workspaces.length === 0 ? html`<p class="hint">暂无工作空间。</p>` : nothing}
-				${this.workspaces.map((ws) => html`
-					<button class="nav-item ${ws.id === this.workspaceId ? "active" : ""}" role="listitem"
-						@click=${() => this.dispatchEvent(new CustomEvent("baize-enter-workspace", { detail: { id: ws.id }, bubbles: true, composed: true }))}
-					>${ws.name}</button>
-				`)}
-			</div>
-		`;
-	}
 
 	render(): TemplateResult {
 		return html`
 			<div class="header">
-				${this.activeView === "workspace" ? html`
-					<div class="sub-tabs">
-						<button class="sub-tab ${this.subView === "requirements" ? "active" : ""}"
-							@click=${() => { this.subView = "requirements"; this.dispatchEvent(new CustomEvent("baize-sub-view-change", { detail: { subView: "requirements" }, bubbles: true, composed: true })); }}>
-							需求
-						</button>
-						<button class="sub-tab ${this.subView === "assets" ? "active" : ""}"
-							@click=${() => { this.subView = "assets"; this.dispatchEvent(new CustomEvent("baize-sub-view-change", { detail: { subView: "assets" }, bubbles: true, composed: true })); }}>
-							资产
-						</button>
-					</div>
-				` : html`<span>${TITLE_MAP[this.activeView]}</span>`}
+				<div class="sub-tabs">
+					<button class="sub-tab ${this.subView === "requirements" ? "active" : ""}"
+						@click=${() => { this.subView = "requirements"; this.dispatchEvent(new CustomEvent("baize-sub-view-change", { detail: { subView: "requirements" }, bubbles: true, composed: true })); }}>
+						需求
+					</button>
+					<button class="sub-tab ${this.subView === "assets" ? "active" : ""}"
+						@click=${() => { this.subView = "assets"; this.dispatchEvent(new CustomEvent("baize-sub-view-change", { detail: { subView: "assets" }, bubbles: true, composed: true })); }}>
+						资产
+					</button>
+				</div>
 			</div>
 			<div class="content">
-				${this.activeView === "workspace" && this.subView === "requirements" ? html`
+				${this.subView === "requirements" ? html`
 					<baize-requirements
 						.apiBase=${this.apiBase}
 						.workspaceId=${this.workspaceId}
 						@baize-open-requirement=${this.onOpenRequirement}
 					></baize-requirements>
 				` : nothing}
-				${this.activeView === "workspace" && this.subView === "assets" ? this.renderAssetsNav() : nothing}
-				${this.activeView === "manage" ? this.renderWorkspaceList() : nothing}
+				${this.subView === "assets" ? this.renderAssetsNav() : nothing}
 			</div>
 		`;
 	}

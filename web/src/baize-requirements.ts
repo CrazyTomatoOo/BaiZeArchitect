@@ -164,6 +164,13 @@ class BaizeRequirements extends LitElement {
 		void this.loadModelConfig();
 	}
 
+	override updated(changed: Map<string, unknown>): void {
+		super.updated(changed);
+		if (changed.has("workspaceId") && this.workspaceId > 0) {
+			void this.load();
+		}
+	}
+
 	private async load(): Promise<void> {
 		this.loading = true;
 		this.error = null;
