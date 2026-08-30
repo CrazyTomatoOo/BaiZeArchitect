@@ -29,20 +29,24 @@ export interface HandlerContext {
 	secureCookies?: boolean;
 }
 
-export async function parseJsonBody(request: IncomingMessage, response: ServerResponse, errorKey = "malformed_body"): Promise<unknown | null> {
+const PARSE_ERROR = Symbol("parse_error");
+export async function parseJsonBody(request: IncomingMessage, response: ServerResponse, errorKey = "malformed_body"): Promise<unknown | typeof PARSE_ERROR> {
 	let raw: string;
 	try {
 		raw = await readBody(request);
 	} catch {
 		sendJson(response, 400, { error: errorKey });
-		return null;
+		return PARSE_ERROR;
 	}
 	try {
 		return JSON.parse(raw);
 	} catch {
 		sendJson(response, 400, { error: errorKey });
-		return null;
+		return PARSE_ERROR;
 	}
+}
+export function isParseError(body: unknown): body is typeof PARSE_ERROR {
+	return body === PARSE_ERROR;
 }
 
 export function requireWorkspace(runtime: HeadlessWorkflowRuntime, workspaceId: number, response: ServerResponse): boolean {

@@ -16,6 +16,7 @@ import {
 	sendAssetError,
 	sendJson,
 	parseJsonBody,
+	isParseError,
 	type HandlerContext,
 } from "./shared.js";
 
@@ -88,7 +89,7 @@ export async function match(
 
 	if (method === "POST" && url.pathname === "/api/assets/import") {
 		const body = await parseJsonBody(request, response);
-		if (body === null) return true;
+		if (isParseError(body)) return true;
 		if (typeof body !== "object" || body === null || Array.isArray(body)) {
 			sendJson(response, 400, { error: "malformed_body" });
 			return true;
@@ -134,7 +135,7 @@ export async function match(
 
 	if (method === "POST" && url.pathname === "/api/assets/import/preview") {
 		const body = await parseJsonBody(request, response);
-		if (body === null) return true;
+		if (isParseError(body)) return true;
 		if (typeof body !== "object" || body === null || Array.isArray(body)) {
 			sendJson(response, 400, { error: "malformed_body" });
 			return true;
@@ -159,7 +160,7 @@ export async function match(
 
 	if (method === "POST" && url.pathname === "/api/assets/import/commit") {
 		const body = await parseJsonBody(request, response);
-		if (body === null) return true;
+		if (isParseError(body)) return true;
 		if (typeof body !== "object" || body === null || Array.isArray(body)) {
 			sendJson(response, 400, { error: "malformed_body" });
 			return true;
@@ -231,7 +232,7 @@ export async function match(
 
 	if (method === "POST" && url.pathname === "/api/assets/hierarchy") {
 		const body = await parseJsonBody(request, response);
-		if (body === null) return true;
+		if (isParseError(body)) return true;
 		if (typeof body !== "object" || body === null || Array.isArray(body)) {
 			sendJson(response, 400, { error: "malformed_body" });
 			return true;
@@ -273,7 +274,7 @@ export async function match(
 
 	if (method === "PUT" && url.pathname === "/api/assets/hierarchy/move") {
 		const body = await parseJsonBody(request, response);
-		if (body === null) return true;
+		if (isParseError(body)) return true;
 		if (typeof body !== "object" || body === null || Array.isArray(body)) {
 			sendJson(response, 400, { error: "malformed_body" });
 			return true;
@@ -343,7 +344,7 @@ export async function match(
 
 	if (method === "POST" && url.pathname === "/api/assets") {
 		const body = await parseJsonBody(request, response);
-		if (body === null) return true;
+		if (isParseError(body)) return true;
 		if (typeof body !== "object" || body === null || Array.isArray(body)) {
 			sendJson(response, 400, { error: "malformed_body" });
 			return true;
@@ -396,7 +397,7 @@ export async function match(
 
 	if (method === "PUT" && segments.length === 3 && segments[0] === "api" && segments[1] === "assets") {
 		const body = await parseJsonBody(request, response);
-		if (body === null) return true;
+		if (isParseError(body)) return true;
 		if (typeof body !== "object" || body === null || Array.isArray(body)) {
 			sendJson(response, 400, { error: "malformed_body" });
 			return true;

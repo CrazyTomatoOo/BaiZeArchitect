@@ -3,6 +3,7 @@ import { WORKFLOW_COMMAND_TYPES, type WorkflowCommandType } from "../command-typ
 import { isReusableAssetKind } from "../../persistence/reusable-asset-kind.js";
 import {
 	parseJsonBody,
+	isParseError,
 	rejectReservedFields,
 	runReadyTasks,
 	sendJson,
@@ -31,7 +32,7 @@ export async function match(
 			return true;
 		}
 		const body = await parseJsonBody(request, response);
-		if (body === null) return true;
+		if (isParseError(body)) return true;
 		if (typeof body !== "object" || body === null || Array.isArray(body)) {
 			sendJson(response, 400, { error: "malformed_body" });
 			return true;
@@ -90,7 +91,7 @@ export async function match(
 
 	if (method === "POST" && segments.length === 4 && segments[0] === "api" && segments[1] === "requirements" && segments[3] === "promote") {
 		const body = await parseJsonBody(request, response);
-		if (body === null) return true;
+		if (isParseError(body)) return true;
 		if (typeof body !== "object" || body === null || Array.isArray(body)) {
 			sendJson(response, 400, { error: "malformed_body" });
 			return true;

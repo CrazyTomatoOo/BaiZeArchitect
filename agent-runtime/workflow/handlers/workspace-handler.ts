@@ -4,6 +4,7 @@ import type { RequirementBaseline } from "../requirement.js";
 import { BusyWorkspaceError } from "../../persistence/workflow-store.js";
 import {
 	parseJsonBody,
+	isParseError,
 	requireWorkspace,
 	rejectReservedFields,
 	sendJson,
@@ -25,7 +26,7 @@ export async function match(
 
 	if (method === "POST" && url.pathname === "/api/workspaces") {
 		const body = await parseJsonBody(request, response, "malformed_workspace");
-		if (body === null) return true;
+		if (isParseError(body)) return true;
 		if (typeof body !== "object" || body === null || Array.isArray(body)) {
 			sendJson(response, 400, { error: "malformed_workspace" });
 			return true;
@@ -143,7 +144,7 @@ export async function match(
 		const workspaceId = Number(segments[2]);
 		if (!requireWorkspace(ctx.runtime, workspaceId, response)) return true;
 		const body = await parseJsonBody(request, response);
-		if (body === null) return true;
+		if (isParseError(body)) return true;
 		if (typeof body !== "object" || body === null || Array.isArray(body)) {
 			sendJson(response, 400, { error: "malformed_body" });
 			return true;

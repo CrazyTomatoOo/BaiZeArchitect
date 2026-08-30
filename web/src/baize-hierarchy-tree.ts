@@ -132,6 +132,7 @@ class BaizeHierarchyTree extends LitElement {
 		pageSize: { type: Number, attribute: "page-size" },
 		query: { type: String },
 		narrowView: { type: Boolean, attribute: "narrow-view" },
+		refresh: { type: Number },
 
 		roots: { state: true },
 		total: { state: true },
@@ -156,6 +157,7 @@ class BaizeHierarchyTree extends LitElement {
 	declare page: number;
 	declare pageSize: number;
 	declare query: string;
+	declare refresh: number;
 	declare narrowView: boolean;
 
 	declare roots: readonly HierarchyRoot[];
@@ -533,7 +535,8 @@ class BaizeHierarchyTree extends LitElement {
 			changed.has("rootKind") ||
 			changed.has("page") ||
 			changed.has("pageSize") ||
-			changed.has("query")
+			changed.has("query") ||
+			changed.has("refresh")
 		) {
 			if (changed.has("rootKind") || changed.has("apiBase") || changed.has("workspaceId")) {
 				this.childrenMap = new Map();
