@@ -642,6 +642,11 @@ class BaizeHierarchyTree extends LitElement {
 						composed: true,
 					}),
 				);
+				if (this.selectedAssetId === 0 && this.roots.length > 0 && this.roots[0]) {
+					this.dispatchEvent(
+						new CustomEvent("select", { detail: this.roots[0].assetId, bubbles: true, composed: true }),
+					);
+				}
 				this.searchHits = [];
 				this.searchQuery = "";
 			}
