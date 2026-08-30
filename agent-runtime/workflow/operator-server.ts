@@ -19,7 +19,8 @@ import * as workflowCommandHandler from "./handlers/workflow-command-handler.js"
 import * as workflowProjectionHandler from "./handlers/workflow-projection-handler.js";
 import * as assetHandler from "./handlers/asset-handler.js";
 import * as sseHandler from "./handlers/sse-handler.js";
-import { runReadyTasks, sendJson, sessionFromCookie, serveStatic, type HandlerContext, type OperatorContext } from "./handlers/shared.js";
+import { runReadyTasks } from "./handlers/workflow-command-orchestration.js";
+import { sendJson, sessionFromCookie, serveStatic, type HandlerContext, type OperatorContext } from "./handlers/shared.js";
 
 export { runReadyTasks };
 
@@ -89,6 +90,9 @@ export async function startOperatorServer(
 			sseHeartbeatMs: options.sseHeartbeatMs,
 			staticRoot: options.staticRoot,
 			secureCookies: options.secureCookies,
+			projectionReader: options.runtime.readModel,
+			eventStreamReader: options.runtime.readModel,
+			planningContextReader: options.runtime.readModel,
 		};
 
 		// Public bootstrap route: must run before authentication.

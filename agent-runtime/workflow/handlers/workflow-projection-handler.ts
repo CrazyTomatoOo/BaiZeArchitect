@@ -10,7 +10,7 @@ export async function match(
 	ctx: HandlerContext,
 ): Promise<boolean> {
 	if (method === "GET" && segments.length === 3 && segments[0] === "api" && segments[1] === "workflows") {
-		const projection = ctx.runtime.readModel.getBoundedProjection(Number(segments[2]));
+		const projection = ctx.projectionReader.getBoundedProjection(Number(segments[2]));
 		if (!projection) {
 			sendJson(response, 404, { error: "unknown_workflow" });
 			return true;
@@ -20,7 +20,7 @@ export async function match(
 	}
 
 	if (method === "GET" && segments.length === 5 && segments[0] === "api" && segments[1] === "workflows" && segments[3] === "commands") {
-		const receipt = ctx.runtime.readModel.getCommandReceiptDetail(Number(segments[2]), segments[4]);
+		const receipt = ctx.projectionReader.getCommandReceiptDetail(Number(segments[2]), segments[4]);
 		if (!receipt) {
 			sendJson(response, 404, { error: "unknown_command_receipt" });
 			return true;
@@ -30,7 +30,7 @@ export async function match(
 	}
 
 	if (method === "GET" && segments.length === 3 && segments[0] === "api" && segments[1] === "tasks") {
-		const detail = ctx.runtime.readModel.getTaskDetail(Number(segments[2]));
+		const detail = ctx.projectionReader.getTaskDetail(Number(segments[2]));
 		if (!detail) {
 			sendJson(response, 404, { error: "unknown_task" });
 			return true;
@@ -41,7 +41,7 @@ export async function match(
 
 	if (method === "GET" && segments.length === 4 && segments[0] === "api" && segments[1] === "tasks" && segments[3] === "attempts") {
 		const taskId = Number(segments[2]);
-		if (!ctx.runtime.readModel.getTaskDetail(taskId)) {
+		if (!ctx.projectionReader.getTaskDetail(taskId)) {
 			sendJson(response, 404, { error: "unknown_task" });
 			return true;
 		}
@@ -50,7 +50,7 @@ export async function match(
 	}
 
 	if (method === "GET" && segments.length === 3 && segments[0] === "api" && segments[1] === "attempts") {
-		const detail = ctx.runtime.readModel.getAttemptDetail(Number(segments[2]));
+		const detail = ctx.projectionReader.getAttemptDetail(Number(segments[2]));
 		if (!detail) {
 			sendJson(response, 404, { error: "unknown_attempt" });
 			return true;
@@ -60,7 +60,7 @@ export async function match(
 	}
 
 	if (method === "GET" && segments.length === 3 && segments[0] === "api" && segments[1] === "runs") {
-		const detail = ctx.runtime.readModel.getRunDetail(Number(segments[2]));
+		const detail = ctx.projectionReader.getRunDetail(Number(segments[2]));
 		if (!detail) {
 			sendJson(response, 404, { error: "unknown_run" });
 			return true;
@@ -70,7 +70,7 @@ export async function match(
 	}
 
 	if (method === "GET" && segments.length === 3 && segments[0] === "api" && segments[1] === "plan-revisions") {
-		const detail = ctx.runtime.readModel.getPlanRevisionDetail(Number(segments[2]));
+		const detail = ctx.projectionReader.getPlanRevisionDetail(Number(segments[2]));
 		if (!detail) {
 			sendJson(response, 404, { error: "unknown_plan_revision" });
 			return true;
@@ -80,7 +80,7 @@ export async function match(
 	}
 
 	if (method === "GET" && segments.length === 3 && segments[0] === "api" && segments[1] === "approval-packets") {
-		const detail = ctx.runtime.readModel.getApprovalPacketDetail(Number(segments[2]));
+		const detail = ctx.projectionReader.getApprovalPacketDetail(Number(segments[2]));
 		if (!detail) {
 			sendJson(response, 404, { error: "unknown_approval_packet" });
 			return true;
@@ -92,8 +92,11 @@ export async function match(
 	if (method === "GET" && url.pathname === "/api/search") {
 		const workspaceId = Number(url.searchParams.get("workspaceId"));
 		const query = url.searchParams.get("q") ?? "";
-		if (!requireWorkspace(ctx.runtime, workspaceId, response)) return true;
-		sendJson(response, 200, { query, hits: ctx.runtime.readModel.searchWorkspaceContent(workspaceId, query) });
+		if (!requireWorkspace(ctx.runtime, workspaceId)) {
+			sendJson(response, 404, { error: "unknown_workspace" });
+			return true;
+		}
+		sendJson(response, 200, { query, hits: ctx.planningContextReader.searchWorkspaceContent(workspaceId, query) });
 		return true;
 	}
 

@@ -16,7 +16,6 @@ import {
 	sendAssetError,
 	sendJson,
 	parseJsonBody,
-	isParseError,
 	type HandlerContext,
 } from "./shared.js";
 
@@ -75,28 +74,42 @@ export async function match(
 ): Promise<boolean> {
 	if (method === "GET" && url.pathname === "/api/assets/graph") {
 		const workspaceId = Number(url.searchParams.get("workspaceId"));
-		if (!requireWorkspace(ctx.runtime, workspaceId, response)) return true;
+		if (!requireWorkspace(ctx.runtime, workspaceId)) {
+			sendJson(response, 404, { error: "unknown_workspace" });
+			return true;
+		}
 		sendJson(response, 200, ctx.runtime.assets.getWorkspaceAssetGraph(workspaceId));
 		return true;
 	}
 
 	if (method === "GET" && url.pathname === "/api/assets/export") {
 		const workspaceId = Number(url.searchParams.get("workspaceId"));
-		if (!requireWorkspace(ctx.runtime, workspaceId, response)) return true;
+		if (!requireWorkspace(ctx.runtime, workspaceId)) {
+			sendJson(response, 404, { error: "unknown_workspace" });
+			return true;
+		}
 		sendJson(response, 200, ctx.runtime.assets.exportReusableAssetBundle(workspaceId));
 		return true;
 	}
 
 	if (method === "POST" && url.pathname === "/api/assets/import") {
-		const body = await parseJsonBody(request, response);
-		if (isParseError(body)) return true;
+		let body: unknown;
+		try {
+			body = await parseJsonBody(request);
+		} catch {
+			sendJson(response, 400, { error: "malformed_body" });
+			return true;
+		}
 		if (typeof body !== "object" || body === null || Array.isArray(body)) {
 			sendJson(response, 400, { error: "malformed_body" });
 			return true;
 		}
 		const importBody = body as { workspaceId?: unknown; assets?: unknown; relations?: unknown };
 		const workspaceId = Number(importBody.workspaceId);
-		if (!requireWorkspace(ctx.runtime, workspaceId, response)) return true;
+		if (!requireWorkspace(ctx.runtime, workspaceId)) {
+			sendJson(response, 404, { error: "unknown_workspace" });
+			return true;
+		}
 		if (!Array.isArray(importBody.assets) || importBody.assets.length === 0) {
 			sendJson(response, 400, { error: "malformed_body" });
 			return true;
@@ -134,15 +147,23 @@ export async function match(
 	}
 
 	if (method === "POST" && url.pathname === "/api/assets/import/preview") {
-		const body = await parseJsonBody(request, response);
-		if (isParseError(body)) return true;
+		let body: unknown;
+		try {
+			body = await parseJsonBody(request);
+		} catch {
+			sendJson(response, 400, { error: "malformed_body" });
+			return true;
+		}
 		if (typeof body !== "object" || body === null || Array.isArray(body)) {
 			sendJson(response, 400, { error: "malformed_body" });
 			return true;
 		}
 		const previewBody = body as { workspaceId?: unknown; bundle?: unknown };
 		const workspaceId = Number(previewBody.workspaceId);
-		if (!requireWorkspace(ctx.runtime, workspaceId, response)) return true;
+		if (!requireWorkspace(ctx.runtime, workspaceId)) {
+			sendJson(response, 404, { error: "unknown_workspace" });
+			return true;
+		}
 		const bundle = parseImportBundle(previewBody.bundle);
 		if (bundle === undefined) {
 			sendJson(response, 400, { error: "malformed_body" });
@@ -159,15 +180,23 @@ export async function match(
 	}
 
 	if (method === "POST" && url.pathname === "/api/assets/import/commit") {
-		const body = await parseJsonBody(request, response);
-		if (isParseError(body)) return true;
+		let body: unknown;
+		try {
+			body = await parseJsonBody(request);
+		} catch {
+			sendJson(response, 400, { error: "malformed_body" });
+			return true;
+		}
 		if (typeof body !== "object" || body === null || Array.isArray(body)) {
 			sendJson(response, 400, { error: "malformed_body" });
 			return true;
 		}
 		const commitBody = body as { workspaceId?: unknown; bundle?: unknown; previewDigest?: unknown };
 		const workspaceId = Number(commitBody.workspaceId);
-		if (!requireWorkspace(ctx.runtime, workspaceId, response)) return true;
+		if (!requireWorkspace(ctx.runtime, workspaceId)) {
+			sendJson(response, 404, { error: "unknown_workspace" });
+			return true;
+		}
 		if (typeof commitBody.previewDigest !== "string") {
 			sendJson(response, 400, { error: "malformed_body" });
 			return true;
@@ -194,7 +223,10 @@ export async function match(
 
 	if (method === "GET" && url.pathname === "/api/assets/hierarchy") {
 		const workspaceId = Number(url.searchParams.get("workspaceId"));
-		if (!requireWorkspace(ctx.runtime, workspaceId, response)) return true;
+		if (!requireWorkspace(ctx.runtime, workspaceId)) {
+			sendJson(response, 404, { error: "unknown_workspace" });
+			return true;
+		}
 		const searchQ = url.searchParams.get("q");
 		if (searchQ !== null && searchQ.length > 0) {
 			sendJson(response, 200, { query: searchQ, hits: ctx.runtime.assets.searchNodes(workspaceId, searchQ) });
@@ -231,15 +263,23 @@ export async function match(
 	}
 
 	if (method === "POST" && url.pathname === "/api/assets/hierarchy") {
-		const body = await parseJsonBody(request, response);
-		if (isParseError(body)) return true;
+		let body: unknown;
+		try {
+			body = await parseJsonBody(request);
+		} catch {
+			sendJson(response, 400, { error: "malformed_body" });
+			return true;
+		}
 		if (typeof body !== "object" || body === null || Array.isArray(body)) {
 			sendJson(response, 400, { error: "malformed_body" });
 			return true;
 		}
 		const createBody = body as { workspaceId?: unknown; tree?: unknown; parentAssetId?: unknown };
 		const workspaceId = Number(createBody.workspaceId);
-		if (!requireWorkspace(ctx.runtime, workspaceId, response)) return true;
+		if (!requireWorkspace(ctx.runtime, workspaceId)) {
+			sendJson(response, 404, { error: "unknown_workspace" });
+			return true;
+		}
 		const tree = parseSubtreeNode(createBody.tree);
 		if (tree === undefined) {
 			sendJson(response, 400, { error: "malformed_body" });
@@ -273,8 +313,13 @@ export async function match(
 	}
 
 	if (method === "PUT" && url.pathname === "/api/assets/hierarchy/move") {
-		const body = await parseJsonBody(request, response);
-		if (isParseError(body)) return true;
+		let body: unknown;
+		try {
+			body = await parseJsonBody(request);
+		} catch {
+			sendJson(response, 400, { error: "malformed_body" });
+			return true;
+		}
 		if (typeof body !== "object" || body === null || Array.isArray(body)) {
 			sendJson(response, 400, { error: "malformed_body" });
 			return true;
@@ -328,7 +373,10 @@ export async function match(
 
 	if (method === "GET" && url.pathname === "/api/assets") {
 		const workspaceId = Number(url.searchParams.get("workspaceId"));
-		if (!requireWorkspace(ctx.runtime, workspaceId, response)) return true;
+		if (!requireWorkspace(ctx.runtime, workspaceId)) {
+			sendJson(response, 404, { error: "unknown_workspace" });
+			return true;
+		}
 		const q = url.searchParams.get("q");
 		const page = parsePositiveQueryInteger(url.searchParams.get("page"), 1);
 		const pageSize = parsePositiveQueryInteger(url.searchParams.get("pageSize"), 12, 100);
@@ -343,8 +391,13 @@ export async function match(
 	}
 
 	if (method === "POST" && url.pathname === "/api/assets") {
-		const body = await parseJsonBody(request, response);
-		if (isParseError(body)) return true;
+		let body: unknown;
+		try {
+			body = await parseJsonBody(request);
+		} catch {
+			sendJson(response, 400, { error: "malformed_body" });
+			return true;
+		}
 		if (typeof body !== "object" || body === null || Array.isArray(body)) {
 			sendJson(response, 400, { error: "malformed_body" });
 			return true;
@@ -356,7 +409,10 @@ export async function match(
 		}
 		const createBody = body as { workspaceId?: unknown; kind?: unknown; title?: unknown; content?: unknown; relations?: unknown };
 		const workspaceId = Number(createBody.workspaceId);
-		if (!requireWorkspace(ctx.runtime, workspaceId, response)) return true;
+		if (!requireWorkspace(ctx.runtime, workspaceId)) {
+			sendJson(response, 404, { error: "unknown_workspace" });
+			return true;
+		}
 		if (!isReusableAssetKind(createBody.kind) || !("content" in createBody)) {
 			sendJson(response, 400, { error: "malformed_body" });
 			return true;
@@ -396,8 +452,13 @@ export async function match(
 	}
 
 	if (method === "PUT" && segments.length === 3 && segments[0] === "api" && segments[1] === "assets") {
-		const body = await parseJsonBody(request, response);
-		if (isParseError(body)) return true;
+		let body: unknown;
+		try {
+			body = await parseJsonBody(request);
+		} catch {
+			sendJson(response, 400, { error: "malformed_body" });
+			return true;
+		}
 		if (typeof body !== "object" || body === null || Array.isArray(body)) {
 			sendJson(response, 400, { error: "malformed_body" });
 			return true;

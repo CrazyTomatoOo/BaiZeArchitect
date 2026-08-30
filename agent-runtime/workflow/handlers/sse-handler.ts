@@ -18,14 +18,14 @@ export async function match(
 		&& segments[4] === "stream"
 	) {
 		const workflowId = Number(segments[2]);
-		if (!Number.isInteger(workflowId) || !ctx.runtime.readModel.getWorkflowProjection(workflowId)) {
+		if (!Number.isInteger(workflowId) || !ctx.projectionReader.getWorkflowProjection(workflowId)) {
 			sendJson(response, 404, { error: "unknown_workflow" });
 			return true;
 		}
 		const lastEventId = request.headers["last-event-id"];
 		const cursor = parseEventCursor(url, response, typeof lastEventId === "string" ? lastEventId : undefined);
 		if (cursor === null) return true;
-		const watermark = ctx.runtime.readModel.getWorkflowEventWatermark(workflowId);
+		const watermark = ctx.eventStreamReader.getWorkflowEventWatermark(workflowId);
 		if (cursor.after > watermark) {
 			sendJson(response, 416, { error: "cursor_out_of_range", watermark });
 			return true;
@@ -34,8 +34,8 @@ export async function match(
 			eventField: "workflow-event",
 			after: cursor.after,
 			watermark,
-			replay: (after, limit) => ctx.runtime.readModel.getWorkflowEvents(workflowId, after, limit),
-			subscribe: (listener) => ctx.runtime.readModel.subscribeWorkflowEvents((event) => {
+			replay: (after, limit) => ctx.eventStreamReader.getWorkflowEvents(workflowId, after, limit),
+			subscribe: (listener) => ctx.eventStreamReader.subscribeWorkflowEvents((event) => {
 				if (event.workflowId === workflowId) listener(event);
 			}),
 			heartbeatMs: ctx.sseHeartbeatMs ?? 15_000,
@@ -52,14 +52,14 @@ export async function match(
 		&& segments[4] === "stream"
 	) {
 		const runId = Number(segments[2]);
-		if (!Number.isInteger(runId) || !ctx.runtime.readModel.runExists(runId)) {
+		if (!Number.isInteger(runId) || !ctx.eventStreamReader.runExists(runId)) {
 			sendJson(response, 404, { error: "unknown_run" });
 			return true;
 		}
 		const lastEventId = request.headers["last-event-id"];
 		const cursor = parseEventCursor(url, response, typeof lastEventId === "string" ? lastEventId : undefined);
 		if (cursor === null) return true;
-		const watermark = ctx.runtime.readModel.getRunEventWatermark(runId);
+		const watermark = ctx.eventStreamReader.getRunEventWatermark(runId);
 		if (cursor.after > watermark) {
 			sendJson(response, 416, { error: "cursor_out_of_range", watermark });
 			return true;
@@ -68,8 +68,8 @@ export async function match(
 			eventField: "run-event",
 			after: cursor.after,
 			watermark,
-			replay: (after, limit) => ctx.runtime.readModel.getRunEvents(runId, after, limit),
-			subscribe: (listener) => ctx.runtime.readModel.subscribeRunEvents((event) => {
+			replay: (after, limit) => ctx.eventStreamReader.getRunEvents(runId, after, limit),
+			subscribe: (listener) => ctx.eventStreamReader.subscribeRunEvents((event) => {
 				if (event.runId === runId) listener(event);
 			}),
 			heartbeatMs: ctx.sseHeartbeatMs ?? 15_000,

@@ -4,7 +4,6 @@ import type { RequirementBaseline } from "../requirement.js";
 import { BusyWorkspaceError } from "../../persistence/workflow-store.js";
 import {
 	parseJsonBody,
-	isParseError,
 	requireWorkspace,
 	rejectReservedFields,
 	sendJson,
@@ -25,8 +24,13 @@ export async function match(
 	}
 
 	if (method === "POST" && url.pathname === "/api/workspaces") {
-		const body = await parseJsonBody(request, response, "malformed_workspace");
-		if (isParseError(body)) return true;
+		let body: unknown;
+		try {
+			body = await parseJsonBody(request);
+		} catch {
+			sendJson(response, 400, { error: "malformed_workspace" });
+			return true;
+		}
 		if (typeof body !== "object" || body === null || Array.isArray(body)) {
 			sendJson(response, 400, { error: "malformed_workspace" });
 			return true;
@@ -89,13 +93,16 @@ export async function match(
 
 	if (method === "GET" && url.pathname === "/api/requirements") {
 		const workspaceId = Number(url.searchParams.get("workspaceId"));
-		if (!requireWorkspace(ctx.runtime, workspaceId, response)) return true;
-		sendJson(response, 200, { requirements: ctx.runtime.readModel.listRequirementSummaries(workspaceId) });
+		if (!requireWorkspace(ctx.runtime, workspaceId)) {
+			sendJson(response, 404, { error: "unknown_workspace" });
+			return true;
+		}
+		sendJson(response, 200, { requirements: ctx.projectionReader.listRequirementSummaries(workspaceId) });
 		return true;
 	}
 
 	if (method === "GET" && segments.length === 3 && segments[0] === "api" && segments[1] === "requirements") {
-		const detail = ctx.runtime.readModel.getRequirementDetail(Number(segments[2]));
+		const detail = ctx.projectionReader.getRequirementDetail(Number(segments[2]));
 		if (!detail) {
 			sendJson(response, 404, { error: "unknown_requirement" });
 			return true;
@@ -105,7 +112,7 @@ export async function match(
 	}
 
 	if (method === "GET" && segments.length === 4 && segments[0] === "api" && segments[1] === "requirements" && segments[3] === "artifacts") {
-		const detail = ctx.runtime.readModel.getArtifactRevisionDetail(Number(segments[2]), String(url.searchParams.get("kind") ?? ""));
+		const detail = ctx.projectionReader.getArtifactRevisionDetail(Number(segments[2]), String(url.searchParams.get("kind") ?? ""));
 		if (!detail) {
 			sendJson(response, 404, { error: "unknown_artifact" });
 			return true;
@@ -115,7 +122,7 @@ export async function match(
 	}
 
 	if (method === "GET" && segments.length === 3 && segments[0] === "api" && segments[1] === "design-packages") {
-		const designPackage = ctx.runtime.readModel.getDesignPackage(Number(segments[2]));
+		const designPackage = ctx.projectionReader.getDesignPackage(Number(segments[2]));
 		if (!designPackage) {
 			sendJson(response, 404, { error: "unknown_design_package" });
 			return true;
@@ -125,7 +132,7 @@ export async function match(
 	}
 
 	if (method === "GET" && segments.length === 3 && segments[0] === "api" && segments[1] === "legacy-imports") {
-		const legacyImport = ctx.runtime.readModel.getLegacyImport(Number(segments[2]));
+		const legacyImport = ctx.projectionReader.getLegacyImport(Number(segments[2]));
 		if (!legacyImport) {
 			sendJson(response, 404, { error: "unknown_legacy_import" });
 			return true;
@@ -142,9 +149,17 @@ export async function match(
 		&& segments[3] === "requirements"
 	) {
 		const workspaceId = Number(segments[2]);
-		if (!requireWorkspace(ctx.runtime, workspaceId, response)) return true;
-		const body = await parseJsonBody(request, response);
-		if (isParseError(body)) return true;
+		if (!requireWorkspace(ctx.runtime, workspaceId)) {
+			sendJson(response, 404, { error: "unknown_workspace" });
+			return true;
+		}
+		let body: unknown;
+		try {
+			body = await parseJsonBody(request);
+		} catch {
+			sendJson(response, 400, { error: "malformed_body" });
+			return true;
+		}
 		if (typeof body !== "object" || body === null || Array.isArray(body)) {
 			sendJson(response, 400, { error: "malformed_body" });
 			return true;

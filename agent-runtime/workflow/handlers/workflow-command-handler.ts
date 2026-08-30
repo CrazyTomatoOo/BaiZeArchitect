@@ -3,12 +3,11 @@ import { WORKFLOW_COMMAND_TYPES, type WorkflowCommandType } from "../command-typ
 import { isReusableAssetKind } from "../../persistence/reusable-asset-kind.js";
 import {
 	parseJsonBody,
-	isParseError,
 	rejectReservedFields,
-	runReadyTasks,
 	sendJson,
 	type HandlerContext,
 } from "./shared.js";
+import { runReadyTasks } from "./workflow-command-orchestration.js";
 
 export async function match(
 	method: string,
@@ -27,12 +26,17 @@ export async function match(
 	) {
 		const workflowId = Number(segments[2]);
 		const commandId = segments[4];
-		if (!Number.isInteger(workflowId) || !ctx.runtime.readModel.getWorkflowProjection(workflowId)) {
+		if (!Number.isInteger(workflowId) || !ctx.projectionReader.getWorkflowProjection(workflowId)) {
 			sendJson(response, 404, { error: "unknown_workflow" });
 			return true;
 		}
-		const body = await parseJsonBody(request, response);
-		if (isParseError(body)) return true;
+		let body: unknown;
+		try {
+			body = await parseJsonBody(request);
+		} catch {
+			sendJson(response, 400, { error: "malformed_body" });
+			return true;
+		}
 		if (typeof body !== "object" || body === null || Array.isArray(body)) {
 			sendJson(response, 400, { error: "malformed_body" });
 			return true;
@@ -90,8 +94,13 @@ export async function match(
 	}
 
 	if (method === "POST" && segments.length === 4 && segments[0] === "api" && segments[1] === "requirements" && segments[3] === "promote") {
-		const body = await parseJsonBody(request, response);
-		if (isParseError(body)) return true;
+		let body: unknown;
+		try {
+			body = await parseJsonBody(request);
+		} catch {
+			sendJson(response, 400, { error: "malformed_body" });
+			return true;
+		}
 		if (typeof body !== "object" || body === null || Array.isArray(body)) {
 			sendJson(response, 400, { error: "malformed_body" });
 			return true;
@@ -102,7 +111,7 @@ export async function match(
 			return true;
 		}
 		const requirementId = Number(segments[2]);
-		const detail = ctx.runtime.readModel.getRequirementDetail(requirementId);
+		const detail = ctx.projectionReader.getRequirementDetail(requirementId);
 		if (!detail) {
 			sendJson(response, 404, { error: "unknown_requirement" });
 			return true;
