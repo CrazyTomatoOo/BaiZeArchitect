@@ -32,6 +32,9 @@ import { ASSET_KIND_EXPANSION_MIGRATION } from "./migrations/0020-asset-kind-exp
 import type { ReusableAssetKind } from "./reusable-asset-kind.js";
 import { parseJson } from "./json.js";
 import { AssetStore } from "./asset-store.js";
+import { ProjectionReadModel } from "./projection-read-model.js";
+import type { WorkflowProjectionReader, EventStreamReader, PlanningContextReader } from "./projection-read-interfaces.js";
+export type { WorkflowProjectionReader, EventStreamReader, PlanningContextReader } from "./projection-read-interfaces.js";
 import type { AssetGraph, AssetRelationExport, AssetRelationInput, AssetRelationRecord, ReusableAssetExportBundle } from "./asset-relations.js";
 import type { ReusableAssetDetail, ReusableAssetListQuery, ReusableAssetPage, ReusableAssetSummary, SubtreeNode } from "./asset-store.js";
 import { SnapshotStore } from "./snapshot-store.js";
@@ -303,6 +306,7 @@ export class WorkflowStore {
 	private readonly snapshotStore: SnapshotStore;
 	private readonly workspaceStore: WorkspaceStore;
 	private readonly assetStore: AssetStore;
+	private readonly readModel: ProjectionReadModel;
 	private readonly createRequirementTransaction: (
 		input: CreateRequirementInput,
 	) => CreationResult;
@@ -321,6 +325,7 @@ this.database.pragma("busy_timeout = 5000");
 		this.snapshotStore = new SnapshotStore(this.database, this.options.hashProvider);
 		this.workspaceStore = new WorkspaceStore(this.database, this.options.clock);
 	this.assetStore = new AssetStore(this.database, this.options.clock, this.snapshotStore, this.options.artifactValidator, this.options.hashProvider);
+	this.readModel = new ProjectionReadModel(this);
 		this.createRequirementTransaction = this.database.transaction((input) =>
 			this.createRequirementRows(input),
 		).immediate;
@@ -388,6 +393,11 @@ createWorkspace(input: { repoPath: string; name: string }): number {
 
 	workspaceExists(workspaceId: number): boolean {
 		return this.workspaceStore.workspaceExists(workspaceId);
+	}
+
+	/** ADR-011: read-only projection accessor. Returns the ProjectionReadModel for consumers that need the three narrow read interfaces. */
+	getReadModel(): ProjectionReadModel {
+		return this.readModel;
 	}
 
 	listWorkspaces(): readonly WorkspaceSummary[] {
