@@ -14,6 +14,7 @@ import type { ModelRolesOverride } from "../workflow/model-driver.js";
 export type {
 	WorkflowProjection,
 	BoundedWorkflowProjection,
+	CommandReceipt,
 	CommandReceiptDetail,
 	RequirementSummaryRecord,
 	RequirementDetailRecord,
@@ -48,6 +49,7 @@ export type {
 import type {
 	WorkflowProjection,
 	BoundedWorkflowProjection,
+	CommandReceipt,
 	CommandReceiptDetail,
 	RequirementSummaryRecord,
 	RequirementDetailRecord,
@@ -81,6 +83,7 @@ export interface WorkflowProjectionReader {
 	getWorkflowProjection(workflowId: number): WorkflowProjection | undefined;
 	getBoundedProjection(workflowId: number): BoundedWorkflowProjection | undefined;
 	getCommandReceiptDetail(workflowId: number, commandId: string): CommandReceiptDetail | undefined;
+	getCommandReceipt(workflowId: number, commandId: string): CommandReceipt | undefined;
 	listRequirements(workspaceId: number): Array<{ requirementId: number; workflowId: number }>;
 	listRequirementSummaries(workspaceId: number): readonly RequirementSummaryRecord[];
 	getRequirementDetail(requirementId: number): RequirementDetailRecord | undefined;
