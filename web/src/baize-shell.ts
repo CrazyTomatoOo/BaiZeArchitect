@@ -171,14 +171,15 @@ class BaizeShell extends LitElement {
 		.switcher-item:hover { background: var(--surface-hover); }
 		.switcher-item.active { color: var(--accent); }
 		.switcher-item.manage-link { border-top: 1px solid var(--border); color: var(--text-muted); }
-		.switcher-scrim {
+	.switcher-scrim {
 			position: fixed;
 			inset: 0;
 			z-index: 9;
 			border: 0;
-			background: transparent;
+			background: transparent !important;
 			cursor: default;
 		}
+		.switcher-scrim:hover { background: transparent !important; }
 
 		/* — workbench-row: 横向 grid 四列 — */
 		.workbench-row {
