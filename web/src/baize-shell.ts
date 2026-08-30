@@ -301,7 +301,21 @@ class BaizeShell extends LitElement {
 			color: var(--danger);
 			font-size: var(--text-sm);
 			text-align: center;
-		}
+	}
+
+	/* — 工作空间选择器 — */
+	.workspace-selector { padding: var(--space-md); }
+	.selector-head { display: flex; align-items: center; gap: var(--gap); margin-bottom: var(--space-md); }
+	.selector-head h1 { font-family: var(--font-display); font-size: var(--text-xl); font-weight: 600; }
+	.selector-head .secondary { margin-left: var(--gap); }
+	.selector-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(var(--side-bar-w-max), 1fr)); gap: var(--space-sm); }
+	.selector-card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-card); padding: var(--pad); display: flex; flex-direction: column; gap: var(--gap); }
+	.selector-card .card-title { font-weight: 600; font-size: var(--text-base); }
+	.selector-card .card-meta { color: var(--text-muted); font-size: var(--text-sm); word-break: break-all; }
+	.selector-card .card-stats { display: flex; gap: var(--space-sm); font-size: var(--text-sm); color: var(--text-subtle); }
+	.selector-card .primary { align-self: flex-start; }
+	.selector-empty { display: flex; flex-direction: column; align-items: center; gap: var(--gap); padding: var(--space-md) 0; }
+	.selector-empty .empty-hint { color: var(--text-muted); }
 
 	/* — <900px 坍缩:Activity Bar→底部 bar / Side Bar→off-canvas 抽屉 / 右栏隐藏 / Panel 隐藏 — */
 	.menu-button, .drawer-scrim { display: none; }
@@ -449,7 +463,7 @@ class BaizeShell extends LitElement {
 		this.initializing = false;
 	}
 
-	/** 登录成功后的加载序:合法已存键直达其需求列表;否则回管理页。 */
+	/** 登录成功后的加载序:合法已存键直达其需求列表;否则留首页选择器。 */
 	private async resolveInitialView(): Promise<void> {
 		try {
 			const stored = localStorage.getItem("baize.workspaceId");
@@ -471,8 +485,10 @@ class BaizeShell extends LitElement {
 			// localStorage 不可用 → 不持久化
 		}
 		this.workspaceId = 0;
-		if (window.location.pathname === "/" || window.location.pathname === "") {
+		if (window.location.pathname === "/manage") {
 			this.navigate("/manage");
+		} else if (window.location.pathname !== "/" && window.location.pathname !== "") {
+			this.navigate("/");
 		}
 	}
 
@@ -485,13 +501,13 @@ class BaizeShell extends LitElement {
 			await this.resolveInitialView();
 		} catch (error) {
 			this.loginError = error instanceof Error ? error.message : String(error);
-		} finally {
-			this.initializing = false;
-		}
+	} finally {
+		this.initializing = false;
+	}
 	}
 
-	private handleEnterWorkspace(event: Event): void {
-		const id = (event as CustomEvent<{ id: number }>).detail.id;
+	/** 进入工作空间（选择器、管理页、切换器共用）。 */
+	private enterWorkspace(id: number): void {
 		this.workspaceId = id;
 		this.switcherOpen = false;
 		localStorage.setItem("baize.workspaceId", String(id));
@@ -499,11 +515,17 @@ class BaizeShell extends LitElement {
 		this.navigate("/");
 	}
 
+	private handleEnterWorkspace(event: Event): void {
+		this.enterWorkspace((event as CustomEvent<{ id: number }>).detail.id);
+	}
+
 	private handleWorkspaceDeleted(event: Event): void {
 		const id = (event as CustomEvent<{ id: number }>).detail.id;
 		if (id === this.workspaceId) {
 			this.workspaceId = 0;
 			localStorage.removeItem("baize.workspaceId");
+			void this.refreshWorkspaces();
+			this.navigate("/");
 		}
 	}
 
@@ -574,19 +596,49 @@ class BaizeShell extends LitElement {
 
 	// — Route renderers —
 
-	private renderHome(): ReturnType<typeof html> {
-		if (this.workspaceId === 0) {
-			return html`<div class="empty">请先选择或创建工作空间。</div>`;
-		}
-		return html`<div class="empty">从侧栏选择一个需求查看详情。</div>`;
+private renderHome(): ReturnType<typeof html> {
+	if (this.workspaceId === 0) {
+		return this.renderWorkspaceSelector();
 	}
+	return html`<div class="empty">从侧栏选择一个需求查看详情。</div>`;
+}
 
-	private renderAssets(): ReturnType<typeof html> {
-		if (this.workspaceId === 0) {
-			return html`<div class="empty">请先选择或创建工作空间。</div>`;
-		}
-		return html`<baize-asset-library .apiBase=${this.apiBase} .workspaceId=${this.workspaceId}></baize-asset-library>`;
+private renderWorkspaceSelector(): ReturnType<typeof html> {
+	if (this.workspaces.length === 0) {
+		return html`<div class="selector-empty">
+			<p class="empty-hint">还没有工作空间。</p>
+			<button class="primary" @click=${() => this.navigate("/manage")}>新建工作空间</button>
+		</div>`;
 	}
+return html`<div class="workspace-selector">
+		<div class="selector-head">
+			<h1>选择工作空间</h1>
+			<span class="spacer"></span>
+			<button class="secondary" @click=${() => this.navigate("/manage")}>新建工作空间</button>
+			<button class="secondary" @click=${() => this.navigate("/manage")}>管理工作空间</button>
+		</div>
+		<div class="selector-grid">
+			${this.workspaces.map((ws) => html`
+				<div class="selector-card">
+					<div class="card-title">${ws.name}</div>
+					<div class="card-meta mono">${ws.repoPath}</div>
+					<div class="card-stats">
+						<span>${ws.requirementCount} 需求</span>
+						<span>${ws.assetCount} 资产</span>
+					</div>
+					<button class="primary" @click=${() => this.enterWorkspace(ws.id)}>进入</button>
+				</div>
+			`)}
+		</div>
+	</div>`;
+}
+
+private renderAssets(): ReturnType<typeof html> {
+	if (this.workspaceId === 0) {
+		return html`<div class="empty">请先选择或创建工作空间。</div>`;
+	}
+	return html`<baize-asset-library .apiBase=${this.apiBase} .workspaceId=${this.workspaceId}></baize-asset-library>`;
+}
 
 	private renderManage(): ReturnType<typeof html> {
 		return html`<baize-workspace-manager
@@ -637,21 +689,21 @@ class BaizeShell extends LitElement {
 		if (this.initializing) {
 			return html`<div class="placeholder">加载中…</div>`;
 		}
-
-	return html`
+return html`
 		<div class="topbar">
-			<button class="menu-button" aria-label="打开工作台导航" aria-expanded=${this.drawerOpen} @click=${() => this.toggleDrawer()}>菜单</button>
+			${this.workspaceId > 0 ? html`<button class="menu-button" aria-label="打开工作台导航" aria-expanded=${this.drawerOpen} @click=${() => this.toggleDrawer()}>菜单</button>` : nothing}
 			<div class="brand"><span class="dot">◇</span> BaiZe Architect</div>
 			<span class="spacer"></span>
+			${this.workspaceId > 0 ? html`
 			<div class="workspace-switcher">
 				<button class="switcher-btn" @click=${() => this.toggleSwitcher()} aria-expanded=${this.switcherOpen}>
-					${this.workspaceId > 0 ? this.currentWorkspaceName : "选择工作空间"}
+					${this.currentWorkspaceName}
 				</button>
 				${this.switcherOpen ? html`
 					<div class="switcher-dropdown" role="menu">
 						${this.workspaces.map((ws) => html`
 							<button class="switcher-item ${ws.id === this.workspaceId ? "active" : ""}" role="menuitem"
-								@click=${() => { this.workspaceId = ws.id; localStorage.setItem("baize.workspaceId", String(ws.id)); this.closeSwitcher(); this.navigate("/"); }}>
+							@click=${() => this.enterWorkspace(ws.id)}>
 								${ws.name}
 							</button>
 						`)}
@@ -663,9 +715,11 @@ class BaizeShell extends LitElement {
 					<button class="switcher-scrim" aria-label="关闭切换器" @click=${() => this.closeSwitcher()}></button>
 				` : nothing}
 			</div>
+			` : nothing}
 			<button @click=${() => { this.session = null; }}>退出</button>
 		</div>
-		<div class="workbench-row" style="--rail-w: ${window.location.pathname.startsWith("/workflow/") ? "320px" : "0px"}; --side-bar-w: ${this.workspaceId > 0 ? "240px" : "0px"}">
+		<div class="workbench-row" style="--rail-w: ${window.location.pathname.startsWith("/workflow/") ? "320px" : "0px"}; --side-bar-w: ${this.workspaceId > 0 ? "240px" : "0px"}; --activity-bar-w: ${this.workspaceId > 0 ? "48px" : "0px"}">
+			${this.workspaceId > 0 ? html`
 			<div class="activity-bar-slot">
 			<baize-activity-bar
 					.activeView=${this.activeView}
@@ -699,15 +753,16 @@ class BaizeShell extends LitElement {
 					}}
 			</baize-side-bar>
 		</div>
+			` : nothing}
 		<main class="main-slot" @keydown=${(e: KeyboardEvent) => this.handleKeydown(e)}>
 			${this.router.outlet()}
 		</main>
 		${window.location.pathname.startsWith("/workflow/") ? html`<div class="rail-slot"></div>` : nothing}
 		${this.drawerOpen ? html`<button class="drawer-scrim" aria-label="关闭导航" @click=${() => this.closeDrawer()}></button>` : nothing}
 	</div>
-		<div class="panel-slot ${this.panelOpen ? "open" : ""}">
+		${this.workspaceId > 0 ? html`<div class="panel-slot ${this.panelOpen ? "open" : ""}">
 			<baize-panel .entries=${this.panelEntries}></baize-panel>
-		</div>
+		</div>` : nothing}
 		<div class="status-bar-slot">
 			<baize-status-bar
 				.statusSnapshot=${this.statusSnapshot}

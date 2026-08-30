@@ -184,11 +184,10 @@ class BaizeWorkspaceManager extends LitElement {
 												<div class="title">${workspace.name}</div>
 												<div class="meta mono">${workspace.repoPath}</div>
 											</div>
-											<div class="actions">
-												<button class="primary" ?disabled=${this.deletingId !== null} @click=${() => this.enter(workspace.id)}>进入</button>
-												<button class="danger" ?disabled=${this.deletingId !== null} @click=${() => this.askDelete(workspace.id)}>删除</button>
-											</div>
+										<div class="actions">
+											<button class="danger" ?disabled=${this.deletingId !== null} @click=${() => this.askDelete(workspace.id)}>删除</button>
 										</div>
+									</div>
 										${this.confirmId === workspace.id
 											? html`<div class="confirm" role="dialog" aria-label="确认删除工作区 ${workspace.name}">
 													<span class="text">删除工作区「${workspace.name}」?将级联删除其下所有需求与资产（含设计历史、审批记录），<strong>不可恢复</strong>。</span>

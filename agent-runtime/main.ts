@@ -227,6 +227,14 @@ async function createPiExecutor(): Promise<PiModelExecutor> {
 				// 终止型工具结果:role=toolResult,带 details(pi-ai ToolResultMessage)
 				if (msg.role === "toolResult" && msg.details !== undefined) {
 					structuredResult = msg.details;
+					// GLM-5.2 可能以字符串形式传递 JSON(把 JSON 当字符串参数提交),需反序列化为对象。
+					if (typeof structuredResult === "string") {
+						try {
+							structuredResult = JSON.parse(structuredResult);
+						} catch {
+							// 保留原始字符串,后续 schema 验证会以 invalid_role_result_schema 拒绝。
+						}
+					}
 					terminationTool = typeof msg.toolName === "string" ? msg.toolName : "unknown";
 					break;
 				}

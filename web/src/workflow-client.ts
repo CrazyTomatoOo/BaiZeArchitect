@@ -1111,6 +1111,8 @@ export interface WorkspaceSummary {
 	name: string;
 	repoPath: string;
 	createdAt: string;
+	requirementCount: number;
+	assetCount: number;
 }
 
 /** 工作区注册表 API 错误:保留 HTTP 状态码与服务端 error code,供管理页行内文案映射。 */

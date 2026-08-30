@@ -381,8 +381,7 @@ describe("baize-workspace-manager — 管理页安全约定", () => {
 		expect(workspaceManagerSource).toContain("baize-workspace-deleted");
 	});
 
-	it("删除在飞时禁用全部行操作(防删除-进入竞态,决议 10)", () => {
-		expect(workspaceManagerSource).toMatch(/\?disabled=\$\{this\.deletingId !== null\}[\s\S]*>进入</);
+	it("删除在飞时禁用全部行操作(防删除竞态,决议 10)", () => {
 		expect(workspaceManagerSource).toMatch(/\?disabled=\$\{this\.deletingId !== null\}[\s\S]*>删除</);
 	});
 
@@ -403,8 +402,8 @@ describe("baize-workspace-manager — 管理页安全约定", () => {
 
 describe("resolveStoredWorkspace — 已存键解析规则(决议 09)", () => {
 	const workspaces = [
-		{ id: 3, name: "North", repoPath: "/north", createdAt: "t" },
-		{ id: 5, name: "South", repoPath: "/south", createdAt: "t" },
+		{ id: 3, name: "North", repoPath: "/north", createdAt: "t", requirementCount: 0, assetCount: 0 },
+		{ id: 5, name: "South", repoPath: "/south", createdAt: "t", requirementCount: 0, assetCount: 0 },
 	];
 
 	it("合法键值在列表内 → 直达,不清键", () => {

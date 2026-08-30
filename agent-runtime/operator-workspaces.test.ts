@@ -120,9 +120,9 @@ test("GET /api/workspaces lists created workspaces in id order", async () => {
 		assert.equal(listed.status, 200);
 		assert.deepEqual(await listed.json(), {
 			workspaces: [
-				{ id: 1, name: "North", repoPath: "/north", createdAt: TIMESTAMP },
-				{ id: 2, name: "South", repoPath: "/south", createdAt: TIMESTAMP },
-				{ id: 3, name: "East", repoPath: "/east", createdAt: TIMESTAMP },
+				{ id: 1, name: "North", repoPath: "/north", createdAt: TIMESTAMP, requirementCount: 0, assetCount: 0 },
+				{ id: 2, name: "South", repoPath: "/south", createdAt: TIMESTAMP, requirementCount: 0, assetCount: 0 },
+				{ id: 3, name: "East", repoPath: "/east", createdAt: TIMESTAMP, requirementCount: 0, assetCount: 0 },
 			],
 		});
 	});

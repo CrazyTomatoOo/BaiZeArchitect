@@ -15,6 +15,8 @@ export interface WorkspaceSummary {
 	name: string;
 	repoPath: string;
 	createdAt: string;
+	requirementCount: number;
+	assetCount: number;
 }
 
 /**
@@ -92,16 +94,23 @@ export class WorkspaceStore {
 			.prepare("select 1 from workspaces where id = ?")
 			.get(workspaceId) !== undefined;
 	}
-
 	listWorkspaces(): readonly WorkspaceSummary[] {
 		const rows = this.database
-			.prepare("select id, repo_path, name, created_at from workspaces order by id")
-			.all() as Array<{ id: number; repo_path: string; name: string; created_at: string }>;
+			.prepare(`
+				select w.id, w.repo_path, w.name, w.created_at,
+					(select count(*) from requirements r where r.workspace_id = w.id) as requirement_count,
+					(select count(*) from reusable_assets a where a.workspace_id = w.id) as asset_count
+				from workspaces w
+				order by w.id
+			`)
+			.all() as Array<{ id: number; repo_path: string; name: string; created_at: string; requirement_count: number; asset_count: number }>;
 		return rows.map((row) => ({
 			id: row.id,
 			name: row.name,
 			repoPath: row.repo_path,
 			createdAt: row.created_at,
+			requirementCount: row.requirement_count,
+			assetCount: row.asset_count,
 		}));
 	}
 

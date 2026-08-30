@@ -15,6 +15,8 @@ interface Workspace {
 	id: number;
 	name: string;
 	repoPath: string;
+	requirementCount: number;
+	assetCount: number;
 }
 
 function requirementSummary(workspaceId: number) {
@@ -171,7 +173,7 @@ async function mockWorkspaceApi(page: Page, options: MockOptions): Promise<void>
 		const request = route.request();
 		if (request.method() === "POST") {
 			const body = JSON.parse(request.postData() ?? "{}") as { name?: string; repoPath?: string };
-			const workspace: Workspace = { id: nextId, name: (body.name ?? "").trim(), repoPath: (body.repoPath ?? "").trim() };
+		const workspace: Workspace = { id: nextId, name: (body.name ?? "").trim(), repoPath: (body.repoPath ?? "").trim(), requirementCount: 0, assetCount: 0 };
 			nextId += 1;
 			workspaces.push(workspace);
 			await fulfillJson(route, { workspaceId: workspace.id }, 201);
@@ -210,25 +212,25 @@ async function openApp(page: Page): Promise<void> {
 
 test.describe("workspace management", () => {
 	test("匿名访问:只呈现登录表单,无管理面泄漏", async ({ page }) => {
-		await mockWorkspaceApi(page, { session: "anonymous", workspaces: [{ id: 1, name: "North", repoPath: "/north" }] });
+		await mockWorkspaceApi(page, { session: "anonymous", workspaces: [{ id: 1, name: "North", repoPath: "/north", requirementCount: 1, assetCount: 0 }] });
 		await openApp(page);
 
 		await expect(page.getByLabel("Operator Token")).toBeVisible();
 		await expect(page.getByRole("button", { name: "登录" })).toBeVisible();
-		await expect(page.getByRole("heading", { name: "工作空间" })).toHaveCount(0);
+		await expect(page.getByRole("heading", { name: "选择工作空间" })).toHaveCount(0);
 		await expect(page.getByRole("button", { name: "退出" })).toHaveCount(0);
 	});
 
-	test("登录后首屏 = 管理页,列出全部工作区且未写选中键", async ({ page }) => {
+	test("登录后首屏 = 选择器,列出全部工作区且未写选中键", async ({ page }) => {
 		await mockWorkspaceApi(page, { session: "anonymous", workspaces: [
-			{ id: 1, name: "North", repoPath: "/north" },
-			{ id: 2, name: "South", repoPath: "/south" },
+			{ id: 1, name: "North", repoPath: "/north", requirementCount: 1, assetCount: 0 },
+			{ id: 2, name: "South", repoPath: "/south", requirementCount: 1, assetCount: 0 },
 		] });
 		await openApp(page);
 		await page.getByLabel("Operator Token").fill("token-admin");
 		await page.getByRole("button", { name: "登录" }).click();
 
-		await expect(page.getByRole("main").getByRole("heading", { name: "工作空间" })).toBeVisible();
+		await expect(page.getByRole("main").getByRole("heading", { name: "选择工作空间" })).toBeVisible();
 		await expect(page.getByText("/north")).toBeVisible();
 		await expect(page.getByText("/south")).toBeVisible();
 		await expect(page.getByRole("button", { name: "进入" })).toHaveCount(2);
@@ -236,17 +238,32 @@ test.describe("workspace management", () => {
 		expect(stored).toBeNull();
 	});
 
-	test("零态:空工作区列表显示创建引导", async ({ page }) => {
-		await mockWorkspaceApi(page, { session: "operator", workspaces: [] });
+	test("选择器卡片显示需求数和资产数", async ({ page }) => {
+		await mockWorkspaceApi(page, { session: "anonymous", workspaces: [
+			{ id: 1, name: "North", repoPath: "/north", requirementCount: 3, assetCount: 5 },
+		] });
 		await openApp(page);
+		await page.getByLabel("Operator Token").fill("token-admin");
+		await page.getByRole("button", { name: "登录" }).click();
 
-		await expect(page.getByRole("main").getByRole("heading", { name: "工作空间" })).toBeVisible();
-		await expect(page.getByText(/还没有工作空间/)).toBeVisible();
+		await expect(page.getByText("3 需求")).toBeVisible();
+		await expect(page.getByText("5 资产")).toBeVisible();
 	});
 
-	test("创建 → 直接进入新工作区需求列表并写键", async ({ page }) => {
+	test("零态:选择器空态显示创建引导", async ({ page }) => {
 		await mockWorkspaceApi(page, { session: "operator", workspaces: [] });
 		await openApp(page);
+
+		await expect(page.getByRole("main").getByRole("heading", { name: "选择工作空间" })).toHaveCount(0);
+		await expect(page.getByText(/还没有工作空间/)).toBeVisible();
+		await expect(page.getByRole("button", { name: "新建工作空间" })).toBeVisible();
+	});
+
+	test("创建:从选择器空态跳管理页 → 创建并进入 → 写键", async ({ page }) => {
+		await mockWorkspaceApi(page, { session: "operator", workspaces: [] });
+		await openApp(page);
+		await page.getByRole("button", { name: "新建工作空间" }).click();
+		await expect(page.getByRole("main").getByRole("heading", { name: "工作空间" })).toBeVisible();
 		await page.getByRole("button", { name: "＋ 新建工作空间" }).click();
 		await page.getByPlaceholder("名称").fill("Alpha");
 		await page.getByPlaceholder("仓库路径,如 /path/to/repo").fill("/alpha");
@@ -258,8 +275,8 @@ test.describe("workspace management", () => {
 		expect(stored).toBe("1");
 	});
 
-	test("进入既有工作区 → 需求列表 → 详情 → 返回;顶栏回管理页", async ({ page }) => {
-		await mockWorkspaceApi(page, { session: "operator", workspaces: [{ id: 1, name: "North", repoPath: "/north" }] });
+	test("进入既有工作区 → 需求列表 → 详情 → 返回;管理页无进入按钮", async ({ page }) => {
+		await mockWorkspaceApi(page, { session: "operator", workspaces: [{ id: 1, name: "North", repoPath: "/north", requirementCount: 1, assetCount: 0 }] });
 		await openApp(page);
 
 		await page.getByRole("button", { name: "进入" }).click();
@@ -272,7 +289,7 @@ test.describe("workspace management", () => {
 		await page.reload();
 		await expect(page.getByRole("heading", { name: "需求" })).toBeVisible();
 		await expect(page.getByText("需求 101")).toBeVisible();
-		await expect(page.getByRole("heading", { name: "工作空间" })).toHaveCount(0);
+		await expect(page.getByRole("heading", { name: "选择工作空间" })).toHaveCount(0);
 
 
 		// 小屏坍缩态:Side Bar 为抽屉,需先打开才能点击需求
@@ -282,19 +299,41 @@ test.describe("workspace management", () => {
 		await expect(page.getByText(/需求 101/).first()).toBeVisible();
 		await expect(page.getByTestId("primary-action")).toHaveText("开始"); // pending 状态主动作
 
-		// 返回需求列表:Activity Bar 导航(原 back 按钮已移除,#81)
+		// 返回需求列表
 		await page.goto("/");
 		await expect(page.getByRole("heading", { name: "需求" })).toBeVisible();
 
-		// 回管理页:Activity Bar 导航(原 topbar 按钮已移除,#78)
+		// 管理页无「进入」按钮(概念分离)
 		await page.goto("/manage");
 		await expect(page.getByRole("main").getByRole("heading", { name: "工作空间" })).toBeVisible();
+		await expect(page.getByRole("button", { name: "进入" })).toHaveCount(0);
 	});
 
-	test("记住最近:刷新直达;键失效 → 管理页并清键", async ({ page }) => {
+	test("无工作区时最小 chrome:Activity Bar/Side Bar/Panel/切换器隐藏", async ({ page }) => {
+		await mockWorkspaceApi(page, { session: "anonymous", workspaces: [
+			{ id: 1, name: "North", repoPath: "/north", requirementCount: 1, assetCount: 0 },
+		] });
+		await openApp(page);
+		await page.getByLabel("Operator Token").fill("token-admin");
+		await page.getByRole("button", { name: "登录" }).click();
+
+		// 选择器首屏:无 Activity Bar / Side Bar / Panel / 切换器
+		await expect(page.locator(".activity-bar-slot")).toHaveCount(0);
+		await expect(page.locator(".side-bar-slot")).toHaveCount(0);
+		await expect(page.locator(".panel-slot")).toHaveCount(0);
+		await expect(page.locator(".switcher-btn")).toHaveCount(0);
+
+		// 进入工作区后 chrome 恢复
+		await page.getByRole("button", { name: "进入" }).click();
+		await expect(page.locator(".activity-bar-slot")).toBeVisible();
+		await expect(page.locator(".side-bar-slot")).toBeVisible();
+		await expect(page.locator(".switcher-btn")).toBeVisible();
+	});
+
+	test("记住最近:刷新直达;键失效 → 选择器并清键", async ({ page }) => {
 		await mockWorkspaceApi(page, { session: "operator", workspaces: [
-			{ id: 1, name: "North", repoPath: "/north" },
-			{ id: 2, name: "South", repoPath: "/south" },
+			{ id: 1, name: "North", repoPath: "/north", requirementCount: 1, assetCount: 0 },
+			{ id: 2, name: "South", repoPath: "/south", requirementCount: 1, assetCount: 0 },
 		] });
 		// 仅首次加载写键:reload 后不得覆盖测试中途设置的失效键
 		await page.addInitScript(() => {
@@ -302,24 +341,24 @@ test.describe("workspace management", () => {
 		});
 		await openApp(page);
 
-		// 合法已存键 → 直达该工作区需求列表,不经管理页
+		// 合法已存键 → 直达该工作区需求列表,不经选择器
 		await expect(page.getByRole("heading", { name: "需求" })).toBeVisible();
 		await expect(page.getByText("需求 101")).toBeVisible();
-		await expect(page.getByRole("heading", { name: "工作空间" })).toHaveCount(0);
+		await expect(page.getByRole("heading", { name: "选择工作空间" })).toHaveCount(0);
 
-		// 键失效(工作区 99 已删)→ 管理页并清键
+		// 键失效(工作区 99 已删)→ 选择器并清键
 		await page.evaluate(() => localStorage.setItem("baize.workspaceId", "99"));
 		await page.reload();
-		await expect(page.getByRole("main").getByRole("heading", { name: "工作空间" })).toBeVisible();
+		await expect(page.getByRole("main").getByRole("heading", { name: "选择工作空间" })).toBeVisible();
 		const stored = await page.evaluate(() => localStorage.getItem("baize.workspaceId"));
 		expect(stored).toBeNull();
 	});
 
-	test("删除流:取消 / 409 busy 内行错误 / 成功移除;删当前清键", async ({ page }) => {
+	test("删除流:取消 / 409 busy 内行错误 / 成功移除;删当前回选择器", async ({ page }) => {
 		let busy = true;
 		await mockWorkspaceApi(page, {
 			session: "operator",
-			workspaces: [{ id: 1, name: "North", repoPath: "/north" }],
+			workspaces: [{ id: 1, name: "North", repoPath: "/north", requirementCount: 1, assetCount: 0 }],
 			deleteBusy: () => busy,
 		});
 		await page.addInitScript(() => {
@@ -327,11 +366,10 @@ test.describe("workspace management", () => {
 		});
 		await openApp(page);
 
-		// 直达需求列表后经顶栏回到管理页(North 即当前工作区)
+		// 直达需求列表后回管理页(North 即当前工作区)
 		await expect(page.getByRole("heading", { name: "需求" })).toBeVisible();
-	// 回管理页:Activity Bar 导航(原 topbar 按钮已移除,#78)
-	await page.goto("/manage");
-	await expect(page.getByRole("main").getByRole("heading", { name: "工作空间" })).toBeVisible();
+		await page.goto("/manage");
+		await expect(page.getByRole("main").getByRole("heading", { name: "工作空间" })).toBeVisible();
 
 		// 第一步:取消
 		await page.getByRole("button", { name: "删除", exact: true }).click();
@@ -348,7 +386,7 @@ test.describe("workspace management", () => {
 		await expect(confirm).toContainText(/运行或认领在飞/);
 		await expect(confirm).toContainText("级联删除其下所有需求与资产（含设计历史、审批记录）");
 
-		// 放行 → 成功移除,回管理页(零态)并清键
+		// 放行 → 成功移除,回选择器并清键
 		busy = false;
 		await page.getByRole("button", { name: "确认删除" }).click();
 		await expect(page.getByText(/还没有工作空间/)).toBeVisible();

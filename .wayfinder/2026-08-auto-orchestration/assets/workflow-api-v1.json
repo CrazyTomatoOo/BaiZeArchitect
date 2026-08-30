@@ -95,7 +95,7 @@
     "list": {
       "method": "GET",
       "path": "/api/workspaces",
-      "purpose": "List all workspaces ordered by id"
+      "purpose": "List all workspaces ordered by id, with requirementCount and assetCount per workspace"
     },
     "create": {
       "method": "POST",

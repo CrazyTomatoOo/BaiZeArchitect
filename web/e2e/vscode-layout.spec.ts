@@ -47,6 +47,8 @@ test.describe("VS Code 式五层布局重新设计", () => {
 		await page.goto("/");
 		await page.getByLabel("Operator Token").fill("demo-token");
 		await page.getByRole("button", { name: "登录" }).click();
+		// 进入工作空间后 Panel 可见
+		await page.getByRole("button", { name: "进入" }).click();
 		// Panel 默认折叠
 		await expect(page.locator(".panel-slot")).not.toHaveClass(/open/);
 		// 点击 toggle 展开
