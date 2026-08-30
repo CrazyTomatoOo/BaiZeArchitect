@@ -665,16 +665,17 @@ class BaizeShell extends LitElement {
 		</div>
 		<div class="workbench-row" style="--rail-w: ${window.location.pathname.startsWith("/workflow/") ? "var(--rail-w)" : "0px"}">
 			<div class="activity-bar-slot">
-				<baize-activity-bar
+			<baize-activity-bar
 					.activeView=${this.activeView}
 					.theme=${this.theme}
 					.sidebarCollapsed=${this.sidebarCollapsed}
+					.workspaceId=${this.workspaceId}
 					@baize-view-change=${(e: Event) => this.switchView((e as CustomEvent<{ view: ActiveView }>).detail.view)}
 					@baize-theme-toggle=${() => this.cycleTheme()}
 					@baize-sidebar-toggle=${() => { this.sidebarCollapsed = !this.sidebarCollapsed; }}
 				></baize-activity-bar>
 			</div>
-			<div class="side-bar-slot ${this.drawerOpen ? "drawer-open" : ""}">
+			<div class="side-bar-slot ${this.drawerOpen ? "drawer-open" : ""}" ?hidden=${this.workspaceId === 0}>
 				<baize-side-bar
 					.activeView=${this.activeView}
 					.apiBase=${this.apiBase}

@@ -1,4 +1,4 @@
-import { LitElement, html, css, type TemplateResult } from "lit";
+import { LitElement, html, css, nothing, type TemplateResult } from "lit";
 import { unsafeHTML } from "lit/directives/unsafe-html.js";
 import { sharedStyles, cycleTheme } from "./baize-styles.js";
 
@@ -26,11 +26,13 @@ class BaizeActivityBar extends LitElement {
 		activeView: { type: String, attribute: "active-view" },
 		theme: { type: String },
 		sidebarCollapsed: { type: Boolean, attribute: "sidebar-collapsed" },
+		workspaceId: { type: Number, attribute: "workspace-id" },
 	};
 
 	declare activeView: ActiveView;
 	declare theme: Theme;
 	declare sidebarCollapsed: boolean;
+	declare workspaceId: number;
 
 	static styles = [sharedStyles, css`
 		:host {
@@ -99,6 +101,7 @@ class BaizeActivityBar extends LitElement {
 		this.activeView = "workspace";
 		this.theme = "system";
 		this.sidebarCollapsed = false;
+		this.workspaceId = 0;
 	}
 
 	private onViewClick(view: ActiveView): void {
@@ -127,10 +130,9 @@ class BaizeActivityBar extends LitElement {
 			</button>
 		`;
 	}
-
 	render() {
 		return html`
-			${this.renderIcon("workspace", this.activeView === "workspace", "工作空间", () => this.onViewClick("workspace"))}
+			${this.workspaceId > 0 ? this.renderIcon("workspace", this.activeView === "workspace", "工作空间", () => this.onViewClick("workspace")) : nothing}
 			<div class="spacer"></div>
 			${this.renderIcon(`theme-${this.theme}`, false, "主题切换", () => this.onThemeClick())}
 		`;
