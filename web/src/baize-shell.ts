@@ -664,7 +664,7 @@ class BaizeShell extends LitElement {
 			</div>
 			<button @click=${() => { this.session = null; }}>退出</button>
 		</div>
-		<div class="workbench-row" style="--rail-w: ${window.location.pathname.startsWith("/workflow/") ? "var(--rail-w)" : "0px"}">
+		<div class="workbench-row" style="--rail-w: ${window.location.pathname.startsWith("/workflow/") ? "var(--rail-w)" : "0px"}; --side-bar-w: ${this.workspaceId > 0 ? "var(--side-bar-w)" : "0px"}">
 			<div class="activity-bar-slot">
 			<baize-activity-bar
 					.activeView=${this.activeView}
