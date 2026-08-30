@@ -15,6 +15,9 @@ import type { TaskRole } from "./plan-types.js";
 import type { PlanProposal } from "./plan-types.js";
 import type { AssetGraph, AssetRelationExport, AssetRelationInput, AssetRelationRecord, ReusableAssetExportBundle, HierarchyNode, SubtreeNode, ImportPreview } from "../persistence/workflow-store.js";
 import type { RequirementBaseline } from "./requirement.js";
+import type { GovernanceKernel } from "../persistence/governance-kernel.js";
+import type { ProjectionReadModel } from "../persistence/projection-read-model.js";
+import type { AssetStore } from "../persistence/asset-store.js";
 
 export type { RequirementBaseline } from "./requirement.js";
 export type { CommandReceipt, ReconciliationReport, BeginPlanningResult, CompletePlanningResult, FindingRecord, FindingThreadRecord, WorkspaceSummary } from "../persistence/workflow-store.js";
@@ -142,6 +145,10 @@ export interface HeadlessWorkflowRuntime {
 	subscribeWorkflowEvents(listener: (event: WorkflowEventEnvelope) => void): () => void;
 	subscribeRunEvents(listener: (event: RunEventEnvelope) => void): () => void;
 	close(): void;
+	/** ADR-011: composition getters for direct access to kernel, read model, and asset store. */
+	readonly kernel: GovernanceKernel;
+	readonly readModel: ProjectionReadModel;
+	readonly assets: AssetStore;
 }
 
 export async function openHeadlessWorkflowRuntime(
@@ -163,27 +170,27 @@ export async function openHeadlessWorkflowRuntime(
 	const store = new WorkflowStore({ ...options, policyBundle, artifactValidator, planValidator });
 
 	function completePlanningInternal(workflowId: number, attemptId: number, structuredResult: unknown, templateMode = false): CompletePlanningResult {
-		if (store.isPlanningContextStale(workflowId, attemptId)) {
-			return store.supersedePlanningAttempt(workflowId, attemptId, "planning_context_changed");
+		if (store.getReadModel().isPlanningContextStale(workflowId, attemptId)) {
+			return store.getKernel().supersedePlanningAttempt(workflowId, attemptId, "planning_context_changed");
 		}
-		const projection = store.getWorkflowProjection(workflowId);
+		const projection = store.getReadModel().getWorkflowProjection(workflowId);
 		if (!projection) throw new Error("Workflow not found");
-		const baseVersion = store.getAttemptBaseVersion(workflowId, attemptId);
+		const baseVersion = store.getReadModel().getAttemptBaseVersion(workflowId, attemptId);
 		const context: PlanValidationContext = {
 			workflowId,
 			workflowVersion: baseVersion ?? projection.workflow.version,
-			planningContextDigest: store.getPlanningContextDigest(workflowId),
+			planningContextDigest: store.getReadModel().getPlanningContextDigest(workflowId),
 			basePlanRevisionId: projection.workflow.currentPlanRevisionId,
 		};
 		const validation = validatePlanProposal(structuredResult, context, planValidator, { templateMode });
 		if (validation.valid) {
-			return store.adoptPlan(workflowId, attemptId, structuredResult as PlanProposal);
+			return store.getKernel().adoptPlan(workflowId, attemptId, structuredResult as PlanProposal);
 		}
-		return store.failPlanningAttempt(workflowId, attemptId, validation.ruleViolations);
+		return store.getKernel().failPlanningAttempt(workflowId, attemptId, validation.ruleViolations);
 	}
 
 	function completeAttemptInternal(workflowId: number, attemptId: number, structuredResult: unknown): CompleteAttemptResult {
-		return store.publishAttemptResult(workflowId, attemptId, structuredResult);
+		return store.getKernel().publishAttemptResult(workflowId, attemptId, structuredResult);
 	}
 
 /** 各产物 kind 的 schema 字段提示(禁止额外字段)。从 artifact-content-v1.schema.json 提取。 */
@@ -245,351 +252,167 @@ function buildTaskInstruction(role: string, objective: string, baseline: Require
 	return base.join("\n");
 }
 	return {
-		createWorkspace(input) {
-			return store.createWorkspace(input);
-		},
-		workspaceExists(workspaceId) {
-			return store.workspaceExists(workspaceId);
-		},
-		listWorkspaces() {
-			return store.listWorkspaces();
-		},
-		deleteWorkspace(workspaceId) {
-			return store.deleteWorkspace(workspaceId);
-		},
+		get kernel() { return store.getKernel(); },
+		get readModel() { return store.getReadModel(); },
+		get assets() { return store.getAssetStore(); },
+		// --- Store facade + cross-domain (stay on WorkflowStore) ---
+		createWorkspace(input) { return store.createWorkspace(input); },
+		workspaceExists(workspaceId) { return store.workspaceExists(workspaceId); },
+		listWorkspaces() { return store.listWorkspaces(); },
+		deleteWorkspace(workspaceId) { return store.deleteWorkspace(workspaceId); },
 		createRequirement(input) {
-			if (!artifactValidator.check(input.baseline)) {
-				throw new Error("Requirement baseline does not match artifact/requirement/v1");
-			}
+			if (!artifactValidator.check(input.baseline)) throw new Error("Requirement baseline does not match artifact/requirement/v1");
 			return store.createRequirement(input);
 		},
-		listRequirements(workspaceId) {
-			return store.listRequirements(workspaceId);
-		},
-		getWorkflowProjection(workflowId) {
-			return store.getWorkflowProjection(workflowId);
-		},
+		bindEvidenceSnapshot(workflowId, repoDigest, files) { return store.bindEvidenceSnapshot(workflowId, repoDigest, files); },
+		diagnose() { return store.diagnose(); },
+		close() { store.close(); },
+		// --- Read methods → readModel (ADR-011) ---
+		listRequirements(workspaceId) { return store.getReadModel().listRequirements(workspaceId); },
+		getWorkflowProjection(workflowId) { return store.getReadModel().getWorkflowProjection(workflowId); },
+		getCommandReceipt(workflowId, commandId) { return store.getReadModel().getCommandReceipt(workflowId, commandId); },
+		getCommandReceiptDetail(workflowId, commandId) { return store.getReadModel().getCommandReceiptDetail(workflowId, commandId); },
+		getPlanningContextDigest(workflowId) { return store.getReadModel().getPlanningContextDigest(workflowId); },
+		getTraceLinks(artifactRevisionId) { return store.getReadModel().getTraceLinks(artifactRevisionId); },
+		isEvidenceStale(workflowId, currentRepoDigest) { return store.getReadModel().isEvidenceStale(workflowId, currentRepoDigest); },
+		getEvidenceSnapshots(workflowId) { return store.getReadModel().getEvidenceSnapshots(workflowId); },
+		getFindings(workflowId) { return store.getReadModel().getFindings(workflowId); },
+		getFindingThreads(workflowId) { return store.getReadModel().getFindingThreads(workflowId); },
+		isFindingRiskAcceptanceStale(workflowId, findingId) { return store.getReadModel().isFindingRiskAcceptanceStale(workflowId, findingId); },
+		getDecisions(workflowId) { return store.getReadModel().getDecisions(workflowId); },
+		checkReadiness(workflowId) { return store.getReadModel().checkReadiness(workflowId); },
+		getApprovalPacket(workflowId) { return store.getReadModel().getApprovalPacket(workflowId); },
+		getHumanGates(workflowId) { return store.getReadModel().getHumanGates(workflowId); },
+		getApprovalRecords(workflowId) { return store.getReadModel().getApprovalRecords(workflowId); },
+		getHumanDirectives(workflowId) { return store.getReadModel().getHumanDirectives(workflowId); },
+		getDiagnosticRuns(workflowId) { return store.getReadModel().getDiagnosticRuns(workflowId); },
+		listRequirementSummaries(workspaceId) { return store.getReadModel().listRequirementSummaries(workspaceId); },
+		getRequirementDetail(requirementId) { return store.getReadModel().getRequirementDetail(requirementId); },
+		getArtifactRevisionDetail(requirementId, kind) { return store.getReadModel().getArtifactRevisionDetail(requirementId, kind); },
+		getBoundedProjection(workflowId) { return store.getReadModel().getBoundedProjection(workflowId); },
+		getPlanRevisionDetail(planRevisionId) { return store.getReadModel().getPlanRevisionDetail(planRevisionId); },
+		getTaskDetail(taskId) { return store.getReadModel().getTaskDetail(taskId); },
+		listTaskAttempts(taskId) { return store.getReadModel().listTaskAttempts(taskId); },
+		getAttemptDetail(attemptId) { return store.getReadModel().getAttemptDetail(attemptId); },
+		getAttemptContext(attemptId) { return store.getReadModel().getAttemptContext(attemptId); },
+		listPendingReviewedArtifacts(workflowId) { return store.getReadModel().listPendingReviewedArtifacts(workflowId); },
+		getRunDetail(runId) { return store.getReadModel().getRunDetail(runId); },
+		getApprovalPacketDetail(packetId) { return store.getReadModel().getApprovalPacketDetail(packetId); },
+		getDesignPackage(designPackageId) { return store.getReadModel().getDesignPackage(designPackageId); },
+		getLegacyImport(requirementId) { return store.getReadModel().getLegacyImport(requirementId); },
+		searchWorkspaceContent(workspaceId, query) { return store.getReadModel().searchWorkspaceContent(workspaceId, query); },
+		getFeedbackAssetReferences(workflowId, query, budget) { return store.getReadModel().getFeedbackAssetReferences(workflowId, query, budget); },
+		runExists(runId) { return store.getReadModel().runExists(runId); },
+		getRunEventWatermark(runId) { return store.getReadModel().getRunEventWatermark(runId); },
+		getRunEvents(runId, after, limit) { return store.getReadModel().getRunEvents(runId, after, limit); },
+		getWorkflowEventWatermark(workflowId) { return store.getReadModel().getWorkflowEventWatermark(workflowId); },
+		getWorkflowEvents(workflowId, after, limit) { return store.getReadModel().getWorkflowEvents(workflowId, after, limit); },
+		subscribeWorkflowEvents(listener) { return store.getReadModel().subscribeWorkflowEvents(listener); },
+		subscribeRunEvents(listener) { return store.getReadModel().subscribeRunEvents(listener); },
+		// --- Write methods → kernel (ADR-011) ---
+		beginPlanning(workflowId) { return store.getKernel().beginPlanning(workflowId); },
+		acceptFindingRisk(workflowId, findingId, operator, reason) { store.getKernel().acceptFindingRisk(workflowId, findingId, operator, reason); },
+		buildApprovalPacket(workflowId) { return store.getKernel().buildApprovalPacket(workflowId); },
+		appendRunEvent(runId, type, payload) { return store.getKernel().appendRunEvent(runId, type, payload); },
+		reconcile() { return store.getKernel().reconcile(); },
+		processOutbox() { return store.getKernel().processOutbox(); },
+		promoteRequirementArtifacts(workflowId, kinds) { return store.getKernel().promoteRequirementArtifacts(workflowId, kinds); },
+		// --- Orchestration (stay on facade, delegate to kernel + readModel) ---
 		executeCommand(input) {
-			if (input.schemaVersion !== undefined && input.schemaVersion !== "workflow-command/v1") {
-				throw new Error("Command envelope schema is invalid");
-			}
-			if (!WORKFLOW_COMMAND_TYPES.includes(input.type)) {
-				throw new Error("Command envelope schema is invalid");
-			}
-			if (!store.getWorkflowProjection(input.workflowId)) {
-				throw new Error("Command envelope schema is invalid");
-			}
+			if (input.schemaVersion !== undefined && input.schemaVersion !== "workflow-command/v1") throw new Error("Command envelope schema is invalid");
+			if (!WORKFLOW_COMMAND_TYPES.includes(input.type)) throw new Error("Command envelope schema is invalid");
+			if (!store.getReadModel().getWorkflowProjection(input.workflowId)) throw new Error("Command envelope schema is invalid");
 			const { schemaVersion: _omitted, ...envelope } = input;
 			void _omitted;
-			return store.executeCommand(envelope as ExecuteCommandInput);
+			return store.getKernel().executeCommand(envelope as ExecuteCommandInput);
 		},
-		getCommandReceipt(workflowId, commandId) {
-			return store.getCommandReceipt(workflowId, commandId);
-		},
-		getCommandReceiptDetail(workflowId, commandId) {
-			return store.getCommandReceiptDetail(workflowId, commandId);
-		},
-		beginPlanning(workflowId) {
-			return store.beginPlanning(workflowId);
-		},
-		completePlanning(workflowId, attemptId, structuredResult) {
-			return completePlanningInternal(workflowId, attemptId, structuredResult);
-		},
+		completePlanning(workflowId, attemptId, structuredResult) { return completePlanningInternal(workflowId, attemptId, structuredResult); },
+		completeAttempt(workflowId, attemptId, structuredResult) { return completeAttemptInternal(workflowId, attemptId, structuredResult); },
 		async planWorkflow(workflowId, _modelDriver: ModelDriver | null) {
-			// #12 决议：Engine 直生成。plan-template/v1 确定性实例化模板计划，无 Orchestrator 模型调用；
-			// beginPlanning 持久化骨架（plan Task/attempt/run）保留，adoptPlan 校验器复用（templateMode 免限额）。
 			for (let iteration = 0; iteration < 10; iteration += 1) {
-				const begin = store.beginPlanning(workflowId);
-				if (begin.taskId === 0) {
-					return { outcome: "plan_budget_exhausted", planRevisionId: null, workflowVersion: begin.workflowVersion, lastEventSeq: begin.lastEventSeq };
-				}
-				store.appendRunEvent(begin.runId, "plan_template_instantiated", { role: "engine", contextDigest: begin.planningContextDigest });
-				const baseVersion = store.getAttemptBaseVersion(workflowId, begin.attemptId);
+				const begin = store.getKernel().beginPlanning(workflowId);
+				if (begin.taskId === 0) return { outcome: "plan_budget_exhausted", planRevisionId: null, workflowVersion: begin.workflowVersion, lastEventSeq: begin.lastEventSeq };
+				store.getKernel().appendRunEvent(begin.runId, "plan_template_instantiated", { role: "engine", contextDigest: begin.planningContextDigest });
+				const baseVersion = store.getReadModel().getAttemptBaseVersion(workflowId, begin.attemptId);
 				const proposal = instantiatePlanTemplate(contracts, {
 					workflowId,
 					workflowVersion: baseVersion ?? begin.workflowVersion,
 					planningContextDigest: begin.planningContextDigest,
-					basePlanRevisionId: store.getWorkflowProjection(workflowId)?.workflow.currentPlanRevisionId ?? null,
+					basePlanRevisionId: store.getReadModel().getWorkflowProjection(workflowId)?.workflow.currentPlanRevisionId ?? null,
 				});
-				// #24 规划期注入：需求标题检索历史资产引用（预算内），冻结进 plan revision
 				{
-					const projection = store.getWorkflowProjection(workflowId);
+					const projection = store.getReadModel().getWorkflowProjection(workflowId);
 					if (projection) {
-						const references = store.getFeedbackAssetReferences(workflowId, projection.requirement.title, FEEDBACK_REFERENCE_BUDGET);
+						const references = store.getReadModel().getFeedbackAssetReferences(workflowId, projection.requirement.title, FEEDBACK_REFERENCE_BUDGET);
 						if (references.length > 0) proposal.assetReferences = references;
 					}
 				}
 				const complete = completePlanningInternal(workflowId, begin.attemptId, proposal, true);
-				if (complete.outcome === "adopted") {
-					return { outcome: "adopted", planRevisionId: complete.planRevisionId, workflowVersion: complete.workflowVersion, lastEventSeq: complete.lastEventSeq };
-				}
-				if (complete.outcome === "planning_exhausted" || complete.outcome === "plan_budget_exhausted") {
-					return { outcome: complete.outcome, planRevisionId: null, workflowVersion: complete.workflowVersion, lastEventSeq: complete.lastEventSeq };
-				}
+				if (complete.outcome === "adopted") return { outcome: "adopted", planRevisionId: complete.planRevisionId, workflowVersion: complete.workflowVersion, lastEventSeq: complete.lastEventSeq };
+				if (complete.outcome === "planning_exhausted" || complete.outcome === "plan_budget_exhausted") return { outcome: complete.outcome, planRevisionId: null, workflowVersion: complete.workflowVersion, lastEventSeq: complete.lastEventSeq };
 			}
 			throw new Error("Planning loop exceeded maximum iterations");
 		},
-		getPlanningContextDigest(workflowId) {
-			return store.getPlanningContextDigest(workflowId);
-		},
-		beginAttempt(workflowId) {
-			return store.beginAttempt(workflowId);
-		},
-		completeAttempt(workflowId, attemptId, structuredResult) {
-			return completeAttemptInternal(workflowId, attemptId, structuredResult);
-		},
+		beginAttempt(workflowId) { return store.getKernel().beginAttempt(workflowId); },
 		async executeTask(workflowId, modelDriver) {
-			const projection = store.getWorkflowProjection(workflowId);
+			const projection = store.getReadModel().getWorkflowProjection(workflowId);
 			const modelRoles = projection?.workflow.modelRoles;
 			for (let iteration = 0; iteration < 10; iteration += 1) {
-				const begin = store.beginAttempt(workflowId);
-				if (begin.taskId === 0) {
-					return { outcome: "no_ready_task", workflowVersion: begin.workflowVersion, lastEventSeq: begin.lastEventSeq };
+				const begin = store.getKernel().beginAttempt(workflowId);
+				if (begin.taskId === 0) return { outcome: "no_ready_task", workflowVersion: begin.workflowVersion, lastEventSeq: begin.lastEventSeq };
+				store.getKernel().appendRunEvent(begin.runId, "model_call_started", { role: begin.taskRole, contextDigest: begin.contextDigest });
+				let result;
+				try {
+					const ctx = store.getReadModel().getAttemptContext(begin.attemptId);
+					const evidenceSnapshots = store.getReadModel().getEvidenceSnapshots(workflowId);
+					const evidenceSnapshotId = evidenceSnapshots[0]?.id ?? 0;
+					const reviewTargets = ctx?.inputs?.filter((i) => (i as { type?: string }).type === "task_output") as Array<{ resolvedRevisionId?: number; artifactKind?: string }> | undefined;
+					const firstReviewTarget = reviewTargets?.[0];
+					const instruction = ctx
+						? buildTaskInstruction(ctx.role, ctx.objective, ctx.requirementBaseline, workflowId, begin.attemptId, evidenceSnapshotId, firstReviewTarget?.resolvedRevisionId ?? 0, firstReviewTarget?.artifactKind ?? "", ctx.expectedArtifactKinds, reviewTargets ?? [])
+						: "Produce the required output.";
+					result = await modelDriver.execute(
+						{ role: begin.taskRole as TaskRole, contextDigest: begin.contextDigest, instruction, modelRoles, toolNames: ["submit_role_result"] },
+						[],
+					);
+					store.getKernel().appendRunEvent(begin.runId, "token", { role: begin.taskRole, provider: result.modelUsage.provider, modelId: result.modelUsage.modelId, inputTokens: result.modelUsage.inputTokens, outputTokens: result.modelUsage.outputTokens, cacheReadTokens: result.modelUsage.cacheReadTokens, cacheCreationTokens: result.modelUsage.cacheCreationTokens, reasoningTokens: result.modelUsage.reasoningTokens, cost: result.modelUsage.cost, terminationTool: result.terminationTool });
+					store.getKernel().appendRunEvent(begin.runId, "model_result", { role: begin.taskRole, produced: "role-result/v1" });
+					const complete = completeAttemptInternal(workflowId, begin.attemptId, result.structuredResult);
+					if (complete.outcome === "published") return { outcome: "published", workflowVersion: complete.workflowVersion, lastEventSeq: complete.lastEventSeq };
+					if (complete.outcome === "task_exhausted") return { outcome: "task_exhausted", workflowVersion: complete.workflowVersion, lastEventSeq: complete.lastEventSeq };
+				} catch (error) {
+					store.getKernel().appendRunEvent(begin.runId, "model_call_failed", { role: begin.taskRole, error: error instanceof Error ? error.message : String(error) });
+					const failed = store.getKernel().failAttempt(workflowId, begin.attemptId, "model_call_error", error instanceof Error ? error.message : String(error));
+					return { outcome: failed.outcome === "task_exhausted" ? "task_exhausted" : "failed", workflowVersion: failed.workflowVersion, lastEventSeq: failed.lastEventSeq };
 				}
-			store.appendRunEvent(begin.runId, "model_call_started", { role: begin.taskRole, contextDigest: begin.contextDigest });
-			let result;
-		try {
-			// 从 contextManifest 读取任务上下文,拼出有意义的 instruction(角色、需求、任务目标、输出格式)
-		const ctx = store.getAttemptContext(begin.attemptId);
-		const evidenceSnapshots = store.getEvidenceSnapshots(workflowId);
-		const evidenceSnapshotId = evidenceSnapshots[0]?.id ?? 0;
-	const reviewTargets = ctx?.inputs?.filter((i) => (i as { type?: string }).type === "task_output") as Array<{ resolvedRevisionId?: number; artifactKind?: string }> | undefined;
-	const firstReviewTarget = reviewTargets?.[0];
-	const instruction = ctx
-		? buildTaskInstruction(ctx.role, ctx.objective, ctx.requirementBaseline, workflowId, begin.attemptId, evidenceSnapshotId, firstReviewTarget?.resolvedRevisionId ?? 0, firstReviewTarget?.artifactKind ?? "", ctx.expectedArtifactKinds, reviewTargets ?? [])
-		: "Produce the required output.";
-		result = await modelDriver.execute(
-			{ role: begin.taskRole as TaskRole, contextDigest: begin.contextDigest, instruction, modelRoles, toolNames: ["submit_role_result"] },
-			[],
-		);
-		store.appendRunEvent(begin.runId, "token", { role: begin.taskRole, provider: result.modelUsage.provider, modelId: result.modelUsage.modelId, inputTokens: result.modelUsage.inputTokens, outputTokens: result.modelUsage.outputTokens, cacheReadTokens: result.modelUsage.cacheReadTokens, cacheCreationTokens: result.modelUsage.cacheCreationTokens, reasoningTokens: result.modelUsage.reasoningTokens, cost: result.modelUsage.cost, terminationTool: result.terminationTool });
-			store.appendRunEvent(begin.runId, "model_result", { role: begin.taskRole, produced: "role-result/v1" });
-			const complete = completeAttemptInternal(workflowId, begin.attemptId, result.structuredResult);
-				if (complete.outcome === "published") {
-					return { outcome: "published", workflowVersion: complete.workflowVersion, lastEventSeq: complete.lastEventSeq };
-				}
-				if (complete.outcome === "task_exhausted") {
-					return { outcome: "task_exhausted", workflowVersion: complete.workflowVersion, lastEventSeq: complete.lastEventSeq };
-				}
-		} catch (error) {
-			store.appendRunEvent(begin.runId, "model_call_failed", { role: begin.taskRole, error: error instanceof Error ? error.message : String(error) });
-			// 驱动或发布抛错都必须走 failAttempt:释放 claim、计入失败/重试/耗尽,否则 dangling claim 阻塞后续命令与引擎推进。
-			const failed = store.failAttempt(workflowId, begin.attemptId, "model_call_error", error instanceof Error ? error.message : String(error));
-			return { outcome: failed.outcome === "task_exhausted" ? "task_exhausted" : "failed", workflowVersion: failed.workflowVersion, lastEventSeq: failed.lastEventSeq };
-		}
-		}
-		throw new Error("Task execution loop exceeded maximum iterations");
+			}
+			throw new Error("Task execution loop exceeded maximum iterations");
 		},
-		reconcile() {
-			return store.reconcile();
-		},
-		processOutbox() {
-			return store.processOutbox();
-		},
-		diagnose() {
-			return store.diagnose();
-		},
-		bindEvidenceSnapshot(workflowId, repoDigest, files) {
-			return store.bindEvidenceSnapshot(workflowId, repoDigest, files);
-		},
-
-		getTraceLinks(artifactRevisionId) {
-			return store.getTraceLinks(artifactRevisionId);
-		},
-		isEvidenceStale(workflowId, currentRepoDigest) {
-			return store.isEvidenceStale(workflowId, currentRepoDigest);
-		},
-	getEvidenceSnapshots(workflowId) {
-		return store.getEvidenceSnapshots(workflowId);
-	},
-	getFindings(workflowId) {
-		return store.getFindings(workflowId);
-	},
-	getFindingThreads(workflowId) {
-		return store.getFindingThreads(workflowId);
-	},
-	acceptFindingRisk(workflowId, findingId, operator, reason) {
-		return store.acceptFindingRisk(workflowId, findingId, operator, reason);
-	},
-	isFindingRiskAcceptanceStale(workflowId, findingId) {
-		return store.isFindingRiskAcceptanceStale(workflowId, findingId);
-	},
-	getDecisions(workflowId) {
-		return store.getDecisions(workflowId);
-	},
-	checkReadiness(workflowId) {
-		return store.checkReadiness(workflowId);
-	},
-	buildApprovalPacket(workflowId) {
-		return store.buildApprovalPacket(workflowId);
-	},
-	getApprovalPacket(workflowId) {
-		return store.getApprovalPacket(workflowId);
-	},
-	getHumanGates(workflowId) {
-		return store.getHumanGates(workflowId);
-	},
-	getApprovalRecords(workflowId) {
-		return store.getApprovalRecords(workflowId);
-	},
-	getHumanDirectives(workflowId) {
-		return store.getHumanDirectives(workflowId);
-	},
-	getDiagnosticRuns(workflowId) {
-		return store.getDiagnosticRuns(workflowId);
-	},
-	listRequirementSummaries(workspaceId) {
-		return store.listRequirementSummaries(workspaceId);
-	},
-	getRequirementDetail(requirementId) {
-		return store.getRequirementDetail(requirementId);
-	},
-	getArtifactRevisionDetail(requirementId, kind) {
-		return store.getArtifactRevisionDetail(requirementId, kind);
-	},
-	getBoundedProjection(workflowId) {
-		return store.getBoundedProjection(workflowId);
-	},
-	getPlanRevisionDetail(planRevisionId) {
-		return store.getPlanRevisionDetail(planRevisionId);
-	},
-	getTaskDetail(taskId) {
-		return store.getTaskDetail(taskId);
-	},
-	listTaskAttempts(taskId) {
-		return store.listTaskAttempts(taskId);
-	},
-	getAttemptDetail(attemptId) {
-		return store.getAttemptDetail(attemptId);
-	},
-	getAttemptContext(attemptId) {
-		return store.getAttemptContext(attemptId);
-	},
-	listPendingReviewedArtifacts(workflowId) {
-		return store.listPendingReviewedArtifacts(workflowId);
-	},
-	getRunDetail(runId) {
-		return store.getRunDetail(runId);
-	},
-	getApprovalPacketDetail(packetId) {
-		return store.getApprovalPacketDetail(packetId);
-	},
-	getDesignPackage(designPackageId) {
-		return store.getDesignPackage(designPackageId);
-	},
-	getLegacyImport(requirementId) {
-		return store.getLegacyImport(requirementId);
-	},
-	createReusableAsset(input) {
-		return store.createReusableAsset(input);
-	},
-	writeRelations(input) {
-		return store.writeRelations(input);
-	},
-	readRelations(assetId) {
-		return store.readRelations(assetId);
-	},
-	getWorkspaceAssetGraph(workspaceId) {
-		return store.getWorkspaceAssetGraph(workspaceId);
-	},
-	assetExistsByOriginArtifactId(workspaceId, artifactId) {
-		return store.assetExistsByOriginArtifactId(workspaceId, artifactId);
-	},
-	updateReusableAsset(input) {
-		return store.updateReusableAsset(input);
-	},
-	listReusableAssets(workspaceId) {
-		return store.listReusableAssets(workspaceId);
-	},
-	listReusableAssetPage(workspaceId, query) {
-		return store.listReusableAssetPage(workspaceId, query);
-	},
-	getReusableAsset(assetId) {
-		return store.getReusableAsset(assetId);
-	},
-	deleteReusableAsset(assetId) {
-		return store.deleteReusableAsset(assetId);
-	},
-	exportReusableAssets(workspaceId) {
-		return store.exportReusableAssets(workspaceId);
-	},
-	exportReusableAssetBundle(workspaceId) {
-		return store.exportReusableAssetBundle(workspaceId);
-	},
-	importReusableAssetBundle(workspaceId, assets, relations, strict) {
-		return store.importReusableAssetBundle(workspaceId, assets, relations, strict);
-	},
-	importReusableAssets(workspaceId, assets) {
-		return store.importReusableAssets(workspaceId, assets);
-	},
-	previewImportBundle(workspaceId, assets, relations) {
-		return store.previewImportBundle(workspaceId, assets, relations);
-	},
-	commitImportBundle(workspaceId, assets, relations, previewDigest) {
-		return store.commitImportBundle(workspaceId, assets, relations, previewDigest);
-	},
-	getHierarchyRoots(workspaceId, rootKind, query) {
-		return store.getHierarchyRoots(workspaceId, rootKind, query);
-	},
-	getHierarchyChildren(parentAssetId) {
-		return store.getHierarchyChildren(parentAssetId);
-	},
-	searchHierarchyNodes(workspaceId, q) {
-		return store.searchHierarchyNodes(workspaceId, q);
-	},
-	createHierarchySubtree(workspaceId, tree, parentId) {
-		return store.createHierarchySubtree(workspaceId, tree, parentId);
-	},
-	moveHierarchySubtree(workspaceId, assetId, expectedRevisionId, newParentAssetId) {
-		store.moveHierarchySubtree(workspaceId, assetId, expectedRevisionId, newParentAssetId);
-	},
-	previewSubtreeDeletion(assetId) {
-		return store.previewSubtreeDeletion(assetId);
-	},
-	deleteSubtree(assetId) {
-		return store.deleteSubtree(assetId);
-	},
-	hasChildren(assetId) {
-		return store.hasChildren(assetId);
-	},
-	hasIncomingCrossAssetRelations(assetId) {
-		return store.hasIncomingCrossAssetRelations(assetId);
-	},
-		searchWorkspaceContent(workspaceId, query) {
-			return store.searchWorkspaceContent(workspaceId, query);
-		},
-		getFeedbackAssetReferences(workflowId, query, budget) {
-			return store.getFeedbackAssetReferences(workflowId, query, budget);
-		},
-	promoteRequirementArtifacts(workflowId, kinds) {
-		return store.promoteRequirementArtifacts(workflowId, kinds);
-	},
-		appendRunEvent(runId, type, payload) {
-			return store.appendRunEvent(runId, type, payload);
-		},
-		runExists(runId) {
-			return store.runExists(runId);
-		},
-		getRunEventWatermark(runId) {
-			return store.getRunEventWatermark(runId);
-		},
-		getRunEvents(runId, after, limit) {
-			return store.getRunEvents(runId, after, limit);
-		},
-		getWorkflowEventWatermark(workflowId) {
-			return store.getWorkflowEventWatermark(workflowId);
-		},
-		getWorkflowEvents(workflowId, after, limit) {
-			return store.getWorkflowEvents(workflowId, after, limit);
-		},
-		subscribeWorkflowEvents(listener) {
-			return store.subscribeWorkflowEvents(listener);
-		},
-		subscribeRunEvents(listener) {
-			return store.subscribeRunEvents(listener);
-		},
-		close() {
-			store.close();
-		},
+		// --- Asset facade (stay on store — WorkflowStore delegates to AssetStore) ---
+		createReusableAsset(input) { return store.createReusableAsset(input); },
+		writeRelations(input) { return store.writeRelations(input); },
+		readRelations(assetId) { return store.readRelations(assetId); },
+		getWorkspaceAssetGraph(workspaceId) { return store.getWorkspaceAssetGraph(workspaceId); },
+		assetExistsByOriginArtifactId(workspaceId, artifactId) { return store.assetExistsByOriginArtifactId(workspaceId, artifactId); },
+		updateReusableAsset(input) { return store.updateReusableAsset(input); },
+		listReusableAssets(workspaceId) { return store.listReusableAssets(workspaceId); },
+		listReusableAssetPage(workspaceId, query) { return store.listReusableAssetPage(workspaceId, query); },
+		getReusableAsset(assetId) { return store.getReusableAsset(assetId); },
+		deleteReusableAsset(assetId) { return store.deleteReusableAsset(assetId); },
+		exportReusableAssets(workspaceId) { return store.exportReusableAssets(workspaceId); },
+		exportReusableAssetBundle(workspaceId) { return store.exportReusableAssetBundle(workspaceId); },
+		importReusableAssetBundle(workspaceId, assets, relations, strict) { return store.importReusableAssetBundle(workspaceId, assets, relations, strict); },
+		importReusableAssets(workspaceId, assets) { return store.importReusableAssets(workspaceId, assets); },
+		previewImportBundle(workspaceId, assets, relations) { return store.previewImportBundle(workspaceId, assets, relations); },
+		commitImportBundle(workspaceId, assets, relations, previewDigest) { return store.commitImportBundle(workspaceId, assets, relations, previewDigest); },
+		getHierarchyRoots(workspaceId, rootKind, query) { return store.getHierarchyRoots(workspaceId, rootKind, query); },
+		getHierarchyChildren(parentAssetId) { return store.getHierarchyChildren(parentAssetId); },
+		searchHierarchyNodes(workspaceId, q) { return store.searchHierarchyNodes(workspaceId, q); },
+		createHierarchySubtree(workspaceId, tree, parentId) { return store.createHierarchySubtree(workspaceId, tree, parentId); },
+		moveHierarchySubtree(workspaceId, assetId, expectedRevisionId, newParentAssetId) { store.moveHierarchySubtree(workspaceId, assetId, expectedRevisionId, newParentAssetId); },
+		previewSubtreeDeletion(assetId) { return store.previewSubtreeDeletion(assetId); },
+		deleteSubtree(assetId) { return store.deleteSubtree(assetId); },
+		hasChildren(assetId) { return store.hasChildren(assetId); },
+		hasIncomingCrossAssetRelations(assetId) { return store.hasIncomingCrossAssetRelations(assetId); },
 	};
 }

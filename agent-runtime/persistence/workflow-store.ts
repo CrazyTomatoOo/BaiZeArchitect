@@ -311,6 +311,11 @@ createWorkspace(input: { repoPath: string; name: string }): number {
 		return this.kernel;
 	}
 
+	/** ADR-011: AssetStore accessor for HeadlessWorkflowRuntime `assets` getter. */
+	getAssetStore(): AssetStore {
+		return this.assetStore;
+	}
+
 	listWorkspaces(): readonly WorkspaceSummary[] {
 		return this.workspaceStore.listWorkspaces();
 	}
