@@ -632,6 +632,13 @@ class BaizeHierarchyTree extends LitElement {
 				this.roots = page.roots;
 				this.total = page.total;
 				this.kindCounts = page.kindCounts as Record<AssetKind, number>;
+				this.dispatchEvent(
+					new CustomEvent("baize-asset-page", {
+						detail: { total: this.total, kindCounts: this.kindCounts },
+						bubbles: true,
+						composed: true,
+					}),
+				);
 				this.searchHits = [];
 				this.searchQuery = "";
 			}
