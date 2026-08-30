@@ -147,6 +147,9 @@ class BaizeSideBar extends LitElement {
 
 
 	render(): TemplateResult {
+		if (this.workspaceId === 0) {
+			return html`<div class="header"><span class="hint">未选择工作空间</span></div>`;
+		}
 		return html`
 			<div class="header">
 				<div class="sub-tabs">

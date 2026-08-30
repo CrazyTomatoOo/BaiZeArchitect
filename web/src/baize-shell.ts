@@ -222,10 +222,11 @@ class BaizeShell extends LitElement {
 		:host([data-sidebar-collapsed]) .side-bar-slot { opacity: 0; }
 
 		/* — 主区 — */
-		.main-slot {
+	.main-slot {
 			background: var(--bg);
 			overflow-y: auto;
 			min-width: 0;
+			grid-column: 3;
 		}
 
 		/* — 右栏占位 — */
@@ -664,7 +665,7 @@ class BaizeShell extends LitElement {
 			</div>
 			<button @click=${() => { this.session = null; }}>退出</button>
 		</div>
-		<div class="workbench-row" style="--rail-w: ${window.location.pathname.startsWith("/workflow/") ? "var(--rail-w)" : "0px"}; --side-bar-w: ${this.workspaceId > 0 ? "var(--side-bar-w)" : "0px"}">
+		<div class="workbench-row" style="--rail-w: ${window.location.pathname.startsWith("/workflow/") ? "320px" : "0px"}; --side-bar-w: ${this.workspaceId > 0 ? "240px" : "0px"}">
 			<div class="activity-bar-slot">
 			<baize-activity-bar
 					.activeView=${this.activeView}
@@ -676,7 +677,7 @@ class BaizeShell extends LitElement {
 					@baize-sidebar-toggle=${() => { this.sidebarCollapsed = !this.sidebarCollapsed; }}
 				></baize-activity-bar>
 			</div>
-			<div class="side-bar-slot ${this.drawerOpen ? "drawer-open" : ""}" ?hidden=${this.workspaceId === 0}>
+			<div class="side-bar-slot ${this.drawerOpen ? "drawer-open" : ""}">
 				<baize-side-bar
 					.activeView=${this.activeView}
 					.apiBase=${this.apiBase}
@@ -696,14 +697,14 @@ class BaizeShell extends LitElement {
 						if (sv === "assets") this.navigate("/assets");
 						else this.navigate("/");
 					}}
-				></baize-side-bar>
-			</div>
-			${this.drawerOpen ? html`<button class="drawer-scrim" aria-label="关闭导航" @click=${() => this.closeDrawer()}></button>` : nothing}
-			<main class="main-slot" @keydown=${(e: KeyboardEvent) => this.handleKeydown(e)}>
-				${this.router.outlet()}
-			</main>
-			${window.location.pathname.startsWith("/workflow/") ? html`<div class="rail-slot"></div>` : nothing}
+			</baize-side-bar>
 		</div>
+		<main class="main-slot" @keydown=${(e: KeyboardEvent) => this.handleKeydown(e)}>
+			${this.router.outlet()}
+		</main>
+		${window.location.pathname.startsWith("/workflow/") ? html`<div class="rail-slot"></div>` : nothing}
+		${this.drawerOpen ? html`<button class="drawer-scrim" aria-label="关闭导航" @click=${() => this.closeDrawer()}></button>` : nothing}
+	</div>
 		<div class="panel-slot ${this.panelOpen ? "open" : ""}">
 			<baize-panel .entries=${this.panelEntries}></baize-panel>
 		</div>
