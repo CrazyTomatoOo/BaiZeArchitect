@@ -15,6 +15,7 @@ import "./baize-activity-bar.js";
 import "./baize-side-bar.js";
 import "./baize-panel.js";
 import "./baize-status-bar.js";
+import { assetTabFromPath, type WorkbenchView } from "./baize-asset-library-constants.js";
 
 // URLPattern polyfill for non-Chromium browsers (Firefox/Safari)
 import "urlpattern-polyfill";
@@ -41,8 +42,8 @@ export type PanelEntry =
 /** 主题三态。 */
 type Theme = "system" | "light" | "dark";
 
-/** Activity Bar 顶层视图。 */
-type ActiveView = "workspace";
+/** Activity Bar 顶层视图;null = 当前路由无对应图标(如关系图全幅)。 */
+type ActiveView = WorkbenchView | null;
 
 /** 解析主题偏好 → 实际应用到 <html> 的 data-theme 值。 */
 function resolveTheme(pref: Theme): "light" | "dark" | null {
@@ -98,6 +99,7 @@ class BaizeShell extends LitElement {
 	private router = new Router(this, [
 		{ path: "/", render: () => this.renderHome() },
 		{ path: "/assets", render: () => this.renderAssets() },
+		{ path: "/assets/:tab", render: () => this.renderAssets() },
 		{ path: "/manage", render: () => this.renderManage() },
 		{ path: "/workflow/:id", render: ({ id }) => this.renderWorkflow(Number(id)) },
 		{ path: "/workflow/:id/:tab", render: ({ id, tab }) => this.renderWorkflow(Number(id), tab) },
@@ -331,7 +333,7 @@ class BaizeShell extends LitElement {
 			left: 0;
 			right: 0;
 			z-index: 3;
-			height: var(--activity-bar-w);
+			height: 48px;
 			border-right: none;
 			border-top: 1px solid var(--border);
 		}
@@ -364,7 +366,7 @@ class BaizeShell extends LitElement {
 		/* Panel 隐藏 */
 		.panel-slot { display: none; }
 		/* Status Bar 底部留出 Activity Bar 空间 */
-		.status-bar-slot { margin-bottom: var(--activity-bar-w); }
+		.status-bar-slot { margin-bottom: 48px; }
 	}
 	`];
 
@@ -375,7 +377,7 @@ class BaizeShell extends LitElement {
 		this.loginToken = "";
 		this.loginError = null;
 		this.initializing = true;
-		this.activeView = "workspace";
+		this.activeView = null;
 		this.theme = "system";
 		this.sidebarCollapsed = false;
 	this.drawerOpen = false;
@@ -434,13 +436,9 @@ class BaizeShell extends LitElement {
 
 	/** Activity Bar 视图切换。 */
 	private switchView(view: ActiveView): void {
-		if (view === this.activeView) {
-			this.sidebarCollapsed = !this.sidebarCollapsed;
-		} else {
-			this.activeView = view;
-			this.sidebarCollapsed = false;
-			this.navigate("/");
-		}
+		// 同视图重复点击由 Activity Bar 直接发 baize-sidebar-toggle,不走这里
+		this.sidebarCollapsed = false;
+		this.navigate(view === "requirements" ? "/" : `/assets/${view}`);
 	}
 
 	private toggleDrawer(): void {
@@ -666,8 +664,9 @@ private renderAssets(): ReturnType<typeof html> {
 	}
 
 	protected override willUpdate(): void {
-		// activeView 始终为 workspace(管理页是独立路由,不经 Activity Bar)
-		this.activeView = "workspace";
+		// 从地址栏推导高亮图标:/assets/:tab → 对应库图标(graph 无图标);其余工作空间路由 → 需求
+		const tab = assetTabFromPath(window.location.pathname);
+		this.activeView = tab === null ? "requirements" : tab === "graph" ? null : tab;
 	}
 
 	/** 管理页是全局操作(跨工作空间),不绑定到具体工作空间 chrome。 */
@@ -728,7 +727,7 @@ return html`
 			` : nothing}
 			<button @click=${() => { this.session = null; }}>退出</button>
 		</div>
-		<div class="workbench-row" style="--rail-w: ${window.location.pathname.startsWith("/workflow/") ? "320px" : "0px"}; --side-bar-w: ${showChrome ? "240px" : "0px"}; --activity-bar-w: ${showChrome ? "48px" : "0px"}">
+		<div class="workbench-row" style="--rail-w: ${window.location.pathname.startsWith("/workflow/") ? "320px" : "0px"}; --side-bar-w: ${showChrome ? "240px" : "0px"}; --activity-bar-w: ${showChrome ? "64px" : "0px"}">
 			${showChrome ? html`
 			<div class="activity-bar-slot">
 			<baize-activity-bar
@@ -752,7 +751,16 @@ return html`
 					}}
 					@baize-asset-tab-change=${(e: Event) => {
 						const tab = (e as CustomEvent<{ tab: string }>).detail.tab;
-						this.navigate(`/assets?tab=${tab}`);
+						this.navigate(`/assets/${tab}`);
+					}}
+					@baize-asset-select=${(e: Event) => {
+						const assetId = (e as CustomEvent<{ assetId: number }>).detail.assetId;
+						const path = window.location.pathname;
+						const params = new URLSearchParams(window.location.search);
+						params.set("asset", String(assetId));
+						const query = params.toString();
+						window.history.pushState({}, "", `${path}${query ? "?" + query : ""}`);
+						window.dispatchEvent(new Event("baize-location-change"));
 					}}
 					@baize-enter-workspace=${(e: Event) => this.handleEnterWorkspace(e)}
 					@baize-workspace-deleted=${(e: Event) => this.handleWorkspaceDeleted(e)}

@@ -8,7 +8,7 @@ import "./baize-asset-form.js";
 import "./baize-asset-graph.js";
 import "./baize-asset-import.js";
 import {
-	isWorkbenchTab,
+	assetTabFromPath,
 	positiveInteger,
 	SPECIALIZED_VIEW_KINDS,
 	TAB_KINDS,
@@ -225,12 +225,12 @@ class BaizeAssetLibrary extends LitElement {
 
 	private readUrl(): void {
 		const params = new URLSearchParams(window.location.search);
-		const tab = params.get("tab");
-		this.activeTab = isWorkbenchTab(tab) ? tab : "scenario";
+		// tab 在路径段(/assets/:tab);query 只携带 q/page/pageSize/asset/graph 状态
+		this.activeTab = assetTabFromPath(window.location.pathname) ?? "scenario";
 		this.query = params.get("q") ?? "";
 		this.page = positiveInteger(params.get("page"), 1);
 		this.pageSize = positiveInteger(params.get("pageSize"), 12);
-		const selected = params.get("selectedAssetId");
+		const selected = params.get("asset");
 		this.selectedAssetId = selected === null ? null : positiveInteger(selected, 0) || null;
 		const graphKind = params.get("graphKind");
 		this.graphKindFilter = graphKind !== null && ASSET_KINDS.includes(graphKind as AssetKind) ? graphKind as AssetKind : null;
@@ -261,13 +261,14 @@ class BaizeAssetLibrary extends LitElement {
 		replace = false,
 	): void {
 		const params = new URLSearchParams(window.location.search);
-		if (changes.tab !== undefined) params.set("tab", changes.tab);
+		const tab = changes.tab ?? this.activeTab;
+		params.delete("tab"); // 旧 ?tab= 形态清理(若有)
 		if (changes.q !== undefined) changes.q.length > 0 ? params.set("q", changes.q) : params.delete("q");
 		if (changes.page !== undefined) params.set("page", String(changes.page));
 		if (changes.pageSize !== undefined) params.set("pageSize", String(changes.pageSize));
 		if (changes.selectedAssetId !== undefined) {
-			if (changes.selectedAssetId === null) params.delete("selectedAssetId");
-			else params.set("selectedAssetId", String(changes.selectedAssetId));
+			if (changes.selectedAssetId === null) params.delete("asset");
+			else params.set("asset", String(changes.selectedAssetId));
 		}
 		if (changes.graphKind !== undefined) {
 			if (changes.graphKind === null) params.delete("graphKind");
@@ -281,7 +282,7 @@ class BaizeAssetLibrary extends LitElement {
 			else params.delete("expandedNodes");
 		}
 		const query = params.toString();
-		const url = query.length > 0 ? `/assets?${query}` : "/assets";
+		const url = query.length > 0 ? `/assets/${tab}?${query}` : `/assets/${tab}`;
 		if (replace) window.history.replaceState({}, "", url);
 		else window.history.pushState({}, "", url);
 		this.readUrl();

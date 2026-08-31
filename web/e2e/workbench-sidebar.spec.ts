@@ -101,23 +101,27 @@ test.describe("工作台侧栏布局", () => {
 		await expect(page.locator("baize-side-bar .card.item").first()).toBeVisible();
 	});
 
-	test("资产类型导航唯一:只在侧栏,点击即切换库内容", async ({ page }) => {
+	test("资产类型导航:图标条与侧栏各一份,点击即切换库内容", async ({ page }) => {
 		await installMocks(page);
-		await page.goto("/assets?tab=scenario");
+		await page.goto("/assets/scenario");
 
 		// 库内不再渲染重复的 tabs 行
 		await expect(page.locator("baize-asset-library .tabs")).toHaveCount(0);
-		// 全页面「场景库」按钮唯一(侧栏导航)
-		await expect(page.locator("button").filter({ hasText: "场景库" })).toHaveCount(1);
+		// 图标条有「场景库」入口;侧栏不再有 kind 导航(T2 移除)
+		await expect(page.locator("baize-activity-bar button").filter({ hasText: "场景库" })).toHaveCount(1);
+		await expect(page.locator("baize-side-bar .nav-list")).toHaveCount(0);
 
-		// 侧栏导航高亮当前类型
+		// 场景库:侧栏渲染层级树
 		await openDrawerIfNarrow(page);
-		await expect(page.locator("baize-side-bar .nav-item.active")).toHaveText("场景库");
+		await expect(page.locator("baize-side-bar baize-hierarchy-tree")).toBeVisible();
 
-		// 点击侧栏「设计库」→ URL 与库内容同步切换
-		await page.locator("baize-side-bar .nav-item", { hasText: "设计库" }).click();
-		await expect(page).toHaveURL(/tab=design/);
-		await expect(page.locator("baize-side-bar .nav-item.active")).toHaveText("设计库");
+		// 点击图标条「设计库」→ URL 与库内容同步切换(narrow 视口先关抽屉)
+		if (await page.getByRole("button", { name: "关闭导航" }).isVisible()) {
+			await page.getByRole("button", { name: "关闭导航" }).click();
+		}
+		await page.locator("baize-activity-bar button[title=\"设计库\"]").click();
+		await expect(page).toHaveURL(/\/assets\/design/);
+		await expect(page.locator("baize-side-bar baize-asset-entries")).toBeVisible();
 		await expect(page.locator("baize-asset-library .count")).toContainText("设计库");
 		// narrow 视口自动选中首项后换到详情页——两处任一呈现「核心设计」即可
 		await expect(page.locator("baize-asset-library").getByText("核心设计").first()).toBeVisible();

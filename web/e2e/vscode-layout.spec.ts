@@ -13,15 +13,16 @@ test.describe("VS Code 式五层布局重新设计", () => {
 		await page.getByRole("button", { name: "登录" }).click();
 		// 进入工作空间后 Side Bar 显示工作空间视图(需求/资产 sub-tabs)
 		await page.getByRole("button", { name: "进入" }).click();
-		await expect(page.locator("baize-side-bar .sub-tab").first()).toHaveText("需求");
-		await expect(page.locator("baize-side-bar .sub-tab").nth(1)).toHaveText("资产");
+		// T2:侧栏不再有 sub-tab,直渲需求列表
+		await expect(page.locator("baize-side-bar .sub-tab")).toHaveCount(0);
+		await expect(page.locator("baize-side-bar baize-requirements")).toBeVisible();
 		// 切到管理视图
 		// 管理页是独立路由(主区渲染 baize-workspace-manager)
 		await page.goto("/manage");
 		await expect(page.locator("main baize-workspace-manager")).toBeVisible();
-		// 资产是工作空间内的 sub-view
-		await page.goto("/assets");
-		await expect(page.locator("baize-side-bar .sub-tab.active")).toHaveText("资产");
+		// 资产库视图:侧栏直渲条目
+		await page.goto("/assets/design");
+		await expect(page.locator("baize-side-bar baize-asset-entries")).toBeVisible();
 	});
 
 	test("顶栏显示工作空间标签", async ({ page }) => {

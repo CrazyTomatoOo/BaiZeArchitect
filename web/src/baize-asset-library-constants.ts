@@ -45,6 +45,27 @@ export const TAB_LABELS: Record<WorkbenchTab, string> = {
 	graph: "关系图",
 };
 
+/** Activity Bar 顶层视图:需求 + 8 个资产库(关系图不占图标,留在主区)。 */
+export type WorkbenchView = "requirements" | Exclude<WorkbenchTab, "graph">;
+
+/** 图标条视图顺序:需求在前,资产库按 TAB_ORDER(减 graph)。 */
+export const VIEW_ORDER: readonly WorkbenchView[] = [
+	"requirements",
+	...(TAB_ORDER.filter((tab) => tab !== "graph") as readonly Exclude<WorkbenchTab, "graph">[]),
+];
+
+/** 图标标注文字(64px 图标条,图标下带小字)。 */
+export const VIEW_LABELS: Record<WorkbenchView, string> = Object.fromEntries(
+	VIEW_ORDER.map((view) => [view, view === "requirements" ? "需求" : TAB_LABELS[view]]),
+) as Record<WorkbenchView, string>;
+/** `/assets/:tab` 路径段 → WorkbenchTab(含 graph);非 /assets 路径 → null;裸 /assets 回退场景库。 */
+export function assetTabFromPath(pathname: string): WorkbenchTab | null {
+	const match = /^\/assets(?:\/([^/?]+))?/.exec(pathname);
+	if (match === null) return null;
+	const tab = match[1];
+	return tab !== undefined && isWorkbenchTab(tab) ? tab : "scenario";
+}
+
 /** Kinds aggregated by each non-graph tab. */
 export const TAB_KINDS: Record<Exclude<WorkbenchTab, "graph">, readonly AssetKind[]> = {
 	scenario: ["scenario-domain", "scenario", "scenario-variant"],

@@ -95,21 +95,24 @@ test("asset workbench exposes 9 aggregated tabs with specialized views and graph
 	await page.goto("/assets");
 	await expect(page.getByRole("heading", { name: "设计模型资产" })).toBeVisible();
 
-	// 资产类型导航只在侧栏(narrow 视口需先开抽屉)
+	// T2:侧栏不再有 kind 导航,直渲条目;图标条有 8 个库图标(narrow 视口需先开抽屉)
 	await openWorkbenchNavigation(page);
-	// 9 aggregated tabs in fixed order
-	await expect(page.getByRole("button", { name: /场景库/ })).toBeVisible();
-	await expect(page.getByRole("button", { name: /功能库/ })).toBeVisible();
-	await expect(page.getByRole("button", { name: /用例库/ })).toBeVisible();
-	await expect(page.getByRole("button", { name: /设计库/ })).toBeVisible();
-	await expect(page.getByRole("button", { name: /架构库/ })).toBeVisible();
-	await expect(page.getByRole("button", { name: /数据库/ })).toBeVisible();
-	await expect(page.getByRole("button", { name: /接口库/ })).toBeVisible();
-	await expect(page.getByRole("button", { name: /干系人库/ })).toBeVisible();
-	await expect(page.getByRole("button", { name: /关系图/ })).toBeVisible();
+	const activityBar = page.locator("baize-activity-bar");
+	// 8 aggregated tabs in fixed order(关系图不占图标)
+	await expect(activityBar.getByRole("button", { name: /场景库/ })).toBeVisible();
+	await expect(activityBar.getByRole("button", { name: /功能库/ })).toBeVisible();
+	await expect(activityBar.getByRole("button", { name: /用例库/ })).toBeVisible();
+	await expect(activityBar.getByRole("button", { name: /设计库/ })).toBeVisible();
+	await expect(activityBar.getByRole("button", { name: /架构库/ })).toBeVisible();
+	await expect(activityBar.getByRole("button", { name: /数据库/ })).toBeVisible();
+	await expect(activityBar.getByRole("button", { name: /接口库/ })).toBeVisible();
+	await expect(activityBar.getByRole("button", { name: /干系人库/ })).toBeVisible();
 
-	// Design tab: list + detail with relations(narrow 视口点击后抽屉自动关闭)
-	await page.getByRole("button", { name: /设计库/ }).click();
+	// Design tab: list + detail with relations(narrow 视口先关抽屉再点图标)
+	if (await page.getByRole("button", { name: "关闭导航" }).isVisible()) {
+		await page.getByRole("button", { name: "关闭导航" }).click();
+	}
+	await activityBar.getByRole("button", { name: /设计库/ }).click();
 	// On narrow viewport, auto-selection may show detail instead of list — check detail heading
 	await expect(page.getByRole("heading", { name: "核心设计" })).toBeVisible({ timeout: 10000 });
 	await expect(page.getByText(/核心架构/)).toBeVisible();
@@ -120,9 +123,8 @@ test("asset workbench exposes 9 aggregated tabs with specialized views and graph
 	await page.getByRole("button", { name: "确认删除" }).click();
 	await expect(page.getByText(/仍被以下 1 个资产引用/)).toBeVisible();
 
-	// Graph tab: full-screen graph with 2 nodes
-	await openWorkbenchNavigation(page);
-	await page.getByRole("button", { name: /关系图/ }).click();
+	// Graph tab: full-screen graph with 2 nodes(关系图是主区 tab,不在图标条;直接 URL 切换)
+	await page.goto("/assets/graph");
 	await expect(page.getByRole("img", { name: "Workspace 资产关系图" })).toBeVisible();
 	await expect(page.locator("button.graph-node")).toHaveCount(2);
 	await page.locator("button.graph-node").nth(1).click();
@@ -140,9 +142,9 @@ test("asset workbench exposes 9 aggregated tabs with specialized views and graph
 
 test("asset workbench URL state captures tab and selection", async ({ page }) => {
 	await installAssetMocks(page);
-	await page.goto("/assets?tab=architecture&page=1");
+	await page.goto("/assets/architecture?page=1");
 	await expect(page.getByRole("heading", { name: "设计模型资产" })).toBeVisible();
-	await expect(page).toHaveURL(/tab=architecture/);
+	await expect(page).toHaveURL(/\/assets\/architecture/);
 
 	// 视图切换:Activity Bar 导航(原 Side Bar 按钮已移至 Activity Bar 图标)
 	await page.goto("/");

@@ -1,30 +1,43 @@
 import { LitElement, html, css, nothing, type TemplateResult } from "lit";
 import { sharedStyles } from "./baize-styles.js";
-import { TAB_LABELS, TAB_ORDER, isWorkbenchTab, type WorkbenchTab } from "./baize-asset-library-constants.js";
+import {
+	TAB_KINDS,
+	TAB_LABELS,
+	VIEW_LABELS,
+	assetTabFromPath,
+	type WorkbenchTab,
+	type WorkbenchView,
+} from "./baize-asset-library-constants.js";
+import "./baize-requirements.js";
+import "./baize-asset-entries.js";
+import "./baize-hierarchy-tree.js";
 
 /** Side Bar 当前承载的顶层视图。 */
-type ActiveView = "workspace";
+type ActiveView = WorkbenchView | null;
 
-/** 位置变更事件——shell.navigate 与资产库 updateUrl 在 pushState 后派发。 */
+/** 位置变更事件——shell.navigate 在 pushState 后派发;与资产库共用。 */
 const LOCATION_CHANGE_EVENT = "baize-location-change";
 
 /**
- * baize-side-bar — 240px 左侧辅助面板。
+ * baize-side-bar — 240px 左侧辅助面板(T2 条目化)。
+ * 直渲当前视图条目:需求卡片 / 资产条目 / 层级树;无 sub-tab 与 kind 导航。
  */
 class BaizeSideBar extends LitElement {
 	static properties = {
 		activeView: { type: String, attribute: "active-view" },
 		apiBase: { type: String, attribute: "api-base" },
 		workspaceId: { type: Number, attribute: "workspace-id" },
-		subView: { state: true },
 		activeAssetTab: { state: true },
+		selectedAssetId: { state: true },
+		refresh: { state: true },
 	};
 
 	declare activeView: ActiveView;
 	declare apiBase: string;
-	declare subView: "requirements" | "assets";
 	declare workspaceId: number;
 	declare activeAssetTab: WorkbenchTab;
+	declare selectedAssetId: number;
+	declare refresh: number;
 
 	static styles = [sharedStyles, css`
 		:host {
@@ -35,7 +48,7 @@ class BaizeSideBar extends LitElement {
 			background: var(--surface);
 			overflow: hidden;
 		}
-		.header {
+		.lib-head {
 			flex: 0 0 var(--topbar-h);
 			display: flex;
 			align-items: center;
@@ -43,77 +56,28 @@ class BaizeSideBar extends LitElement {
 			border-bottom: 1px solid var(--border);
 			font-weight: 600;
 			color: var(--text);
+			font-size: var(--text-sm);
 		}
 		.content {
 			flex: 1 1 0;
 			min-height: 0;
 			overflow-y: auto;
 		}
-		.nav-list {
-			display: flex;
-			flex-direction: column;
-			padding: var(--gap) 0;
-		}
-		.nav-item {
-			display: flex;
-			align-items: center;
-			width: 100%;
-			padding: var(--gap) var(--pad);
-			text-align: left;
-			color: var(--text);
-			background: transparent;
-			border: none;
-			border-radius: 0;
-			cursor: pointer;
-			font-size: var(--text-base);
-		}
-		.nav-item:hover {
-			background: var(--surface-hover);
-		}
-		.nav-item.active {
-			color: var(--accent);
-			font-weight: 600;
-			box-shadow: inset 2px 0 0 var(--accent);
-		}
 		.hint {
 			padding: var(--pad);
 			color: var(--text-muted);
 			font-size: var(--text-sm);
 		}
-		.sub-tabs {
-			display: flex;
-			gap: 0;
-			width: 100%;
-		}
-		.sub-tab {
-			flex: 1;
-			padding: var(--gap-dense) 0;
-			background: none;
-			border: none;
-			border-bottom: var(--accent-border-w) solid transparent;
-			color: var(--text-muted);
-			font-size: var(--text-sm);
-			font-weight: 600;
-			cursor: pointer;
-			text-align: center;
-		}
-		.sub-tab:hover {
-			color: var(--text);
-			background: var(--surface-hover);
-		}
-		.sub-tab.active {
-			color: var(--accent);
-			border-bottom-color: var(--accent);
-		}
 	`];
 
 	constructor() {
 		super();
-		this.activeView = "workspace";
+		this.activeView = null;
 		this.apiBase = "";
 		this.workspaceId = 0;
-		this.subView = "requirements";
 		this.activeAssetTab = "scenario";
+		this.selectedAssetId = 0;
+		this.refresh = 0;
 	}
 
 	connectedCallback(): void {
@@ -135,14 +99,10 @@ class BaizeSideBar extends LitElement {
 
 	protected override willUpdate(): void {
 		const path = window.location.pathname;
-		this.subView = path.startsWith("/assets") ? "assets" : "requirements";
-		const tab = new URLSearchParams(window.location.search).get("tab");
-		this.activeAssetTab = isWorkbenchTab(tab) ? tab : "scenario";
-	}
-
-
-	private onAssetTabChange(tab: WorkbenchTab): void {
-		this.dispatchEvent(new CustomEvent("baize-asset-tab-change", { detail: { tab }, bubbles: true, composed: true }));
+		this.activeAssetTab = assetTabFromPath(path) ?? "scenario";
+		const params = new URLSearchParams(window.location.search);
+		const asset = params.get("asset");
+		this.selectedAssetId = asset !== null ? Number(asset) || 0 : 0;
 	}
 
 	private onOpenRequirement(e: Event): void {
@@ -150,48 +110,79 @@ class BaizeSideBar extends LitElement {
 		this.dispatchEvent(new CustomEvent("baize-open-requirement", { detail, bubbles: true, composed: true }));
 	}
 
+	private onAssetSelect(e: Event): void {
+		const detail = (e as CustomEvent<{ assetId: number }>).detail;
+		this.dispatchEvent(new CustomEvent("baize-asset-select", { detail, bubbles: true, composed: true }));
+	}
 
-	private renderAssetsNav(): TemplateResult {
+	private onAssetPage(e: Event): void {
+		// 资产条目加载完成,刷新计数
+		this.refresh++;
+	}
+
+	private renderRequirements(): TemplateResult {
 		return html`
-			<nav class="nav-list" aria-label="资产类型">
-				${TAB_ORDER.map((tab) => html`
-					<button
-						class="nav-item ${this.activeAssetTab === tab ? "active" : ""}"
-						aria-current=${this.activeAssetTab === tab ? "page" : "false"}
-						@click=${() => this.onAssetTabChange(tab)}
-					>${TAB_LABELS[tab]}</button>
-				`)}
-			</nav>
+			<baize-requirements
+				.apiBase=${this.apiBase}
+				.workspaceId=${this.workspaceId}
+				@baize-open-requirement=${this.onOpenRequirement}
+			></baize-requirements>
 		`;
 	}
 
+	private renderAssetEntries(): TemplateResult {
+		const tab = this.activeAssetTab;
+		const kinds = TAB_KINDS[tab as Exclude<WorkbenchTab, "graph">];
+		if (!kinds || kinds.length === 0) {
+			return html`<div class="hint">该库暂不支持条目列表。</div>`;
+		}
+		const kind = kinds[0]!;
+		return html`
+			<baize-asset-entries
+				.apiBase=${this.apiBase}
+				.workspaceId=${this.workspaceId}
+				.kind=${kind}
+				.selectedAssetId=${this.selectedAssetId}
+				.refresh=${this.refresh}
+				@baize-asset-select=${this.onAssetSelect}
+				@baize-asset-page=${this.onAssetPage}
+			></baize-asset-entries>
+		`;
+	}
+
+	private renderHierarchyTree(): TemplateResult {
+		const tab = this.activeAssetTab;
+		const rootKind = tab === "scenario" ? "scenario-domain" : "function-domain";
+		return html`
+			<baize-hierarchy-tree
+				.apiBase=${this.apiBase}
+				.workspaceId=${this.workspaceId}
+				.rootKind=${rootKind}
+				.selectedAssetId=${this.selectedAssetId}
+				.page=${1}
+				.pageSize=${48}
+				.query=${""}
+				.narrowView=${false}
+				.refresh=${this.refresh}
+				@select=${this.onAssetSelect}
+				@baize-asset-page=${this.onAssetPage}
+			></baize-hierarchy-tree>
+		`;
+	}
 
 	render(): TemplateResult {
 		if (this.workspaceId === 0) {
-			return html`<div class="header"><span class="hint">未选择工作空间</span></div>`;
+			return html`<div class="lib-head"><span class="hint">未选择工作空间</span></div>`;
 		}
+		const path = window.location.pathname;
+		const isRequirements = !path.startsWith("/assets");
+		const isHierarchy = this.activeAssetTab === "scenario" || this.activeAssetTab === "function";
 		return html`
-			<div class="header">
-				<div class="sub-tabs">
-					<button class="sub-tab ${this.subView === "requirements" ? "active" : ""}"
-						@click=${() => { this.subView = "requirements"; this.dispatchEvent(new CustomEvent("baize-sub-view-change", { detail: { subView: "requirements" }, bubbles: true, composed: true })); }}>
-						需求
-					</button>
-					<button class="sub-tab ${this.subView === "assets" ? "active" : ""}"
-						@click=${() => { this.subView = "assets"; this.dispatchEvent(new CustomEvent("baize-sub-view-change", { detail: { subView: "assets" }, bubbles: true, composed: true })); }}>
-						资产
-					</button>
-				</div>
-			</div>
+			<div class="lib-head">${isRequirements ? "需求" : VIEW_LABELS[this.activeAssetTab as WorkbenchView]}</div>
 			<div class="content">
-				${this.subView === "requirements" ? html`
-					<baize-requirements
-						.apiBase=${this.apiBase}
-						.workspaceId=${this.workspaceId}
-						@baize-open-requirement=${this.onOpenRequirement}
-					></baize-requirements>
-				` : nothing}
-				${this.subView === "assets" ? this.renderAssetsNav() : nothing}
+				${isRequirements ? this.renderRequirements() : nothing}
+				${!isRequirements && isHierarchy ? this.renderHierarchyTree() : nothing}
+				${!isRequirements && !isHierarchy ? this.renderAssetEntries() : nothing}
 			</div>
 		`;
 	}
