@@ -386,12 +386,15 @@ describe("baize-workspace-manager — 管理页安全约定", () => {
 	});
 
 	it("行容器为 div 而非 button(防按钮嵌套)", () => {
-		const rowMarkup = workspaceManagerSource.match(/<div class="card item">\s*<div class="row">/);
+		const rowMarkup = workspaceManagerSource.match(/<div class="card item \$\{[\s\S]*?<div class="row">/);
 		expect(rowMarkup).not.toBeNull();
 	});
 
-	it("不持有静态 workspace-id / workspaceId 属性,API 委托 client 三函数", () => {
-		expect(workspaceManagerSource).not.toMatch(/workspace-id\s*=|workspaceId:\s*\{ type: Number/);
+	it("整卡可点击进入 + 持有 workspaceId 标识当前工作区(ADR-012),API 委托 client 三函数", () => {
+		expect(workspaceManagerSource).toMatch(/workspaceId:\s*\{ type: Number/);
+		expect(workspaceManagerSource).toContain("baize-enter-workspace");
+		expect(workspaceManagerSource).toMatch(/@click=\$\{\(\) => this\.enter\(workspace\.id\)\}/);
+		expect(workspaceManagerSource).toMatch(/stopPropagation/);
 		expect(workspaceManagerSource).toMatch(/createWorkspace|deleteWorkspace|listWorkspaces/);
 	});
 });

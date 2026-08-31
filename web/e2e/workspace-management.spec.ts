@@ -303,10 +303,20 @@ test.describe("workspace management", () => {
 		await page.goto("/");
 		await expect(page.getByRole("heading", { name: "需求" })).toBeVisible();
 
-		// 管理页无「进入」按钮(概念分离)
+		// 管理页无独立「进入」按钮——整卡可点击进入(ADR-012 反转 #85 概念分离)
 		await page.goto("/manage");
 		await expect(page.getByRole("main").getByRole("heading", { name: "工作空间" })).toBeVisible();
 		await expect(page.getByRole("button", { name: "进入" })).toHaveCount(0);
+		// 管理页是全局操作,不绑定到具体工作空间 chrome:Activity Bar/Side Bar/Panel/切换器隐藏
+		await expect(page.locator(".side-bar-slot")).toHaveCount(0);
+		await expect(page.locator(".activity-bar-slot")).toHaveCount(0);
+		await expect(page.locator(".panel-slot")).toHaveCount(0);
+		await expect(page.locator(".switcher-btn")).toHaveCount(0);
+		// 当前工作区条目带 current 标识;点击条目直接进入工作空间
+		const northCard = page.locator(".card.item", { hasText: "North" });
+		await expect(northCard).toHaveClass(/current/);
+		await northCard.click();
+		await expect(page.getByRole("heading", { name: "需求" })).toBeVisible();
 	});
 
 	test("无工作区时最小 chrome:Activity Bar/Side Bar/Panel/切换器隐藏", async ({ page }) => {

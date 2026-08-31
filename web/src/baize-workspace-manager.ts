@@ -13,13 +13,15 @@ import {
 
 /**
  * baize-workspace-manager — 工作区管理页:列表 + 新建 + 行内两步删除确认。
- * 行容器为 div.card(非 button,防非法嵌套);「进入」primary + 「删除」danger 行内直显。
+ * 行容器为 div.card(非 button,防非法嵌套);整卡点击进入工作区,删除按钮 stopPropagation。
+ * 当前工作区条目以 accent 左条 + accent-glow 背景标识;非当前条目左条淡化为 border 色。
  * 删除确认沿决议 10:行内展开 role="dialog" 两步确认,不可恢复文案,不使用浏览器原生确认框。
  * 对外事件:baize-enter-workspace{id}(进入/创建后直接进入)、baize-workspace-deleted{id}(删除成功)。
  */
 class BaizeWorkspaceManager extends LitElement {
 	static properties = {
 		apiBase: { type: String, attribute: "api-base" },
+		workspaceId: { type: Number, attribute: "workspace-id" },
 		workspaces: { state: true },
 		loading: { state: true },
 		loadError: { state: true },
@@ -34,6 +36,7 @@ class BaizeWorkspaceManager extends LitElement {
 	};
 
 	declare apiBase: string;
+	declare workspaceId: number;
 	declare workspaces: readonly WorkspaceSummary[];
 	declare loading: boolean;
 	declare loadError: string | null;
@@ -57,6 +60,11 @@ class BaizeWorkspaceManager extends LitElement {
 		.form-card { display: flex; flex-direction: column; gap: 10px; margin-top: var(--gap); }
 		.command-row { display: flex; justify-content: flex-end; }
 		.list { display: flex; flex-direction: column; gap: var(--gap); margin-top: var(--gap); }
+		/* 条目整卡可点击进入(ADR-012);非当前条目左条淡化,当前条目 accent 左条 + 微光背景 */
+		.item { cursor: pointer; border-left-color: var(--border); transition: background var(--dur-1) var(--ease-out), border-color var(--dur-1) var(--ease-out); }
+		.item:hover { background: var(--surface-hover); }
+		.item:focus-visible { outline: var(--focus-ring); outline-offset: 1px; }
+		.item.current { border-left-color: var(--accent); background: var(--accent-glow); }
 		.error { color: var(--danger); font-size: var(--text-sm); margin-top: 8px; }
 		.confirm { border-top: 1px solid var(--border); margin-top: var(--gap); padding-top: var(--gap); display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
 		.confirm .text { font-size: var(--text-sm); color: var(--text-muted); flex: 1; min-width: 200px; }
@@ -65,6 +73,7 @@ class BaizeWorkspaceManager extends LitElement {
 	constructor() {
 		super();
 		this.apiBase = "";
+		this.workspaceId = 0;
 		this.workspaces = [];
 		this.loading = true;
 		this.loadError = null;
@@ -178,18 +187,21 @@ class BaizeWorkspaceManager extends LitElement {
 							</div>`
 						: html`<div class="list">
 								${this.workspaces.map((workspace) => html`
-									<div class="card item">
+									<div class="card item ${workspace.id === this.workspaceId ? "current" : ""}"
+										role="link" tabindex="0" aria-label="进入工作区 ${workspace.name}"
+										@click=${() => this.enter(workspace.id)}
+										@keydown=${(e: KeyboardEvent) => { if (e.target === e.currentTarget && (e.key === "Enter" || e.key === " ")) { e.preventDefault(); this.enter(workspace.id); } }}>
 										<div class="row">
 											<div class="grow">
 												<div class="title">${workspace.name}</div>
 												<div class="meta mono">${workspace.repoPath}</div>
 											</div>
-										<div class="actions">
+										<div class="actions" @click=${(e: Event) => e.stopPropagation()}>
 											<button class="danger" ?disabled=${this.deletingId !== null} @click=${() => this.askDelete(workspace.id)}>删除</button>
 										</div>
 									</div>
 										${this.confirmId === workspace.id
-											? html`<div class="confirm" role="dialog" aria-label="确认删除工作区 ${workspace.name}">
+											? html`<div class="confirm" role="dialog" aria-label="确认删除工作区 ${workspace.name}" @click=${(e: Event) => e.stopPropagation()}>
 													<span class="text">删除工作区「${workspace.name}」?将级联删除其下所有需求与资产（含设计历史、审批记录），<strong>不可恢复</strong>。</span>
 													<div class="actions">
 														<button class="danger" ?disabled=${this.deletingId !== null} @click=${() => void this.confirmDelete(workspace.id)}>${this.deletingId === workspace.id ? "删除中…" : "确认删除"}</button>
