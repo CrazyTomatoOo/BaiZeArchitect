@@ -50,12 +50,26 @@ class BaizeRequirements extends LitElement {
 	declare customized: Record<ModelRoleKey, boolean>;
 
 	static styles = [sharedStyles, css`
-		.head { display: flex; align-items: center; gap: 12px; }
-		.head .spacer { flex: 1; }
+		:host { display: block; container-type: inline-size; }
+		.side-head {
+			display: flex;
+			align-items: center;
+			gap: var(--gap);
+			padding: 0 var(--pad);
+			margin-top: var(--gap);
+		}
+		.side-head h2 {
+			margin: 0;
+			font-size: var(--text-xs);
+			font-weight: 600;
+			letter-spacing: 0.08em;
+			color: var(--text-subtle);
+		}
+		.side-head .spacer { flex: 1; }
 		.list { margin-top: var(--gap); display: grid; gap: var(--gap); }
-		.item { display: flex; align-items: center; gap: 12px; width: 100%; text-align: left; cursor: pointer; }
+		.item { display: flex; align-items: center; flex-wrap: wrap; gap: var(--space-2xs); width: 100%; text-align: left; cursor: pointer; }
 		.item .title { font-weight: 600; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-		.item .grow { flex: 1; min-width: 0; }
+		.item .grow { flex: 1 1 100%; min-width: 0; }
 		.create { margin-top: var(--gap); display: flex; flex-direction: column; gap: 8px; }
 
 		.model-picker {
@@ -113,8 +127,13 @@ class BaizeRequirements extends LitElement {
 			text-overflow: ellipsis;
 			max-width: 100%;
 		}
-		@media (max-width: 640px) {
-			.picker-table th, .picker-table td { padding: var(--radius-sm) var(--radius-sm); }
+		/* 窄容器(240px 侧栏):角色表堆叠为纵向卡片行 */
+		@container (max-width: 640px) {
+			.picker-table thead { display: none; }
+			.picker-table, .picker-table tbody, .picker-table tr, .picker-table td { display: block; width: 100%; }
+			.picker-table tr { padding: var(--space-2xs) 0; border-bottom: 1px solid var(--border); }
+			.picker-table tr.picker-group { border-bottom: none; }
+			.picker-table td { padding: var(--space-2xs) 0; }
 			.picker-table select { min-width: 0; }
 		}
 	`];
@@ -341,8 +360,8 @@ class BaizeRequirements extends LitElement {
 
 	render() {
 		return html`
-			<div class="page-head head">
-				<div><h1>需求</h1><p class="sub">每个需求都会建立一条自动设计工作流。</p></div>
+			<div class="side-head">
+				<h2>需求</h2>
 				<span class="spacer"></span>
 				<button class="primary" @click=${() => (this.createOpen = !this.createOpen)}>${this.createOpen ? "收起" : "＋ 新建需求"}</button>
 			</div>
@@ -362,15 +381,12 @@ class BaizeRequirements extends LitElement {
 			${this.loading
 				? html`<div class="empty">加载中…</div>`
 				: this.views.length === 0
-					? html`<div class="card" style="margin-top:var(--gap)"><div class="empty">还没有需求。点击「新建需求」,描述你想要设计的功能,系统会自动规划、分析、设计并评审,在关键节点请你决策。</div></div>`
+					? html`<div class="empty">还没有需求。点击「新建需求」,描述你想要设计的功能,系统会自动规划、分析、设计并评审,在关键节点请你决策。</div>`
 					: html`<div class="list">
 							${this.views.map((v) => html`
 								<button class="card item" @click=${() => this.dispatchEvent(new CustomEvent("baize-open-requirement", { detail: { id: v.id }, bubbles: true, composed: true }))}>
 									<div class="grow">
 										<div class="title">需求 ${v.id} · ${v.title}</div>
-										<div class="journey" style="margin-top:6px">
-											${v.stages.map((s, i) => html`${i > 0 ? html`<span class="step-link ${v.stages[i - 1]!.status === "done" ? "done" : ""}"></span>` : nothing}<span class="step" data-status=${s.status}><span class="dot">${s.status === "done" ? "✓" : i + 1}</span><span class="name">${s.label}</span></span>`)}
-										</div>
 									</div>
 									${v.gates.length > 0 ? html`<span class="badge" data-tone="warn">${v.gates.length} 待处理</span>` : nothing}
 									${this.renderModelBadge(v)}

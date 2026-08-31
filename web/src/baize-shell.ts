@@ -555,7 +555,10 @@ class BaizeShell extends LitElement {
 			window.history.pushState({}, "", path);
 		}
 		this.closeDrawer();
-		void this.router.goto(path);
+		// 路由只按 pathname 匹配(query 由各视图经 baize-location-change 自读)
+		void this.router.goto(new URL(path, window.location.origin).pathname);
+		// pushState 不触发 popstate——通知侧栏/资产库重读地址栏
+		window.dispatchEvent(new Event("baize-location-change"));
 	}
 
 	/** Panel toggle（Status Bar 按钮 / Cmd+J）。 */
@@ -643,6 +646,7 @@ private renderAssets(): ReturnType<typeof html> {
 	private renderManage(): ReturnType<typeof html> {
 		return html`<baize-workspace-manager
 			.apiBase=${this.apiBase}
+			.workspaceId=${this.workspaceId}
 			@baize-enter-workspace=${(e: Event) => this.handleEnterWorkspace(e)}
 			@baize-workspace-deleted=${(e: Event) => this.handleWorkspaceDeleted(e)}
 		></baize-workspace-manager>`;
@@ -664,6 +668,11 @@ private renderAssets(): ReturnType<typeof html> {
 	protected override willUpdate(): void {
 		// activeView 始终为 workspace(管理页是独立路由,不经 Activity Bar)
 		this.activeView = "workspace";
+	}
+
+	/** 管理页是全局操作(跨工作空间),不绑定到具体工作空间 chrome。 */
+	private isManageRoute(): boolean {
+		return window.location.pathname === "/manage";
 	}
 
 	render() {
@@ -689,12 +698,13 @@ private renderAssets(): ReturnType<typeof html> {
 		if (this.initializing) {
 			return html`<div class="placeholder">加载中…</div>`;
 		}
+const showChrome = this.workspaceId > 0 && !this.isManageRoute();
 return html`
 		<div class="topbar">
-			${this.workspaceId > 0 ? html`<button class="menu-button" aria-label="打开工作台导航" aria-expanded=${this.drawerOpen} @click=${() => this.toggleDrawer()}>菜单</button>` : nothing}
+			${showChrome ? html`<button class="menu-button" aria-label="打开工作台导航" aria-expanded=${this.drawerOpen} @click=${() => this.toggleDrawer()}>菜单</button>` : nothing}
 			<div class="brand"><span class="dot">◇</span> BaiZe Architect</div>
 			<span class="spacer"></span>
-			${this.workspaceId > 0 ? html`
+			${showChrome ? html`
 			<div class="workspace-switcher">
 				<button class="switcher-btn" @click=${() => this.toggleSwitcher()} aria-expanded=${this.switcherOpen}>
 					${this.currentWorkspaceName}
@@ -713,13 +723,13 @@ return html`
 						</button>
 					</div>
 					<button class="switcher-scrim" aria-label="关闭切换器" @click=${() => this.closeSwitcher()}></button>
-				` : nothing}
-			</div>
+			` : nothing}
+		</div>
 			` : nothing}
 			<button @click=${() => { this.session = null; }}>退出</button>
 		</div>
-		<div class="workbench-row" style="--rail-w: ${window.location.pathname.startsWith("/workflow/") ? "320px" : "0px"}; --side-bar-w: ${this.workspaceId > 0 ? "240px" : "0px"}; --activity-bar-w: ${this.workspaceId > 0 ? "48px" : "0px"}">
-			${this.workspaceId > 0 ? html`
+		<div class="workbench-row" style="--rail-w: ${window.location.pathname.startsWith("/workflow/") ? "320px" : "0px"}; --side-bar-w: ${showChrome ? "240px" : "0px"}; --activity-bar-w: ${showChrome ? "48px" : "0px"}">
+			${showChrome ? html`
 			<div class="activity-bar-slot">
 			<baize-activity-bar
 					.activeView=${this.activeView}
@@ -760,7 +770,7 @@ return html`
 		${window.location.pathname.startsWith("/workflow/") ? html`<div class="rail-slot"></div>` : nothing}
 		${this.drawerOpen ? html`<button class="drawer-scrim" aria-label="关闭导航" @click=${() => this.closeDrawer()}></button>` : nothing}
 	</div>
-		${this.workspaceId > 0 ? html`<div class="panel-slot ${this.panelOpen ? "open" : ""}">
+		${showChrome ? html`<div class="panel-slot ${this.panelOpen ? "open" : ""}">
 			<baize-panel .entries=${this.panelEntries}></baize-panel>
 		</div>` : nothing}
 		<div class="status-bar-slot">

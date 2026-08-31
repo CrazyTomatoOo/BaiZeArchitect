@@ -1,23 +1,12 @@
 import { LitElement, html, css, nothing, type TemplateResult } from "lit";
 import { sharedStyles } from "./baize-styles.js";
+import { TAB_LABELS, TAB_ORDER, isWorkbenchTab, type WorkbenchTab } from "./baize-asset-library-constants.js";
 
 /** Side Bar 当前承载的顶层视图。 */
 type ActiveView = "workspace";
 
-/** 资产库九大分类。 */
-type AssetTab = "scenario" | "function" | "usecase" | "design" | "architecture" | "data" | "api" | "stakeholder" | "graph";
-
-const ASSET_TABS: readonly { tab: AssetTab; label: string }[] = [
-	{ tab: "scenario", label: "场景库" },
-	{ tab: "function", label: "功能库" },
-	{ tab: "usecase", label: "用例库" },
-	{ tab: "design", label: "设计库" },
-	{ tab: "architecture", label: "架构库" },
-	{ tab: "data", label: "数据库" },
-	{ tab: "api", label: "接口库" },
-	{ tab: "stakeholder", label: "干系人库" },
-	{ tab: "graph", label: "关系图" },
-];
+/** 位置变更事件——shell.navigate 与资产库 updateUrl 在 pushState 后派发。 */
+const LOCATION_CHANGE_EVENT = "baize-location-change";
 
 /**
  * baize-side-bar — 240px 左侧辅助面板。
@@ -28,12 +17,14 @@ class BaizeSideBar extends LitElement {
 		apiBase: { type: String, attribute: "api-base" },
 		workspaceId: { type: Number, attribute: "workspace-id" },
 		subView: { state: true },
+		activeAssetTab: { state: true },
 	};
 
 	declare activeView: ActiveView;
 	declare apiBase: string;
 	declare subView: "requirements" | "assets";
 	declare workspaceId: number;
+	declare activeAssetTab: WorkbenchTab;
 
 	static styles = [sharedStyles, css`
 		:host {
@@ -79,6 +70,11 @@ class BaizeSideBar extends LitElement {
 		.nav-item:hover {
 			background: var(--surface-hover);
 		}
+		.nav-item.active {
+			color: var(--accent);
+			font-weight: 600;
+			box-shadow: inset 2px 0 0 var(--accent);
+		}
 		.hint {
 			padding: var(--pad);
 			color: var(--text-muted);
@@ -117,15 +113,35 @@ class BaizeSideBar extends LitElement {
 		this.apiBase = "";
 		this.workspaceId = 0;
 		this.subView = "requirements";
+		this.activeAssetTab = "scenario";
 	}
+
+	connectedCallback(): void {
+		super.connectedCallback();
+		window.addEventListener("popstate", this.onLocationChange);
+		window.addEventListener(LOCATION_CHANGE_EVENT, this.onLocationChange);
+	}
+
+	disconnectedCallback(): void {
+		window.removeEventListener("popstate", this.onLocationChange);
+		window.removeEventListener(LOCATION_CHANGE_EVENT, this.onLocationChange);
+		super.disconnectedCallback();
+	}
+
+	/** pushState 不触发 popstate——壳层/资产库派发自定义事件,统一在此重读地址栏。 */
+	private readonly onLocationChange = (): void => {
+		this.requestUpdate();
+	};
 
 	protected override willUpdate(): void {
 		const path = window.location.pathname;
 		this.subView = path.startsWith("/assets") ? "assets" : "requirements";
+		const tab = new URLSearchParams(window.location.search).get("tab");
+		this.activeAssetTab = isWorkbenchTab(tab) ? tab : "scenario";
 	}
 
 
-	private onAssetTabChange(tab: AssetTab): void {
+	private onAssetTabChange(tab: WorkbenchTab): void {
 		this.dispatchEvent(new CustomEvent("baize-asset-tab-change", { detail: { tab }, bubbles: true, composed: true }));
 	}
 
@@ -137,11 +153,15 @@ class BaizeSideBar extends LitElement {
 
 	private renderAssetsNav(): TemplateResult {
 		return html`
-			<div class="nav-list" role="list">
-				${ASSET_TABS.map(({ tab, label }) => html`
-					<button class="nav-item" role="listitem" @click=${() => this.onAssetTabChange(tab)}>${label}</button>
+			<nav class="nav-list" aria-label="资产类型">
+				${TAB_ORDER.map((tab) => html`
+					<button
+						class="nav-item ${this.activeAssetTab === tab ? "active" : ""}"
+						aria-current=${this.activeAssetTab === tab ? "page" : "false"}
+						@click=${() => this.onAssetTabChange(tab)}
+					>${TAB_LABELS[tab]}</button>
 				`)}
-			</div>
+			</nav>
 		`;
 	}
 

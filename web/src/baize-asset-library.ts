@@ -8,16 +8,17 @@ import "./baize-asset-form.js";
 import "./baize-asset-graph.js";
 import "./baize-asset-import.js";
 import {
-	emptyKindCounts,
 	isWorkbenchTab,
 	positiveInteger,
 	SPECIALIZED_VIEW_KINDS,
 	TAB_KINDS,
 	TAB_LABELS,
-	TAB_ORDER,
 	type Renderable,
 	type WorkbenchTab,
 } from "./baize-asset-library-constants.js";
+
+/** 位置变更事件——shell.navigate 在 pushState 后派发;与侧栏共用。 */
+const LOCATION_CHANGE_EVENT = "baize-location-change";
 
 class BaizeAssetLibrary extends LitElement {
 	static properties = {
@@ -28,7 +29,6 @@ class BaizeAssetLibrary extends LitElement {
 		page: { state: true },
 		pageSize: { state: true },
 		total: { state: true },
-		kindCounts: { state: true },
 		selectedAssetId: { state: true },
 		graphKindFilter: { state: true },
 		graphZoom: { state: true },
@@ -48,7 +48,6 @@ class BaizeAssetLibrary extends LitElement {
 	declare page: number;
 	declare pageSize: number;
 	declare total: number;
-	declare kindCounts: Readonly<Record<AssetKind, number>>;
 	declare selectedAssetId: number | null;
 	declare graphKindFilter: AssetKind | null;
 	declare graphZoom: number;
@@ -65,8 +64,6 @@ class BaizeAssetLibrary extends LitElement {
 	static styles = [sharedStyles, css`
 		:host {
 			display: block;
-			--asset-toolbar-offset: 8.5rem;
-			--asset-mobile-toolbar-offset: 11rem;
 			--asset-list-min-width: 15rem;
 			--asset-pane-height: min(68vh, 42rem);
 			--asset-placeholder-height: 11rem;
@@ -88,16 +85,6 @@ class BaizeAssetLibrary extends LitElement {
 		.count { color: var(--text-subtle); font: 600 var(--text-sm) var(--font-mono); white-space: nowrap; }
 		.toolbar-actions { display: flex; align-items: center; justify-content: flex-start; gap: var(--gap); flex-wrap: wrap; }
 		.search { width: min(280px, 30vw); }
-		.tabs {
-			position: sticky; top: var(--asset-toolbar-offset); z-index: 2;
-			display: flex; gap: var(--space-2xs); overflow-x: auto;
-			padding: var(--space-2xs) 0;
-			background: var(--bg); border-bottom: 1px solid var(--border);
-		}
-		.tab { border: 0; border-bottom: 2px solid transparent; border-radius: 0; padding: var(--space-2xs) var(--gap); color: var(--text-muted); }
-		.tab:hover { color: var(--text); }
-		.tab.active { border-bottom-color: var(--accent); color: var(--accent); font-weight: 600; }
-		.tab-count { margin-left: var(--space-2xs); color: var(--text-subtle); font: var(--text-xs) var(--font-mono); }
 		.content { display: grid; grid-template-columns: minmax(var(--asset-list-min-width), 0.8fr) minmax(0, 1.4fr); gap: var(--gap); min-height: 0; }
 		.pane { min-width: 0; height: var(--asset-pane-height); overflow: auto; }
 		.list-pane { padding: var(--gap); }
@@ -165,7 +152,6 @@ class BaizeAssetLibrary extends LitElement {
 			.toolbar { top: 0; }
 			.toolbar-actions { align-items: stretch; }
 			.search { width: 100%; flex: 1 1 100%; }
-			.tabs { top: var(--asset-mobile-toolbar-offset); }
 			.content { grid-template-columns: minmax(0, 1fr); }
 			.pane { height: auto; max-height: none; overflow: visible; }
 			.detail-pane { min-height: var(--asset-placeholder-height); }
@@ -182,7 +168,6 @@ class BaizeAssetLibrary extends LitElement {
 		this.page = 1;
 		this.pageSize = 12;
 		this.total = 0;
-		this.kindCounts = emptyKindCounts();
 		this.selectedAssetId = null;
 		this.graphKindFilter = null;
 		this.graphZoom = 1;
@@ -198,14 +183,16 @@ class BaizeAssetLibrary extends LitElement {
 
 	connectedCallback(): void {
 		super.connectedCallback();
-		window.addEventListener("popstate", this.handlePopState);
+		window.addEventListener("popstate", this.handleLocationChange);
+		window.addEventListener(LOCATION_CHANGE_EVENT, this.handleLocationChange);
 		this.mediaQuery = window.matchMedia("(max-width: 1023px)");
 		this.narrowView = this.mediaQuery.matches;
 		this.mediaQuery.addEventListener("change", this.handleMediaChange);
 	}
 
 	disconnectedCallback(): void {
-		window.removeEventListener("popstate", this.handlePopState);
+		window.removeEventListener("popstate", this.handleLocationChange);
+		window.removeEventListener(LOCATION_CHANGE_EVENT, this.handleLocationChange);
 		this.mediaQuery?.removeEventListener("change", this.handleMediaChange);
 		super.disconnectedCallback();
 	}
@@ -216,8 +203,20 @@ class BaizeAssetLibrary extends LitElement {
 		}
 	}
 
-	private readonly handlePopState = (): void => {
+	/**
+	 * 地址栏 → 组件状态同步。侧栏导航经 shell.navigate(pushState)不触发 popstate,
+	 * 统一由 baize-location-change 事件驱动;tab 实际变化时重置选择/分页/表单。
+	 */
+	private readonly handleLocationChange = (): void => {
+		const previousTab = this.activeTab;
 		this.readUrl();
+		if (this.activeTab !== previousTab) {
+			this.total = 0;
+			this.selectedAssetId = null;
+			this.formMode = null;
+			this.formKind = null;
+			this.formAssetId = null;
+		}
 	};
 
 	private readonly handleMediaChange = (event: MediaQueryListEvent): void => {
@@ -286,15 +285,8 @@ class BaizeAssetLibrary extends LitElement {
 		if (replace) window.history.replaceState({}, "", url);
 		else window.history.pushState({}, "", url);
 		this.readUrl();
-	}
-
-	private chooseTab(tab: WorkbenchTab): void {
-		this.updateUrl({ tab, page: 1, q: "" });
-		this.total = 0;
-		this.selectedAssetId = null;
-		this.formMode = null;
-		this.query = "";
-		this.page = 1;
+		// 通知侧栏等导航组件重读地址栏(pushState 不触发 popstate)
+		window.dispatchEvent(new Event(LOCATION_CHANGE_EVENT));
 	}
 
 	private chooseAsset(assetId: number): void {
@@ -320,7 +312,6 @@ class BaizeAssetLibrary extends LitElement {
 
 	private handleAssetPage(event: CustomEvent<{ total?: number; kindCounts?: Readonly<Record<AssetKind, number>> }>): void {
 		if (typeof event.detail.total === "number") this.total = event.detail.total;
-		if (event.detail.kindCounts) this.kindCounts = event.detail.kindCounts;
 	}
 
 	private handleSelectAsset(event: CustomEvent<number>): void {
@@ -404,24 +395,6 @@ class BaizeAssetLibrary extends LitElement {
 		this.refresh++;
 	}
 
-	private renderTabs(): Renderable {
-		return html`<nav class="tabs" aria-label="资产类型">
-			${TAB_ORDER.map((tab) => {
-				const count = tab === "graph" ? null : TAB_KINDS[tab].reduce((sum, kind) => sum + (this.kindCounts[kind] ?? 0), 0);
-				return html`
-					<button
-						class="tab ${this.activeTab === tab ? "active" : ""}"
-						aria-current=${this.activeTab === tab ? "page" : "false"}
-						@click=${() => this.chooseTab(tab)}
-					>
-						${TAB_LABELS[tab]}
-						${count !== null ? html`<span class="tab-count">${count}</span>` : ""}
-					</button>
-				`;
-			})}
-		</nav>`;
-	}
-
 	private activeKind(): AssetKind | null {
 		if (this.activeTab === "graph") return null;
 		return TAB_KINDS[this.activeTab as Exclude<WorkbenchTab, "graph">][0] ?? null;
@@ -441,7 +414,7 @@ class BaizeAssetLibrary extends LitElement {
 							<h1 id="asset-library-title">设计模型资产</h1>
 							<p class="sub">按类型浏览 Workspace 内可复用的设计事实，并追溯资产关系。</p>
 						</div>
-						<span class="count">${this.activeTab === "graph" ? "关系图" : this.total}</span>
+						<span class="count">${TAB_LABELS[this.activeTab]}${this.activeTab === "graph" ? "" : ` · ${this.total}`}</span>
 					</div>
 					<div class="toolbar-actions">
 						${this.activeTab !== "graph"
@@ -459,7 +432,6 @@ class BaizeAssetLibrary extends LitElement {
 						></baize-asset-import>
 					</div>
 				</header>
-				${this.renderTabs()}
 				<div class="content">
 					${showList
 						? html`<section class="card pane list-pane" aria-label="资产列表">
