@@ -1,0 +1,473 @@
+<!doctype html>
+<!--
+  PROTOTYPE — 用完即弃,勿合入 main。
+  问题(issue #98):「导航上移一层、列表左移一层、详情独占主区」三连布局看起来/用起来如何?
+    1. 图标条 9 个图标(需求 + 8 个资产库)是否拥挤、可辨识?
+    2. 侧栏条目行(列表 + 场景/功能两库的层级树)在 240px 下的密度?
+    3. 主区「详情 + 顶部工具条(新建/导入/关系图)」的编排?
+  三个结构不同的变体,?variant=A|B|C 切换,或底部浮条 ← →(键盘方向键同效)。
+  运行:直接双击本文件(file://),或 vite dev 下访问 /prototype/layout.html。
+  说明:真实 shell 需后端会话,且演示数据量不足以检验密度——故用静态 mock + 真实 token 值(拷贝自 web/index.html)。
+-->
+<html lang="zh-CN" data-theme="dark">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>原型 #98 — 资产/需求三连布局</title>
+<style>
+/* — token 拷贝自 web/index.html(暗色) — */
+:root {
+  --bg: oklch(17.0% 0.009 264.3);
+  --surface: oklch(21.5% 0.012 264.3);
+  --surface-2: oklch(24.5% 0.014 267);
+  --surface-hover: oklch(28.5% 0.016 264.3);
+  --border: oklch(48.0% 0.026 265.5);
+  --border-strong: oklch(52.0% 0.023 260.1);
+  --text: oklch(89.1% 0.008 260.7);
+  --text-muted: oklch(63.9% 0.016 264.5);
+  --text-subtle: oklch(60.6% 0.016 264.4);
+  --accent: oklch(68.1% 0.169 275);
+  --accent-hi: oklch(74% 0.165 275);
+  --accent-fg: oklch(17.0% 0.009 264.3);
+  --run: oklch(75.4% 0.139 232.7);
+  --ok: oklch(77.3% 0.153 163.2);
+  --warn: oklch(83.7% 0.164 84.4);
+  --danger: oklch(71.9% 0.169 13.4);
+  --accent-glow: oklch(68.1% 0.169 275 / 0.15);
+  --shadow-2: oklch(10% 0.01 264 / 0.5);
+  --radius: 4px; --radius-sm: 3px; --radius-pill: 999px;
+  --pad: 12px; --gap: 8px; --gap-dense: 4px;
+  --topbar-h: 40px; --activity-bar-w: 48px; --side-bar-w: 240px; --status-bar-h: 24px;
+  --icon-size: 20px; --accent-border-w: 3px;
+  --font-ui: -apple-system, "SF Pro Text", system-ui, sans-serif;
+  --font-mono: "SF Mono", ui-monospace, "JetBrains Mono", monospace;
+  --text-xs: 0.625rem; --text-sm: 0.75rem; --text-base: 0.8125rem; --text-lg: 1rem; --text-xl: 1.25rem;
+  --ease-out: cubic-bezier(0.16, 1, 0.3, 1); --dur-1: 150ms;
+}
+html, body { margin: 0; height: 100%; background: var(--bg); color: var(--text); font-family: var(--font-ui); font-size: var(--text-base); overflow: hidden; }
+button { font-family: inherit; cursor: pointer; }
+svg { display: block; }
+
+/* ============ 真实壳层 chrome(三变体共享):顶栏 + 状态栏 ============ */
+.topbar { height: var(--topbar-h); display: flex; align-items: center; gap: var(--gap); padding: 0 var(--pad); border-bottom: 1px solid var(--border); background: var(--surface); }
+.brand { font-weight: 600; font-size: var(--text-base); }
+.brand .dot { color: var(--accent); }
+.topbar .spacer { flex: 1; }
+.switcher-btn { background: var(--surface-2); border: 1px solid var(--border); border-radius: var(--radius); padding: var(--gap-dense) var(--pad); color: var(--text); font-size: var(--text-sm); }
+.topbar .exit { background: transparent; border: 1px solid var(--border); border-radius: var(--radius); color: var(--text-muted); padding: var(--gap-dense) var(--pad); font-size: var(--text-sm); }
+.statusbar { height: var(--status-bar-h); display: flex; align-items: center; gap: var(--space, 12px); padding: 0 var(--pad); border-top: 1px solid var(--border); background: var(--surface); font-size: var(--text-xs); color: var(--text-muted); font-family: var(--font-mono); }
+.statusbar .dot-ok { width: 8px; height: 8px; border-radius: 50%; background: var(--ok); display: inline-block; margin-right: 4px; }
+.statusbar .sep { color: var(--border-strong); }
+
+.workbench { flex: 1; min-height: 0; display: flex; }
+#app { display: flex; flex-direction: column; height: 100vh; }
+
+/* ============ 变体 A:平铺紧凑(决议原样) ============ */
+/* 图标条:48px,9 图标一列平铺,激活 = 左侧 accent 边条(沿用现有 .icon-btn 模式) */
+.v-a .abar { width: var(--activity-bar-w); background: var(--surface-2); border-right: 1px solid var(--border); display: flex; flex-direction: column; align-items: center; padding-top: var(--gap); gap: var(--gap-dense); overflow-y: auto; }
+.v-a .abar .ib { position: relative; width: var(--activity-bar-w); height: var(--activity-bar-w); flex: 0 0 auto; display: flex; align-items: center; justify-content: center; color: var(--text-muted); background: transparent; border: none; border-left: var(--accent-border-w) solid transparent; padding: 0; }
+.v-a .abar .ib:hover { color: var(--text); background: var(--surface-hover); }
+.v-a .abar .ib.active { color: var(--text); border-left-color: var(--accent); }
+.v-a .abar .ib svg { width: var(--icon-size); height: var(--icon-size); }
+.v-a .abar .ab-spacer { flex: 1; }
+/* 侧栏:单行紧凑条目,26px 行高 */
+.v-a .sbar { width: var(--side-bar-w); border-right: 1px solid var(--border); background: var(--surface); display: flex; flex-direction: column; min-height: 0; }
+.v-a .sbar .shead { padding: var(--pad) var(--pad) var(--gap); font-size: var(--text-sm); font-weight: 600; color: var(--text-muted); letter-spacing: 0.04em; border-bottom: 1px solid var(--border); display: flex; align-items: baseline; gap: var(--gap); }
+.v-a .sbar .shead .count { font-family: var(--font-mono); font-size: var(--text-xs); color: var(--text-subtle); }
+.v-a .slist { flex: 1; overflow-y: auto; padding: var(--gap-dense) 0; }
+.v-a .erow { display: flex; align-items: center; gap: 6px; height: 26px; padding: 0 var(--pad); border: none; border-left: 2px solid transparent; background: transparent; color: var(--text); width: 100%; text-align: left; font-size: var(--text-base); }
+.v-a .erow:hover { background: var(--surface-hover); }
+.v-a .erow.selected { border-left-color: var(--accent); background: var(--surface-2); }
+.v-a .erow .t { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; }
+.v-a .erow .rev { font-family: var(--font-mono); font-size: var(--text-xs); color: var(--text-subtle); }
+.v-a .tnode { display: flex; align-items: center; gap: 4px; height: 26px; padding: 0 var(--pad) 0 calc(var(--pad) + var(--depth) * 14px); width: 100%; background: transparent; border: none; border-left: 2px solid transparent; color: var(--text); text-align: left; font-size: var(--text-base); }
+.v-a .tnode:hover { background: var(--surface-hover); }
+.v-a .tnode.selected { border-left-color: var(--accent); background: var(--surface-2); }
+.v-a .tnode .caret { width: 12px; color: var(--text-subtle); font-size: 9px; flex: 0 0 auto; }
+.v-a .tnode .t { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.v-a .tnode .cnt { font-family: var(--font-mono); font-size: var(--text-xs); color: var(--text-subtle); background: var(--surface-2); border-radius: 999px; padding: 1px 6px; }
+.v-a .tnode .kind-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--border-strong); flex: 0 0 auto; }
+/* 主区:工具条右对齐,详情满幅 */
+.v-a .main { flex: 1; min-width: 0; display: flex; flex-direction: column; background: var(--bg); }
+.v-a .mtoolbar { display: flex; align-items: center; gap: var(--gap); padding: var(--gap) var(--pad); border-bottom: 1px solid var(--border); background: var(--surface); }
+.v-a .mtoolbar .crumb { font-size: var(--text-sm); color: var(--text-muted); }
+.v-a .mtoolbar .spacer { flex: 1; }
+.btn { border: 1px solid var(--border); background: var(--surface-2); color: var(--text); border-radius: var(--radius); padding: var(--gap-dense) var(--pad); font-size: var(--text-sm); }
+.btn.primary { background: var(--accent); color: var(--accent-fg); border-color: var(--accent); font-weight: 600; }
+.btn:hover { filter: brightness(1.12); }
+
+/* ============ 变体 B:分组图标 + 双行条目 + 主区页签头 ============ */
+/* 图标条:48px,按族分组(需求 | 分析族 | 架构族),组间分隔线,激活 = 圆角背景块 */
+.v-b .abar { width: var(--activity-bar-w); background: var(--surface-2); border-right: 1px solid var(--border); display: flex; flex-direction: column; align-items: center; padding: var(--gap) 0; gap: 2px; overflow-y: auto; }
+.v-b .abar .ib { width: 36px; height: 36px; flex: 0 0 auto; display: flex; align-items: center; justify-content: center; color: var(--text-muted); background: transparent; border: none; border-radius: 6px; padding: 0; }
+.v-b .abar .ib:hover { color: var(--text); background: var(--surface-hover); }
+.v-b .abar .ib.active { color: var(--accent-hi); background: var(--accent-glow); }
+.v-b .abar .ib svg { width: var(--icon-size); height: var(--icon-size); }
+.v-b .abar .grp-sep { width: 24px; border-top: 1px solid var(--border); margin: 6px 0; flex: 0 0 auto; }
+.v-b .abar .ab-spacer { flex: 1; }
+/* 侧栏:双行条目(标题 + 元信息行:kind 徽标/rev/时间) */
+.v-b .sbar { width: 264px; border-right: 1px solid var(--border); background: var(--surface); display: flex; flex-direction: column; min-height: 0; }
+.v-b .sbar .shead { padding: 10px var(--pad); border-bottom: 1px solid var(--border); }
+.v-b .sbar .shead .lib { font-size: var(--text-lg); font-weight: 600; }
+.v-b .sbar .shead .sub { font-size: var(--text-xs); color: var(--text-subtle); font-family: var(--font-mono); margin-top: 2px; }
+.v-b .slist { flex: 1; overflow-y: auto; padding: var(--gap-dense) 0; }
+.v-b .erow { display: block; width: 100%; padding: 6px var(--pad); background: transparent; border: none; border-left: 2px solid transparent; text-align: left; color: var(--text); }
+.v-b .erow:hover { background: var(--surface-hover); }
+.v-b .erow.selected { border-left-color: var(--accent); background: var(--surface-2); }
+.v-b .erow .l1 { font-size: var(--text-base); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.v-b .erow .l2 { display: flex; gap: 6px; align-items: center; margin-top: 2px; font-size: var(--text-xs); color: var(--text-subtle); font-family: var(--font-mono); }
+.v-b .erow .kbadge { color: var(--accent-hi); letter-spacing: 0.04em; }
+.v-b .tnode { display: flex; align-items: center; gap: 4px; min-height: 30px; padding: 2px var(--pad) 2px calc(var(--pad) + var(--depth) * 14px); width: 100%; background: transparent; border: none; border-left: 2px solid transparent; color: var(--text); text-align: left; }
+.v-b .tnode:hover { background: var(--surface-hover); }
+.v-b .tnode.selected { border-left-color: var(--accent); background: var(--surface-2); }
+.v-b .tnode .caret { width: 12px; color: var(--text-subtle); font-size: 9px; flex: 0 0 auto; }
+.v-b .tnode .tt { flex: 1; min-width: 0; }
+.v-b .tnode .l1 { font-size: var(--text-base); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.v-b .tnode .l2 { font-size: var(--text-xs); color: var(--text-subtle); font-family: var(--font-mono); }
+.v-b .tnode .cnt { font-family: var(--font-mono); font-size: var(--text-xs); color: var(--text-subtle); background: var(--surface-2); border-radius: 999px; padding: 1px 6px; }
+/* 主区:页签式头(详情|关系图 分段控件)+ 操作按钮 */
+.v-b .main { flex: 1; min-width: 0; display: flex; flex-direction: column; background: var(--bg); }
+.v-b .mtoolbar { display: flex; align-items: center; gap: var(--gap); padding: var(--gap) var(--pad); border-bottom: 1px solid var(--border); background: var(--surface); }
+.v-b .seg { display: flex; border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; }
+.v-b .seg button { border: none; background: transparent; color: var(--text-muted); padding: var(--gap-dense) 14px; font-size: var(--text-sm); }
+.v-b .seg button.on { background: var(--surface-2); color: var(--text); font-weight: 600; }
+.v-b .mtoolbar .spacer { flex: 1; }
+
+/* ============ 变体 C:带文字标注的宽图标条 + 卡片侧栏 + 居中主区 ============ */
+/* 图标条:64px,图标下带小字标注,激活 = accent 文字 + 背景 */
+.v-c .abar { width: 64px; background: var(--surface-2); border-right: 1px solid var(--border); display: flex; flex-direction: column; align-items: center; padding-top: var(--gap); gap: 2px; overflow-y: auto; }
+.v-c .abar .ib { width: 56px; flex: 0 0 auto; display: flex; flex-direction: column; align-items: center; gap: 2px; padding: 6px 0; color: var(--text-muted); background: transparent; border: none; border-radius: 6px; }
+.v-c .abar .ib:hover { color: var(--text); background: var(--surface-hover); }
+.v-c .abar .ib.active { color: var(--accent-hi); background: var(--accent-glow); }
+.v-c .abar .ib svg { width: var(--icon-size); height: var(--icon-size); }
+.v-c .abar .ib .lbl { font-size: 9px; letter-spacing: 0.02em; }
+.v-c .abar .ab-spacer { flex: 1; }
+/* 侧栏:卡片式条目(沿用现有需求卡片的呼吸感) */
+.v-c .sbar { width: var(--side-bar-w); border-right: 1px solid var(--border); background: var(--surface); display: flex; flex-direction: column; min-height: 0; }
+.v-c .sbar .shead { padding: var(--pad); font-size: var(--text-sm); font-weight: 600; color: var(--text-muted); border-bottom: 1px solid var(--border); display: flex; align-items: baseline; gap: var(--gap); }
+.v-c .sbar .shead .count { font-family: var(--font-mono); font-size: var(--text-xs); color: var(--text-subtle); }
+.v-c .slist { flex: 1; overflow-y: auto; padding: var(--gap); display: flex; flex-direction: column; gap: var(--gap); }
+.v-c .ecard { display: block; width: 100%; text-align: left; background: var(--surface-2); border: 1px solid var(--border); border-radius: var(--radius); padding: 8px 10px; color: var(--text); }
+.v-c .ecard:hover { border-color: var(--border-strong); }
+.v-c .ecard.selected { border-left: var(--accent-border-w) solid var(--accent); }
+.v-c .ecard .t { font-weight: 600; font-size: var(--text-base); }
+.v-c .ecard .m { margin-top: 3px; font-size: var(--text-xs); color: var(--text-subtle); font-family: var(--font-mono); display: flex; gap: 8px; }
+.v-c .twrap { background: var(--surface-2); border: 1px solid var(--border); border-radius: var(--radius); padding: 4px 0; }
+.v-c .tnode { display: flex; align-items: center; gap: 4px; height: 28px; padding: 0 8px 0 calc(8px + var(--depth) * 14px); width: 100%; background: transparent; border: none; color: var(--text); text-align: left; font-size: var(--text-base); }
+.v-c .tnode:hover { background: var(--surface-hover); }
+.v-c .tnode.selected { color: var(--accent-hi); }
+.v-c .tnode .caret { width: 12px; color: var(--text-subtle); font-size: 9px; flex: 0 0 auto; }
+.v-c .tnode .t { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.v-c .tnode .cnt { font-family: var(--font-mono); font-size: var(--text-xs); color: var(--text-subtle); }
+/* 主区:居中栏(最大 880px),工具条主按钮突出 */
+.v-c .main { flex: 1; min-width: 0; display: flex; flex-direction: column; background: var(--bg); }
+.v-c .mtoolbar { display: flex; align-items: center; gap: var(--gap); padding: 10px var(--pad); border-bottom: 1px solid var(--border); background: var(--surface); }
+.v-c .mtoolbar .crumb { font-size: var(--text-sm); color: var(--text-muted); }
+.v-c .mtoolbar .spacer { flex: 1; }
+.v-c .mbody { flex: 1; overflow-y: auto; display: flex; justify-content: center; }
+.v-c .mcol { width: 100%; max-width: 880px; padding: 20px 24px; }
+
+/* ============ 主区详情(三变体共享的展示件,排版随变体容器不同) ============ */
+.mbody { flex: 1; overflow-y: auto; }
+.detail { padding: 20px 24px; }
+.d-head { display: flex; align-items: center; gap: var(--gap); flex-wrap: wrap; }
+.d-kind { color: var(--accent-hi); font-size: var(--text-xs); letter-spacing: 0.04em; border: 1px solid var(--border); border-radius: var(--radius-pill); padding: 2px 10px; font-family: var(--font-mono); }
+.d-title { font-size: var(--text-xl); font-weight: 600; }
+.d-rev { font-family: var(--font-mono); font-size: var(--text-xs); color: var(--text-subtle); }
+.d-meta { margin-top: 4px; font-size: var(--text-xs); color: var(--text-muted); font-family: var(--font-mono); }
+.d-sec { margin-top: 18px; }
+.d-sec h3 { margin: 0 0 8px; font-size: var(--text-sm); color: var(--text-muted); letter-spacing: 0.04em; font-weight: 600; }
+.d-field { display: grid; grid-template-columns: 120px 1fr; gap: var(--gap); padding: 6px 0; border-bottom: 1px solid var(--border); font-size: var(--text-base); }
+.d-field .k { color: var(--text-subtle); }
+.d-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.d-chip { background: var(--surface-2); border: 1px solid var(--border); border-radius: var(--radius-pill); padding: 3px 10px; font-size: var(--text-xs); color: var(--text-muted); }
+.d-chip b { color: var(--text); font-weight: 600; }
+.empty-hint { flex: 1; display: flex; align-items: center; justify-content: center; color: var(--text-subtle); font-size: var(--text-base); }
+.graph-box { flex: 1; display: flex; align-items: center; justify-content: center; }
+.graph-box svg { max-width: 90%; }
+.gnode { fill: var(--surface-2); stroke: var(--border-strong); rx: 4px; }
+.gedge { stroke: var(--border-strong); }
+.gtext { fill: var(--text); font-size: 12px; }
+.gkind { fill: var(--accent); font-size: 10px; }
+
+/* ============ 浮条(明显不属于被评估的设计) ============ */
+#switcher { position: fixed; left: 50%; bottom: 34px; transform: translateX(-50%); display: flex; align-items: center; gap: 10px; background: oklch(30% 0.02 267); border: 1px solid var(--border-strong); border-radius: var(--radius-pill); padding: 6px 10px; box-shadow: 0 6px 24px var(--shadow-2); z-index: 99; font-size: var(--text-sm); }
+#switcher button { width: 26px; height: 26px; border-radius: 50%; border: 1px solid var(--border-strong); background: var(--surface-2); color: var(--text); }
+#switcher .vlabel { min-width: 150px; text-align: center; color: var(--text); }
+#switcher .vlabel b { color: var(--accent-hi); }
+.proto-tag { position: fixed; right: 10px; bottom: 34px; z-index: 99; font-size: 10px; color: var(--warn); font-family: var(--font-mono); border: 1px solid var(--warn); border-radius: var(--radius-sm); padding: 2px 6px; opacity: 0.8; }
+</style>
+</head>
+<body>
+<div id="app"></div>
+<div id="switcher">
+  <button id="prev" aria-label="上一个变体">←</button>
+  <span class="vlabel" id="vlabel"></span>
+  <button id="next" aria-label="下一个变体">→</button>
+</div>
+<div class="proto-tag">PROTOTYPE #98 — 用完即弃</div>
+
+<script>
+"use strict";
+/* — 图标(20px 几何 SVG,占位质量,真图形是 fog 的一部分) — */
+const I = {
+  req: '<svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="4" y="3" width="12" height="14" rx="1.5"/><line x1="7" y1="7" x2="13" y2="7"/><line x1="7" y1="10" x2="13" y2="10"/><line x1="7" y1="13" x2="11" y2="13"/></svg>',
+  scenario: '<svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="3" y="4" width="14" height="12" rx="1.5"/><path d="M8.5 8l3.5 2-3.5 2z" fill="currentColor" stroke="none"/></svg>',
+  function_: '<svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="3" y="3" width="6" height="6" rx="1"/><rect x="11" y="3" width="6" height="6" rx="1"/><rect x="3" y="11" width="6" height="6" rx="1"/><rect x="11" y="11" width="6" height="6" rx="1"/></svg>',
+  usecase: '<svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="6" cy="6" r="2.5"/><ellipse cx="12.5" cy="10" rx="5" ry="3"/><line x1="7.8" y1="7.8" x2="9.5" y2="8.8"/></svg>',
+  design: '<svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M12 3l5 5-9 9H3v-5z"/><line x1="10" y1="5" x2="15" y2="10"/></svg>',
+  architecture: '<svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="7" y="2.5" width="6" height="4" rx="1"/><rect x="2.5" y="13" width="6" height="4" rx="1"/><rect x="11.5" y="13" width="6" height="4" rx="1"/><line x1="10" y1="6.5" x2="10" y2="10"/><line x1="5.5" y1="13" x2="5.5" y2="10"/><line x1="14.5" y1="13" x2="14.5" y2="10"/><line x1="5.5" y1="10" x2="14.5" y2="10"/></svg>',
+  data: '<svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5"><ellipse cx="10" cy="4.5" rx="6" ry="2.2"/><path d="M4 4.5v11c0 1.2 2.7 2.2 6 2.2s6-1 6-2.2v-11"/><path d="M4 10c0 1.2 2.7 2.2 6 2.2s6-1 6-2.2"/></svg>',
+  api: '<svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M7 5L3 10l4 5"/><path d="M13 5l4 5-4 5"/></svg>',
+  stakeholder: '<svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="10" cy="6.5" r="3"/><path d="M4 16.5c0-3.3 2.7-5 6-5s6 1.7 6 5"/></svg>',
+  theme: '<svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="10" cy="10" r="6.5"/><path d="M10 3.5v13" stroke-width="0"/><path d="M10 3.5a6.5 6.5 0 010 13z" fill="currentColor" stroke="none"/></svg>',
+};
+
+/* — 资产库定义(顺序 = TAB_ORDER 去掉 graph) — */
+const LIBS = [
+  { id: "scenario", label: "场景库", icon: "scenario", tree: true },
+  { id: "function", label: "功能库", icon: "function_", tree: true },
+  { id: "usecase", label: "用例库", icon: "usecase" },
+  { id: "design", label: "设计库", icon: "design" },
+  { id: "architecture", label: "架构库", icon: "architecture" },
+  { id: "data", label: "数据库", icon: "data" },
+  { id: "api", label: "接口库", icon: "api" },
+  { id: "stakeholder", label: "干系人库", icon: "stakeholder" },
+];
+
+/* — mock 条目(密度按真实量级造) — */
+const NAMES = {
+  usecase: ["用户登录认证", "创建业务需求", "启动工作流", "审批产物修订", "驳回并返工", "查看审核中心", "管理工作空间", "导入外部资产", "导出资产包", "搜索资产库", "查看运行轨迹", "处理恢复事件"],
+  design: ["会话引导流程设计", "命令幂等设计", "门禁双闸设计", "资产晋升规则", "事件溯源存储设计", "SSE 断线重放", "工作空间级联删除", "计划校验规则", "审查包冻结策略", "外发效应暂存"],
+  architecture: ["治理内核", "HTTP 传输层", "模型驱动适配", "前端外壳", "持久化层", "合约目录", " fixtures 注入", "外发作业排水"],
+  data: ["workflow 主表", "event 事件表", "snapshot_document", "artifact_revision", "finding 表", "decision 表", "outbox_job", "asset 表", "workspace 表", "command_receipt"],
+  api: ["POST /api/workflows", "GET /api/workflows/:id", "POST /commands/:commandId", "GET /events (SSE)", "GET /api/assets", "POST /api/assets", "PUT /api/assets/:id", "GET /api/assets/search", "POST /api/assets/import", "GET /api/workspaces"],
+  stakeholder: ["平台负责人", "业务分析师", "架构师", "审核员", "运营工程师", "外部审计"],
+};
+function mkEntries(lib) {
+  const names = NAMES[lib] || [];
+  return names.map((t, i) => ({ id: lib + "-" + i, title: t, rev: "r" + (1 + (i % 4)), updated: "08-" + String(10 + (i % 20)).padStart(2, "0"), kind: lib }));
+}
+/* 场景库/功能库:三级树 */
+const TREES = {
+  scenario: [
+    { title: "电商履约域", children: [
+      { title: "下单履约场景", children: [{ title: "超时未支付变体" }, { title: "部分发货变体" }] },
+      { title: "售后退款场景", children: [{ title: "仅退款变体" }, { title: "退货退款变体" }] },
+    ]},
+    { title: "内容审核域", children: [
+      { title: "机审人审协同场景", children: [{ title: "高置信直通变体" }] },
+      { title: "申诉复核场景", children: [] },
+    ]},
+  ],
+  function: [
+    { title: "需求治理域", children: [
+      { title: "需求生命周期", children: [{ title: "创建需求" }, { title: "启动工作流" }, { title: "归档需求" }] },
+      { title: "审批治理", children: [{ title: "产物批准" }, { title: "批准撤回" }] },
+    ]},
+    { title: "资产治理域", children: [
+      { title: "资产库管理", children: [{ title: "资产晋升" }, { title: "资产去重" }, { title: "资产导入" }] },
+    ]},
+  ],
+};
+const TREE_KIND = { 0: "域", 1: "场景/项", 2: "变体/点" };
+
+const REQUIREMENTS = [
+  { id: 12, title: "电商履约链路建模", state: "运行中", cls: "run", gates: 1 },
+  { id: 11, title: "内容审核平台分析", state: "待批准", cls: "warn", gates: 2 },
+  { id: 10, title: "干系人资产梳理", state: "运行中", cls: "run", gates: 0 },
+  { id: 9, title: "订单域用例补全", state: "待启动", cls: "", gates: 0 },
+  { id: 8, title: "库存服务接口盘点", state: "已完成", cls: "ok", gates: 0 },
+  { id: 7, title: "履约超时补偿设计", state: "已完成", cls: "ok", gates: 0 },
+  { id: 6, title: "审核申诉流程梳理", state: "已完成", cls: "ok", gates: 0 },
+  { id: 5, title: "数据目录初版", state: "已归档", cls: "", gates: 0 },
+];
+
+const state = { view: "usecase", selected: null, mode: "detail", variant: "A" };
+
+/* — 变体元信息 — */
+const VARIANTS = {
+  A: { cls: "v-a", name: "平铺紧凑", desc: "48px 图标条一列平铺 · 单行 26px 条目 · 工具条右对齐" },
+  B: { cls: "v-b", name: "分组+双行", desc: "图标按族分组 · 双行条目带元信息 · 主区页签式分段控件" },
+  C: { cls: "v-c", name: "宽条标注+卡片", desc: "64px 图标条带文字标注 · 卡片式条目 · 主区居中 880px" },
+};
+
+/* — 渲染 — */
+function iconBtn(v, lib, label) {
+  const active = state.view === lib.id;
+  const lbl = v === "C" ? `<span class="lbl">${label}</span>` : "";
+  return `<button class="ib ${active ? "active" : ""}" title="${label}" data-view="${lib.id}">${I[lib.icon]}${lbl}</button>`;
+}
+
+function renderABar(v) {
+  const reqActive = state.view === "requirements";
+  const reqLbl = v === "C" ? `<span class="lbl">需求</span>` : "";
+  const reqBtn = `<button class="ib ${reqActive ? "active" : ""}" title="需求" data-view="requirements">${I.req}${reqLbl}</button>`;
+  let libs;
+  if (v === "B") {
+    const fam1 = LIBS.slice(0, 4), fam2 = LIBS.slice(4);
+    libs = fam1.map(l => iconBtn(v, l, l.label)).join("") + `<div class="grp-sep"></div>` + fam2.map(l => iconBtn(v, l, l.label)).join("");
+  } else {
+    libs = LIBS.map(l => iconBtn(v, l, l.label)).join("");
+  }
+  const themeLbl = v === "C" ? `<span class="lbl">主题</span>` : "";
+  return `<div class="abar">${reqBtn}${v === "B" ? '<div class="grp-sep"></div>' : ""}${libs}<div class="ab-spacer"></div><button class="ib" title="主题切换">${I.theme}${themeLbl}</button></div>`;
+}
+
+function treeRows(nodes, depth, out) {
+  for (const n of nodes) {
+    const kids = n.children || [];
+    const id = "tree-" + depth + "-" + n.title;
+    const sel = state.selected === id ? "selected" : "";
+    if (state.variant === "B") {
+      out.push(`<button class="tnode ${sel}" style="--depth:${depth}" data-sel="${id}" data-title="${n.title}"><span class="caret">${kids.length ? "▾" : ""}</span><span class="tt"><span class="l1">${n.title}</span><span class="l2">${TREE_KIND[depth]}${kids.length ? " · " + kids.length + " 子项" : ""}</span></span></button>`);
+    } else {
+      const cnt = kids.length ? `<span class="cnt">${kids.length}</span>` : "";
+      out.push(`<button class="tnode ${sel}" style="--depth:${depth}" data-sel="${id}" data-title="${n.title}"><span class="caret">${kids.length ? "▾" : ""}</span><span class="t">${n.title}</span>${cnt}</button>`);
+    }
+    treeRows(kids, depth + 1, out);
+  }
+}
+
+function renderSBar(v) {
+  if (state.view === "requirements") {
+    const head = v === "B"
+      ? `<div class="shead"><div class="lib">需求</div><div class="sub">${REQUIREMENTS.length} 项 · 按更新时间</div></div>`
+      : `<div class="shead">需求 <span class="count">${REQUIREMENTS.length}</span></div>`;
+    const rows = REQUIREMENTS.map(r => {
+      const sel = state.selected === "req-" + r.id ? "selected" : "";
+      if (v === "C") return `<button class="ecard ${sel}" data-sel="req-${r.id}" data-title="${r.title}"><div class="t">#${r.id} ${r.title}</div><div class="m"><span>${r.state}</span>${r.gates ? `<span>${r.gates} 待处理</span>` : ""}</div></button>`;
+      if (v === "B") return `<button class="erow ${sel}" data-sel="req-${r.id}" data-title="${r.title}"><div class="l1">#${r.id} ${r.title}</div><div class="l2"><span class="kbadge">${r.state}</span>${r.gates ? `<span>${r.gates} 待处理</span>` : ""}</div></button>`;
+      return `<button class="erow ${sel}" data-sel="req-${r.id}" data-title="${r.title}"><span class="t">#${r.id} ${r.title}</span><span class="rev">${r.state}</span></button>`;
+    }).join("");
+    return `<div class="sbar">${head}<div class="slist">${rows}</div></div>`;
+  }
+  const lib = LIBS.find(l => l.id === state.view);
+  const head = v === "B"
+    ? `<div class="shead"><div class="lib">${lib.label}</div><div class="sub">${lib.tree ? "层级树" : mkEntries(lib.id).length + " 项 · 按更新时间"}</div></div>`
+    : `<div class="shead">${lib.label} <span class="count">${lib.tree ? "树" : mkEntries(lib.id).length}</span></div>`;
+  let body;
+  if (lib.tree) {
+    const out = []; treeRows(TREES[lib.id], 0, out);
+    body = v === "C" ? `<div class="twrap">${out.join("")}</div>` : out.join("");
+  } else {
+    body = mkEntries(lib.id).map(e => {
+      const sel = state.selected === e.id ? "selected" : "";
+      if (v === "C") return `<button class="ecard ${sel}" data-sel="${e.id}" data-title="${e.title}"><div class="t">${e.title}</div><div class="m"><span>${e.rev}</span><span>${e.updated}</span></div></button>`;
+      if (v === "B") return `<button class="erow ${sel}" data-sel="${e.id}" data-title="${e.title}"><div class="l1">${e.title}</div><div class="l2"><span class="kbadge">${lib.label}</span><span>${e.rev}</span><span>${e.updated}</span></div></button>`;
+      return `<button class="erow ${sel}" data-sel="${e.id}" data-title="${e.title}"><span class="t">${e.title}</span><span class="rev">${e.rev}</span></button>`;
+    }).join("");
+  }
+  return `<div class="sbar">${head}<div class="slist">${body}</div></div>`;
+}
+
+function renderToolbar(v) {
+  const crumb = state.view === "requirements" ? "需求" : LIBS.find(l => l.id === state.view).label;
+  if (v === "B") {
+    return `<div class="mtoolbar">
+      <div class="seg"><button class="${state.mode === "detail" ? "on" : ""}" data-mode="detail">详情</button><button class="${state.mode === "graph" ? "on" : ""}" data-mode="graph">关系图</button></div>
+      <span class="spacer"></span>
+      <button class="btn">导入</button><button class="btn primary">新建</button>
+    </div>`;
+  }
+  return `<div class="mtoolbar">
+    <span class="crumb">${crumb}</span>
+    <span class="spacer"></span>
+    <button class="btn primary">新建</button>
+    <button class="btn">导入</button>
+    <button class="btn ${state.mode === "graph" ? "primary" : ""}" data-mode="${state.mode === "graph" ? "detail" : "graph"}">关系图</button>
+  </div>`;
+}
+
+function renderDetail() {
+  if (!state.selected) return `<div class="empty-hint">从侧栏选择一条${state.view === "requirements" ? "需求" : "资产"}查看详情。</div>`;
+  const title = document.querySelector(`[data-sel="${state.selected}"]`)?.dataset.title || state.selected;
+  if (state.selected.startsWith("req-")) {
+    return `<div class="detail"><div class="d-head"><span class="d-kind">需求</span><span class="d-title">${title}</span></div>
+      <div class="d-meta">提示:需求详情在 /workflow/:id(任务/产物/治理页签 + 右侧审批栏),不在本次重设计范围。</div></div>`;
+  }
+  return `<div class="detail">
+    <div class="d-head"><span class="d-kind">${state.view === "requirements" ? "" : LIBS.find(l => l.id === state.view)?.label || ""}</span><span class="d-title">${title}</span><span class="d-rev">r3 · 已批准</span></div>
+    <div class="d-meta">来源:需求 #12「电商履约链路建模」 · 晋升于 08-21 · 最近更新 08-28</div>
+    <div class="d-sec"><h3>字段</h3>
+      <div class="d-field"><span class="k">标识</span><span>${state.selected}</span></div>
+      <div class="d-field"><span class="k">摘要</span><span>从已批准的产物修订晋升而来,内容与来源修订保持摘要一致。</span></div>
+      <div class="d-field"><span class="k">负责人</span><span>业务分析师</span></div>
+    </div>
+    <div class="d-sec"><h3>关系</h3>
+      <div class="d-chips"><span class="d-chip">包含 · <b>下单履约场景</b></span><span class="d-chip">涉及 · <b>库存服务接口盘点</b></span><span class="d-chip">涉及 · <b>workflow 主表</b></span></div>
+    </div>
+  </div>`;
+}
+
+function renderGraph() {
+  return `<div class="graph-box"><svg width="560" height="320" viewBox="0 0 560 320">
+    <line class="gedge" x1="120" y1="70" x2="280" y2="60"/><line class="gedge" x1="120" y1="70" x2="270" y2="150"/>
+    <line class="gedge" x1="330" y1="60" x2="440" y2="110"/><line class="gedge" x1="320" y1="150" x2="440" y2="110"/>
+    <line class="gedge" x1="440" y1="140" x2="430" y2="230"/>
+    <rect class="gnode" x="40" y="50" width="90" height="40"/><text class="gkind" x="50" y="66">场景</text><text class="gtext" x="50" y="82">下单履约</text>
+    <rect class="gnode" x="280" y="40" width="90" height="40"/><text class="gkind" x="290" y="56">用例</text><text class="gtext" x="290" y="72">创建订单</text>
+    <rect class="gnode" x="270" y="130" width="90" height="40"/><text class="gkind" x="280" y="146">功能</text><text class="gtext" x="280" y="162">履约调度</text>
+    <rect class="gnode" x="430" y="90" width="90" height="40"/><text class="gkind" x="440" y="106">接口</text><text class="gtext" x="440" y="122">POST /orders</text>
+    <rect class="gnode" x="380" y="230" width="90" height="40"/><text class="gkind" x="390" y="246">数据</text><text class="gtext" x="390" y="262">order 表</text>
+  </svg></div>`;
+}
+
+function render() {
+  const v = state.variant;
+  const cfg = VARIANTS[v];
+  document.getElementById("vlabel").innerHTML = `<b>${v}</b> — ${cfg.name}`;
+  document.getElementById("app").className = cfg.cls;
+  document.getElementById("app").innerHTML = `
+    <div class="topbar">
+      <div class="brand"><span class="dot">◇</span> BaiZe Architect</div>
+      <span class="spacer"></span>
+      <button class="switcher-btn">电商demo工作空间 ▾</button>
+      <button class="exit">退出</button>
+    </div>
+    <div class="workbench">
+      ${renderABar(v)}
+      ${renderSBar(v)}
+      <div class="main">
+        ${state.view === "requirements" ? "" : renderToolbar(v)}
+        ${state.mode === "graph" && state.view !== "requirements" ? renderGraph() : (v === "C" ? `<div class="mbody"><div class="mcol">${renderDetail()}</div></div>` : `<div class="mbody">${renderDetail()}</div>`)}
+      </div>
+    </div>
+    <div class="statusbar"><span><span class="dot-ok"></span>已连接</span><span class="sep">·</span><span>工作流:运行中</span><span class="sep">·</span><span>v14</span><span class="sep">·</span><span>2 待批准 · 1 待决策</span></div>
+  `;
+}
+
+function setVariant(v) {
+  state.variant = v;
+  const u = new URL(location.href); u.searchParams.set("variant", v);
+  history.replaceState(null, "", u);
+  render();
+}
+
+document.getElementById("app").addEventListener("click", (e) => {
+  const vb = e.target.closest("[data-view]");
+  if (vb) { state.view = vb.dataset.view; state.selected = null; state.mode = "detail"; render(); return; }
+  const sb = e.target.closest("[data-sel]");
+  if (sb) { state.selected = sb.dataset.sel; state.mode = "detail"; render(); return; }
+  const mb = e.target.closest("[data-mode]");
+  if (mb) { state.mode = mb.dataset.mode; render(); }
+});
+document.getElementById("prev").addEventListener("click", () => cycle(-1));
+document.getElementById("next").addEventListener("click", () => cycle(1));
+function cycle(d) {
+  const keys = Object.keys(VARIANTS);
+  const i = (keys.indexOf(state.variant) + d + keys.length) % keys.length;
+  setVariant(keys[i]);
+}
+document.addEventListener("keydown", (e) => {
+  if (e.target.matches("input, textarea, [contenteditable]")) return;
+  if (e.key === "ArrowLeft") cycle(-1);
+  if (e.key === "ArrowRight") cycle(1);
+});
+
+const init = new URL(location.href).searchParams.get("variant");
+if (init && VARIANTS[init]) state.variant = init;
+render();
+</script>
+</body>
+</html>
