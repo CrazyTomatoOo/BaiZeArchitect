@@ -508,6 +508,6 @@ describe("baize-workflow — 子组件提取(#81/#82/#83)", () => {
 describe("workspace asset surface", () => {
 	it("renders workspace asset information after entering a workspace", () => {
 		expect(shellSource).toMatch(/baize-asset-library/);
-		expect(assetLibrarySource).toMatch(/listAssets/);
+		expect(shellSource).toMatch(/baize-side-bar/);
 	});
 });

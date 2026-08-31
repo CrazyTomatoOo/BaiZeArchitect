@@ -93,9 +93,9 @@ async function openWorkbenchNavigation(page: Page): Promise<void> {
 test("asset workbench exposes 9 aggregated tabs with specialized views and graph navigation", async ({ page }) => {
 	await installAssetMocks(page);
 	await page.goto("/assets");
-	await expect(page.getByRole("heading", { name: "设计模型资产" })).toBeVisible();
+	await expect(page.locator("baize-asset-library .mtoolbar")).toBeVisible();
 
-	// T2:侧栏不再有 kind 导航,直渲条目;图标条有 8 个库图标(narrow 视口需先开抽屉)
+	// T2+T3:侧栏直渲条目;主区无列表 pane,居中 880px 内容栏
 	await openWorkbenchNavigation(page);
 	const activityBar = page.locator("baize-activity-bar");
 	// 8 aggregated tabs in fixed order(关系图不占图标)
@@ -108,14 +108,21 @@ test("asset workbench exposes 9 aggregated tabs with specialized views and graph
 	await expect(activityBar.getByRole("button", { name: /接口库/ })).toBeVisible();
 	await expect(activityBar.getByRole("button", { name: /干系人库/ })).toBeVisible();
 
-	// Design tab: list + detail with relations(narrow 视口先关抽屉再点图标)
+	// Design tab: 主区无列表 pane,居中内容栏(narrow 视口先关抽屉再点图标)
 	if (await page.getByRole("button", { name: "关闭导航" }).isVisible()) {
 		await page.getByRole("button", { name: "关闭导航" }).click();
 	}
 	await activityBar.getByRole("button", { name: /设计库/ }).click();
-	// On narrow viewport, auto-selection may show detail instead of list — check detail heading
-	await expect(page.getByRole("heading", { name: "核心设计" })).toBeVisible({ timeout: 10000 });
-	await expect(page.getByText(/核心架构/)).toBeVisible();
+	await expect(page).toHaveURL(/\/assets\/design/);
+	// 主区无列表 pane
+	await expect(page.locator("baize-asset-library .list-pane")).toHaveCount(0);
+	// 未选中资产:空态提示
+	await expect(page.locator("baize-asset-library .empty-hint")).toBeVisible();
+	// 点击侧栏条目 → 主区显示详情(narrow 视口需先开抽屉)
+	await openWorkbenchNavigation(page);
+	await page.locator("baize-side-bar .entry-card").first().click();
+	// 等待 URL 更新(抽屉应自动关闭)
+	await expect(page).toHaveURL(/\/assets\/design\?asset=1/);
 
 	// Delete blocked by incoming relation
 	await page.getByRole("button", { name: "删除" }).click();
@@ -123,14 +130,15 @@ test("asset workbench exposes 9 aggregated tabs with specialized views and graph
 	await page.getByRole("button", { name: "确认删除" }).click();
 	await expect(page.getByText(/仍被以下 1 个资产引用/)).toBeVisible();
 
-	// Graph tab: full-screen graph with 2 nodes(关系图是主区 tab,不在图标条;直接 URL 切换)
+	// Graph tab: full-screen graph with 2 nodes(关系图是主区模式,不在图标条;直接 URL 切换)
 	await page.goto("/assets/graph");
 	await expect(page.getByRole("img", { name: "Workspace 资产关系图" })).toBeVisible();
 	await expect(page.locator("button.graph-node")).toHaveCount(2);
 	await page.locator("button.graph-node").nth(1).click();
 	await expect(page.getByRole("heading", { name: "核心架构" })).toBeVisible();
 
-	// Import preview with two-step flow
+	// Import preview with two-step flow(返回设计库再导入)
+	await page.goto("/assets/design");
 	await page.locator("input.file-input").setInputFiles({
 		name: "asset-bundle.json",
 		mimeType: "application/json",
@@ -142,30 +150,29 @@ test("asset workbench exposes 9 aggregated tabs with specialized views and graph
 
 test("asset workbench URL state captures tab and selection", async ({ page }) => {
 	await installAssetMocks(page);
-	await page.goto("/assets/architecture?page=1");
-	await expect(page.getByRole("heading", { name: "设计模型资产" })).toBeVisible();
+	await page.goto("/assets/architecture");
+	await expect(page.locator("baize-asset-library .mtoolbar .crumb")).toContainText("架构库");
 	await expect(page).toHaveURL(/\/assets\/architecture/);
 
-	// 视图切换:Activity Bar 导航(原 Side Bar 按钮已移至 Activity Bar 图标)
+	// 视图切换:Activity Bar 导航
 	await page.goto("/");
 	await expect(page).toHaveURL(/\/$/);
 	await expect(page.getByRole("heading", { name: "需求" })).toBeVisible();
 
 	await page.goto("/assets");
-	await expect(page).toHaveURL(/\/assets(?:\?|$)/);
-	await expect(page.getByRole("heading", { name: "设计模型资产" })).toBeVisible();
+	await expect(page).toHaveURL(/\/assets/);
+	await expect(page.locator("baize-asset-library .mtoolbar")).toBeVisible();
 });
 
 test("requirements and assets share the workbench sidebar", async ({ page }) => {
 	await installAssetMocks(page);
 	await page.goto("/assets");
-	await expect(page.locator("baize-asset-library .toolbar-head")).toBeVisible();
-	await expect(page.locator("baize-asset-library .toolbar-actions")).toBeVisible();
+	await expect(page.locator("baize-asset-library .mtoolbar")).toBeVisible();
 
-	// 视图切换:Activity Bar 导航(原 Side Bar 按钮已移至 Activity Bar 图标)
+	// 视图切换:Activity Bar 导航
 	await page.goto("/");
 	await expect(page.getByRole("heading", { name: "需求" })).toBeVisible();
 	// Side Bar 在新布局中始终可见(桌面态)或通过 Activity Bar 切回
 	await page.goto("/assets");
-	await expect(page.locator("baize-asset-library .toolbar-head")).toBeVisible();
+	await expect(page.locator("baize-asset-library .mtoolbar")).toBeVisible();
 });

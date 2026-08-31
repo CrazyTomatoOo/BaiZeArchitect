@@ -761,6 +761,7 @@ return html`
 						const query = params.toString();
 						window.history.pushState({}, "", `${path}${query ? "?" + query : ""}`);
 						window.dispatchEvent(new Event("baize-location-change"));
+						this.closeDrawer();
 					}}
 					@baize-enter-workspace=${(e: Event) => this.handleEnterWorkspace(e)}
 					@baize-workspace-deleted=${(e: Event) => this.handleWorkspaceDeleted(e)}

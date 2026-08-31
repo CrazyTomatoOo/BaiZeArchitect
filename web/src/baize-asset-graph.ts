@@ -2,31 +2,35 @@ import { LitElement, html, nothing, type PropertyValues } from "lit";
 import { getAssetGraph, assetKindLabel, ASSET_KINDS, type AssetGraph, type AssetKind } from "./workflow-client.js";
 import { KIND_TO_TAB, type Renderable, type WorkbenchTab } from "./baize-asset-library-constants.js";
 
+/**
+ * baize-asset-graph — Workspace 资产关系图(T3 自包含)。
+ * 状态(kindFilter/zoom/offset)内部管理,不再依赖父级传参;节点点击通过 baize-graph-node-select 抛出。
+ */
 export class BaizeAssetGraph extends LitElement {
 	static properties = {
 		apiBase: { type: String, attribute: "api-base" },
 		workspaceId: { type: Number, attribute: "workspace-id" },
-		kindFilter: { type: String, attribute: "kind-filter" },
-		zoom: { type: Number },
-		offsetX: { type: Number, attribute: "offset-x" },
-		offsetY: { type: Number, attribute: "offset-y" },
 		refresh: { type: Number },
 		graph: { state: true },
 		loading: { state: true },
 		error: { state: true },
+		kindFilter: { state: true },
+		zoom: { state: true },
+		offsetX: { state: true },
+		offsetY: { state: true },
 	};
 
 	declare apiBase: string;
 	declare workspaceId: number;
-	declare kindFilter: AssetKind | null;
-	declare zoom: number;
-	declare offsetX: number;
-	declare offsetY: number;
 	declare refresh: number;
 
 	declare graph: AssetGraph | null;
 	declare loading: boolean;
 	declare error: string | null;
+	declare kindFilter: AssetKind | null;
+	declare zoom: number;
+	declare offsetX: number;
+	declare offsetY: number;
 	private currentRequest = 0;
 
 	createRenderRoot(): HTMLElement {
@@ -37,14 +41,14 @@ export class BaizeAssetGraph extends LitElement {
 		super();
 		this.apiBase = "";
 		this.workspaceId = 0;
-		this.kindFilter = null;
-		this.zoom = 1;
-		this.offsetX = 0;
-		this.offsetY = 0;
 		this.refresh = 0;
 		this.graph = null;
 		this.loading = false;
 		this.error = null;
+		this.kindFilter = null;
+		this.zoom = 1;
+		this.offsetX = 0;
+		this.offsetY = 0;
 	}
 
 	protected updated(changed: PropertyValues<this>): void {
@@ -85,34 +89,16 @@ export class BaizeAssetGraph extends LitElement {
 
 	private setKindFilter(event: Event): void {
 		const value = (event.target as HTMLSelectElement).value;
-		this.dispatchEvent(
-			new CustomEvent("baize-graph-filter-change", {
-				detail: { kindFilter: value === "all" ? null : (value as AssetKind) },
-				bubbles: true,
-				composed: true,
-			}),
-		);
+		this.kindFilter = value === "all" ? null : (value as AssetKind);
 	}
 
 	private setZoom(delta: number): void {
-		const zoom = Math.max(0.6, Math.min(2, this.zoom + delta));
-		this.dispatchEvent(
-			new CustomEvent("baize-graph-view-change", {
-				detail: { zoom, offsetX: this.offsetX, offsetY: this.offsetY },
-				bubbles: true,
-				composed: true,
-			}),
-		);
+		this.zoom = Math.max(0.6, Math.min(2, this.zoom + delta));
 	}
 
 	private pan(dx: number, dy: number): void {
-		this.dispatchEvent(
-			new CustomEvent("baize-graph-view-change", {
-				detail: { zoom: this.zoom, offsetX: this.offsetX + dx, offsetY: this.offsetY + dy },
-				bubbles: true,
-				composed: true,
-			}),
-		);
+		this.offsetX = this.offsetX + dx;
+		this.offsetY = this.offsetY + dy;
 	}
 
 	private openNode(assetId: number): void {

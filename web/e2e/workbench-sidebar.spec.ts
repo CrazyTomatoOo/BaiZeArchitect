@@ -122,8 +122,11 @@ test.describe("工作台侧栏布局", () => {
 		await page.locator("baize-activity-bar button[title=\"设计库\"]").click();
 		await expect(page).toHaveURL(/\/assets\/design/);
 		await expect(page.locator("baize-side-bar baize-asset-entries")).toBeVisible();
-		await expect(page.locator("baize-asset-library .count")).toContainText("设计库");
-		// narrow 视口自动选中首项后换到详情页——两处任一呈现「核心设计」即可
-		await expect(page.locator("baize-asset-library").getByText("核心设计").first()).toBeVisible();
+		// T3:主区无 count 元素,直接断言 URL 与侧栏条目组件
+		await expect(page.locator("baize-asset-library .mtoolbar .crumb")).toContainText("设计库");
+		// 点击侧栏条目 → 主区显示详情(narrow 视口需先开抽屉)
+		await openDrawerIfNarrow(page);
+		await page.locator("baize-side-bar .entry-card").first().click();
+		await expect(page.locator("baize-asset-library baize-asset-detail")).toBeVisible();
 	});
 });
