@@ -13,7 +13,7 @@ atmospheric — 双主题 AI 工作台（暗色 Graphite Indigo 收紧 + 亮色�
 
 ## Macrostructure family
 
-- App pages: VS Code 式五层 — Activity Bar（最左图标条 48px）+ Side Bar（导航/
+- App pages: VS Code 式五层 — Activity Bar（最左图标条 64px，图标+文字标注）+ Side Bar（导航/
   列表 240px）+ 主区/Editor Group（单面板 + 内部 tab：任务/产物/治理）+
   Panel（底部可折叠）+ Status Bar（底部固定 24px）。
   页面间只变 archetype knobs（Side Bar 域列表形态、主区 tab 组合），不变主题。
@@ -107,12 +107,13 @@ Panel 折叠 = height 0 + `overflow: hidden` + transition；展开时主区 flex
 ## Spacing
 
 4-point named scale（`--pad` 12px · `--gap` 8px · `--gap-dense` 4px ·
-radius 4/3px）。组件必须用 named tokens，不得内联裸值。
+radius 4/3/6px）。组件必须用 named tokens，不得内联裸值。
 
 布局尺寸 token（双主题共享——尺寸不随主题变）：
-`--topbar-h` 40px · `--activity-bar-w` 48px · `--side-bar-w` 240px
+`--topbar-h` 40px · `--activity-bar-w` 64px · `--side-bar-w` 240px
 （`--side-bar-w-min` 160px · `--side-bar-w-max` 480px，拖拽预留，首版不实现）·
-`--rail-w` 320px · `--panel-h-open` 240px · `--status-bar-h` 24px。
+`--rail-w` 320px · `--panel-h-open` 240px · `--status-bar-h` 24px ·
+`--main-content-max` 880px · `--bottom-bar-h` 48px。
 
 ## Motion
 

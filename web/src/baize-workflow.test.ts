@@ -6,6 +6,9 @@ import workspaceManagerSource from "./baize-workspace-manager.ts?raw";
 import shellSource from "./baize-shell.ts?raw";
 import indexSource from "../index.html?raw";
 import assetLibrarySource from "./baize-asset-library.ts?raw";
+import assetLibraryConstantsSource from "./baize-asset-library-constants.ts?raw";
+import sideBarSource from "./baize-side-bar.ts?raw";
+import activityBarSource from "./baize-activity-bar.ts?raw";
 import {
 	artifactSummary,
 	createWorkspaceErrorCopy,
@@ -480,9 +483,10 @@ describe("baize-shell — VS Code 五层组件注册(#78/#79/#80)", () => {
 		expect(shellSource).not.toMatch(/content-max/);
 	});
 	it("index.html 不含已删除 token", () => {
-		expect(indexSource).not.toMatch(/content-max/);
+		expect(indexSource).not.toMatch(/--content-max/);
 		expect(indexSource).not.toMatch(/workbench-rail-width/);
 		expect(indexSource).toContain("activity-bar-w");
+		expect(indexSource).toContain("main-content-max");
 		expect(indexSource).toContain("data-theme");
 	});
 });
@@ -509,5 +513,41 @@ describe("workspace asset surface", () => {
 	it("renders workspace asset information after entering a workspace", () => {
 		expect(shellSource).toMatch(/baize-asset-library/);
 		expect(shellSource).toMatch(/baize-side-bar/);
+	});
+});
+
+describe("资产/需求布局重设计(#97 T1–T3)— 源扫描", () => {
+	it("图标条:9 个视图图标 + 64px 带文字标注", () => {
+		expect(assetLibraryConstantsSource).toMatch(/VIEW_ORDER/);
+		expect(assetLibraryConstantsSource).toMatch(/VIEW_LABELS/);
+		expect(activityBarSource).toMatch(/VIEW_ORDER/);
+		expect(activityBarSource).toMatch(/VIEW_LABELS/);
+		expect(indexSource).toMatch(/--activity-bar-w: 64px/);
+	});
+	it("侧栏:直渲条目组件,无 sub-tab 与 kind 导航", () => {
+		expect(sideBarSource).toMatch(/baize-asset-entries/);
+		expect(sideBarSource).toMatch(/baize-hierarchy-tree/);
+		// 精确匹配 CSS class 定义,避免注释误匹配
+		expect(sideBarSource).not.toMatch(/\.sub-tab\s*\{/);
+		expect(sideBarSource).not.toMatch(/\.nav-list\s*\{/);
+		expect(sideBarSource).not.toMatch(/renderAssetsNav\s*\(/);
+	});
+	it("主区:无 list-pane,居中 880px 内容栏", () => {
+		// 精确匹配 CSS class 定义,避免注释误匹配
+		expect(assetLibrarySource).not.toMatch(/\.list-pane\s*\{/);
+		expect(assetLibrarySource).not.toMatch(/class="[^"]*\blist-pane\b/);
+		expect(assetLibrarySource).not.toMatch(/baize-asset-list/);
+		expect(assetLibrarySource).toMatch(/var\(--main-content-max\)/);
+		expect(assetLibrarySource).toMatch(/\.mtoolbar\s*\{/);
+		expect(assetLibrarySource).toMatch(/\.mcol\s*\{/);
+		expect(assetLibrarySource).toMatch(/\.empty-hint\s*\{/);
+	});
+	it("URL 形态:/assets/:tab?asset=<id>", () => {
+		expect(assetLibraryConstantsSource).toMatch(/assetTabFromPath/);
+		expect(shellSource).toMatch(/assetTabFromPath/);
+		expect(assetLibrarySource).toMatch(/assetTabFromPath/);
+		expect(assetLibrarySource).toMatch(/params\.get\("asset"\)/);
+		expect(assetLibrarySource).not.toMatch(/params\.get\("tab"\)/);
+		// selectedAssetId 是合法状态字段名,不作为负向扫描目标
 	});
 });

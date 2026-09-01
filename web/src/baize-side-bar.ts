@@ -177,12 +177,14 @@ class BaizeSideBar extends LitElement {
 		const path = window.location.pathname;
 		const isRequirements = !path.startsWith("/assets");
 		const isHierarchy = this.activeAssetTab === "scenario" || this.activeAssetTab === "function";
+		// 需求视图:baize-requirements 自带 side-head(标题+新建按钮),不再重复渲染 lib-head
+		if (isRequirements) {
+			return html`<div class="content">${this.renderRequirements()}</div>`;
+		}
 		return html`
-			<div class="lib-head">${isRequirements ? "需求" : VIEW_LABELS[this.activeAssetTab as WorkbenchView]}</div>
+			<div class="lib-head">${VIEW_LABELS[this.activeAssetTab as WorkbenchView]}</div>
 			<div class="content">
-				${isRequirements ? this.renderRequirements() : nothing}
-				${!isRequirements && isHierarchy ? this.renderHierarchyTree() : nothing}
-				${!isRequirements && !isHierarchy ? this.renderAssetEntries() : nothing}
+				${isHierarchy ? this.renderHierarchyTree() : this.renderAssetEntries()}
 			</div>
 		`;
 	}

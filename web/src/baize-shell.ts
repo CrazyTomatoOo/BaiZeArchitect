@@ -727,7 +727,7 @@ return html`
 			` : nothing}
 			<button @click=${() => { this.session = null; }}>退出</button>
 		</div>
-		<div class="workbench-row" style="--rail-w: ${window.location.pathname.startsWith("/workflow/") ? "320px" : "0px"}; --side-bar-w: ${showChrome ? "240px" : "0px"}; --activity-bar-w: ${showChrome ? "64px" : "0px"}">
+		<div class="workbench-row" style="--rail-w: ${window.location.pathname.startsWith("/workflow/") ? "320px" : "0px"}; ${showChrome ? "" : "--activity-bar-w: 0px; --side-bar-w: 0px;"}">
 			${showChrome ? html`
 			<div class="activity-bar-slot">
 			<baize-activity-bar

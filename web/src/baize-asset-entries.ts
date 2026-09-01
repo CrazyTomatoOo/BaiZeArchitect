@@ -56,7 +56,7 @@ class BaizeAssetEntries extends LitElement {
 			background: var(--surface-2);
 			border: 1px solid var(--border);
 			border-radius: var(--radius);
-			padding: 8px 10px;
+			padding: var(--gap) var(--pad);
 			color: var(--text);
 			cursor: pointer;
 			font-family: inherit;
@@ -76,12 +76,12 @@ class BaizeAssetEntries extends LitElement {
 			white-space: nowrap;
 		}
 		.entry-meta {
-			margin-top: 3px;
+			margin-top: var(--gap-dense);
 			font-size: var(--text-xs);
 			color: var(--text-subtle);
 			font-family: var(--font-mono);
 			display: flex;
-			gap: 8px;
+			gap: var(--gap);
 		}
 		.empty {
 			padding: var(--pad);

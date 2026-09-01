@@ -103,8 +103,8 @@ class BaizeAssetLibrary extends LitElement {
 		}
 		.mcol {
 			width: 100%;
-			max-width: 880px;
-			padding: 20px 24px;
+			max-width: var(--main-content-max);
+			padding: var(--space-sm) var(--space-md);
 		}
 		.empty-hint {
 			display: flex;
@@ -275,20 +275,18 @@ class BaizeAssetLibrary extends LitElement {
 		const canCreate = activeKind !== null && !SPECIALIZED_VIEW_KINDS[activeKind];
 		return html`
 			<div class="mtoolbar">
-				<span class="crumb">${TAB_LABELS[this.activeTab]}</span>
-				<span class="spacer"></span>
-				${!isGraphMode && canCreate ? html`<button class="btn primary" @click=${() => this.openCreate()}>新建${assetKindLabel(activeKind)}</button>` : nothing}
-				${!isGraphMode ? html`
-					<baize-asset-import
-						.apiBase=${this.apiBase}
-						.workspaceId=${this.workspaceId}
-						@baize-import-complete=${(event: CustomEvent<{ assetId: number | null }>) => this.handleImportComplete(event)}
-					></baize-asset-import>
-				` : nothing}
-				<button class="btn ${isGraphMode ? "primary" : ""}" @click=${() => this.updateUrl({ tab: isGraphMode ? "scenario" : "graph" })}>
-					${isGraphMode ? "返回列表" : "关系图"}
-				</button>
-			</div>
+			<span class="crumb">${TAB_LABELS[this.activeTab]}</span>
+			<span class="spacer"></span>
+			${!isGraphMode && canCreate ? html`<button class="btn primary" @click=${() => this.openCreate()}>新建${assetKindLabel(activeKind)}</button>` : nothing}
+			<baize-asset-import
+				.apiBase=${this.apiBase}
+				.workspaceId=${this.workspaceId}
+				@baize-import-complete=${(event: CustomEvent<{ assetId: number | null }>) => this.handleImportComplete(event)}
+			></baize-asset-import>
+			<button class="btn ${isGraphMode ? "primary" : ""}" @click=${() => this.updateUrl({ tab: isGraphMode ? "scenario" : "graph" })}>
+				${isGraphMode ? "返回列表" : "关系图"}
+			</button>
+		</div>
 			${isGraphMode
 				? html`<div class="graph-mode">
 						<baize-asset-graph

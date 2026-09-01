@@ -51,7 +51,7 @@ class BaizeActivityBar extends LitElement {
 			height: 100%;
 			background: var(--surface-2);
 			padding-top: var(--gap);
-			gap: 2px;
+			gap: var(--gap-dense);
 			overflow-y: auto;
 		}
 		.icon-btn {
@@ -60,12 +60,12 @@ class BaizeActivityBar extends LitElement {
 			display: flex;
 			flex-direction: column;
 			align-items: center;
-			gap: 2px;
-			padding: 6px 0;
+			gap: var(--gap-dense);
+			padding: var(--gap-dense) 0;
 			color: var(--text-muted);
 			background: transparent;
 			border: none;
-			border-radius: 6px;
+			border-radius: var(--radius-md);
 			cursor: pointer;
 		}
 		.icon-btn:hover {
@@ -81,7 +81,7 @@ class BaizeActivityBar extends LitElement {
 			height: var(--icon-size);
 		}
 		.icon-btn .lbl {
-			font-size: 9px;
+			font-size: var(--text-xxs);
 			letter-spacing: 0.02em;
 		}
 		.spacer {
@@ -95,7 +95,7 @@ class BaizeActivityBar extends LitElement {
 				flex-direction: row;
 				justify-content: space-around;
 				padding-top: 0;
-				height: 100%;
+				height: var(--bottom-bar-h);
 				overflow-y: visible;
 			}
 			.icon-btn {
