@@ -12,6 +12,7 @@ import {
   type AnalysisPlanStage,
   type AnalysisStageName,
 } from "./agent/orchestrator.ts";
+import { McpToolClient } from "./mcp.ts";
 import {
   completeAnalysisRun,
   createAnalysisRun,
@@ -343,24 +344,32 @@ async function main(): Promise<void> {
       callCount: orchestratorResult.callCount,
     });
 
-    const scenarioStage = await runAnalysisStage(pool, run.id, confirmation, {
-      stage: "scenario",
-      planStage: scenarioPlanStage,
-      proposalLabel: "scenarios",
-      startEventName: "scenario_subagent_started",
-      startPayload: { requirement },
-      runAnalysis: () => runScenarioAnalysis(pool, requirement),
-      toolTrace: {
-        eventPrefix: "scenario_",
-        skillName: "scenario-analysis",
-        queryToolName: "query_scenario_tree",
-        libraryEventName: "scenario_tree_queried",
-      },
-      saveProposals: (proposals) =>
-        saveScenarioProposals(pool, run.id, proposals),
-      settleProposals: (confirmed) =>
-        settleScenarioProposals(pool, run.id, confirmed),
-    });
+    const mcp = new McpToolClient(pool, run.id);
+    await mcp.start();
+
+    let scenarioStage;
+    try {
+      scenarioStage = await runAnalysisStage(pool, run.id, confirmation, {
+        stage: "scenario",
+        planStage: scenarioPlanStage,
+        proposalLabel: "scenarios",
+        startEventName: "scenario_subagent_started",
+        startPayload: { requirement },
+        runAnalysis: () => runScenarioAnalysis(mcp, requirement),
+        toolTrace: {
+          eventPrefix: "scenario_",
+          skillName: "scenario-analysis",
+          queryToolName: "query_scenario_tree",
+          libraryEventName: "scenario_tree_queried",
+        },
+        saveProposals: (proposals) =>
+          saveScenarioProposals(pool, run.id, proposals),
+        settleProposals: (confirmed) =>
+          settleScenarioProposals(pool, run.id, confirmed),
+      });
+    } finally {
+      await mcp.close();
+    }
     const scenarioAssets = scenarioStage.assets;
 
     const useCaseStage = scenarioStage.confirmed

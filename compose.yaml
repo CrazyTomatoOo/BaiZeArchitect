@@ -19,6 +19,7 @@ services:
     build: .
     environment:
       DATABASE_URL: postgres://baize:baize@db:5432/baize
+      MCP_CONFIG_PATH: /app/mcp.config.json
       HOME: /tmp
       PI_CODING_AGENT_DIR: /app/.pi-agent
     depends_on:
@@ -37,6 +38,7 @@ services:
       - test
     environment:
       DATABASE_URL: postgres://baize:baize@db:5432/baize
+      MCP_CONFIG_PATH: /app/mcp.config.json
       HOME: /tmp
       PI_CODING_AGENT_DIR: /app/.pi-agent
     depends_on:

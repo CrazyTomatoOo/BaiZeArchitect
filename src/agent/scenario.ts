@@ -1,12 +1,12 @@
-import type { Pool } from "pg";
-import { listScenarioNodes, type ScenarioProposalInput } from "../db.ts";
+import type { ScenarioProposalInput } from "../db.ts";
 import {
   runFauxAnalysisAgent,
   type AnalysisAgentResult,
 } from "./analysis-agent.ts";
+import type { McpToolClient } from "../mcp.ts";
 
 export async function runScenarioAnalysis(
-  pool: Pool,
+  mcp: McpToolClient,
   requirement: string,
 ): Promise<AnalysisAgentResult<ScenarioProposalInput>> {
   return runFauxAnalysisAgent({
@@ -16,7 +16,18 @@ export async function runScenarioAnalysis(
     queryToolName: "query_scenario_tree",
     queryToolLabel: "Query scenario tree",
     queryToolDescription: "Query the full scenario tree from PostgreSQL.",
-    queryData: () => listScenarioNodes(pool),
+    queryData: async () => {
+      const result = await mcp.callTool("query_scenario_tree", {});
+      const structured = result.structuredContent as {
+        nodes?: unknown[];
+      };
+
+      if (!Array.isArray(structured.nodes)) {
+        throw new Error("MCP query_scenario_tree result is missing nodes");
+      }
+
+      return structured.nodes;
+    },
     prompt: requirement,
     finalResponse: {
       proposals: [

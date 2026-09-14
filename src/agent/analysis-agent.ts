@@ -197,6 +197,11 @@ export async function runFauxAgent<TResult>(
       await session.prompt(config.prompt);
 
       const finalText = extractAssistantText(session.state.messages) || text;
+      const failedToolResult = toolResults.find((result) => result.isError);
+
+      if (failedToolResult) {
+        throw new Error(`Analysis tool failed: ${failedToolResult.name}`);
+      }
 
       return {
         result: config.parseResult(finalText),
