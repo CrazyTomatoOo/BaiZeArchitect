@@ -1,0 +1,49 @@
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: baize
+      POSTGRES_PASSWORD: baize
+      POSTGRES_DB: baize
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "pg_isready -U baize -d baize"
+        ]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  agent:
+    build: .
+    environment:
+      DATABASE_URL: postgres://baize:baize@db:5432/baize
+      HOME: /tmp
+      PI_CODING_AGENT_DIR: /app/.pi-agent
+    depends_on:
+      db:
+        condition: service_healthy
+    command:
+      [
+        "node",
+        "dist/cli.js",
+        "Bootstrap requirement"
+      ]
+
+  test:
+    build: .
+    profiles:
+      - test
+    environment:
+      DATABASE_URL: postgres://baize:baize@db:5432/baize
+      HOME: /tmp
+      PI_CODING_AGENT_DIR: /app/.pi-agent
+    depends_on:
+      db:
+        condition: service_healthy
+    command:
+      [
+        "npm",
+        "test"
+      ]
