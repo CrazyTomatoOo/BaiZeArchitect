@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "baize-analysis": {
+      "command": "/usr/local/bin/baize",
+      "args": ["mcp"]
+    }
+  }
+}

@@ -90,20 +90,34 @@ export class McpToolClient {
       return;
     }
 
+    let serverStderr = "";
+
     try {
       const serverConfig = await loadServerConfig(this.serverName);
+      const childEnv: Record<string, string> = {
+        ...serverConfig.env,
+        DATABASE_URL: process.env.DATABASE_URL ?? "",
+      };
+
+      if (childEnv.PKG_EXECPATH === undefined) {
+        // pkg injects this variable into spawned processes. If the child is the
+        // same packaged executable, it would treat its first argument as a
+        // script path instead of passing it through to the CLI.
+        childEnv.PKG_EXECPATH = "";
+      }
+
       this.transport = new StdioClientTransport({
         command: serverConfig.command,
         args: serverConfig.args,
-        env: {
-          ...serverConfig.env,
-          DATABASE_URL: process.env.DATABASE_URL ?? "",
-        },
+        env: childEnv,
         stderr: "pipe",
       });
       this.client = new Client({
         name: "baize-agent-mvp",
         version: "0.1.0",
+      });
+      this.transport.stderr?.on("data", (chunk: string | Buffer) => {
+        serverStderr += chunk.toString();
       });
       await withTimeout(
         this.client.connect(this.transport),
@@ -138,7 +152,9 @@ export class McpToolClient {
       await this.close().catch(() => undefined);
       throw new AnalysisFailureError(
         failureCode,
-        `MCP server failed to start: ${message}`,
+        `MCP server failed to start: ${message}${
+          serverStderr ? `: ${serverStderr.trim()}` : ""
+        }`,
         { cause: error },
       );
     }

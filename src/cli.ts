@@ -13,6 +13,7 @@ import {
   type AnalysisStageName,
 } from "./agent/orchestrator.ts";
 import { McpToolClient } from "./mcp.ts";
+import { runMcpServer } from "./mcp-server.ts";
 import {
   cancelAnalysisRun,
   completeAnalysisRun,
@@ -651,4 +652,14 @@ async function main(): Promise<void> {
   }
 }
 
-await main();
+void (async () => {
+  if (process.argv[2] === "mcp") {
+    await runMcpServer();
+    return;
+  }
+
+  await main();
+})().catch((error: unknown) => {
+  console.error(errorMessage(error));
+  process.exitCode = 1;
+});

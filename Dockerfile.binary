@@ -1,0 +1,27 @@
+FROM node:22-slim AS build
+
+WORKDIR /app
+
+COPY package.json package-lock.json ./
+RUN npm ci
+
+COPY . .
+RUN npm run build:binary
+
+FROM debian:bookworm-slim
+
+RUN apt-get update \
+  && apt-get install -y --no-install-recommends ca-certificates \
+  && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+COPY --from=build /app/dist/baize /usr/local/bin/baize
+RUN chmod 0755 /usr/local/bin/baize
+COPY --from=build /app/.pi/skills /app/.pi/skills
+COPY mcp.runtime.config.json /app/mcp.config.json
+
+ENV HOME=/tmp
+ENV PI_CODING_AGENT_DIR=/tmp/baize-agent
+
+ENTRYPOINT ["/usr/local/bin/baize"]
+CMD ["Add dashboard sharing"]

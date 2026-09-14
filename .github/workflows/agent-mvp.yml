@@ -1,0 +1,24 @@
+name: Agent MVP
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Run source test suite
+        run: docker compose run --build --rm test
+
+      - name: Verify binary runtime has no development toolchain
+        run: >-
+          docker compose run --build --rm --entrypoint sh agent
+          -c '! command -v node && ! command -v npm && ! command -v npx && ! command -v tsc'
+
+      - name: Execute standalone binary workflow
+        run: printf 'y\ny\ny\n' | docker compose run --build --rm -T agent

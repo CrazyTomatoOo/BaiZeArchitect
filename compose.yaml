@@ -16,21 +16,18 @@ services:
       retries: 10
 
   agent:
-    build: .
+    build:
+      context: .
+      dockerfile: Dockerfile.binary
     environment:
       DATABASE_URL: postgres://baize:baize@db:5432/baize
       MCP_CONFIG_PATH: /app/mcp.config.json
       HOME: /tmp
-      PI_CODING_AGENT_DIR: /app/.pi-agent
+      PI_CODING_AGENT_DIR: /tmp/baize-agent
     depends_on:
       db:
         condition: service_healthy
-    command:
-      [
-        "sh",
-        "-c",
-        "printf 'y\\ny\\ny\\n' | node dist/cli.js 'Add dashboard sharing'"
-      ]
+    command: ["Add dashboard sharing"]
 
   test:
     build: .

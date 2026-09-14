@@ -8,9 +8,11 @@
   },
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
+    "build:binary": "npm run build && node scripts/build-binary.mjs",
     "start": "tsx src/cli.ts",
     "start:dist": "node dist/cli.js",
     "test": "node --import tsx --test --test-concurrency=1 tests/*.test.ts",
+    "test:binary": "node --import tsx --test --test-concurrency=1 tests/binary-cli.test.ts",
     "test:docker": "docker compose run --build --rm test",
     "typecheck": "tsc -p tsconfig.json"
   },
@@ -27,8 +29,10 @@
     "undici": "8.10.2"
   },
   "devDependencies": {
+    "@yao-pkg/pkg": "6.22.0",
     "@types/node": "22.15.0",
     "@types/pg": "8.15.5",
+    "esbuild": "0.28.2",
     "tsx": "4.20.3",
     "typescript": "5.8.3"
   }
