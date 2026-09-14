@@ -1,17 +1,42 @@
 import { Pool } from "pg";
-import { runFauxAgent } from "./agent/faux.ts";
+import { createInterface } from "node:readline/promises";
+import { runScenarioAnalysis } from "./agent/scenario.ts";
 import {
   completeAnalysisRun,
   createAnalysisRun,
   failAnalysisRun,
   initializeSchema,
   recordTraceEvent,
+  saveScenarioProposals,
+  settleScenarioProposals,
+  type ScenarioAsset,
 } from "./db.ts";
 
 interface CliResult {
   runId: string;
-  status: "succeeded";
-  assistantText: string;
+  status: "succeeded" | "rejected";
+  scenarioAssetCount: number;
+  confirmedScenarios: Array<{
+    kind: ScenarioAsset["kind"];
+    title: string;
+  }>;
+}
+
+async function confirmScenarioProposals(): Promise<boolean> {
+  const readline = createInterface({
+    input: process.stdin,
+    output: process.stderr,
+  });
+
+  try {
+    const answer = await readline.question(
+      "Confirm scenario proposals? [y/N] ",
+    );
+    return answer.trim().toLowerCase() === "y" ||
+      answer.trim().toLowerCase() === "yes";
+  } finally {
+    readline.close();
+  }
 }
 
 async function main(): Promise<void> {
@@ -43,22 +68,90 @@ async function main(): Promise<void> {
       requirement,
     });
 
-    const agentResult = await runFauxAgent(requirement);
-
-    await recordTraceEvent(pool, run.id, "analysis_run_completed", {
-      assistantText: agentResult.text,
-      callCount: agentResult.callCount,
+    await recordTraceEvent(pool, run.id, "scenario_subagent_started", {
+      requirement,
     });
 
-    await completeAnalysisRun(pool, run.id);
+    const scenarioResult = await runScenarioAnalysis(pool, requirement);
+
+    for (const toolCall of scenarioResult.toolCalls) {
+      await recordTraceEvent(pool, run.id, "scenario_tool_call", {
+        toolName: toolCall.name,
+        args: toolCall.args,
+      });
+    }
+
+    for (const toolResult of scenarioResult.toolResults) {
+      await recordTraceEvent(pool, run.id, "scenario_tool_result", {
+        toolName: toolResult.name,
+        result: toolResult.result,
+        isError: toolResult.isError,
+      });
+
+      if (!toolResult.isError && toolResult.name === "read") {
+        await recordTraceEvent(pool, run.id, "scenario_skill_loaded", {
+          skill: "scenario-analysis",
+        });
+      }
+
+      if (!toolResult.isError && toolResult.name === "query_scenario_tree") {
+        await recordTraceEvent(pool, run.id, "scenario_tree_queried", {
+          tool: "query_scenario_tree",
+        });
+      }
+    }
+
+    await saveScenarioProposals(pool, run.id, scenarioResult.proposals);
+
+    await recordTraceEvent(pool, run.id, "scenario_proposals_generated", {
+      proposals: scenarioResult.proposals,
+      callCount: scenarioResult.callCount,
+    });
+
+    console.error("Proposed scenarios:");
+    for (const proposal of scenarioResult.proposals) {
+      console.error(
+        `- [${proposal.kind}] ${proposal.title}: ${proposal.description}`,
+      );
+    }
+
+    await recordTraceEvent(pool, run.id, "scenario_confirmation_requested", {
+      proposals: scenarioResult.proposals,
+    });
+
+    const confirmed = await confirmScenarioProposals();
+
+    await recordTraceEvent(pool, run.id, "scenario_confirmation_received", {
+      confirmed,
+    });
+
+    const assets = await settleScenarioProposals(pool, run.id, confirmed);
+
+    await recordTraceEvent(pool, run.id, "scenario_assets_persisted", {
+      count: assets.length,
+      assets,
+    });
+
+    const status = confirmed ? "succeeded" : "rejected";
+    await completeAnalysisRun(pool, run.id, status);
+
+    await recordTraceEvent(pool, run.id, "analysis_run_completed", {
+      status,
+      scenarioAssetCount: assets.length,
+    });
 
     const result: CliResult = {
       runId: run.id,
-      status: "succeeded",
-      assistantText: agentResult.text,
+      status,
+      scenarioAssetCount: assets.length,
+      confirmedScenarios: assets.map((asset) => ({
+        kind: asset.kind,
+        title: asset.title,
+      })),
     };
 
     console.log(JSON.stringify(result));
+    process.exitCode = confirmed ? 0 : 2;
   } catch (error) {
     if (runId) {
       await recordTraceEvent(pool, runId, "analysis_run_failed", {

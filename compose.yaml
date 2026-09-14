@@ -26,9 +26,9 @@ services:
         condition: service_healthy
     command:
       [
-        "node",
-        "dist/cli.js",
-        "Bootstrap requirement"
+        "sh",
+        "-c",
+        "printf 'y\\n' | node dist/cli.js 'Add dashboard sharing'"
       ]
 
   test:
