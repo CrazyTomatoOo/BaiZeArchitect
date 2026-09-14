@@ -10,8 +10,8 @@
     "build": "tsc -p tsconfig.build.json",
     "start": "tsx src/cli.ts",
     "start:dist": "node dist/cli.js",
-    "test": "node --import tsx --test tests/*.test.ts",
-    "test:docker": "docker compose run --rm test",
+    "test": "node --import tsx --test --test-concurrency=1 tests/*.test.ts",
+    "test:docker": "docker compose run --build --rm test",
     "typecheck": "tsc -p tsconfig.json"
   },
   "dependencies": {

@@ -49,6 +49,26 @@ export interface UseCaseAsset {
   description: string;
 }
 
+export interface FeatureNode {
+  id: string;
+  title: string;
+  description: string;
+}
+
+export interface FeatureProposalInput {
+  kind: "affected" | "new";
+  title: string;
+  description: string;
+  useCaseTitle: string;
+}
+
+export interface FeatureAsset {
+  id: string;
+  kind: "affected" | "new";
+  title: string;
+  description: string;
+}
+
 export async function initializeSchema(pool: Pool): Promise<void> {
   await pool.query(`
     CREATE TABLE IF NOT EXISTS analysis_runs (
@@ -145,6 +165,44 @@ export async function initializeSchema(pool: Pool): Promise<void> {
       ON use_case_proposals(run_id);
     CREATE INDEX IF NOT EXISTS use_case_assets_run_id_idx
       ON use_case_assets(run_id);
+
+    CREATE TABLE IF NOT EXISTS feature_nodes (
+      id UUID PRIMARY KEY,
+      title TEXT NOT NULL UNIQUE,
+      description TEXT NOT NULL,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    );
+
+    CREATE TABLE IF NOT EXISTS feature_proposals (
+      id UUID PRIMARY KEY,
+      run_id UUID NOT NULL REFERENCES analysis_runs(id) ON DELETE CASCADE,
+      existing_feature_id UUID REFERENCES feature_nodes(id),
+      use_case_asset_id UUID NOT NULL REFERENCES use_case_assets(id),
+      title TEXT NOT NULL,
+      description TEXT NOT NULL,
+      kind TEXT NOT NULL CHECK (kind IN ('affected', 'new')),
+      status TEXT NOT NULL DEFAULT 'proposed'
+        CHECK (status IN ('proposed', 'confirmed', 'rejected')),
+      created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+      confirmed_at TIMESTAMPTZ
+    );
+
+    CREATE TABLE IF NOT EXISTS feature_assets (
+      id UUID PRIMARY KEY,
+      run_id UUID NOT NULL REFERENCES analysis_runs(id) ON DELETE CASCADE,
+      proposal_id UUID NOT NULL REFERENCES feature_proposals(id) ON DELETE CASCADE,
+      existing_feature_id UUID REFERENCES feature_nodes(id),
+      use_case_asset_id UUID NOT NULL REFERENCES use_case_assets(id),
+      title TEXT NOT NULL,
+      description TEXT NOT NULL,
+      kind TEXT NOT NULL,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    );
+
+    CREATE INDEX IF NOT EXISTS feature_proposals_run_id_idx
+      ON feature_proposals(run_id);
+    CREATE INDEX IF NOT EXISTS feature_assets_run_id_idx
+      ON feature_assets(run_id);
   `);
 
   await pool.query(`
@@ -163,6 +221,15 @@ export async function initializeSchema(pool: Pool): Promise<void> {
       ('00000000-0000-0000-0000-000000000101', '00000000-0000-0000-0000-000000000002', 'View dashboard on desktop', 'A user opens the dashboard on a desktop device.'),
       ('00000000-0000-0000-0000-000000000102', '00000000-0000-0000-0000-000000000003', 'Filter dashboard by last seven days', 'A user filters dashboard data to the last seven days.'),
       ('00000000-0000-0000-0000-000000000103', '00000000-0000-0000-0000-000000000004', 'Export dashboard as CSV', 'A user exports dashboard data as a CSV file.')
+    ON CONFLICT (title) DO NOTHING;
+  `);
+
+  await pool.query(`
+    INSERT INTO feature_nodes (id, title, description)
+    VALUES
+      ('00000000-0000-0000-0000-000000000201', 'Dashboard rendering', 'Renders dashboard widgets and layout.'),
+      ('00000000-0000-0000-0000-000000000202', 'Dashboard access control', 'Controls who can view each dashboard.'),
+      ('00000000-0000-0000-0000-000000000203', 'Dashboard CSV export', 'Exports dashboard data as CSV.')
     ON CONFLICT (title) DO NOTHING;
   `);
 }
@@ -243,6 +310,20 @@ export async function listUseCaseNodes(
     id: row.id,
     scenarioId: row.scenario_id,
     scenarioName: row.scenario_name,
+    title: row.title,
+    description: row.description,
+  }));
+}
+
+export async function listFeatureNodes(
+  pool: Pool,
+): Promise<FeatureNode[]> {
+  const result = await pool.query(
+    "SELECT id, title, description FROM feature_nodes ORDER BY title",
+  );
+
+  return result.rows.map((row) => ({
+    id: row.id,
     title: row.title,
     description: row.description,
   }));
@@ -500,6 +581,151 @@ export async function settleUseCaseProposals(
           proposal.id,
           useCaseId,
           proposal.scenario_asset_id,
+          proposal.title,
+          proposal.description,
+          proposal.kind,
+        ],
+      );
+
+      assets.push({
+        id,
+        kind: proposal.kind,
+        title: proposal.title,
+        description: proposal.description,
+      });
+    }
+
+    await client.query("COMMIT");
+    return assets;
+  } catch (error) {
+    await client.query("ROLLBACK");
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
+export async function saveFeatureProposals(
+  pool: Pool,
+  runId: string,
+  proposals: FeatureProposalInput[],
+  useCaseAssets: UseCaseAsset[],
+): Promise<void> {
+  for (const proposal of proposals) {
+    const useCaseAsset = useCaseAssets.find(
+      (asset) => asset.title === proposal.useCaseTitle,
+    );
+
+    if (!useCaseAsset) {
+      throw new Error(
+        `Feature proposal must use a confirmed use case: ${proposal.useCaseTitle}`,
+      );
+    }
+
+    let existingFeatureId: string | null = null;
+
+    if (proposal.kind === "affected") {
+      const result = await pool.query(
+        "SELECT id FROM feature_nodes WHERE title = $1",
+        [proposal.title],
+      );
+
+      if (result.rows.length === 0) {
+        throw new Error(`Affected feature does not exist: ${proposal.title}`);
+      }
+
+      existingFeatureId = result.rows[0].id;
+    }
+
+    await pool.query(
+      `INSERT INTO feature_proposals
+        (id, run_id, existing_feature_id, use_case_asset_id, title, description, kind)
+       VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+      [
+        randomUUID(),
+        runId,
+        existingFeatureId,
+        useCaseAsset.id,
+        proposal.title,
+        proposal.description,
+        proposal.kind,
+      ],
+    );
+  }
+}
+
+export async function settleFeatureProposals(
+  pool: Pool,
+  runId: string,
+  confirmed: boolean,
+): Promise<FeatureAsset[]> {
+  const client = await pool.connect();
+
+  try {
+    await client.query("BEGIN");
+
+    if (!confirmed) {
+      await client.query(
+        "UPDATE feature_proposals SET status = 'rejected' WHERE run_id = $1 AND status = 'proposed'",
+        [runId],
+      );
+      await client.query("COMMIT");
+      return [];
+    }
+
+    await client.query(
+      "UPDATE feature_proposals SET status = 'confirmed', confirmed_at = now() WHERE run_id = $1 AND status = 'proposed'",
+      [runId],
+    );
+
+    const proposals = await client.query(
+      `SELECT id, existing_feature_id, use_case_asset_id,
+              title, description, kind
+       FROM feature_proposals
+       WHERE run_id = $1 AND status = 'confirmed'`,
+      [runId],
+    );
+
+    const assets: FeatureAsset[] = [];
+
+    for (const proposal of proposals.rows) {
+      let featureId = proposal.existing_feature_id;
+
+      if (proposal.kind === "new") {
+        const inserted = await client.query(
+          `INSERT INTO feature_nodes (id, title, description)
+           VALUES ($1, $2, $3)
+           ON CONFLICT (title) DO NOTHING
+           RETURNING id`,
+          [randomUUID(), proposal.title, proposal.description],
+        );
+
+        featureId =
+          inserted.rows[0]?.id ??
+          (
+            await client.query(
+              "SELECT id FROM feature_nodes WHERE title = $1",
+              [proposal.title],
+            )
+          ).rows[0].id;
+
+        await client.query(
+          "UPDATE feature_proposals SET existing_feature_id = $2 WHERE id = $1",
+          [proposal.id, featureId],
+        );
+      }
+
+      const id = randomUUID();
+      await client.query(
+        `INSERT INTO feature_assets
+          (id, run_id, proposal_id, existing_feature_id, use_case_asset_id, title, description, kind)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+        [
+          id,
+          runId,
+          proposal.id,
+          featureId,
+          proposal.use_case_asset_id,
           proposal.title,
           proposal.description,
           proposal.kind,

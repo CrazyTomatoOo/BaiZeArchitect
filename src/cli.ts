@@ -5,6 +5,7 @@ import {
 } from "node:readline/promises";
 import { runScenarioAnalysis } from "./agent/scenario.ts";
 import { runUseCaseAnalysis } from "./agent/use-case.ts";
+import { runFeatureAnalysis } from "./agent/feature.ts";
 import {
   completeAnalysisRun,
   createAnalysisRun,
@@ -15,8 +16,11 @@ import {
   settleScenarioProposals,
   saveUseCaseProposals,
   settleUseCaseProposals,
+  saveFeatureProposals,
+  settleFeatureProposals,
   type ScenarioAsset,
   type UseCaseAsset,
+  type FeatureAsset,
 } from "./db.ts";
 
 interface CliResult {
@@ -24,12 +28,17 @@ interface CliResult {
   status: "succeeded" | "rejected";
   scenarioAssetCount: number;
   useCaseAssetCount: number;
+  featureAssetCount: number;
   confirmedScenarios: Array<{
     kind: ScenarioAsset["kind"];
     title: string;
   }>;
   confirmedUseCases: Array<{
     kind: UseCaseAsset["kind"];
+    title: string;
+  }>;
+  confirmedFeatures: Array<{
+    kind: FeatureAsset["kind"];
     title: string;
   }>;
 }
@@ -60,7 +69,9 @@ class ConfirmationReader {
     });
   }
 
-  async confirm(stage: "scenario" | "use case"): Promise<boolean> {
+  async confirm(
+    stage: "scenario" | "use case" | "feature",
+  ): Promise<boolean> {
     process.stderr.write(`Confirm ${stage} proposals? [y/N] `);
     const answer = await this.readLine();
 
@@ -111,6 +122,37 @@ interface ToolTraceConfig {
   libraryEventName: string;
 }
 
+interface StageProposal {
+  kind: string;
+  title: string;
+  description: string;
+}
+
+interface StageAnalysisResult<TProposal extends StageProposal>
+  extends ToolTraceResult {
+  proposals: TProposal[];
+  callCount: number;
+}
+
+interface StageOutcome<TAsset> {
+  assets: TAsset[];
+  confirmed: boolean;
+}
+
+interface AnalysisStageConfig<
+  TProposal extends StageProposal,
+  TAsset,
+> {
+  stage: "scenario" | "use case" | "feature";
+  proposalLabel: string;
+  startEventName: string;
+  startPayload: Record<string, unknown>;
+  runAnalysis: () => Promise<StageAnalysisResult<TProposal>>;
+  toolTrace: ToolTraceConfig;
+  saveProposals: (proposals: TProposal[]) => Promise<void>;
+  settleProposals: (confirmed: boolean) => Promise<TAsset[]>;
+}
+
 async function recordAnalysisToolTrace(
   pool: Pool,
   runId: string,
@@ -150,6 +192,73 @@ async function recordAnalysisToolTrace(
   }
 }
 
+async function runAnalysisStage<TProposal extends StageProposal, TAsset>(
+  pool: Pool,
+  runId: string,
+  confirmation: ConfirmationReader,
+  config: AnalysisStageConfig<TProposal, TAsset>,
+): Promise<StageOutcome<TAsset>> {
+  await recordTraceEvent(pool, runId, config.startEventName, {
+    ...config.startPayload,
+  });
+
+  const result = await config.runAnalysis();
+
+  await recordAnalysisToolTrace(pool, runId, config.toolTrace, result);
+  await config.saveProposals(result.proposals);
+
+  await recordTraceEvent(
+    pool,
+    runId,
+    `${config.toolTrace.eventPrefix}proposals_generated`,
+    {
+      proposals: result.proposals,
+      callCount: result.callCount,
+    },
+  );
+
+  console.error(`Proposed ${config.proposalLabel}:`);
+  for (const proposal of result.proposals) {
+    console.error(
+      `- [${proposal.kind}] ${proposal.title}: ${proposal.description}`,
+    );
+  }
+
+  await recordTraceEvent(
+    pool,
+    runId,
+    `${config.toolTrace.eventPrefix}confirmation_requested`,
+    {
+      proposals: result.proposals,
+    },
+  );
+
+  const confirmed = await confirmation.confirm(config.stage);
+
+  await recordTraceEvent(
+    pool,
+    runId,
+    `${config.toolTrace.eventPrefix}confirmation_received`,
+    {
+      confirmed,
+    },
+  );
+
+  const assets = await config.settleProposals(confirmed);
+
+  await recordTraceEvent(
+    pool,
+    runId,
+    `${config.toolTrace.eventPrefix}assets_persisted`,
+    {
+      count: assets.length,
+      assets,
+    },
+  );
+
+  return { assets, confirmed };
+}
+
 async function main(): Promise<void> {
   const requirement = process.argv[2]?.trim();
 
@@ -180,122 +289,96 @@ async function main(): Promise<void> {
       requirement,
     });
 
-    await recordTraceEvent(pool, run.id, "scenario_subagent_started", {
-      requirement,
+    const scenarioStage = await runAnalysisStage(pool, run.id, confirmation, {
+      stage: "scenario",
+      proposalLabel: "scenarios",
+      startEventName: "scenario_subagent_started",
+      startPayload: { requirement },
+      runAnalysis: () => runScenarioAnalysis(pool, requirement),
+      toolTrace: {
+        eventPrefix: "scenario_",
+        skillName: "scenario-analysis",
+        queryToolName: "query_scenario_tree",
+        libraryEventName: "scenario_tree_queried",
+      },
+      saveProposals: (proposals) =>
+        saveScenarioProposals(pool, run.id, proposals),
+      settleProposals: (confirmed) =>
+        settleScenarioProposals(pool, run.id, confirmed),
     });
+    const scenarioAssets = scenarioStage.assets;
 
-    const scenarioResult = await runScenarioAnalysis(pool, requirement);
+    const useCaseStage = scenarioStage.confirmed
+      ? await runAnalysisStage(pool, run.id, confirmation, {
+          stage: "use case",
+          proposalLabel: "use cases",
+          startEventName: "use_case_subagent_started",
+          startPayload: {
+            requirement,
+            confirmedScenarios: scenarioAssets.map((asset) => ({
+              kind: asset.kind,
+              title: asset.title,
+              description: asset.description,
+            })),
+          },
+          runAnalysis: () =>
+            runUseCaseAnalysis(pool, requirement, scenarioAssets),
+          toolTrace: {
+            eventPrefix: "use_case_",
+            skillName: "use-case-analysis",
+            queryToolName: "query_use_case_library",
+            libraryEventName: "use_case_library_queried",
+          },
+          saveProposals: (proposals) =>
+            saveUseCaseProposals(
+              pool,
+              run.id,
+              proposals,
+              scenarioAssets,
+            ),
+          settleProposals: (confirmed) =>
+            settleUseCaseProposals(pool, run.id, confirmed),
+        })
+      : { assets: [] as UseCaseAsset[], confirmed: false };
+    const useCaseAssets = useCaseStage.assets;
 
-    await recordAnalysisToolTrace(pool, run.id, {
-      eventPrefix: "scenario_",
-      skillName: "scenario-analysis",
-      queryToolName: "query_scenario_tree",
-      libraryEventName: "scenario_tree_queried",
-    }, scenarioResult);
+    const featureStage =
+      scenarioStage.confirmed && useCaseStage.confirmed
+        ? await runAnalysisStage(pool, run.id, confirmation, {
+            stage: "feature",
+            proposalLabel: "features",
+            startEventName: "feature_subagent_started",
+            startPayload: {
+              requirement,
+              confirmedUseCases: useCaseAssets.map((asset) => ({
+                kind: asset.kind,
+                title: asset.title,
+                description: asset.description,
+              })),
+            },
+            runAnalysis: () =>
+              runFeatureAnalysis(pool, requirement, useCaseAssets),
+            toolTrace: {
+              eventPrefix: "feature_",
+              skillName: "feature-analysis",
+              queryToolName: "query_feature_library",
+              libraryEventName: "feature_library_queried",
+            },
+            saveProposals: (proposals) =>
+              saveFeatureProposals(
+                pool,
+                run.id,
+                proposals,
+                useCaseAssets,
+              ),
+            settleProposals: (confirmed) =>
+              settleFeatureProposals(pool, run.id, confirmed),
+          })
+        : { assets: [] as FeatureAsset[], confirmed: false };
+    const featureAssets = featureStage.assets;
 
-    await saveScenarioProposals(pool, run.id, scenarioResult.proposals);
-
-    await recordTraceEvent(pool, run.id, "scenario_proposals_generated", {
-      proposals: scenarioResult.proposals,
-      callCount: scenarioResult.callCount,
-    });
-
-    console.error("Proposed scenarios:");
-    for (const proposal of scenarioResult.proposals) {
-      console.error(
-        `- [${proposal.kind}] ${proposal.title}: ${proposal.description}`,
-      );
-    }
-
-    await recordTraceEvent(pool, run.id, "scenario_confirmation_requested", {
-      proposals: scenarioResult.proposals,
-    });
-
-    const scenarioConfirmed = await confirmation.confirm("scenario");
-
-    await recordTraceEvent(pool, run.id, "scenario_confirmation_received", {
-      confirmed: scenarioConfirmed,
-    });
-
-    const scenarioAssets = await settleScenarioProposals(
-      pool,
-      run.id,
-      scenarioConfirmed,
-    );
-
-    await recordTraceEvent(pool, run.id, "scenario_assets_persisted", {
-      count: scenarioAssets.length,
-      assets: scenarioAssets,
-    });
-
-    let useCaseAssets: UseCaseAsset[] = [];
-    let useCaseConfirmed = false;
-
-    if (scenarioConfirmed) {
-      await recordTraceEvent(pool, run.id, "use_case_subagent_started", {
-        requirement,
-        confirmedScenarios: scenarioAssets.map((asset) => ({
-          kind: asset.kind,
-          title: asset.title,
-          description: asset.description,
-        })),
-      });
-
-      const useCaseResult = await runUseCaseAnalysis(
-        pool,
-        requirement,
-        scenarioAssets,
-      );
-
-      await recordAnalysisToolTrace(pool, run.id, {
-        eventPrefix: "use_case_",
-        skillName: "use-case-analysis",
-        queryToolName: "query_use_case_library",
-        libraryEventName: "use_case_library_queried",
-      }, useCaseResult);
-
-      await saveUseCaseProposals(
-        pool,
-        run.id,
-        useCaseResult.proposals,
-        scenarioAssets,
-      );
-
-      await recordTraceEvent(pool, run.id, "use_case_proposals_generated", {
-        proposals: useCaseResult.proposals,
-        callCount: useCaseResult.callCount,
-      });
-
-      console.error("Proposed use cases:");
-      for (const proposal of useCaseResult.proposals) {
-        console.error(
-          `- [${proposal.kind}] ${proposal.title}: ${proposal.description}`,
-        );
-      }
-
-      await recordTraceEvent(pool, run.id, "use_case_confirmation_requested", {
-        proposals: useCaseResult.proposals,
-      });
-
-      useCaseConfirmed = await confirmation.confirm("use case");
-
-      await recordTraceEvent(pool, run.id, "use_case_confirmation_received", {
-        confirmed: useCaseConfirmed,
-      });
-
-      useCaseAssets = await settleUseCaseProposals(
-        pool,
-        run.id,
-        useCaseConfirmed,
-      );
-
-      await recordTraceEvent(pool, run.id, "use_case_assets_persisted", {
-        count: useCaseAssets.length,
-        assets: useCaseAssets,
-      });
-    }
-
-    const status = scenarioConfirmed && useCaseConfirmed
+    const status =
+      scenarioStage.confirmed && useCaseStage.confirmed && featureStage.confirmed
       ? "succeeded"
       : "rejected";
     await completeAnalysisRun(pool, run.id, status);
@@ -304,6 +387,7 @@ async function main(): Promise<void> {
       status,
       scenarioAssetCount: scenarioAssets.length,
       useCaseAssetCount: useCaseAssets.length,
+      featureAssetCount: featureAssets.length,
     });
 
     const result: CliResult = {
@@ -311,6 +395,7 @@ async function main(): Promise<void> {
       status,
       scenarioAssetCount: scenarioAssets.length,
       useCaseAssetCount: useCaseAssets.length,
+      featureAssetCount: featureAssets.length,
       confirmedScenarios: scenarioAssets.map((asset) => ({
         kind: asset.kind,
         title: asset.title,
@@ -319,10 +404,17 @@ async function main(): Promise<void> {
         kind: asset.kind,
         title: asset.title,
       })),
+      confirmedFeatures: featureAssets.map((asset) => ({
+        kind: asset.kind,
+        title: asset.title,
+      })),
     };
 
     console.log(JSON.stringify(result));
-    process.exitCode = scenarioConfirmed && useCaseConfirmed ? 0 : 2;
+    process.exitCode =
+      scenarioStage.confirmed && useCaseStage.confirmed && featureStage.confirmed
+        ? 0
+        : 2;
   } catch (error) {
     if (runId) {
       await recordTraceEvent(pool, runId, "analysis_run_failed", {

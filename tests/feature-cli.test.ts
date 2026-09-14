@@ -7,13 +7,13 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { Pool } from "pg";
 
-test("use case CLI proposes and persists confirmed use cases", async () => {
+test("feature CLI proposes and persists confirmed features", async () => {
   const isolatedHome = await mkdtemp(path.join(tmpdir(), "baize-agent-"));
   const databaseUrl = process.env.DATABASE_URL;
 
   assert.ok(
     databaseUrl,
-    "DATABASE_URL must be set for the use case CLI integration test",
+    "DATABASE_URL must be set for the feature CLI integration test",
   );
 
   const child = spawn(
@@ -51,13 +51,15 @@ test("use case CLI proposes and persists confirmed use cases", async () => {
   assert.equal(exitCode, 0);
   assert.match(stderr, /Confirm scenario proposals\?/);
   assert.match(stderr, /Confirm use case proposals\?/);
+  assert.match(stderr, /Confirm feature proposals\?/);
 
   const result = JSON.parse(stdout) as {
     runId: string;
     status: string;
     scenarioAssetCount: number;
     useCaseAssetCount: number;
-    confirmedUseCases: Array<{
+    featureAssetCount: number;
+    confirmedFeatures: Array<{
       kind: string;
       title: string;
     }>;
@@ -66,43 +68,33 @@ test("use case CLI proposes and persists confirmed use cases", async () => {
   assert.equal(result.status, "succeeded");
   assert.equal(result.scenarioAssetCount, 2);
   assert.equal(result.useCaseAssetCount, 2);
+  assert.equal(result.featureAssetCount, 2);
   assert.deepEqual(
-    [...result.confirmedUseCases].sort((a, b) => a.title.localeCompare(b.title)),
+    [...result.confirmedFeatures].sort((a, b) => a.title.localeCompare(b.title)),
     [
-      { kind: "new", title: "Share dashboard with a teammate" },
-      { kind: "related", title: "View dashboard on desktop" },
+      { kind: "affected", title: "Dashboard access control" },
+      { kind: "new", title: "Dashboard sharing permissions" },
     ],
   );
 
   const pool = new Pool({ connectionString: databaseUrl });
 
   try {
-    const useCases = await pool.query(
-      `SELECT uc.title, s.name AS scenario_name
-       FROM use_case_nodes uc
-       JOIN scenario_nodes s ON s.id = uc.scenario_id
-       ORDER BY uc.title`,
+    const features = await pool.query(
+      "SELECT title FROM feature_nodes ORDER BY title",
     );
 
-    assert.ok(useCases.rows.length >= 2);
+    assert.ok(features.rows.length >= 3);
     assert.ok(
-      useCases.rows.some(
-        (row) =>
-          row.title === "View dashboard on desktop" &&
-          row.scenario_name === "View dashboard",
-      ),
+      features.rows.some((row) => row.title === "Dashboard access control"),
     );
     assert.ok(
-      useCases.rows.some(
-        (row) =>
-          row.title === "Share dashboard with a teammate" &&
-          row.scenario_name === "Share dashboard",
-      ),
+      features.rows.some((row) => row.title === "Dashboard sharing permissions"),
     );
 
     const proposals = await pool.query(
       `SELECT kind, title, status
-       FROM use_case_proposals
+       FROM feature_proposals
        WHERE run_id = $1
        ORDER BY title`,
       [result.runId],
@@ -110,28 +102,37 @@ test("use case CLI proposes and persists confirmed use cases", async () => {
 
     assert.deepEqual(proposals.rows, [
       {
-        kind: "new",
-        title: "Share dashboard with a teammate",
+        kind: "affected",
+        title: "Dashboard access control",
         status: "confirmed",
       },
       {
-        kind: "related",
-        title: "View dashboard on desktop",
+        kind: "new",
+        title: "Dashboard sharing permissions",
         status: "confirmed",
       },
     ]);
 
     const assets = await pool.query(
-      `SELECT kind, title
-       FROM use_case_assets
-       WHERE run_id = $1
-       ORDER BY title`,
+      `SELECT f.kind, f.title, uc.title AS use_case_title
+       FROM feature_assets f
+       JOIN use_case_assets uc ON uc.id = f.use_case_asset_id
+       WHERE f.run_id = $1
+       ORDER BY f.title`,
       [result.runId],
     );
 
     assert.deepEqual(assets.rows, [
-      { kind: "new", title: "Share dashboard with a teammate" },
-      { kind: "related", title: "View dashboard on desktop" },
+      {
+        kind: "affected",
+        title: "Dashboard access control",
+        use_case_title: "Share dashboard with a teammate",
+      },
+      {
+        kind: "new",
+        title: "Dashboard sharing permissions",
+        use_case_title: "Share dashboard with a teammate",
+      },
     ]);
 
     const trace = await pool.query(
@@ -144,13 +145,13 @@ test("use case CLI proposes and persists confirmed use cases", async () => {
     const eventTypes = trace.rows.map((row) => row.event_type);
 
     for (const expectedEvent of [
-      "use_case_subagent_started",
-      "use_case_skill_loaded",
-      "use_case_library_queried",
-      "use_case_proposals_generated",
-      "use_case_confirmation_requested",
-      "use_case_confirmation_received",
-      "use_case_assets_persisted",
+      "feature_subagent_started",
+      "feature_skill_loaded",
+      "feature_library_queried",
+      "feature_proposals_generated",
+      "feature_confirmation_requested",
+      "feature_confirmation_received",
+      "feature_assets_persisted",
       "analysis_run_completed",
     ]) {
       assert.ok(
@@ -159,15 +160,42 @@ test("use case CLI proposes and persists confirmed use cases", async () => {
       );
     }
 
-    const startedEvent = trace.rows.find(
-      (row) => row.event_type === "use_case_subagent_started",
+    const toolCalls = trace.rows.filter(
+      (row) => row.event_type === "feature_tool_call",
     );
-    const confirmedScenarios = (startedEvent.payload as {
-      confirmedScenarios?: Array<{ title?: string }>;
-    }).confirmedScenarios;
 
     assert.ok(
-      confirmedScenarios?.some((scenario) => scenario.title === "Share dashboard"),
+      toolCalls.some(
+        (row) =>
+          (row.payload as { toolName?: string }).toolName ===
+          "query_feature_library",
+      ),
+    );
+
+    const libraryResult = trace.rows.find(
+      (row) =>
+        row.event_type === "feature_tool_result" &&
+        (row.payload as { toolName?: string }).toolName ===
+          "query_feature_library",
+    );
+    const libraryCount = (
+      (libraryResult.payload as { result?: { details?: { count?: number } } })
+        .result ?? {}
+    ).details?.count;
+
+    assert.ok(libraryCount !== undefined && libraryCount >= 3);
+
+    const startedEvent = trace.rows.find(
+      (row) => row.event_type === "feature_subagent_started",
+    );
+    const confirmedUseCases = (startedEvent.payload as {
+      confirmedUseCases?: Array<{ title?: string }>;
+    }).confirmedUseCases;
+
+    assert.ok(
+      confirmedUseCases?.some(
+        (useCase) => useCase.title === "Share dashboard with a teammate",
+      ),
     );
   } finally {
     await pool.end();
