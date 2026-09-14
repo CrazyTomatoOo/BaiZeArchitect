@@ -28,7 +28,7 @@ services:
       [
         "sh",
         "-c",
-        "printf 'y\\n' | node dist/cli.js 'Add dashboard sharing'"
+        "printf 'y\\ny\\n' | node dist/cli.js 'Add dashboard sharing'"
       ]
 
   test:

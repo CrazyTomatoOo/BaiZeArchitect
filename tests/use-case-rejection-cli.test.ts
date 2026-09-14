@@ -7,13 +7,13 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { Pool } from "pg";
 
-test("scenario CLI proposes and persists confirmed scenarios", async () => {
+test("use case CLI rejects proposals without persisting assets", async () => {
   const isolatedHome = await mkdtemp(path.join(tmpdir(), "baize-agent-"));
   const databaseUrl = process.env.DATABASE_URL;
 
   assert.ok(
     databaseUrl,
-    "DATABASE_URL must be set for the scenario CLI integration test",
+    "DATABASE_URL must be set for the use case rejection CLI integration test",
   );
 
   const child = spawn(
@@ -42,80 +42,65 @@ test("scenario CLI proposes and persists confirmed scenarios", async () => {
   });
 
   child.stdin.write("y\n");
-  child.stdin.write("y\n");
+  child.stdin.write("n\n");
   child.stdin.end();
 
   const [exitCode] = await once(child, "close");
 
-  assert.equal(exitCode, 0);
+  assert.equal(exitCode, 2);
   assert.match(stderr, /Confirm scenario proposals\?/);
+  assert.match(stderr, /Confirm use case proposals\?/);
 
   const result = JSON.parse(stdout) as {
     runId: string;
     status: string;
     scenarioAssetCount: number;
-    confirmedScenarios: Array<{
-      kind: string;
-      title: string;
-    }>;
+    useCaseAssetCount: number;
+    confirmedUseCases: unknown[];
   };
 
-  assert.equal(result.status, "succeeded");
+  assert.equal(result.status, "rejected");
   assert.equal(result.scenarioAssetCount, 2);
-  assert.deepEqual(
-    [...result.confirmedScenarios].sort((a, b) => a.title.localeCompare(b.title)),
-    [
-      { kind: "new", title: "Share dashboard" },
-      { kind: "related", title: "View dashboard" },
-    ],
-  );
+  assert.equal(result.useCaseAssetCount, 0);
+  assert.deepEqual(result.confirmedUseCases, []);
 
   const pool = new Pool({ connectionString: databaseUrl });
 
   try {
-    const nodes = await pool.query(
-      "SELECT name FROM scenario_nodes ORDER BY name",
+    const scenarioAssets = await pool.query(
+      "SELECT id FROM scenario_assets WHERE run_id = $1",
+      [result.runId],
     );
 
-    assert.ok(nodes.rows.length >= 4);
-    assert.ok(nodes.rows.some((row) => row.name === "View dashboard"));
-    assert.ok(nodes.rows.some((row) => row.name === "Share dashboard"));
+    assert.equal(scenarioAssets.rows.length, 2);
 
     const proposals = await pool.query(
-      "SELECT kind, title, status FROM scenario_proposals WHERE run_id = $1 ORDER BY title",
+      "SELECT status FROM use_case_proposals WHERE run_id = $1",
       [result.runId],
     );
 
-    assert.deepEqual(proposals.rows, [
-      { kind: "new", title: "Share dashboard", status: "confirmed" },
-      { kind: "related", title: "View dashboard", status: "confirmed" },
-    ]);
+    assert.equal(proposals.rows.length, 2);
+    assert.ok(proposals.rows.every((row) => row.status === "rejected"));
 
     const assets = await pool.query(
-      "SELECT kind, title FROM scenario_assets WHERE run_id = $1 ORDER BY title",
+      "SELECT id FROM use_case_assets WHERE run_id = $1",
       [result.runId],
     );
 
-    assert.deepEqual(assets.rows, [
-      { kind: "new", title: "Share dashboard" },
-      { kind: "related", title: "View dashboard" },
-    ]);
+    assert.equal(assets.rows.length, 0);
 
     const trace = await pool.query(
-      "SELECT event_type FROM trace_events WHERE run_id = $1 ORDER BY id",
+      `SELECT event_type, payload
+       FROM trace_events
+       WHERE run_id = $1
+       ORDER BY id`,
       [result.runId],
     );
     const eventTypes = trace.rows.map((row) => row.event_type);
 
     for (const expectedEvent of [
-      "analysis_run_started",
-      "scenario_subagent_started",
-      "scenario_skill_loaded",
-      "scenario_tree_queried",
-      "scenario_proposals_generated",
-      "scenario_confirmation_requested",
-      "scenario_confirmation_received",
-      "scenario_assets_persisted",
+      "use_case_confirmation_requested",
+      "use_case_confirmation_received",
       "analysis_run_completed",
     ]) {
       assert.ok(
@@ -123,6 +108,15 @@ test("scenario CLI proposes and persists confirmed scenarios", async () => {
         `Expected trace event ${expectedEvent}; saw ${eventTypes.join(", ")}`,
       );
     }
+
+    const confirmationEvent = trace.rows.find(
+      (row) => row.event_type === "use_case_confirmation_received",
+    );
+
+    assert.equal(
+      (confirmationEvent.payload as { confirmed?: boolean }).confirmed,
+      false,
+    );
   } finally {
     await pool.end();
   }
