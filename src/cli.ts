@@ -7,6 +7,12 @@ import { runScenarioAnalysis } from "./agent/scenario.ts";
 import { runUseCaseAnalysis } from "./agent/use-case.ts";
 import { runFeatureAnalysis } from "./agent/feature.ts";
 import {
+  runAnalysisOrchestrator,
+  type AnalysisPlan,
+  type AnalysisPlanStage,
+  type AnalysisStageName,
+} from "./agent/orchestrator.ts";
+import {
   completeAnalysisRun,
   createAnalysisRun,
   failAnalysisRun,
@@ -144,6 +150,7 @@ interface AnalysisStageConfig<
   TAsset,
 > {
   stage: "scenario" | "use case" | "feature";
+  planStage: AnalysisPlanStage;
   proposalLabel: string;
   startEventName: string;
   startPayload: Record<string, unknown>;
@@ -151,6 +158,25 @@ interface AnalysisStageConfig<
   toolTrace: ToolTraceConfig;
   saveProposals: (proposals: TProposal[]) => Promise<void>;
   settleProposals: (confirmed: boolean) => Promise<TAsset[]>;
+}
+
+function plannedStageName(
+  stage: "scenario" | "use case" | "feature",
+): AnalysisStageName {
+  return stage === "use case" ? "use_case" : stage;
+}
+
+function getPlannedStage(
+  analysisPlan: AnalysisPlan,
+  name: AnalysisStageName,
+): AnalysisPlanStage {
+  const planStage = analysisPlan.stages.find((stage) => stage.name === name);
+
+  if (!planStage) {
+    throw new Error(`Analysis plan is missing stage: ${name}`);
+  }
+
+  return planStage;
 }
 
 async function recordAnalysisToolTrace(
@@ -198,8 +224,13 @@ async function runAnalysisStage<TProposal extends StageProposal, TAsset>(
   confirmation: ConfirmationReader,
   config: AnalysisStageConfig<TProposal, TAsset>,
 ): Promise<StageOutcome<TAsset>> {
+  if (config.planStage.name !== plannedStageName(config.stage)) {
+    throw new Error(`Analysis plan stage does not match ${config.stage} stage`);
+  }
+
   await recordTraceEvent(pool, runId, config.startEventName, {
     ...config.startPayload,
+    planStage: config.planStage,
   });
 
   const result = await config.runAnalysis();
@@ -289,8 +320,32 @@ async function main(): Promise<void> {
       requirement,
     });
 
+    await recordTraceEvent(pool, run.id, "orchestrator_subagent_started", {
+      requirement,
+    });
+
+    const orchestratorResult = await runAnalysisOrchestrator(requirement);
+
+    await recordAnalysisToolTrace(pool, run.id, {
+      eventPrefix: "orchestrator_",
+      skillName: "analysis-orchestration",
+      queryToolName: "query_analysis_contract",
+      libraryEventName: "analysis_contract_queried",
+    }, orchestratorResult);
+
+    const analysisPlan = orchestratorResult.result;
+    const scenarioPlanStage = getPlannedStage(analysisPlan, "scenario");
+    const useCasePlanStage = getPlannedStage(analysisPlan, "use_case");
+    const featurePlanStage = getPlannedStage(analysisPlan, "feature");
+
+    await recordTraceEvent(pool, run.id, "analysis_plan_created", {
+      stages: analysisPlan.stages,
+      callCount: orchestratorResult.callCount,
+    });
+
     const scenarioStage = await runAnalysisStage(pool, run.id, confirmation, {
       stage: "scenario",
+      planStage: scenarioPlanStage,
       proposalLabel: "scenarios",
       startEventName: "scenario_subagent_started",
       startPayload: { requirement },
@@ -311,6 +366,7 @@ async function main(): Promise<void> {
     const useCaseStage = scenarioStage.confirmed
       ? await runAnalysisStage(pool, run.id, confirmation, {
           stage: "use case",
+          planStage: useCasePlanStage,
           proposalLabel: "use cases",
           startEventName: "use_case_subagent_started",
           startPayload: {
@@ -346,6 +402,7 @@ async function main(): Promise<void> {
       scenarioStage.confirmed && useCaseStage.confirmed
         ? await runAnalysisStage(pool, run.id, confirmation, {
             stage: "feature",
+            planStage: featurePlanStage,
             proposalLabel: "features",
             startEventName: "feature_subagent_started",
             startPayload: {

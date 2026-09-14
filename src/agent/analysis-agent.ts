@@ -25,15 +25,15 @@ export interface AnalysisToolResult {
   isError: boolean;
 }
 
-export interface AnalysisAgentResult<TProposal> {
-  proposals: TProposal[];
+export interface FauxAgentResult<TResult> {
+  result: TResult;
   toolCalls: AnalysisToolCall[];
   toolResults: AnalysisToolResult[];
   text: string;
   callCount: number;
 }
 
-export interface AnalysisAgentConfig<TProposal> {
+export interface FauxAgentConfig<TResult> {
   skillName: string;
   systemPrompt: string;
   queryToolName: string;
@@ -42,6 +42,16 @@ export interface AnalysisAgentConfig<TProposal> {
   queryData: () => Promise<unknown[]>;
   prompt: string;
   finalResponse: unknown;
+  parseResult: (text: string) => TResult;
+}
+
+export interface AnalysisAgentResult<TProposal>
+  extends Omit<FauxAgentResult<TProposal[]>, "result"> {
+  proposals: TProposal[];
+}
+
+export interface AnalysisAgentConfig<TProposal>
+  extends Omit<FauxAgentConfig<TProposal[]>, "parseResult"> {
   parseProposals: (text: string) => TProposal[];
 }
 
@@ -82,9 +92,9 @@ function extractAssistantText(messages: unknown[]): string {
   return "";
 }
 
-export async function runFauxAnalysisAgent<TProposal>(
-  config: AnalysisAgentConfig<TProposal>,
-): Promise<AnalysisAgentResult<TProposal>> {
+export async function runFauxAgent<TResult>(
+  config: FauxAgentConfig<TResult>,
+): Promise<FauxAgentResult<TResult>> {
   const { faux, modelRuntime } = await createFauxRuntime();
 
   try {
@@ -189,7 +199,7 @@ export async function runFauxAnalysisAgent<TProposal>(
       const finalText = extractAssistantText(session.state.messages) || text;
 
       return {
-        proposals: config.parseProposals(finalText),
+        result: config.parseResult(finalText),
         toolCalls,
         toolResults,
         text: finalText,
@@ -201,4 +211,19 @@ export async function runFauxAnalysisAgent<TProposal>(
   } finally {
     faux.unregister();
   }
+}
+
+export async function runFauxAnalysisAgent<TProposal>(
+  config: AnalysisAgentConfig<TProposal>,
+): Promise<AnalysisAgentResult<TProposal>> {
+  const { parseProposals, ...agentConfig } = config;
+  const { result, ...agentResult } = await runFauxAgent({
+    ...agentConfig,
+    parseResult: parseProposals,
+  });
+
+  return {
+    ...agentResult,
+    proposals: result,
+  };
 }
