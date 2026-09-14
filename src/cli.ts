@@ -14,6 +14,7 @@ import {
 } from "./agent/orchestrator.ts";
 import { McpToolClient } from "./mcp.ts";
 import {
+  cancelAnalysisRun,
   completeAnalysisRun,
   createAnalysisRun,
   failAnalysisRun,
@@ -29,6 +30,11 @@ import {
   type UseCaseAsset,
   type FeatureAsset,
 } from "./db.ts";
+import {
+  CancellationError,
+  errorMessage,
+  failureCodeForError,
+} from "./errors.ts";
 
 interface CliResult {
   runId: string;
@@ -52,12 +58,64 @@ interface CliResult {
 
 type ConfirmationResolver = (line: string) => void;
 
+class CancellationController {
+  private rejectCancellation!: (error: CancellationError) => void;
+  private readonly handlers = new Map<NodeJS.Signals, () => void>();
+  private readonly controller = new AbortController();
+  readonly promise: Promise<never>;
+
+  constructor() {
+    this.promise = new Promise<never>((_, reject) => {
+      this.rejectCancellation = reject;
+    });
+    this.promise.catch(() => undefined);
+
+    for (const signal of ["SIGINT", "SIGTERM"] as const) {
+      this.handlers.set(signal, () => this.request(signal));
+    }
+  }
+
+  get signal(): AbortSignal {
+    return this.controller.signal;
+  }
+
+  install(): void {
+    for (const [signal, handler] of this.handlers) {
+      process.on(signal, handler);
+    }
+  }
+
+  dispose(): void {
+    for (const [signal, handler] of this.handlers) {
+      process.off(signal, handler);
+    }
+  }
+
+  request(signal: "SIGINT" | "SIGTERM"): void {
+    if (this.signal.aborted) {
+      return;
+    }
+
+    const error = new CancellationError(signal);
+    this.controller.abort(error);
+    this.rejectCancellation(error);
+  }
+
+  throwIfRequested(): void {
+    if (this.signal.aborted) {
+      throw this.signal.reason instanceof CancellationError
+        ? this.signal.reason
+        : new CancellationError("SIGINT");
+    }
+  }
+}
+
 class ConfirmationReader {
   private readonly lines: string[] = [];
   private readonly waiters: ConfirmationResolver[] = [];
   private readonly readline: ReadlineInterface;
 
-  constructor() {
+  constructor(private readonly cancellation: CancellationController) {
     this.readline = createInterface({
       input: process.stdin,
       terminal: false,
@@ -80,7 +138,10 @@ class ConfirmationReader {
     stage: "scenario" | "use case" | "feature",
   ): Promise<boolean> {
     process.stderr.write(`Confirm ${stage} proposals? [y/N] `);
-    const answer = await this.readLine();
+    const answer = await Promise.race([
+      this.readLine(),
+      this.cancellation.promise,
+    ]);
 
     return answer.trim().toLowerCase() === "y" ||
       answer.trim().toLowerCase() === "yes";
@@ -223,8 +284,11 @@ async function runAnalysisStage<TProposal extends StageProposal, TAsset>(
   pool: Pool,
   runId: string,
   confirmation: ConfirmationReader,
+  cancellation: CancellationController,
   config: AnalysisStageConfig<TProposal, TAsset>,
 ): Promise<StageOutcome<TAsset>> {
+  cancellation.throwIfRequested();
+
   if (config.planStage.name !== plannedStageName(config.stage)) {
     throw new Error(`Analysis plan stage does not match ${config.stage} stage`);
   }
@@ -235,9 +299,13 @@ async function runAnalysisStage<TProposal extends StageProposal, TAsset>(
   });
 
   const result = await config.runAnalysis();
+  cancellation.throwIfRequested();
 
   await recordAnalysisToolTrace(pool, runId, config.toolTrace, result);
+  cancellation.throwIfRequested();
+
   await config.saveProposals(result.proposals);
+  cancellation.throwIfRequested();
 
   await recordTraceEvent(
     pool,
@@ -266,6 +334,7 @@ async function runAnalysisStage<TProposal extends StageProposal, TAsset>(
   );
 
   const confirmed = await confirmation.confirm(config.stage);
+  cancellation.throwIfRequested();
 
   await recordTraceEvent(
     pool,
@@ -277,6 +346,7 @@ async function runAnalysisStage<TProposal extends StageProposal, TAsset>(
   );
 
   const assets = await config.settleProposals(confirmed);
+  cancellation.throwIfRequested();
 
   await recordTraceEvent(
     pool,
@@ -309,13 +379,19 @@ async function main(): Promise<void> {
   }
 
   const pool = new Pool({ connectionString: databaseUrl });
-  const confirmation = new ConfirmationReader();
+  const cancellation = new CancellationController();
+  const confirmation = new ConfirmationReader(cancellation);
   let runId: string | undefined;
+
+  cancellation.install();
 
   try {
     await initializeSchema(pool);
+    cancellation.throwIfRequested();
+
     const run = await createAnalysisRun(pool, requirement);
     runId = run.id;
+    cancellation.throwIfRequested();
 
     await recordTraceEvent(pool, run.id, "analysis_run_started", {
       requirement,
@@ -325,7 +401,13 @@ async function main(): Promise<void> {
       requirement,
     });
 
-    const orchestratorResult = await runAnalysisOrchestrator(requirement);
+    const orchestratorPromise = runAnalysisOrchestrator(requirement);
+    orchestratorPromise.catch(() => undefined);
+    const orchestratorResult = await Promise.race([
+      orchestratorPromise,
+      cancellation.promise,
+    ]);
+    cancellation.throwIfRequested();
 
     await recordAnalysisToolTrace(pool, run.id, {
       eventPrefix: "orchestrator_",
@@ -345,11 +427,19 @@ async function main(): Promise<void> {
     });
 
     const mcp = new McpToolClient(pool, run.id);
-    await mcp.start();
+    const mcpStart = mcp.start();
+    mcpStart.catch(() => undefined);
+    await Promise.race([mcpStart, cancellation.promise]);
+    cancellation.throwIfRequested();
 
     let scenarioStage;
     try {
-      scenarioStage = await runAnalysisStage(pool, run.id, confirmation, {
+      scenarioStage = await runAnalysisStage(
+        pool,
+        run.id,
+        confirmation,
+        cancellation,
+        {
         stage: "scenario",
         planStage: scenarioPlanStage,
         proposalLabel: "scenarios",
@@ -363,17 +453,33 @@ async function main(): Promise<void> {
           libraryEventName: "scenario_tree_queried",
         },
         saveProposals: (proposals) =>
-          saveScenarioProposals(pool, run.id, proposals),
+          saveScenarioProposals(
+            pool,
+            run.id,
+            proposals,
+            cancellation.signal,
+          ),
         settleProposals: (confirmed) =>
-          settleScenarioProposals(pool, run.id, confirmed),
-      });
+          settleScenarioProposals(
+            pool,
+            run.id,
+            confirmed,
+            cancellation.signal,
+          ),
+        },
+      );
     } finally {
       await mcp.close();
     }
     const scenarioAssets = scenarioStage.assets;
 
     const useCaseStage = scenarioStage.confirmed
-      ? await runAnalysisStage(pool, run.id, confirmation, {
+      ? await runAnalysisStage(
+          pool,
+          run.id,
+          confirmation,
+          cancellation,
+          {
           stage: "use case",
           planStage: useCasePlanStage,
           proposalLabel: "use cases",
@@ -400,16 +506,28 @@ async function main(): Promise<void> {
               run.id,
               proposals,
               scenarioAssets,
+              cancellation.signal,
             ),
           settleProposals: (confirmed) =>
-            settleUseCaseProposals(pool, run.id, confirmed),
-        })
+            settleUseCaseProposals(
+              pool,
+              run.id,
+              confirmed,
+              cancellation.signal,
+            ),
+          },
+        )
       : { assets: [] as UseCaseAsset[], confirmed: false };
     const useCaseAssets = useCaseStage.assets;
 
     const featureStage =
       scenarioStage.confirmed && useCaseStage.confirmed
-        ? await runAnalysisStage(pool, run.id, confirmation, {
+        ? await runAnalysisStage(
+            pool,
+            run.id,
+            confirmation,
+            cancellation,
+            {
             stage: "feature",
             planStage: featurePlanStage,
             proposalLabel: "features",
@@ -436,10 +554,17 @@ async function main(): Promise<void> {
                 run.id,
                 proposals,
                 useCaseAssets,
+                cancellation.signal,
               ),
             settleProposals: (confirmed) =>
-              settleFeatureProposals(pool, run.id, confirmed),
-          })
+              settleFeatureProposals(
+                pool,
+                run.id,
+                confirmed,
+                cancellation.signal,
+              ),
+            },
+          )
         : { assets: [] as FeatureAsset[], confirmed: false };
     const featureAssets = featureStage.assets;
 
@@ -482,16 +607,45 @@ async function main(): Promise<void> {
         ? 0
         : 2;
   } catch (error) {
-    if (runId) {
-      await recordTraceEvent(pool, runId, "analysis_run_failed", {
-        error: error instanceof Error ? error.message : String(error),
-      });
-      await failAnalysisRun(pool, runId);
+    if (error instanceof CancellationError) {
+      if (runId) {
+        try {
+          await recordTraceEvent(pool, runId, "analysis_run_cancelled", {
+            signal: error.signal,
+            error: error.message,
+          });
+          await cancelAnalysisRun(pool, runId);
+        } catch (finalizationError) {
+          console.error(
+            `Failed to record cancellation: ${errorMessage(finalizationError)}`,
+          );
+        }
+      }
+
+      process.exitCode = error.signal === "SIGINT" ? 130 : 143;
+      return;
     }
 
-    console.error(error instanceof Error ? error.message : String(error));
+    const failureCode = failureCodeForError(error);
+
+    if (runId) {
+      try {
+        await recordTraceEvent(pool, runId, "analysis_run_failed", {
+          failureCode,
+          error: errorMessage(error),
+        });
+        await failAnalysisRun(pool, runId, failureCode);
+      } catch (finalizationError) {
+        console.error(
+          `Failed to record analysis failure: ${errorMessage(finalizationError)}`,
+        );
+      }
+    }
+
+    console.error(errorMessage(error));
     process.exitCode = 1;
   } finally {
+    cancellation.dispose();
     confirmation.close();
     await pool.end();
   }

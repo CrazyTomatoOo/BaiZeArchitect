@@ -12,7 +12,19 @@ import {
   fauxToolCall,
 } from "@earendil-works/pi-ai/providers/faux";
 import { Type } from "typebox";
+import {
+  AnalysisFailureError,
+  errorMessage,
+  failureCodeForError,
+  withTimeout,
+} from "../errors.ts";
 import { createFauxRuntime } from "./faux-runtime.ts";
+
+function toolTimeoutMs(): number {
+  const parsed = Number(process.env.BAIZE_TOOL_TIMEOUT_MS);
+
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : 5_000;
+}
 
 export interface AnalysisToolCall {
   name: string;
@@ -106,6 +118,10 @@ export async function runFauxAgent<TResult>(
     );
     const skillPath = path.join(skillDirectory, "SKILL.md");
 
+    const finalModelOutput =
+      process.env.BAIZE_FAUX_MODEL_OUTPUT ??
+      JSON.stringify(config.finalResponse);
+
     faux.setResponses([
       fauxAssistantMessage(
         [fauxToolCall("read", { path: skillPath })],
@@ -115,9 +131,10 @@ export async function runFauxAgent<TResult>(
         [fauxToolCall(config.queryToolName, {})],
         { stopReason: "toolUse" },
       ),
-      fauxAssistantMessage(JSON.stringify(config.finalResponse)),
+      fauxAssistantMessage(finalModelOutput),
     ]);
 
+    let queryError: AnalysisFailureError | undefined;
     const queryTool = defineTool({
       name: config.queryToolName,
       label: config.queryToolLabel,
@@ -125,19 +142,50 @@ export async function runFauxAgent<TResult>(
       promptSnippet: config.queryToolDescription,
       parameters: Type.Object({}),
       async execute() {
-        const data = await config.queryData();
+        try {
+          const data = await withTimeout(
+            config.queryData(),
+            toolTimeoutMs(),
+            `Analysis tool timed out: ${config.queryToolName}`,
+            "tool_timeout",
+          );
 
-        return {
-          content: [
-            {
-              type: "text" as const,
-              text: JSON.stringify(data),
+          return {
+            content: [
+              {
+                type: "text" as const,
+                text: JSON.stringify(data),
+              },
+            ],
+            details: {
+              count: data.length,
+              error: "",
             },
-          ],
-          details: {
-            count: data.length,
-          },
-        };
+          };
+        } catch (error) {
+          queryError = error instanceof AnalysisFailureError
+            ? error
+            : new AnalysisFailureError(
+              failureCodeForError(error) === "database_error"
+                ? "database_error"
+                : "tool_failure",
+              errorMessage(error),
+              { cause: error },
+            );
+
+          return {
+            content: [
+              {
+                type: "text" as const,
+                text: errorMessage(queryError),
+              },
+            ],
+            details: {
+              count: 0,
+              error: errorMessage(queryError),
+            },
+          };
+        }
       },
     });
 
@@ -196,15 +244,34 @@ export async function runFauxAgent<TResult>(
 
       await session.prompt(config.prompt);
 
+      if (queryError) {
+        throw queryError;
+      }
+
       const finalText = extractAssistantText(session.state.messages) || text;
       const failedToolResult = toolResults.find((result) => result.isError);
 
       if (failedToolResult) {
-        throw new Error(`Analysis tool failed: ${failedToolResult.name}`);
+        throw new AnalysisFailureError(
+          "tool_failure",
+          `Analysis tool failed: ${failedToolResult.name}`,
+        );
+      }
+
+      let result: TResult;
+
+      try {
+        result = config.parseResult(finalText);
+      } catch (error) {
+        throw new AnalysisFailureError(
+          "invalid_model_output",
+          errorMessage(error),
+          { cause: error },
+        );
       }
 
       return {
-        result: config.parseResult(finalText),
+        result,
         toolCalls,
         toolResults,
         text: finalText,

@@ -3,6 +3,11 @@ import path from "node:path";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 import type { Pool } from "pg";
+import {
+  AnalysisFailureError,
+  failureCodeForError,
+  withTimeout,
+} from "./errors.ts";
 import { recordTraceEvent } from "./db.ts";
 
 export type McpToolResult = Awaited<ReturnType<Client["callTool"]>>;
@@ -11,6 +16,20 @@ interface McpServerConfig {
   command: string;
   args?: string[];
   env?: Record<string, string>;
+}
+
+function positiveEnvInteger(name: string, fallback: number): number {
+  const parsed = Number(process.env[name]);
+
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
+}
+
+function mcpStartTimeoutMs(): number {
+  return positiveEnvInteger("BAIZE_MCP_START_TIMEOUT_MS", 5_000);
+}
+
+function mcpTimeoutMs(): number {
+  return positiveEnvInteger("BAIZE_MCP_TIMEOUT_MS", 5_000);
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -86,19 +105,42 @@ export class McpToolClient {
         name: "baize-agent-mvp",
         version: "0.1.0",
       });
-      await this.client.connect(this.transport);
+      await withTimeout(
+        this.client.connect(this.transport),
+        mcpStartTimeoutMs(),
+        `MCP server timed out: ${this.serverName}`,
+        "mcp_timeout",
+      );
       await recordTraceEvent(this.pool, this.runId, "mcp_server_started", {
         server: this.serverName,
       });
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
+      const timeout = error instanceof AnalysisFailureError &&
+        error.failureCode === "mcp_timeout";
+      const classifiedCode = failureCodeForError(error);
+      const failureCode = timeout
+        ? "mcp_timeout"
+        : classifiedCode === "database_error"
+          ? "database_error"
+          : "mcp_failure";
 
-      await recordTraceEvent(this.pool, this.runId, "mcp_server_failed", {
-        server: this.serverName,
-        error: message,
-      });
-      await this.close();
-      throw new Error(`MCP server failed to start: ${message}`);
+      await recordTraceEvent(
+        this.pool,
+        this.runId,
+        timeout ? "mcp_server_timeout" : "mcp_server_failed",
+        {
+          server: this.serverName,
+          error: message,
+          timeoutMs: timeout ? mcpStartTimeoutMs() : undefined,
+        },
+      );
+      await this.close().catch(() => undefined);
+      throw new AnalysisFailureError(
+        failureCode,
+        `MCP server failed to start: ${message}`,
+        { cause: error },
+      );
     }
   }
 
@@ -119,10 +161,15 @@ export class McpToolClient {
     });
 
     try {
-      const result = await this.client.callTool({
-        name: toolName,
-        arguments: args,
-      });
+      const result = await withTimeout(
+        this.client.callTool({
+          name: toolName,
+          arguments: args,
+        }),
+        mcpTimeoutMs(),
+        `MCP tool timed out: ${toolName}`,
+        "mcp_timeout",
+      );
 
       await recordTraceEvent(this.pool, this.runId, "mcp_tool_result", {
         server: this.serverName,
@@ -132,14 +179,36 @@ export class McpToolClient {
       });
 
       if (result.isError === true) {
-        throw new Error(`MCP tool failed: ${toolName}`);
+        throw new AnalysisFailureError(
+          "mcp_failure",
+          `Analysis tool failed: ${toolName}`,
+        );
       }
 
       return result;
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
+      const timeout = error instanceof AnalysisFailureError &&
+        error.failureCode === "mcp_timeout";
+      const classifiedCode = failureCodeForError(error);
+      const failureCode = timeout
+        ? "mcp_timeout"
+        : classifiedCode === "database_error"
+          ? "database_error"
+          : "mcp_failure";
 
-      if (!message.startsWith("MCP tool failed:")) {
+      if (timeout) {
+        await recordTraceEvent(this.pool, this.runId, "mcp_tool_timeout", {
+          server: this.serverName,
+          toolName,
+          timeoutMs: mcpTimeoutMs(),
+          error: message,
+        });
+        await this.close().catch(() => undefined);
+        throw error;
+      }
+
+      if (!(error instanceof AnalysisFailureError)) {
         await recordTraceEvent(this.pool, this.runId, "mcp_tool_result", {
           server: this.serverName,
           toolName,
@@ -148,7 +217,11 @@ export class McpToolClient {
           },
           isError: true,
         });
-        throw new Error(`MCP tool failed: ${toolName}: ${message}`);
+        throw new AnalysisFailureError(
+          failureCode,
+          `Analysis tool failed: ${toolName}: ${message}`,
+          { cause: error },
+        );
       }
 
       throw error;

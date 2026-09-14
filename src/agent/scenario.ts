@@ -1,4 +1,5 @@
 import type { ScenarioProposalInput } from "../db.ts";
+import { AnalysisFailureError } from "../errors.ts";
 import {
   runFauxAnalysisAgent,
   type AnalysisAgentResult,
@@ -23,7 +24,17 @@ export async function runScenarioAnalysis(
       };
 
       if (!Array.isArray(structured.nodes)) {
-        throw new Error("MCP query_scenario_tree result is missing nodes");
+        throw new AnalysisFailureError(
+          "mcp_failure",
+          "MCP query_scenario_tree result is missing nodes",
+        );
+      }
+
+      if (structured.nodes.length === 0) {
+        throw new AnalysisFailureError(
+          "missing_data",
+          "Scenario data is missing; verify the scenario library and request help before retrying",
+        );
       }
 
       return structured.nodes;

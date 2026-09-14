@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
-import { Pool } from "pg";
+import { type Pool, type QueryResult } from "pg";
+import { AnalysisFailureError, type AnalysisFailureCode } from "./errors.ts";
 
 export interface AnalysisRun {
   id: string;
@@ -75,6 +76,7 @@ export async function initializeSchema(pool: Pool): Promise<void> {
       id UUID PRIMARY KEY,
       requirement TEXT NOT NULL,
       status TEXT NOT NULL DEFAULT 'running',
+      failure_code TEXT,
       created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
       completed_at TIMESTAMPTZ
     );
@@ -205,6 +207,10 @@ export async function initializeSchema(pool: Pool): Promise<void> {
       ON feature_assets(run_id);
   `);
 
+  await pool.query(
+    "ALTER TABLE analysis_runs ADD COLUMN IF NOT EXISTS failure_code TEXT",
+  );
+
   await pool.query(`
     INSERT INTO scenario_nodes (id, parent_id, name, description)
     VALUES
@@ -273,11 +279,56 @@ export async function completeAnalysisRun(
 export async function failAnalysisRun(
   pool: Pool,
   runId: string,
+  failureCode: AnalysisFailureCode,
 ): Promise<void> {
   await pool.query(
-    "UPDATE analysis_runs SET status = 'failed', completed_at = now() WHERE id = $1",
+    "UPDATE analysis_runs SET status = 'failed', failure_code = $2, completed_at = now() WHERE id = $1",
+    [runId, failureCode],
+  );
+}
+
+export async function cancelAnalysisRun(
+  pool: Pool,
+  runId: string,
+): Promise<void> {
+  await pool.query(
+    "UPDATE analysis_runs SET status = 'cancelled', failure_code = 'cancelled', completed_at = now() WHERE id = $1",
     [runId],
   );
+}
+
+type TransactionQuery = (
+  text: string,
+  values?: unknown[],
+) => Promise<QueryResult>;
+
+async function withTransaction<T>(
+  pool: Pool,
+  operation: (query: TransactionQuery) => Promise<T>,
+  signal?: AbortSignal,
+): Promise<T> {
+  const client = await pool.connect();
+
+  try {
+    const query: TransactionQuery = (text, values = []) => {
+      signal?.throwIfAborted();
+      return client.query(text, values);
+    };
+
+    await query("BEGIN");
+    const result = await operation(query);
+    await query("COMMIT");
+    return result;
+  } catch (error) {
+    try {
+      await client.query("ROLLBACK");
+    } catch {
+      // Preserve the original operation failure for diagnosis.
+    }
+    throw error;
+  } finally {
+    client.release();
+  }
 }
 
 export async function listScenarioNodes(
@@ -333,64 +384,66 @@ export async function saveScenarioProposals(
   pool: Pool,
   runId: string,
   proposals: ScenarioProposalInput[],
+  signal?: AbortSignal,
 ): Promise<void> {
-  for (const proposal of proposals) {
-    let existingScenarioId: string | null = null;
+  await withTransaction(pool, async (query) => {
+    for (const proposal of proposals) {
+      let existingScenarioId: string | null = null;
 
-    if (proposal.kind === "related") {
-      const result = await pool.query(
-        "SELECT id FROM scenario_nodes WHERE name = $1",
-        [proposal.title],
-      );
+      if (proposal.kind === "related") {
+        const result = await query(
+          "SELECT id FROM scenario_nodes WHERE name = $1",
+          [proposal.title],
+        );
 
-      if (result.rows.length === 0) {
-        throw new Error(`Related scenario does not exist: ${proposal.title}`);
+        if (result.rows.length === 0) {
+          throw new AnalysisFailureError(
+            "missing_data",
+            `Related scenario does not exist: ${proposal.title}; verify the scenario library and retry`,
+          );
+        }
+
+        existingScenarioId = result.rows[0].id;
       }
 
-      existingScenarioId = result.rows[0].id;
+      await query(
+        `INSERT INTO scenario_proposals
+          (id, run_id, existing_scenario_id, title, description, kind)
+         VALUES ($1, $2, $3, $4, $5, $6)`,
+        [
+          randomUUID(),
+          runId,
+          existingScenarioId,
+          proposal.title,
+          proposal.description,
+          proposal.kind,
+        ],
+      );
     }
-
-    await pool.query(
-      `INSERT INTO scenario_proposals
-        (id, run_id, existing_scenario_id, title, description, kind)
-       VALUES ($1, $2, $3, $4, $5, $6)`,
-      [
-        randomUUID(),
-        runId,
-        existingScenarioId,
-        proposal.title,
-        proposal.description,
-        proposal.kind,
-      ],
-    );
-  }
+  }, signal);
 }
 
 export async function settleScenarioProposals(
   pool: Pool,
   runId: string,
   confirmed: boolean,
+  signal?: AbortSignal,
 ): Promise<ScenarioAsset[]> {
-  const client = await pool.connect();
-
-  try {
-    await client.query("BEGIN");
-
+  return withTransaction(pool, async (query) => {
     if (!confirmed) {
-      await client.query(
+      await query(
         "UPDATE scenario_proposals SET status = 'rejected' WHERE run_id = $1 AND status = 'proposed'",
         [runId],
       );
-      await client.query("COMMIT");
       return [];
     }
 
-    await client.query(
+    await query(
       "UPDATE scenario_proposals SET status = 'confirmed', confirmed_at = now() WHERE run_id = $1 AND status = 'proposed'",
       [runId],
     );
 
-    const proposals = await client.query(
+    const proposals = await query(
       `SELECT id, existing_scenario_id, title, description, kind
        FROM scenario_proposals
        WHERE run_id = $1 AND status = 'confirmed'`,
@@ -403,7 +456,7 @@ export async function settleScenarioProposals(
       let scenarioId = proposal.existing_scenario_id;
 
       if (proposal.kind === "new") {
-        const inserted = await client.query(
+        const inserted = await query(
           `INSERT INTO scenario_nodes (id, parent_id, name, description)
            VALUES ($1, NULL, $2, $3)
            ON CONFLICT (name) DO NOTHING
@@ -414,20 +467,20 @@ export async function settleScenarioProposals(
         scenarioId =
           inserted.rows[0]?.id ??
           (
-            await client.query(
+            await query(
               "SELECT id FROM scenario_nodes WHERE name = $1",
               [proposal.title],
             )
           ).rows[0].id;
 
-        await client.query(
+        await query(
           "UPDATE scenario_proposals SET existing_scenario_id = $2 WHERE id = $1",
           [proposal.id, scenarioId],
         );
       }
 
       const id = randomUUID();
-      await client.query(
+      await query(
         `INSERT INTO scenario_assets
           (id, run_id, proposal_id, existing_scenario_id, title, description, kind)
          VALUES ($1, $2, $3, $4, $5, $6, $7)`,
@@ -451,14 +504,8 @@ export async function settleScenarioProposals(
       });
     }
 
-    await client.query("COMMIT");
     return assets;
-  } catch (error) {
-    await client.query("ROLLBACK");
-    throw error;
-  } finally {
-    client.release();
-  }
+  }, signal);
 }
 
 export async function saveUseCaseProposals(
@@ -466,74 +513,77 @@ export async function saveUseCaseProposals(
   runId: string,
   proposals: UseCaseProposalInput[],
   scenarioAssets: ScenarioAsset[],
+  signal?: AbortSignal,
 ): Promise<void> {
-  for (const proposal of proposals) {
-    const scenarioAsset = scenarioAssets.find(
-      (asset) => asset.title === proposal.scenarioTitle,
-    );
-
-    if (!scenarioAsset) {
-      throw new Error(
-        `Use case proposal must use a confirmed scenario: ${proposal.scenarioTitle}`,
-      );
-    }
-
-    let existingUseCaseId: string | null = null;
-
-    if (proposal.kind === "related") {
-      const result = await pool.query(
-        "SELECT id FROM use_case_nodes WHERE title = $1",
-        [proposal.title],
+  await withTransaction(pool, async (query) => {
+    for (const proposal of proposals) {
+      const scenarioAsset = scenarioAssets.find(
+        (asset) => asset.title === proposal.scenarioTitle,
       );
 
-      if (result.rows.length === 0) {
-        throw new Error(`Related use case does not exist: ${proposal.title}`);
+      if (!scenarioAsset) {
+        throw new AnalysisFailureError(
+          "missing_data",
+          `Use case proposal must use a confirmed scenario: ${proposal.scenarioTitle}`,
+        );
       }
 
-      existingUseCaseId = result.rows[0].id;
-    }
+      let existingUseCaseId: string | null = null;
 
-    await pool.query(
-      `INSERT INTO use_case_proposals
-        (id, run_id, existing_use_case_id, scenario_asset_id, title, description, kind)
-       VALUES ($1, $2, $3, $4, $5, $6, $7)`,
-      [
-        randomUUID(),
-        runId,
-        existingUseCaseId,
-        scenarioAsset.id,
-        proposal.title,
-        proposal.description,
-        proposal.kind,
-      ],
-    );
-  }
+      if (proposal.kind === "related") {
+        const result = await query(
+          "SELECT id FROM use_case_nodes WHERE title = $1",
+          [proposal.title],
+        );
+
+        if (result.rows.length === 0) {
+          throw new AnalysisFailureError(
+            "missing_data",
+            `Related use case does not exist: ${proposal.title}; verify the use-case library and retry`,
+          );
+        }
+
+        existingUseCaseId = result.rows[0].id;
+      }
+
+      await query(
+        `INSERT INTO use_case_proposals
+          (id, run_id, existing_use_case_id, scenario_asset_id, title, description, kind)
+         VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+        [
+          randomUUID(),
+          runId,
+          existingUseCaseId,
+          scenarioAsset.id,
+          proposal.title,
+          proposal.description,
+          proposal.kind,
+        ],
+      );
+    }
+  }, signal);
 }
 
 export async function settleUseCaseProposals(
   pool: Pool,
   runId: string,
   confirmed: boolean,
+  signal?: AbortSignal,
 ): Promise<UseCaseAsset[]> {
-  const client = await pool.connect();
-
-  try {
-    await client.query("BEGIN");
-
+  return withTransaction(pool, async (query) => {
     if (!confirmed) {
-      await client.query(
+      await query(
         "UPDATE use_case_proposals SET status = 'rejected' WHERE run_id = $1 AND status = 'proposed'",
         [runId],
       );
-      await client.query("COMMIT");
       return [];
     }
 
-    await client.query(
+    await query(
       "UPDATE use_case_proposals SET status = 'confirmed', confirmed_at = now() WHERE run_id = $1 AND status = 'proposed'",
       [runId],
     );
-    const proposals = await client.query(
+    const proposals = await query(
       `SELECT p.id, p.existing_use_case_id, p.scenario_asset_id,
               p.title, p.description, p.kind, sa.existing_scenario_id AS scenario_id
        FROM use_case_proposals p
@@ -547,7 +597,7 @@ export async function settleUseCaseProposals(
       let useCaseId = proposal.existing_use_case_id;
 
       if (proposal.kind === "new") {
-        const inserted = await client.query(
+        const inserted = await query(
           `INSERT INTO use_case_nodes (id, scenario_id, title, description)
            VALUES ($1, $2, $3, $4)
            ON CONFLICT (title) DO NOTHING
@@ -558,20 +608,20 @@ export async function settleUseCaseProposals(
         useCaseId =
           inserted.rows[0]?.id ??
           (
-            await client.query(
+            await query(
               "SELECT id FROM use_case_nodes WHERE title = $1",
               [proposal.title],
             )
           ).rows[0].id;
 
-        await client.query(
+        await query(
           "UPDATE use_case_proposals SET existing_use_case_id = $2 WHERE id = $1",
           [proposal.id, useCaseId],
         );
       }
 
       const id = randomUUID();
-      await client.query(
+      await query(
         `INSERT INTO use_case_assets
           (id, run_id, proposal_id, existing_use_case_id, scenario_asset_id, title, description, kind)
          VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
@@ -595,14 +645,8 @@ export async function settleUseCaseProposals(
       });
     }
 
-    await client.query("COMMIT");
     return assets;
-  } catch (error) {
-    await client.query("ROLLBACK");
-    throw error;
-  } finally {
-    client.release();
-  }
+  }, signal);
 }
 
 export async function saveFeatureProposals(
@@ -610,75 +654,78 @@ export async function saveFeatureProposals(
   runId: string,
   proposals: FeatureProposalInput[],
   useCaseAssets: UseCaseAsset[],
+  signal?: AbortSignal,
 ): Promise<void> {
-  for (const proposal of proposals) {
-    const useCaseAsset = useCaseAssets.find(
-      (asset) => asset.title === proposal.useCaseTitle,
-    );
-
-    if (!useCaseAsset) {
-      throw new Error(
-        `Feature proposal must use a confirmed use case: ${proposal.useCaseTitle}`,
-      );
-    }
-
-    let existingFeatureId: string | null = null;
-
-    if (proposal.kind === "affected") {
-      const result = await pool.query(
-        "SELECT id FROM feature_nodes WHERE title = $1",
-        [proposal.title],
+  await withTransaction(pool, async (query) => {
+    for (const proposal of proposals) {
+      const useCaseAsset = useCaseAssets.find(
+        (asset) => asset.title === proposal.useCaseTitle,
       );
 
-      if (result.rows.length === 0) {
-        throw new Error(`Affected feature does not exist: ${proposal.title}`);
+      if (!useCaseAsset) {
+        throw new AnalysisFailureError(
+          "missing_data",
+          `Feature proposal must use a confirmed use case: ${proposal.useCaseTitle}`,
+        );
       }
 
-      existingFeatureId = result.rows[0].id;
-    }
+      let existingFeatureId: string | null = null;
 
-    await pool.query(
-      `INSERT INTO feature_proposals
-        (id, run_id, existing_feature_id, use_case_asset_id, title, description, kind)
-       VALUES ($1, $2, $3, $4, $5, $6, $7)`,
-      [
-        randomUUID(),
-        runId,
-        existingFeatureId,
-        useCaseAsset.id,
-        proposal.title,
-        proposal.description,
-        proposal.kind,
-      ],
-    );
-  }
+      if (proposal.kind === "affected") {
+        const result = await query(
+          "SELECT id FROM feature_nodes WHERE title = $1",
+          [proposal.title],
+        );
+
+        if (result.rows.length === 0) {
+          throw new AnalysisFailureError(
+            "missing_data",
+            `Affected feature does not exist: ${proposal.title}; verify the feature library and retry`,
+          );
+        }
+
+        existingFeatureId = result.rows[0].id;
+      }
+
+      await query(
+        `INSERT INTO feature_proposals
+          (id, run_id, existing_feature_id, use_case_asset_id, title, description, kind)
+         VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+        [
+          randomUUID(),
+          runId,
+          existingFeatureId,
+          useCaseAsset.id,
+          proposal.title,
+          proposal.description,
+          proposal.kind,
+        ],
+      );
+    }
+  }, signal);
 }
 
 export async function settleFeatureProposals(
   pool: Pool,
   runId: string,
   confirmed: boolean,
+  signal?: AbortSignal,
 ): Promise<FeatureAsset[]> {
-  const client = await pool.connect();
-
-  try {
-    await client.query("BEGIN");
-
+  return withTransaction(pool, async (query) => {
     if (!confirmed) {
-      await client.query(
+      await query(
         "UPDATE feature_proposals SET status = 'rejected' WHERE run_id = $1 AND status = 'proposed'",
         [runId],
       );
-      await client.query("COMMIT");
       return [];
     }
 
-    await client.query(
+    await query(
       "UPDATE feature_proposals SET status = 'confirmed', confirmed_at = now() WHERE run_id = $1 AND status = 'proposed'",
       [runId],
     );
 
-    const proposals = await client.query(
+    const proposals = await query(
       `SELECT id, existing_feature_id, use_case_asset_id,
               title, description, kind
        FROM feature_proposals
@@ -692,7 +739,7 @@ export async function settleFeatureProposals(
       let featureId = proposal.existing_feature_id;
 
       if (proposal.kind === "new") {
-        const inserted = await client.query(
+        const inserted = await query(
           `INSERT INTO feature_nodes (id, title, description)
            VALUES ($1, $2, $3)
            ON CONFLICT (title) DO NOTHING
@@ -703,20 +750,20 @@ export async function settleFeatureProposals(
         featureId =
           inserted.rows[0]?.id ??
           (
-            await client.query(
+            await query(
               "SELECT id FROM feature_nodes WHERE title = $1",
               [proposal.title],
             )
           ).rows[0].id;
 
-        await client.query(
+        await query(
           "UPDATE feature_proposals SET existing_feature_id = $2 WHERE id = $1",
           [proposal.id, featureId],
         );
       }
 
       const id = randomUUID();
-      await client.query(
+      await query(
         `INSERT INTO feature_assets
           (id, run_id, proposal_id, existing_feature_id, use_case_asset_id, title, description, kind)
          VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
@@ -740,12 +787,6 @@ export async function settleFeatureProposals(
       });
     }
 
-    await client.query("COMMIT");
     return assets;
-  } catch (error) {
-    await client.query("ROLLBACK");
-    throw error;
-  } finally {
-    client.release();
-  }
+  }, signal);
 }
