@@ -1,24 +1,39 @@
 import type { ScenarioProposalInput } from "../db.ts";
 import { AnalysisFailureError } from "../errors.ts";
 import {
-  runAnalysisAgent,
-  type AnalysisAgentResult,
-} from "./analysis-agent.ts";
+  runAnalysisSubagent,
+  type AnalysisSubagentDefinition,
+  type AnalysisSubagentResult,
+} from "./analysis-subagent.ts";
 import type { McpToolClient } from "../mcp.ts";
 
-export async function runScenarioAnalysis(
-  mcp: McpToolClient,
-  requirement: string,
-): Promise<AnalysisAgentResult<ScenarioProposalInput>> {
-  return runAnalysisAgent({
-    skillName: "scenario-analysis",
+interface ScenarioAnalysisInput {
+  mcp: McpToolClient;
+  requirement: string;
+}
+
+type ScenarioAnalysisResult = Omit<
+  AnalysisSubagentResult<ScenarioProposalInput[]>,
+  "result"
+> & {
+  proposals: ScenarioProposalInput[];
+};
+
+const scenarioAnalysisSubagent: AnalysisSubagentDefinition<
+  ScenarioAnalysisInput,
+  ScenarioProposalInput[]
+> = {
+  skill: {
+    name: "scenario-analysis",
     systemPrompt:
       "You are the BaiZe Scenario Analysis subagent. Use the scenario-analysis skill, query the scenario tree, and return only JSON with proposals.",
-    queryToolName: "query_scenario_tree",
-    queryToolLabel: "Query scenario tree",
-    queryToolDescription: "Query the full scenario tree from PostgreSQL.",
-    queryData: async () => {
-      const result = await mcp.callTool("query_scenario_tree", {});
+  },
+  queryTool: {
+    name: "query_scenario_tree",
+    label: "Query scenario tree",
+    description: "Query the full scenario tree from PostgreSQL.",
+    data: async (input) => {
+      const result = await input.mcp.callTool("query_scenario_tree", {});
       const structured = result.structuredContent as {
         nodes?: unknown[];
       };
@@ -39,24 +54,39 @@ export async function runScenarioAnalysis(
 
       return structured.nodes;
     },
-    prompt: requirement,
-    finalResponse: {
-      proposals: [
-        {
-          kind: "related",
-          title: "View dashboard",
-          description:
-            "Dashboard sharing extends the existing dashboard viewing scenario.",
-        },
-        {
-          kind: "new",
-          title: "Share dashboard",
-          description: "A user shares a dashboard with another user.",
-        },
-      ],
-    },
-    parseProposals: parseScenarioProposals,
-  });
+  },
+  prompt: (input) => input.requirement,
+  finalResponse: {
+    proposals: [
+      {
+        kind: "related",
+        title: "View dashboard",
+        description:
+          "Dashboard sharing extends the existing dashboard viewing scenario.",
+      },
+      {
+        kind: "new",
+        title: "Share dashboard",
+        description: "A user shares a dashboard with another user.",
+      },
+    ],
+  },
+  parseResult: parseScenarioProposals,
+};
+
+export async function runScenarioAnalysis(
+  mcp: McpToolClient,
+  requirement: string,
+): Promise<ScenarioAnalysisResult> {
+  const { result, ...agentResult } = await runAnalysisSubagent(
+    scenarioAnalysisSubagent,
+    { mcp, requirement },
+  );
+
+  return {
+    ...agentResult,
+    proposals: result,
+  };
 }
 
 function parseScenarioProposals(text: string): ScenarioProposalInput[] {

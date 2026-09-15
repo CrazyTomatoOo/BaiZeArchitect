@@ -5,50 +5,82 @@ import {
   type UseCaseAsset,
 } from "../db.ts";
 import {
-  runAnalysisAgent,
-  type AnalysisAgentResult,
-} from "./analysis-agent.ts";
+  runAnalysisSubagent,
+  type AnalysisSubagentDefinition,
+  type AnalysisSubagentResult,
+} from "./analysis-subagent.ts";
+
+interface FeatureAnalysisInput {
+  pool: Pool;
+  requirement: string;
+  confirmedUseCases: UseCaseAsset[];
+}
+
+type FeatureAnalysisResult = Omit<
+  AnalysisSubagentResult<FeatureProposalInput[]>,
+  "result"
+> & {
+  proposals: FeatureProposalInput[];
+};
+
+const featureAnalysisSubagent: AnalysisSubagentDefinition<
+  FeatureAnalysisInput,
+  FeatureProposalInput[]
+> = {
+  skill: {
+    name: "feature-analysis",
+    systemPrompt:
+      "You are the BaiZe Feature Analysis subagent. Use the feature-analysis skill, query the feature library, and return only JSON with proposals.",
+  },
+  queryTool: {
+    name: "query_feature_library",
+    label: "Query feature library",
+    description: "Query the full feature library from PostgreSQL.",
+    data: (input) => listFeatureNodes(input.pool),
+  },
+  prompt: (input) =>
+    JSON.stringify({
+      requirement: input.requirement,
+      confirmedUseCases: input.confirmedUseCases.map((useCase) => ({
+        title: useCase.title,
+        description: useCase.description,
+      })),
+    }),
+  finalResponse: {
+    proposals: [
+      {
+        kind: "affected",
+        title: "Dashboard access control",
+        description:
+          "Sharing a dashboard must respect and extend existing dashboard access rules.",
+        useCaseTitle: "Share dashboard with a teammate",
+      },
+      {
+        kind: "new",
+        title: "Dashboard sharing permissions",
+        description:
+          "A user grants and revokes another user's access to a dashboard.",
+        useCaseTitle: "Share dashboard with a teammate",
+      },
+    ],
+  },
+  parseResult: parseFeatureProposals,
+};
 
 export async function runFeatureAnalysis(
   pool: Pool,
   requirement: string,
   confirmedUseCases: UseCaseAsset[],
-): Promise<AnalysisAgentResult<FeatureProposalInput>> {
-  return runAnalysisAgent({
-    skillName: "feature-analysis",
-    systemPrompt:
-      "You are the BaiZe Feature Analysis subagent. Use the feature-analysis skill, query the feature library, and return only JSON with proposals.",
-    queryToolName: "query_feature_library",
-    queryToolLabel: "Query feature library",
-    queryToolDescription: "Query the full feature library from PostgreSQL.",
-    queryData: () => listFeatureNodes(pool),
-    prompt: JSON.stringify({
-      requirement,
-      confirmedUseCases: confirmedUseCases.map((useCase) => ({
-        title: useCase.title,
-        description: useCase.description,
-      })),
-    }),
-    finalResponse: {
-      proposals: [
-        {
-          kind: "affected",
-          title: "Dashboard access control",
-          description:
-            "Sharing a dashboard must respect and extend existing dashboard access rules.",
-          useCaseTitle: "Share dashboard with a teammate",
-        },
-        {
-          kind: "new",
-          title: "Dashboard sharing permissions",
-          description:
-            "A user grants and revokes another user's access to a dashboard.",
-          useCaseTitle: "Share dashboard with a teammate",
-        },
-      ],
-    },
-    parseProposals: parseFeatureProposals,
-  });
+): Promise<FeatureAnalysisResult> {
+  const { result, ...agentResult } = await runAnalysisSubagent(
+    featureAnalysisSubagent,
+    { pool, requirement, confirmedUseCases },
+  );
+
+  return {
+    ...agentResult,
+    proposals: result,
+  };
 }
 
 function parseFeatureProposals(text: string): FeatureProposalInput[] {

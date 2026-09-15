@@ -6,7 +6,7 @@ import {
 import { runScenarioAnalysis } from "./agent/scenario.ts";
 import { runUseCaseAnalysis } from "./agent/use-case.ts";
 import { runFeatureAnalysis } from "./agent/feature.ts";
-import { analysisModelDescriptor } from "./agent/model-runtime.ts";
+import { analysisModelDescriptor } from "./agent/analysis-model-adapter.ts";
 import {
   runAnalysisOrchestrator,
   type AnalysisPlan,

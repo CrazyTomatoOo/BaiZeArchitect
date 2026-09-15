@@ -1,7 +1,8 @@
 import {
-  runModelAgent,
-  type ModelAgentResult,
-} from "./analysis-agent.ts";
+  runAnalysisSubagent,
+  type AnalysisSubagentDefinition,
+  type AnalysisSubagentResult,
+} from "./analysis-subagent.ts";
 
 export type AnalysisStageName = "scenario" | "use_case" | "feature";
 
@@ -14,17 +15,24 @@ export interface AnalysisPlan {
   stages: AnalysisPlanStage[];
 }
 
-export async function runAnalysisOrchestrator(
-  requirement: string,
-): Promise<ModelAgentResult<AnalysisPlan>> {
-  return runModelAgent({
-    skillName: "analysis-orchestration",
+interface AnalysisOrchestratorInput {
+  requirement: string;
+}
+
+const analysisOrchestratorSubagent: AnalysisSubagentDefinition<
+  AnalysisOrchestratorInput,
+  AnalysisPlan
+> = {
+  skill: {
+    name: "analysis-orchestration",
     systemPrompt:
       "You are the BaiZe Analysis Orchestrator. Use the analysis-orchestration skill, query the analysis contract, and return only JSON with the sequential analysis stages.",
-    queryToolName: "query_analysis_contract",
-    queryToolLabel: "Query analysis contract",
-    queryToolDescription: "Query the sequential analysis contract.",
-    queryData: () =>
+  },
+  queryTool: {
+    name: "query_analysis_contract",
+    label: "Query analysis contract",
+    description: "Query the sequential analysis contract.",
+    data: () =>
       Promise.resolve([
         {
           name: "scenario",
@@ -41,26 +49,34 @@ export async function runAnalysisOrchestrator(
             "Analyze affected and new features from confirmed use cases.",
         },
       ]),
-    prompt: requirement,
-    finalResponse: {
-      stages: [
-        {
-          name: "scenario",
-          description: "Analyze related and new scenarios.",
-        },
-        {
-          name: "use_case",
-          description:
-            "Analyze related and new use cases from confirmed scenarios.",
-        },
-        {
-          name: "feature",
-          description:
-            "Analyze affected and new features from confirmed use cases.",
-        },
-      ],
-    },
-    parseResult: parseAnalysisPlan,
+  },
+  prompt: (input) => input.requirement,
+  finalResponse: {
+    stages: [
+      {
+        name: "scenario",
+        description: "Analyze related and new scenarios.",
+      },
+      {
+        name: "use_case",
+        description:
+          "Analyze related and new use cases from confirmed scenarios.",
+      },
+      {
+        name: "feature",
+        description:
+          "Analyze affected and new features from confirmed use cases.",
+      },
+    ],
+  },
+  parseResult: parseAnalysisPlan,
+};
+
+export async function runAnalysisOrchestrator(
+  requirement: string,
+): Promise<AnalysisSubagentResult<AnalysisPlan>> {
+  return runAnalysisSubagent(analysisOrchestratorSubagent, {
+    requirement,
   });
 }
 
