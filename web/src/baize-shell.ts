@@ -9,6 +9,7 @@ import {
 } from "./workflow-client.js";
 import "./baize-requirements.js";
 import "./baize-asset-library.js";
+import type { BaizeAssetLibrary } from "./baize-asset-library.js";
 import "./baize-workflow.js";
 import "./baize-workspace-manager.js";
 import "./baize-activity-bar.js";
@@ -136,17 +137,9 @@ class BaizeShell extends LitElement {
 	.workspace-switcher {
 			position: relative;
 		}
-		.switcher-btn {
-			background: var(--surface-2);
-			border: 1px solid var(--border);
-			border-radius: var(--radius);
-			padding: var(--gap-dense) var(--pad);
-			color: var(--text);
-			font-size: var(--text-sm);
-			cursor: pointer;
+		.workspace-switcher > button {
 			white-space: nowrap;
 		}
-		.switcher-btn:hover { background: var(--surface-hover); }
 		.switcher-dropdown {
 			position: absolute;
 			right: 0;
@@ -705,7 +698,7 @@ return html`
 			<span class="spacer"></span>
 			${showChrome ? html`
 			<div class="workspace-switcher">
-				<button class="switcher-btn" @click=${() => this.toggleSwitcher()} aria-expanded=${this.switcherOpen}>
+				<button @click=${() => this.toggleSwitcher()} aria-expanded=${this.switcherOpen}>
 					${this.currentWorkspaceName}
 				</button>
 				${this.switcherOpen ? html`
@@ -761,6 +754,10 @@ return html`
 						const query = params.toString();
 						window.history.pushState({}, "", `${path}${query ? "?" + query : ""}`);
 						window.dispatchEvent(new Event("baize-location-change"));
+						this.closeDrawer();
+					}}
+					@baize-asset-create=${() => {
+						this.renderRoot.querySelector<BaizeAssetLibrary>("baize-asset-library")?.requestCreate();
 						this.closeDrawer();
 					}}
 					@baize-enter-workspace=${(e: Event) => this.handleEnterWorkspace(e)}

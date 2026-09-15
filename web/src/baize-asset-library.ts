@@ -1,6 +1,6 @@
 import { LitElement, html, css, nothing, type PropertyValues } from "lit";
 import { sharedStyles } from "./baize-styles.js";
-import { assetKindLabel, type AssetKind } from "./workflow-client.js";
+import { type AssetKind } from "./workflow-client.js";
 import "./baize-asset-detail.js";
 import "./baize-asset-form.js";
 import "./baize-asset-graph.js";
@@ -59,40 +59,15 @@ class BaizeAssetLibrary extends LitElement {
 		.mtoolbar {
 			flex: 0 0 auto;
 			display: flex;
+			flex-wrap: wrap;
 			align-items: center;
 			gap: var(--gap);
 			padding: var(--gap) var(--pad);
 			border-bottom: 1px solid var(--border);
 			background: var(--surface);
 		}
-		.mtoolbar .crumb {
-			font-size: var(--text-sm);
-			color: var(--text-muted);
-		}
 		.mtoolbar .spacer {
 			flex: 1;
-		}
-		.btn {
-			border: 1px solid var(--border);
-			background: var(--surface-2);
-			color: var(--text);
-			border-radius: var(--radius);
-			padding: var(--gap-dense) var(--pad);
-			font-size: var(--text-sm);
-			cursor: pointer;
-			font-family: inherit;
-		}
-		.btn:hover {
-			background: var(--surface-hover);
-		}
-		.btn.primary {
-			background: var(--accent);
-			color: var(--accent-fg);
-			border-color: var(--accent);
-			font-weight: 600;
-		}
-		.btn.primary:hover {
-			filter: brightness(1.12);
 		}
 		.mbody {
 			flex: 1 1 0;
@@ -207,7 +182,8 @@ class BaizeAssetLibrary extends LitElement {
 		window.dispatchEvent(new Event(LOCATION_CHANGE_EVENT));
 	}
 
-	private openCreate(): void {
+	/** 侧栏头部常驻「新建」入口:卡片列表域在主区打开创建表单(层级域由树内联创建,不经此路径)。 */
+	requestCreate(): void {
 		if (this.activeTab === "graph") return;
 		const kind = TAB_KINDS[this.activeTab as Exclude<WorkbenchTab, "graph">][0]!;
 		if (SPECIALIZED_VIEW_KINDS[kind]) return;
@@ -264,29 +240,20 @@ class BaizeAssetLibrary extends LitElement {
 		this.handleNavigateAsset(event);
 	}
 
-	private activeKind(): AssetKind | null {
-		if (this.activeTab === "graph") return null;
-		return TAB_KINDS[this.activeTab as Exclude<WorkbenchTab, "graph">][0] ?? null;
-	}
-
 	render(): Renderable {
 		const isGraphMode = this.activeTab === "graph";
-		const activeKind = this.activeKind();
-		const canCreate = activeKind !== null && !SPECIALIZED_VIEW_KINDS[activeKind];
 		return html`
 			<div class="mtoolbar">
-			<span class="crumb">${TAB_LABELS[this.activeTab]}</span>
-			<span class="spacer"></span>
-			${!isGraphMode && canCreate ? html`<button class="btn primary" @click=${() => this.openCreate()}>新建${assetKindLabel(activeKind)}</button>` : nothing}
-			<baize-asset-import
-				.apiBase=${this.apiBase}
-				.workspaceId=${this.workspaceId}
-				@baize-import-complete=${(event: CustomEvent<{ assetId: number | null }>) => this.handleImportComplete(event)}
-			></baize-asset-import>
-			<button class="btn ${isGraphMode ? "primary" : ""}" @click=${() => this.updateUrl({ tab: isGraphMode ? "scenario" : "graph" })}>
-				${isGraphMode ? "返回列表" : "关系图"}
-			</button>
-		</div>
+				<span class="spacer"></span>
+				<baize-asset-import
+					.apiBase=${this.apiBase}
+					.workspaceId=${this.workspaceId}
+					@baize-import-complete=${(event: CustomEvent<{ assetId: number | null }>) => this.handleImportComplete(event)}
+				></baize-asset-import>
+				<button class=${isGraphMode ? "primary" : nothing} @click=${() => this.updateUrl({ tab: isGraphMode ? "scenario" : "graph" })}>
+					${isGraphMode ? "返回列表" : "关系图"}
+				</button>
+			</div>
 			${isGraphMode
 				? html`<div class="graph-mode">
 						<baize-asset-graph
@@ -326,3 +293,5 @@ class BaizeAssetLibrary extends LitElement {
 }
 
 customElements.define("baize-asset-library", BaizeAssetLibrary);
+
+export { BaizeAssetLibrary };

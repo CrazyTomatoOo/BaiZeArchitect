@@ -2,7 +2,7 @@ import { expect, test, type Page, type Route } from "@playwright/test";
 
 /**
  * T3 主区重组 E2E —
- * 主区 = 顶部工具条(新建/导入/关系图) + 居中 880px 内容栏;
+ * 主区 = 顶部工具条(导入/关系图) + 居中 880px 内容栏;新建入口已统一迁至侧栏头部 lib-head。
  * 删除 list-pane(条目已在侧栏);未选中资产时显示空态提示。
  */
 
@@ -82,6 +82,11 @@ async function installMocks(page: Page): Promise<void> {
 	});
 }
 
+async function openDrawerIfNarrow(page: Page): Promise<void> {
+	const menu = page.getByRole("button", { name: "打开工作台导航" });
+	if (await menu.isVisible()) await menu.click();
+}
+
 test.describe("T3 主区重组", () => {
 	test("主区无列表 pane,居中 880px 内容栏", async ({ page }) => {
 		await installMocks(page);
@@ -110,8 +115,9 @@ test.describe("T3 主区重组", () => {
 		await installMocks(page);
 		await page.goto("/assets/design");
 
-		// 新建按钮
-		await page.getByRole("button", { name: /新建/ }).click();
+		// 新建按钮(侧栏头部;narrow 视口先开抽屉)
+		await openDrawerIfNarrow(page);
+		await page.locator("baize-side-bar .lib-head button.primary").click();
 		await expect(page.locator("baize-asset-library baize-asset-form")).toBeVisible();
 		await page.getByRole("button", { name: "取消" }).click();
 

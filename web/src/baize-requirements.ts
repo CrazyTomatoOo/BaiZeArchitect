@@ -51,21 +51,6 @@ class BaizeRequirements extends LitElement {
 
 	static styles = [sharedStyles, css`
 		:host { display: block; container-type: inline-size; }
-		.side-head {
-			display: flex;
-			align-items: center;
-			gap: var(--gap);
-			padding: 0 var(--pad);
-			margin-top: var(--gap);
-		}
-		.side-head h2 {
-			margin: 0;
-			font-size: var(--text-xs);
-			font-weight: 600;
-			letter-spacing: 0.08em;
-			color: var(--text-subtle);
-		}
-		.side-head .spacer { flex: 1; }
 		.list { margin-top: var(--gap); display: grid; gap: var(--gap); }
 		.item { display: flex; align-items: center; flex-wrap: wrap; gap: var(--space-2xs); width: 100%; text-align: left; cursor: pointer; }
 		.item .title { font-weight: 600; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -358,14 +343,13 @@ class BaizeRequirements extends LitElement {
 		`;
 	}
 
+	/** 侧栏 lib-head 常驻「新建」入口:切换内联创建表单(与层级树 requestRootCreate 同模式)。 */
+	requestCreate(): void {
+		this.createOpen = !this.createOpen;
+	}
+
 	render() {
 		return html`
-			<div class="side-head">
-				<h2>需求</h2>
-				<span class="spacer"></span>
-				<button class="primary" @click=${() => (this.createOpen = !this.createOpen)}>${this.createOpen ? "收起" : "＋ 新建需求"}</button>
-			</div>
-
 			${this.createOpen
 				? html`<form class="card create" @submit=${(e: Event) => void this.handleCreate(e)}>
 						<h3>创建新需求</h3>
@@ -398,3 +382,5 @@ class BaizeRequirements extends LitElement {
 }
 
 customElements.define("baize-requirements", BaizeRequirements);
+
+export { BaizeRequirements };

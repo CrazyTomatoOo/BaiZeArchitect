@@ -151,13 +151,13 @@ test("asset workbench exposes 9 aggregated tabs with specialized views and graph
 test("asset workbench URL state captures tab and selection", async ({ page }) => {
 	await installAssetMocks(page);
 	await page.goto("/assets/architecture");
-	await expect(page.locator("baize-asset-library .mtoolbar .crumb")).toContainText("架构库");
+	await expect(page.locator("baize-side-bar .lib-head")).toContainText("架构库");
 	await expect(page).toHaveURL(/\/assets\/architecture/);
 
 	// 视图切换:Activity Bar 导航
 	await page.goto("/");
 	await expect(page).toHaveURL(/\/$/);
-	await expect(page.getByRole("heading", { name: "需求" })).toBeVisible();
+	await expect(page.locator("baize-side-bar .lib-head")).toContainText("需求");
 
 	await page.goto("/assets");
 	await expect(page).toHaveURL(/\/assets/);
@@ -171,7 +171,7 @@ test("requirements and assets share the workbench sidebar", async ({ page }) => 
 
 	// 视图切换:Activity Bar 导航
 	await page.goto("/");
-	await expect(page.getByRole("heading", { name: "需求" })).toBeVisible();
+	await expect(page.locator("baize-side-bar .lib-head")).toContainText("需求");
 	// Side Bar 在新布局中始终可见(桌面态)或通过 Activity Bar 切回
 	await page.goto("/assets");
 	await expect(page.locator("baize-asset-library .mtoolbar")).toBeVisible();

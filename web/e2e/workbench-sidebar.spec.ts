@@ -88,8 +88,8 @@ test.describe("工作台侧栏布局", () => {
 		await installMocks(page);
 		await page.goto("/");
 
-		// 紧凑头:栏目名 + 新建入口(同侧栏宽,一行内)
-		await expect(page.getByRole("heading", { name: "需求" })).toBeVisible();
+		// 紧凑头:lib-head 栏目名 + 新建入口(与资产库同一头部栏实现)
+		await expect(page.locator("baize-side-bar .lib-head")).toContainText("需求");
 		await expect(page.getByRole("button", { name: /新建需求/ })).toBeVisible();
 
 		// 页面级编排不得出现在 240px 侧栏:无 page-head 块、无说明副文案
@@ -122,8 +122,8 @@ test.describe("工作台侧栏布局", () => {
 		await page.locator("baize-activity-bar button[title=\"设计库\"]").click();
 		await expect(page).toHaveURL(/\/assets\/design/);
 		await expect(page.locator("baize-side-bar baize-asset-entries")).toBeVisible();
-		// T3:主区无 count 元素,直接断言 URL 与侧栏条目组件
-		await expect(page.locator("baize-asset-library .mtoolbar .crumb")).toContainText("设计库");
+		// T3:主区无 count 元素,直接断言 URL 与侧栏标题/条目组件
+		await expect(page.locator("baize-side-bar .lib-head")).toContainText("设计库");
 		// 点击侧栏条目 → 主区显示详情(narrow 视口需先开抽屉)
 		await openDrawerIfNarrow(page);
 		await page.locator("baize-side-bar .entry-card").first().click();

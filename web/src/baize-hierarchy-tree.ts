@@ -615,7 +615,7 @@ class BaizeHierarchyTree extends LitElement {
 	}
 
 	private async load(): Promise<void> {
-		if (!this.apiBase || !this.workspaceId) return;
+		if (!this.workspaceId) return;
 		const requestNo = ++this.loadRequestNo;
 		this.loading = true;
 		this.error = null;
@@ -635,13 +635,6 @@ class BaizeHierarchyTree extends LitElement {
 				this.roots = page.roots;
 				this.total = page.total;
 				this.kindCounts = page.kindCounts as Record<AssetKind, number>;
-				this.dispatchEvent(
-					new CustomEvent("baize-asset-page", {
-						detail: { total: this.total, kindCounts: this.kindCounts },
-						bubbles: true,
-						composed: true,
-					}),
-				);
 				if (this.selectedAssetId === 0 && this.roots.length > 0 && this.roots[0]) {
 					this.dispatchEvent(
 						new CustomEvent("select", { detail: this.roots[0].assetId, bubbles: true, composed: true }),
@@ -657,9 +650,8 @@ class BaizeHierarchyTree extends LitElement {
 			if (requestNo === this.loadRequestNo) this.loading = false;
 		}
 	}
-
 	private async loadMissingChildren(): Promise<void> {
-		if (!this.apiBase) return;
+		if (!this.workspaceId) return;
 		const promises: Promise<unknown>[] = [];
 		for (const assetId of this.expandedNodes) {
 			if (this.childrenMap.has(assetId) || this.loadingChildren.has(assetId)) continue;
@@ -669,7 +661,7 @@ class BaizeHierarchyTree extends LitElement {
 	}
 
 	private async loadChildren(assetId: number): Promise<void> {
-		if (!this.apiBase) return;
+		if (!this.workspaceId) return;
 		this.loadingChildren.add(assetId);
 		try {
 			const { children } = await getHierarchyChildren(this.apiBase, assetId);
@@ -712,6 +704,15 @@ class BaizeHierarchyTree extends LitElement {
 
 	private dispatchNavigate(tab: string, assetId: number): void {
 		this.dispatchEvent(new CustomEvent<{ tab: string; assetId: number }>("navigate", { detail: { tab, assetId }, bubbles: true, composed: true }));
+	}
+
+	/** 侧栏头部常驻「新建」入口:退出搜索态并打开根节点内联创建表单。 */
+	requestRootCreate(): void {
+		if (this.searchQuery.length > 0) {
+			this.query = "";
+			void this.load();
+		}
+		this.startAddChild(0);
 	}
 
 	private startAddChild(assetId: number): void {
@@ -827,9 +828,6 @@ class BaizeHierarchyTree extends LitElement {
 		return html`
 			<div class="tree-header">
 				<div class="counts">${this.renderCounts()}</div>
-				<div class="tree-toolbar">
-					<button class="primary icon-btn" @click=${() => this.startAddChild(0)} title="新建顶层${assetKindLabel(this.rootKind)}">+</button>
-				</div>
 			</div>
 			${this.error ? html`<div class="error" role="alert">${this.error}</div>` : nothing}
 			<div class="tree-body" @dragend=${this.handleDragEnd}>
@@ -864,7 +862,9 @@ class BaizeHierarchyTree extends LitElement {
 			return html`
 				<div class="empty">
 					<p>暂无 ${assetKindLabel(this.rootKind)}，开始创建第一个。</p>
-					<button class="primary" @click=${() => this.startAddChild(0)}>新建 ${assetKindLabel(this.rootKind)}</button>
+					${this.editingNode?.assetId === 0 && this.editingNode.mode === "add-child"
+						? this.renderRootAddForm()
+						: html`<button class="primary" @click=${() => this.startAddChild(0)}>新建 ${assetKindLabel(this.rootKind)}</button>`}
 				</div>
 			`;
 		}

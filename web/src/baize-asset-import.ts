@@ -1,4 +1,5 @@
 import { LitElement, html, nothing, type PropertyValues } from "lit";
+import { ref, createRef, type Ref } from "lit/directives/ref.js";
 import {
 	previewImportBundle,
 	commitImportBundle,
@@ -33,6 +34,8 @@ export class BaizeAssetImport extends LitElement {
 	declare importDraft: ImportDraft | null;
 	declare importError: string | null;
 	declare importSubmitting: boolean;
+
+	private fileInputRef: Ref<HTMLInputElement> = createRef();
 
 	createRenderRoot(): HTMLElement {
 		return this;
@@ -172,9 +175,8 @@ export class BaizeAssetImport extends LitElement {
 	render(): Renderable {
 		return html`
 			<button @click=${() => void this.exportWorkspace()}>导出</button>
-			<label class="file-button"
-				>导入<input class="file-input" type="file" accept="application/json" @change=${(event: Event) => void this.handleImportFile(event)} /></label
-			>
+			<button @click=${() => this.fileInputRef.value?.click()}>导入</button>
+			<input ${ref(this.fileInputRef)} class="file-input" type="file" accept="application/json" hidden @change=${(event: Event) => void this.handleImportFile(event)} />
 			${this.importError && !this.importDraft ? html`<p class="form-error" role="alert">${this.importError}</p>` : ""}
 			${this.importDraft ? this.renderPreview() : ""}
 		`;

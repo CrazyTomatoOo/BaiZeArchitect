@@ -211,3 +211,28 @@ test("searchHierarchyNodes returns matchedPath", async () => {
 		assert.ok(hit!.matchedPath.length >= 1);
 	});
 });
+
+test("updateReusableAsset succeeds for hierarchy kinds (rename via tree)", async () => {
+	await withRuntime(async ({ runtime }) => {
+		const ws = runtime.createWorkspace({ repoPath: "/r", name: "r" });
+		const tree = {
+			kind: "function-domain",
+			title: "支付域",
+			content: { nodeId: "fd1", title: "支付域" },
+		};
+		const created = runtime.createHierarchySubtree(ws, tree, null);
+		const assetId = created.assets[0]!.assetId;
+		const detail = runtime.getReusableAsset(assetId);
+		assert.ok(detail);
+		const updated = runtime.updateReusableAsset({
+			workspaceId: ws,
+			assetId,
+			expectedRevisionId: detail.currentRevisionId!,
+			title: "支付域(改名)",
+			content: detail.revisions.at(-1)!.content,
+			relations: [],
+		});
+		assert.ok(updated, "hierarchy asset update must not fail");
+		assert.equal(updated!.revisionNo, 2);
+	});
+});

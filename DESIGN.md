@@ -176,6 +176,10 @@ radius 4/3/6px）。组件必须用 named tokens，不得内联裸值。
 wordmark（◇ BaiZe Architect）、accent 及其位置、display/body/mono 栈、
 CTA voice、radius 节奏、状态色语义（ok/warn/danger/run）、
 面板结构（Activity Bar 图标 + Side Bar 视图 + Status Bar 状态语义）。
+Side Bar 头部栏：所有域（需求/各资产库）共用同一 lib-head 实现——40px、底边框、
+标题 + 常驻新建 CTA「＋ 新建X」（button.primary）；点击展开创建表单（需求域切换
+侧栏内联表单，层级域由树在根位渲染内联表单，卡片列表域在主区打开表单）。
+不允许某域自带头部样式或只能上下文创建；主区工具栏不再放新建按钮。
 
 ## What pages MAY differ on
 

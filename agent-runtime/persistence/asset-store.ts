@@ -129,6 +129,13 @@ function stakeholderNameKey(name: string): string {
 }
 const HIERARCHY_ASSET_KINDS: Record<string, true> = { "scenario-domain": true, "scenario": true, "scenario-variant": true, "function-domain": true, "function-item": true, "function-point": true };
 
+/** 资产内容快照的 schemaRef:stakeholder/层级类型用 asset/ 命名空间,其余用 artifact/。 */
+function assetContentSchemaRef(kind: ReusableAssetKind): string {
+	if (kind === "stakeholder") return "asset/stakeholder/v1";
+	if (HIERARCHY_ASSET_KINDS[kind] === true) return `asset/${kind}/v1`;
+	return `artifact/${kind}/v1`;
+}
+
 interface StructuredAssetValidator {
 	check(value: unknown): boolean;
 }
@@ -347,7 +354,7 @@ export class AssetStore {
 		const contentErrors = validateStructuredAssetContent(input.kind, content, this.structuredValidator, input.strict === true);
 		if (contentErrors.length > 0) throw new ReusableAssetMalformedBodyError(contentErrors);
 		const title = input.kind === "stakeholder" ? (content as { name: string }).name : input.title;
-	const schemaRef = input.kind === "stakeholder" ? "asset/stakeholder/v1" : typeof content === "object" && content !== null && !Array.isArray(content) && (content as Record<string, unknown>).schemaVersion === `artifact/${input.kind}/v1` ? `artifact/${input.kind}/v1` : HIERARCHY_ASSET_KINDS[input.kind] === true ? `asset/${input.kind}/v1` : `artifact/${input.kind}/v1`;
+		const schemaRef = assetContentSchemaRef(input.kind);
 		const transaction = this.database.transaction(() => {
 			if (input.kind === "stakeholder" && this.stakeholderNameExists(input.workspaceId, (content as { name: string }).name)) {
 				throw new ReusableAssetNameConflictError();
@@ -394,7 +401,7 @@ export class AssetStore {
 			if (asset.origin_artifact_id !== null && asset.content !== null && sourceReferencesFingerprint(parseJson<unknown>(asset.content)) !== sourceReferencesFingerprint(content)) {
 				throw new ReusableAssetMalformedBodyError();
 			}
-			const document = this.snapshotStore.insertSnapshot("reusable_asset_content", asset.kind === "stakeholder" ? "asset/stakeholder/v1" : `artifact/${asset.kind}/v1`, content, timestamp);
+			const document = this.snapshotStore.insertSnapshot("reusable_asset_content", assetContentSchemaRef(asset.kind), content, timestamp);
 			const revisionNo = (asset.revision_no ?? 0) + 1;
 			const revisionId = Number(this.database
 				.prepare("insert into reusable_asset_revisions(reusable_asset_id, revision_no, content_document_id, content_digest, source, actor_snapshot_document_id, migration_attestation_document_id, created_at) values (?, ?, ?, ?, 'manual', null, null, ?)")
@@ -429,8 +436,8 @@ export class AssetStore {
 			const existing = this.database
 				.prepare("select id, current_revision_id from reusable_assets where workspace_id = ? and kind = ? and title = ? order by id desc limit 1")
 				.get(input.workspaceId, input.kind, input.title) as { id: number; current_revision_id: number | null } | undefined;
-		const schemaRef = HIERARCHY_ASSET_KINDS[input.kind] === true ? `asset/${input.kind}/v1` : `artifact/${input.kind}/v1`;
-		const document = this.snapshotStore.insertSnapshot("reusable_asset_content", schemaRef, input.content, timestamp);
+			const schemaRef = assetContentSchemaRef(input.kind);
+			const document = this.snapshotStore.insertSnapshot("reusable_asset_content", schemaRef, input.content, timestamp);
 			if (existing) {
 				const currentNo = existing.current_revision_id === null
 					? 0

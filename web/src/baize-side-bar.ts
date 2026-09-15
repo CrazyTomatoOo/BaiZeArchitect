@@ -8,9 +8,12 @@ import {
 	type WorkbenchTab,
 	type WorkbenchView,
 } from "./baize-asset-library-constants.js";
+import { assetKindLabel } from "./workflow-client.js";
 import "./baize-requirements.js";
 import "./baize-asset-entries.js";
 import "./baize-hierarchy-tree.js";
+import type { BaizeHierarchyTree } from "./baize-hierarchy-tree.js";
+import type { BaizeRequirements } from "./baize-requirements.js";
 
 /** Side Bar 当前承载的顶层视图。 */
 type ActiveView = WorkbenchView | null;
@@ -29,7 +32,6 @@ class BaizeSideBar extends LitElement {
 		workspaceId: { type: Number, attribute: "workspace-id" },
 		activeAssetTab: { state: true },
 		selectedAssetId: { state: true },
-		refresh: { state: true },
 	};
 
 	declare activeView: ActiveView;
@@ -37,7 +39,6 @@ class BaizeSideBar extends LitElement {
 	declare workspaceId: number;
 	declare activeAssetTab: WorkbenchTab;
 	declare selectedAssetId: number;
-	declare refresh: number;
 
 	static styles = [sharedStyles, css`
 		:host {
@@ -58,6 +59,7 @@ class BaizeSideBar extends LitElement {
 			color: var(--text);
 			font-size: var(--text-sm);
 		}
+		.lib-head .spacer { flex: 1; }
 		.content {
 			flex: 1 1 0;
 			min-height: 0;
@@ -77,7 +79,6 @@ class BaizeSideBar extends LitElement {
 		this.workspaceId = 0;
 		this.activeAssetTab = "scenario";
 		this.selectedAssetId = 0;
-		this.refresh = 0;
 	}
 
 	connectedCallback(): void {
@@ -115,9 +116,21 @@ class BaizeSideBar extends LitElement {
 		this.dispatchEvent(new CustomEvent("baize-asset-select", { detail, bubbles: true, composed: true }));
 	}
 
-	private onAssetPage(e: Event): void {
-		// 资产条目加载完成,刷新计数
-		this.refresh++;
+	/** 场景库/功能库头部「新建」:委托层级树打开根节点内联创建表单,与需求侧栏的常驻新建入口对齐。 */
+	private onCreateRoot(): void {
+		const tree = this.renderRoot.querySelector<BaizeHierarchyTree>("baize-hierarchy-tree");
+		tree?.requestRootCreate();
+	}
+
+	/** 需求视图头部「新建」:委托 baize-requirements 切换内联创建表单,与层级库的 requestRootCreate 对齐。 */
+	private onCreateRequirement(): void {
+		const req = this.renderRoot.querySelector<BaizeRequirements>("baize-requirements");
+		req?.requestCreate();
+	}
+
+	/** 卡片列表资产域头部「新建」:创建表单在主区,派发事件由壳层桥接到 baize-asset-library。 */
+	private onCreateEntry(): void {
+		this.dispatchEvent(new CustomEvent("baize-asset-create", { bubbles: true, composed: true }));
 	}
 
 	private renderRequirements(): TemplateResult {
@@ -143,9 +156,7 @@ class BaizeSideBar extends LitElement {
 				.workspaceId=${this.workspaceId}
 				.kind=${kind}
 				.selectedAssetId=${this.selectedAssetId}
-				.refresh=${this.refresh}
 				@baize-asset-select=${this.onAssetSelect}
-				@baize-asset-page=${this.onAssetPage}
 			></baize-asset-entries>
 		`;
 	}
@@ -163,9 +174,7 @@ class BaizeSideBar extends LitElement {
 				.pageSize=${48}
 				.query=${""}
 				.narrowView=${false}
-				.refresh=${this.refresh}
 				@select=${this.onAssetSelect}
-				@baize-asset-page=${this.onAssetPage}
 			></baize-hierarchy-tree>
 		`;
 	}
@@ -177,12 +186,27 @@ class BaizeSideBar extends LitElement {
 		const path = window.location.pathname;
 		const isRequirements = !path.startsWith("/assets");
 		const isHierarchy = this.activeAssetTab === "scenario" || this.activeAssetTab === "function";
-		// 需求视图:baize-requirements 自带 side-head(标题+新建按钮),不再重复渲染 lib-head
 		if (isRequirements) {
-			return html`<div class="content">${this.renderRequirements()}</div>`;
+			return html`
+				<div class="lib-head">
+					<span>需求</span>
+					<span class="spacer"></span>
+					<button class="primary" @click=${this.onCreateRequirement}>＋ 新建需求</button>
+				</div>
+				<div class="content">${this.renderRequirements()}</div>
+			`;
 		}
+		const rootKind = this.activeAssetTab === "scenario" ? "scenario-domain" : "function-domain";
+		const entryKind = isHierarchy ? null : (TAB_KINDS[this.activeAssetTab as Exclude<WorkbenchTab, "graph">]?.[0] ?? null);
 		return html`
-			<div class="lib-head">${VIEW_LABELS[this.activeAssetTab as WorkbenchView]}</div>
+			<div class="lib-head">
+				<span>${VIEW_LABELS[this.activeAssetTab as WorkbenchView]}</span>
+				${isHierarchy
+					? html`<span class="spacer"></span><button class="primary" @click=${this.onCreateRoot}>＋ 新建${assetKindLabel(rootKind)}</button>`
+					: entryKind
+						? html`<span class="spacer"></span><button class="primary" @click=${this.onCreateEntry}>＋ 新建${assetKindLabel(entryKind)}</button>`
+						: nothing}
+			</div>
 			<div class="content">
 				${isHierarchy ? this.renderHierarchyTree() : this.renderAssetEntries()}
 			</div>
