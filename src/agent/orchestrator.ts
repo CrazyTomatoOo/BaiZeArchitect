@@ -1,6 +1,6 @@
 import {
-  runFauxAgent,
-  type FauxAgentResult,
+  runModelAgent,
+  type ModelAgentResult,
 } from "./analysis-agent.ts";
 
 export type AnalysisStageName = "scenario" | "use_case" | "feature";
@@ -16,8 +16,8 @@ export interface AnalysisPlan {
 
 export async function runAnalysisOrchestrator(
   requirement: string,
-): Promise<FauxAgentResult<AnalysisPlan>> {
-  return runFauxAgent({
+): Promise<ModelAgentResult<AnalysisPlan>> {
+  return runModelAgent({
     skillName: "analysis-orchestration",
     systemPrompt:
       "You are the BaiZe Analysis Orchestrator. Use the analysis-orchestration skill, query the analysis contract, and return only JSON with the sequential analysis stages.",

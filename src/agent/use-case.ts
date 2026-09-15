@@ -5,7 +5,7 @@ import {
   type UseCaseProposalInput,
 } from "../db.ts";
 import {
-  runFauxAnalysisAgent,
+  runAnalysisAgent,
   type AnalysisAgentResult,
 } from "./analysis-agent.ts";
 
@@ -14,7 +14,7 @@ export async function runUseCaseAnalysis(
   requirement: string,
   confirmedScenarios: ScenarioAsset[],
 ): Promise<AnalysisAgentResult<UseCaseProposalInput>> {
-  return runFauxAnalysisAgent({
+  return runAnalysisAgent({
     skillName: "use-case-analysis",
     systemPrompt:
       "You are the BaiZe Use Case Analysis subagent. Use the use-case-analysis skill, query the use-case library, and return only JSON with proposals.",

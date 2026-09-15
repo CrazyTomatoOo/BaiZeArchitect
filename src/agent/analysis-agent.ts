@@ -18,7 +18,7 @@ import {
   failureCodeForError,
   withTimeout,
 } from "../errors.ts";
-import { createFauxRuntime } from "./faux-runtime.ts";
+import { createAnalysisModelRuntime } from "./model-runtime.ts";
 
 function toolTimeoutMs(): number {
   const parsed = Number(process.env.BAIZE_TOOL_TIMEOUT_MS);
@@ -37,7 +37,7 @@ export interface AnalysisToolResult {
   isError: boolean;
 }
 
-export interface FauxAgentResult<TResult> {
+export interface ModelAgentResult<TResult> {
   result: TResult;
   toolCalls: AnalysisToolCall[];
   toolResults: AnalysisToolResult[];
@@ -45,7 +45,7 @@ export interface FauxAgentResult<TResult> {
   callCount: number;
 }
 
-export interface FauxAgentConfig<TResult> {
+export interface ModelAgentConfig<TResult> {
   skillName: string;
   systemPrompt: string;
   queryToolName: string;
@@ -58,12 +58,12 @@ export interface FauxAgentConfig<TResult> {
 }
 
 export interface AnalysisAgentResult<TProposal>
-  extends Omit<FauxAgentResult<TProposal[]>, "result"> {
+  extends Omit<ModelAgentResult<TProposal[]>, "result"> {
   proposals: TProposal[];
 }
 
 export interface AnalysisAgentConfig<TProposal>
-  extends Omit<FauxAgentConfig<TProposal[]>, "parseResult"> {
+  extends Omit<ModelAgentConfig<TProposal[]>, "parseResult"> {
   parseProposals: (text: string) => TProposal[];
 }
 
@@ -104,10 +104,23 @@ function extractAssistantText(messages: unknown[]): string {
   return "";
 }
 
-export async function runFauxAgent<TResult>(
-  config: FauxAgentConfig<TResult>,
-): Promise<FauxAgentResult<TResult>> {
-  const { faux, modelRuntime } = await createFauxRuntime();
+function modelJsonText(text: string): string {
+  const fenced = text.match(/```(?:json)?\s*([\s\S]*?)```/i);
+
+  if (fenced?.[1]) {
+    return fenced[1].trim();
+  }
+
+  const start = text.indexOf("{");
+  const end = text.lastIndexOf("}");
+
+  return start >= 0 && end > start ? text.slice(start, end + 1) : text.trim();
+}
+
+export async function runModelAgent<TResult>(
+  config: ModelAgentConfig<TResult>,
+): Promise<ModelAgentResult<TResult>> {
+  const runtime = await createAnalysisModelRuntime();
 
   try {
     const skillDirectory = path.join(
@@ -118,21 +131,23 @@ export async function runFauxAgent<TResult>(
     );
     const skillPath = path.join(skillDirectory, "SKILL.md");
 
-    const finalModelOutput =
-      process.env.BAIZE_FAUX_MODEL_OUTPUT ??
-      JSON.stringify(config.finalResponse);
+    if (runtime.faux) {
+      const finalModelOutput =
+        process.env.BAIZE_FAUX_MODEL_OUTPUT ??
+        JSON.stringify(config.finalResponse);
 
-    faux.setResponses([
-      fauxAssistantMessage(
-        [fauxToolCall("read", { path: skillPath })],
-        { stopReason: "toolUse" },
-      ),
-      fauxAssistantMessage(
-        [fauxToolCall(config.queryToolName, {})],
-        { stopReason: "toolUse" },
-      ),
-      fauxAssistantMessage(finalModelOutput),
-    ]);
+      runtime.faux.setResponses([
+        fauxAssistantMessage(
+          [fauxToolCall("read", { path: skillPath })],
+          { stopReason: "toolUse" },
+        ),
+        fauxAssistantMessage(
+          [fauxToolCall(config.queryToolName, {})],
+          { stopReason: "toolUse" },
+        ),
+        fauxAssistantMessage(finalModelOutput),
+      ]);
+    }
 
     let queryError: AnalysisFailureError | undefined;
     const queryTool = defineTool({
@@ -207,18 +222,26 @@ export async function runFauxAgent<TResult>(
     const { session } = await createAgentSession({
       resourceLoader: loader,
       sessionManager: SessionManager.inMemory(),
-      model: faux.getModel(),
-      modelRuntime,
+      model: runtime.model,
+      modelRuntime: runtime.modelRuntime,
       customTools: [queryTool],
       tools: ["read", config.queryToolName],
     });
 
     try {
       let text = "";
+      let modelCallCount = 0;
       const toolCalls: AnalysisToolCall[] = [];
       const toolResults: AnalysisToolResult[] = [];
 
       session.subscribe((event) => {
+        if (
+          event.type === "message_start" &&
+          event.message.role === "assistant"
+        ) {
+          modelCallCount += 1;
+        }
+
         if (
           event.type === "message_update" &&
           event.assistantMessageEvent.type === "text_delta"
@@ -261,7 +284,7 @@ export async function runFauxAgent<TResult>(
       let result: TResult;
 
       try {
-        result = config.parseResult(finalText);
+        result = config.parseResult(modelJsonText(finalText));
       } catch (error) {
         throw new AnalysisFailureError(
           "invalid_model_output",
@@ -275,21 +298,23 @@ export async function runFauxAgent<TResult>(
         toolCalls,
         toolResults,
         text: finalText,
-        callCount: faux.state.callCount,
+        callCount: runtime.faux
+          ? runtime.faux.state.callCount
+          : modelCallCount,
       };
     } finally {
       session.dispose();
     }
   } finally {
-    faux.unregister();
+    runtime.faux?.unregister();
   }
 }
 
-export async function runFauxAnalysisAgent<TProposal>(
+export async function runAnalysisAgent<TProposal>(
   config: AnalysisAgentConfig<TProposal>,
 ): Promise<AnalysisAgentResult<TProposal>> {
   const { parseProposals, ...agentConfig } = config;
-  const { result, ...agentResult } = await runFauxAgent({
+  const { result, ...agentResult } = await runModelAgent({
     ...agentConfig,
     parseResult: parseProposals,
   });

@@ -13,6 +13,7 @@
     "start:dist": "node dist/cli.js",
     "test": "node --import tsx --test --test-concurrency=1 tests/*.test.ts",
     "test:binary": "node --import tsx --test --test-concurrency=1 tests/binary-cli.test.ts",
+    "test:smoke": "node --import tsx --test --test-concurrency=1 tests/smoke/*.test.ts",
     "test:docker": "docker compose run --build --rm test",
     "typecheck": "tsc -p tsconfig.json"
   },

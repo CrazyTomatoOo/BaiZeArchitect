@@ -12,6 +12,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Typecheck
+        run: docker compose run --build --rm --no-deps test npm run typecheck
+
       - name: Run source test suite
         run: docker compose run --build --rm test
 

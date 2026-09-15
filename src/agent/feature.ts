@@ -5,7 +5,7 @@ import {
   type UseCaseAsset,
 } from "../db.ts";
 import {
-  runFauxAnalysisAgent,
+  runAnalysisAgent,
   type AnalysisAgentResult,
 } from "./analysis-agent.ts";
 
@@ -14,7 +14,7 @@ export async function runFeatureAnalysis(
   requirement: string,
   confirmedUseCases: UseCaseAsset[],
 ): Promise<AnalysisAgentResult<FeatureProposalInput>> {
-  return runFauxAnalysisAgent({
+  return runAnalysisAgent({
     skillName: "feature-analysis",
     systemPrompt:
       "You are the BaiZe Feature Analysis subagent. Use the feature-analysis skill, query the feature library, and return only JSON with proposals.",

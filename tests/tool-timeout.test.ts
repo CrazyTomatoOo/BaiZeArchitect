@@ -4,14 +4,14 @@ import test from "node:test";
 import {
   AnalysisFailureError,
 } from "../src/errors.ts";
-import { runFauxAgent } from "../src/agent/analysis-agent.ts";
+import { runModelAgent } from "../src/agent/analysis-agent.ts";
 
 test("analysis tool timeout is deterministic", async () => {
   process.env.BAIZE_TOOL_TIMEOUT_MS = "25";
   const startedAt = performance.now();
 
   await assert.rejects(
-    runFauxAgent({
+    runModelAgent({
       skillName: "analysis-orchestration",
       systemPrompt: "Test analysis agent.",
       queryToolName: "query_timeout",

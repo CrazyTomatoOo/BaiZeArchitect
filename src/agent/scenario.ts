@@ -1,7 +1,7 @@
 import type { ScenarioProposalInput } from "../db.ts";
 import { AnalysisFailureError } from "../errors.ts";
 import {
-  runFauxAnalysisAgent,
+  runAnalysisAgent,
   type AnalysisAgentResult,
 } from "./analysis-agent.ts";
 import type { McpToolClient } from "../mcp.ts";
@@ -10,7 +10,7 @@ export async function runScenarioAnalysis(
   mcp: McpToolClient,
   requirement: string,
 ): Promise<AnalysisAgentResult<ScenarioProposalInput>> {
-  return runFauxAnalysisAgent({
+  return runAnalysisAgent({
     skillName: "scenario-analysis",
     systemPrompt:
       "You are the BaiZe Scenario Analysis subagent. Use the scenario-analysis skill, query the scenario tree, and return only JSON with proposals.",

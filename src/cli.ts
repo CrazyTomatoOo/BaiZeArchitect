@@ -6,6 +6,7 @@ import {
 import { runScenarioAnalysis } from "./agent/scenario.ts";
 import { runUseCaseAnalysis } from "./agent/use-case.ts";
 import { runFeatureAnalysis } from "./agent/feature.ts";
+import { analysisModelDescriptor } from "./agent/model-runtime.ts";
 import {
   runAnalysisOrchestrator,
   type AnalysisPlan,
@@ -382,6 +383,7 @@ async function main(): Promise<void> {
   const pool = new Pool({ connectionString: databaseUrl });
   const cancellation = new CancellationController();
   const confirmation = new ConfirmationReader(cancellation);
+  const model = analysisModelDescriptor();
   let runId: string | undefined;
 
   cancellation.install();
@@ -396,6 +398,8 @@ async function main(): Promise<void> {
 
     await recordTraceEvent(pool, run.id, "analysis_run_started", {
       requirement,
+      modelMode: model.mode,
+      model: model.reference,
     });
 
     await recordTraceEvent(pool, run.id, "orchestrator_subagent_started", {
