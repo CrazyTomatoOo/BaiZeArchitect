@@ -74,16 +74,6 @@ interface CliResult {
   }>;
 }
 
-interface GatedCliResult {
-  runId: string;
-  status: "awaiting_confirmation" | "succeeded" | "rejected";
-  currentStage: AnalysisRunStage | null;
-  scenarioAssetCount: number;
-  useCaseAssetCount: number;
-  featureAssetCount: number;
-  nextCommand?: string;
-}
-
 interface RunSnapshotCommands {
   status: string;
   approve: string | null;
@@ -93,7 +83,7 @@ interface RunSnapshotCommands {
 
 interface RunSnapshot {
   runId: string;
-  status: "awaiting_confirmation" | "succeeded";
+  status: "awaiting_confirmation" | "succeeded" | "rejected";
   currentStage: AnalysisRunStage;
   stageLabel: string;
   requirement: string;
@@ -518,7 +508,7 @@ function stageLabel(stage: AnalysisRunStage): string {
 function runSnapshot(
   runId: string,
   requirement: string,
-  status: "awaiting_confirmation" | "succeeded",
+  status: "awaiting_confirmation" | "succeeded" | "rejected",
   currentStage: AnalysisRunStage,
   proposals: StageProposal[],
   scenarioAssetCount: number,
@@ -590,25 +580,9 @@ function formatRunSnapshotSummary(snapshot: RunSnapshot): string {
   ].join("\n");
 }
 
-function gatedResult(
-  runId: string,
-  status: "awaiting_confirmation" | "succeeded" | "rejected",
-  currentStage: AnalysisRunStage,
-  scenarioAssetCount: number,
-  useCaseAssetCount: number,
-  featureAssetCount: number,
-): GatedCliResult {
-  return {
-    runId,
-    status,
-    currentStage,
-    scenarioAssetCount,
-    useCaseAssetCount,
-    featureAssetCount,
-    ...(status === "awaiting_confirmation"
-      ? { nextCommand: resumeCommand(runId) }
-      : {}),
-  };
+function printRunSnapshot(snapshot: RunSnapshot): void {
+  console.log(JSON.stringify(snapshot));
+  console.error(formatRunSnapshotSummary(snapshot));
 }
 
 function scenarioStageConfig(
@@ -843,8 +817,7 @@ async function main(gated: boolean): Promise<void> {
           0,
           0,
         );
-        console.log(JSON.stringify(snapshot));
-        console.error(formatRunSnapshotSummary(snapshot));
+        printRunSnapshot(snapshot);
         return;
       }
 
@@ -991,7 +964,7 @@ async function reviseAnalysisStage(
   cancellation: CancellationController,
   stage: AnalysisRunStage,
   feedback: string,
-): Promise<GatedCliResult> {
+): Promise<RunSnapshot> {
   const analysisPlan = fixedAnalysisPlan();
   const useCasePlanStage = getPlannedStage(analysisPlan, "use_case");
   const featurePlanStage = getPlannedStage(analysisPlan, "feature");
@@ -1012,8 +985,9 @@ async function reviseAnalysisStage(
     await Promise.race([mcpStart, cancellation.promise]);
     cancellation.throwIfRequested();
 
+    let proposals: ScenarioProposalInput[];
     try {
-      await prepareAnalysisStage(
+      proposals = await prepareAnalysisStage(
         pool,
         runId,
         cancellation,
@@ -1032,7 +1006,16 @@ async function reviseAnalysisStage(
     }
 
     await setAnalysisRunStatus(pool, runId, "awaiting_confirmation", stage);
-    return gatedResult(runId, "awaiting_confirmation", stage, 0, 0, 0);
+    return runSnapshot(
+      runId,
+      requirement,
+      "awaiting_confirmation",
+      stage,
+      proposals,
+      0,
+      0,
+      0,
+    );
   }
 
   if (stage === "use_case") {
@@ -1046,7 +1029,7 @@ async function reviseAnalysisStage(
     await rejectUseCaseProposals(pool, runId);
     await setAnalysisRunStatus(pool, runId, "running", stage);
 
-    await prepareAnalysisStage(
+    const proposals = await prepareAnalysisStage(
       pool,
       runId,
       cancellation,
@@ -1061,10 +1044,12 @@ async function reviseAnalysisStage(
       ),
     );
     await setAnalysisRunStatus(pool, runId, "awaiting_confirmation", stage);
-    return gatedResult(
+    return runSnapshot(
       runId,
+      requirement,
       "awaiting_confirmation",
       stage,
+      proposals,
       scenarioAssets.length,
       0,
       0,
@@ -1082,7 +1067,7 @@ async function reviseAnalysisStage(
   await rejectFeatureProposals(pool, runId);
   await setAnalysisRunStatus(pool, runId, "running", stage);
 
-  await prepareAnalysisStage(
+  const proposals = await prepareAnalysisStage(
     pool,
     runId,
     cancellation,
@@ -1097,10 +1082,12 @@ async function reviseAnalysisStage(
     ),
   );
   await setAnalysisRunStatus(pool, runId, "awaiting_confirmation", stage);
-  return gatedResult(
+  return runSnapshot(
     runId,
+    requirement,
     "awaiting_confirmation",
     stage,
+    proposals,
     scenarioAssets.length,
     useCaseAssets.length,
     0,
@@ -1174,7 +1161,7 @@ async function resumeAnalysisRun(
     const stage = run.currentStage;
 
     if (action === "revise") {
-      const result = await reviseAnalysisStage(
+      const snapshot = await reviseAnalysisStage(
         pool,
         run.id,
         run.requirement,
@@ -1182,7 +1169,7 @@ async function resumeAnalysisRun(
         stage,
         feedback,
       );
-      console.log(JSON.stringify(result));
+      printRunSnapshot(snapshot);
       return;
     }
 
@@ -1223,11 +1210,17 @@ async function resumeAnalysisRun(
           useCaseAssetCount: 0,
           featureAssetCount: 0,
         });
-        console.log(
-          JSON.stringify(
-            gatedResult(run.id, "rejected", stage, 0, 0, 0),
-          ),
+        const snapshot = runSnapshot(
+          run.id,
+          run.requirement,
+          "rejected",
+          stage,
+          [],
+          0,
+          0,
+          0,
         );
+        printRunSnapshot(snapshot);
         process.exitCode = 2;
         return;
       }
@@ -1268,8 +1261,7 @@ async function resumeAnalysisRun(
         0,
         0,
       );
-      console.log(JSON.stringify(snapshot));
-      console.error(formatRunSnapshotSummary(snapshot));
+      printRunSnapshot(snapshot);
       return;
     }
 
@@ -1301,18 +1293,17 @@ async function resumeAnalysisRun(
           useCaseAssetCount: 0,
           featureAssetCount: 0,
         });
-        console.log(
-          JSON.stringify(
-            gatedResult(
-              run.id,
-              "rejected",
-              stage,
-              scenarioAssets.length,
-              0,
-              0,
-            ),
-          ),
+        const snapshot = runSnapshot(
+          run.id,
+          run.requirement,
+          "rejected",
+          stage,
+          [],
+          scenarioAssets.length,
+          0,
+          0,
         );
+        printRunSnapshot(snapshot);
         process.exitCode = 2;
         return;
       }
@@ -1353,8 +1344,7 @@ async function resumeAnalysisRun(
         useCaseStage.assets.length,
         0,
       );
-      console.log(JSON.stringify(snapshot));
-      console.error(formatRunSnapshotSummary(snapshot));
+      printRunSnapshot(snapshot);
       return;
     }
 
@@ -1388,18 +1378,17 @@ async function resumeAnalysisRun(
     });
 
     if (!confirmed) {
-      console.log(
-        JSON.stringify(
-          gatedResult(
-            run.id,
-            status,
-            "feature",
-            scenarioAssets.length,
-            useCaseAssets.length,
-            featureStage.assets.length,
-          ),
-        ),
+      const snapshot = runSnapshot(
+        run.id,
+        run.requirement,
+        status,
+        "feature",
+        [],
+        scenarioAssets.length,
+        useCaseAssets.length,
+        featureStage.assets.length,
       );
+      printRunSnapshot(snapshot);
       process.exitCode = 2;
       return;
     }
@@ -1414,8 +1403,7 @@ async function resumeAnalysisRun(
       useCaseAssets.length,
       featureStage.assets.length,
     );
-    console.log(JSON.stringify(snapshot));
-    console.error(formatRunSnapshotSummary(snapshot));
+    printRunSnapshot(snapshot);
     process.exitCode = 0;
   } catch (error) {
     if (error instanceof CancellationError) {

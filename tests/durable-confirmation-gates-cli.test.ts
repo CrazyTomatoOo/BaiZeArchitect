@@ -7,11 +7,27 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { SqlitePool } from "../src/sqlite.ts";
 
-interface GatedCliResult {
+interface RunSnapshot {
   runId: string;
-  status: string;
-  currentStage?: string | null;
-  nextCommand?: string;
+  status: "awaiting_confirmation" | "succeeded" | "rejected";
+  currentStage: "scenario" | "use_case" | "feature";
+  stageLabel: string;
+  requirement: string;
+  gateOpen: boolean;
+  resumeBlockedReason: string | null;
+  proposals: unknown[];
+  scenarioAssetCount: number;
+  useCaseAssetCount: number;
+  featureAssetCount: number;
+  nextStageOnApprove: "use_case" | "feature" | null;
+  revisionStage: "scenario" | "use_case" | "feature" | null;
+  nextCommand: string | null;
+  commands: {
+    status: string;
+    approve: string | null;
+    reject: string | null;
+    revise: string | null;
+  };
 }
 
 async function runCli(
@@ -72,7 +88,7 @@ test("gated CLI persists each confirmation boundary and resumes across invocatio
     `gated CLI failed: ${initial.stderr}`,
   );
 
-  const initialResult = JSON.parse(initial.stdout) as GatedCliResult;
+  const initialResult = JSON.parse(initial.stdout) as RunSnapshot;
   assert.equal(initialResult.status, "awaiting_confirmation");
   assert.equal(initialResult.currentStage, "scenario");
   assert.match(initialResult.nextCommand ?? "", /resume/);
@@ -111,7 +127,7 @@ test("gated CLI persists each confirmation boundary and resumes across invocatio
 
     const useCaseGate = await runCli(["resume", runId, "y"]);
     assert.equal(useCaseGate.exitCode, 0, useCaseGate.stderr);
-    const useCaseResult = JSON.parse(useCaseGate.stdout) as GatedCliResult;
+    const useCaseResult = JSON.parse(useCaseGate.stdout) as RunSnapshot;
     assert.equal(useCaseResult.status, "awaiting_confirmation");
     assert.equal(useCaseResult.currentStage, "use_case");
     assert.match(useCaseResult.nextCommand ?? "", /resume/);
@@ -127,7 +143,7 @@ test("gated CLI persists each confirmation boundary and resumes across invocatio
 
     const featureGate = await runCli(["resume", runId, "y"]);
     assert.equal(featureGate.exitCode, 0, featureGate.stderr);
-    const featureResult = JSON.parse(featureGate.stdout) as GatedCliResult;
+    const featureResult = JSON.parse(featureGate.stdout) as RunSnapshot;
     assert.equal(featureResult.status, "awaiting_confirmation");
     assert.equal(featureResult.currentStage, "feature");
     assert.match(featureResult.nextCommand ?? "", /resume/);
@@ -143,7 +159,7 @@ test("gated CLI persists each confirmation boundary and resumes across invocatio
 
     const completed = await runCli(["resume", runId, "y"]);
     assert.equal(completed.exitCode, 0, completed.stderr);
-    const completedResult = JSON.parse(completed.stdout) as GatedCliResult;
+    const completedResult = JSON.parse(completed.stdout) as RunSnapshot;
     assert.equal(completedResult.status, "succeeded");
     assert.equal(completedResult.nextCommand, null);
     assert.deepEqual(await runStatus(), {
@@ -172,7 +188,7 @@ test("gated CLI revisions replace only the current stage proposals", async () =>
   const initial = await runCli(["--gated", requirement]);
   assert.equal(initial.exitCode, 0, initial.stderr);
 
-  const initialResult = JSON.parse(initial.stdout) as GatedCliResult;
+  const initialResult = JSON.parse(initial.stdout) as RunSnapshot;
   const runId = initialResult.runId;
 
   const scenarioRevision = await runCli(
@@ -193,7 +209,7 @@ test("gated CLI revisions replace only the current stage proposals", async () =>
   assert.equal(scenarioRevision.exitCode, 0, scenarioRevision.stderr);
   const scenarioRevisionResult = JSON.parse(
     scenarioRevision.stdout,
-  ) as GatedCliResult;
+  ) as RunSnapshot;
   assert.equal(
     scenarioRevisionResult.status,
     "awaiting_confirmation",
@@ -261,11 +277,11 @@ test("gated CLI revisions replace only the current stage proposals", async () =>
     });
     assert.equal(useCaseGate.exitCode, 0, useCaseGate.stderr);
     assert.equal(
-      (JSON.parse(useCaseGate.stdout) as GatedCliResult).status,
+      (JSON.parse(useCaseGate.stdout) as RunSnapshot).status,
       "awaiting_confirmation",
     );
     assert.equal(
-      (JSON.parse(useCaseGate.stdout) as GatedCliResult).currentStage,
+      (JSON.parse(useCaseGate.stdout) as RunSnapshot).currentStage,
       "use_case",
     );
 
@@ -287,11 +303,11 @@ test("gated CLI revisions replace only the current stage proposals", async () =>
     );
     assert.equal(useCaseRevision.exitCode, 0, useCaseRevision.stderr);
     assert.equal(
-      (JSON.parse(useCaseRevision.stdout) as GatedCliResult).status,
+      (JSON.parse(useCaseRevision.stdout) as RunSnapshot).status,
       "awaiting_confirmation",
     );
     assert.equal(
-      (JSON.parse(useCaseRevision.stdout) as GatedCliResult).currentStage,
+      (JSON.parse(useCaseRevision.stdout) as RunSnapshot).currentStage,
       "use_case",
     );
 
@@ -319,11 +335,11 @@ test("gated CLI revisions replace only the current stage proposals", async () =>
     });
     assert.equal(featureGate.exitCode, 0, featureGate.stderr);
     assert.equal(
-      (JSON.parse(featureGate.stdout) as GatedCliResult).status,
+      (JSON.parse(featureGate.stdout) as RunSnapshot).status,
       "awaiting_confirmation",
     );
     assert.equal(
-      (JSON.parse(featureGate.stdout) as GatedCliResult).currentStage,
+      (JSON.parse(featureGate.stdout) as RunSnapshot).currentStage,
       "feature",
     );
 
@@ -345,11 +361,11 @@ test("gated CLI revisions replace only the current stage proposals", async () =>
     );
     assert.equal(featureRevision.exitCode, 0, featureRevision.stderr);
     assert.equal(
-      (JSON.parse(featureRevision.stdout) as GatedCliResult).status,
+      (JSON.parse(featureRevision.stdout) as RunSnapshot).status,
       "awaiting_confirmation",
     );
     assert.equal(
-      (JSON.parse(featureRevision.stdout) as GatedCliResult).currentStage,
+      (JSON.parse(featureRevision.stdout) as RunSnapshot).currentStage,
       "feature",
     );
 
@@ -364,7 +380,7 @@ test("gated CLI revisions replace only the current stage proposals", async () =>
 
     const completed = await runCli(["resume", runId, "y"]);
     assert.equal(completed.exitCode, 0, completed.stderr);
-    const completedResult = JSON.parse(completed.stdout) as GatedCliResult;
+    const completedResult = JSON.parse(completed.stdout) as RunSnapshot;
     assert.equal(completedResult.status, "succeeded");
 
     run = await pool.query(
@@ -401,11 +417,11 @@ test("gated CLI rejection stops the run without starting the next stage", async 
   const initial = await runCli(["--gated", requirement]);
   assert.equal(initial.exitCode, 0, initial.stderr);
 
-  const initialResult = JSON.parse(initial.stdout) as GatedCliResult;
+  const initialResult = JSON.parse(initial.stdout) as RunSnapshot;
   const rejected = await runCli(["resume", initialResult.runId, "n"]);
 
   assert.equal(rejected.exitCode, 2);
-  const rejectedResult = JSON.parse(rejected.stdout) as GatedCliResult;
+  const rejectedResult = JSON.parse(rejected.stdout) as RunSnapshot;
   assert.equal(rejectedResult.status, "rejected");
 
   const pool = new SqlitePool(databasePath);
