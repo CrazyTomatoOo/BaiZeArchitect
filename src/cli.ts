@@ -86,20 +86,26 @@ interface GatedCliResult {
 
 interface RunSnapshotCommands {
   status: string;
-  approve: string;
-  reject: string;
-  revise: string;
+  approve: string | null;
+  reject: string | null;
+  revise: string | null;
 }
 
-interface ScenarioRunSnapshot extends GatedCliResult {
-  currentStage: "scenario";
+interface RunSnapshot {
+  runId: string;
+  status: "awaiting_confirmation" | "succeeded";
+  currentStage: AnalysisRunStage;
   stageLabel: string;
   requirement: string;
   gateOpen: boolean;
   resumeBlockedReason: string | null;
   proposals: StageProposal[];
+  scenarioAssetCount: number;
+  useCaseAssetCount: number;
+  featureAssetCount: number;
   nextStageOnApprove: AnalysisRunStage | null;
-  revisionStage: AnalysisRunStage;
+  revisionStage: AnalysisRunStage | null;
+  nextCommand: string | null;
   commands: RunSnapshotCommands;
 }
 
@@ -484,6 +490,15 @@ function runSnapshotCommands(runId: string): RunSnapshotCommands {
   };
 }
 
+function terminalRunSnapshotCommands(runId: string): RunSnapshotCommands {
+  return {
+    status: `npm start -- status ${runId}`,
+    approve: null,
+    reject: null,
+    revise: null,
+  };
+}
+
 function nextStageOnApprove(stage: AnalysisRunStage): AnalysisRunStage | null {
   if (stage === "scenario") {
     return "use_case";
@@ -500,40 +515,61 @@ function stageLabel(stage: AnalysisRunStage): string {
   return stage === "scenario" ? "Scenario" : "Feature";
 }
 
-function scenarioRunSnapshot(
+function runSnapshot(
   runId: string,
   requirement: string,
+  status: "awaiting_confirmation" | "succeeded",
+  currentStage: AnalysisRunStage,
   proposals: StageProposal[],
-): ScenarioRunSnapshot {
-  const commands = runSnapshotCommands(runId);
+  scenarioAssetCount: number,
+  useCaseAssetCount: number,
+  featureAssetCount: number,
+): RunSnapshot {
+  const gateOpen = status === "awaiting_confirmation";
+  const commands = gateOpen
+    ? runSnapshotCommands(runId)
+    : terminalRunSnapshotCommands(runId);
 
   return {
     runId,
-    status: "awaiting_confirmation",
-    currentStage: "scenario",
-    stageLabel: "Scenario",
+    status,
+    currentStage,
+    stageLabel: stageLabel(currentStage),
     requirement,
-    gateOpen: true,
-    resumeBlockedReason: null,
+    gateOpen,
+    resumeBlockedReason: gateOpen ? null : "run_is_terminal",
     proposals,
-    scenarioAssetCount: 0,
-    useCaseAssetCount: 0,
-    featureAssetCount: 0,
-    nextStageOnApprove: "use_case",
-    revisionStage: "scenario",
-    nextCommand: commands.approve,
+    scenarioAssetCount,
+    useCaseAssetCount,
+    featureAssetCount,
+    nextStageOnApprove: gateOpen ? nextStageOnApprove(currentStage) : null,
+    revisionStage: gateOpen ? currentStage : null,
+    nextCommand: gateOpen ? commands.approve : null,
     commands,
   };
 }
 
-function formatScenarioGateSummary(snapshot: ScenarioRunSnapshot): string {
-  return [
+function formatRunSnapshotSummary(snapshot: RunSnapshot): string {
+  const summary = [
     `Requirement: ${snapshot.requirement}`,
     `Lifecycle status: ${snapshot.status}`,
     `Current stage: ${stageLabel(snapshot.currentStage)}`,
     `Gate open: ${snapshot.gateOpen ? "yes" : "no"}`,
-    `Resume blocked: ${snapshot.resumeBlockedReason === null ? "no" : "yes"}`,
-    "Progress: 0 scenarios, 0 use cases, 0 features confirmed",
+    `Resume blocked: ${snapshot.resumeBlockedReason ?? "no"}`,
+    `Progress: ${snapshot.scenarioAssetCount} scenarios, ${snapshot.useCaseAssetCount} use cases, ${snapshot.featureAssetCount} features confirmed`,
+  ];
+
+  if (!snapshot.gateOpen) {
+    return [
+      ...summary,
+      "",
+      "No Confirmation Gate is open.",
+      `Status command: ${snapshot.commands.status}`,
+    ].join("\n");
+  }
+
+  return [
+    ...summary,
     "",
     "Proposals:",
     ...snapshot.proposals.map(
@@ -541,7 +577,9 @@ function formatScenarioGateSummary(snapshot: ScenarioRunSnapshot): string {
         `- [${proposal.kind}] ${proposal.title}: ${proposal.description}`,
     ),
     "",
-    `Approve will continue to: ${snapshot.nextStageOnApprove}`,
+    `Approve will continue to: ${
+      snapshot.nextStageOnApprove ?? "complete the run"
+    }`,
     `Revise will rerun: ${snapshot.revisionStage}`,
     "",
     "Commands:",
@@ -795,9 +833,18 @@ async function main(gated: boolean): Promise<void> {
           "analysis_run_awaiting_confirmation",
           { stage: "scenario" },
         );
-        const snapshot = scenarioRunSnapshot(run.id, requirement, proposals);
+        const snapshot = runSnapshot(
+          run.id,
+          requirement,
+          "awaiting_confirmation",
+          "scenario",
+          proposals,
+          0,
+          0,
+          0,
+        );
         console.log(JSON.stringify(snapshot));
-        console.error(formatScenarioGateSummary(snapshot));
+        console.error(formatRunSnapshotSummary(snapshot));
         return;
       }
 
@@ -1186,7 +1233,7 @@ async function resumeAnalysisRun(
       }
 
       await setAnalysisRunStatus(pool, run.id, "running", "use_case");
-      await prepareAnalysisStage(
+      const useCaseProposals = await prepareAnalysisStage(
         pool,
         run.id,
         cancellation,
@@ -1211,18 +1258,18 @@ async function resumeAnalysisRun(
         "analysis_run_awaiting_confirmation",
         { stage: "use_case" },
       );
-      console.log(
-        JSON.stringify(
-          gatedResult(
-            run.id,
-            "awaiting_confirmation",
-            "use_case",
-            scenarioStage.assets.length,
-            0,
-            0,
-          ),
-        ),
+      const snapshot = runSnapshot(
+        run.id,
+        run.requirement,
+        "awaiting_confirmation",
+        "use_case",
+        useCaseProposals,
+        scenarioStage.assets.length,
+        0,
+        0,
       );
+      console.log(JSON.stringify(snapshot));
+      console.error(formatRunSnapshotSummary(snapshot));
       return;
     }
 
@@ -1271,7 +1318,7 @@ async function resumeAnalysisRun(
       }
 
       await setAnalysisRunStatus(pool, run.id, "running", "feature");
-      await prepareAnalysisStage(
+      const featureProposals = await prepareAnalysisStage(
         pool,
         run.id,
         cancellation,
@@ -1296,18 +1343,18 @@ async function resumeAnalysisRun(
         "analysis_run_awaiting_confirmation",
         { stage: "feature" },
       );
-      console.log(
-        JSON.stringify(
-          gatedResult(
-            run.id,
-            "awaiting_confirmation",
-            "feature",
-            scenarioAssets.length,
-            useCaseStage.assets.length,
-            0,
-          ),
-        ),
+      const snapshot = runSnapshot(
+        run.id,
+        run.requirement,
+        "awaiting_confirmation",
+        "feature",
+        featureProposals,
+        scenarioAssets.length,
+        useCaseStage.assets.length,
+        0,
       );
+      console.log(JSON.stringify(snapshot));
+      console.error(formatRunSnapshotSummary(snapshot));
       return;
     }
 
@@ -1339,19 +1386,37 @@ async function resumeAnalysisRun(
       useCaseAssetCount: useCaseAssets.length,
       featureAssetCount: featureStage.assets.length,
     });
-    console.log(
-      JSON.stringify(
-        gatedResult(
-          run.id,
-          status,
-          "feature",
-          scenarioAssets.length,
-          useCaseAssets.length,
-          featureStage.assets.length,
+
+    if (!confirmed) {
+      console.log(
+        JSON.stringify(
+          gatedResult(
+            run.id,
+            status,
+            "feature",
+            scenarioAssets.length,
+            useCaseAssets.length,
+            featureStage.assets.length,
+          ),
         ),
-      ),
+      );
+      process.exitCode = 2;
+      return;
+    }
+
+    const snapshot = runSnapshot(
+      run.id,
+      run.requirement,
+      "succeeded",
+      "feature",
+      [],
+      scenarioAssets.length,
+      useCaseAssets.length,
+      featureStage.assets.length,
     );
-    process.exitCode = confirmed ? 0 : 2;
+    console.log(JSON.stringify(snapshot));
+    console.error(formatRunSnapshotSummary(snapshot));
+    process.exitCode = 0;
   } catch (error) {
     if (error instanceof CancellationError) {
       if (runId) {

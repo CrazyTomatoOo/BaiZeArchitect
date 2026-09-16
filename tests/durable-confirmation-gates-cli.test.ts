@@ -145,7 +145,7 @@ test("gated CLI persists each confirmation boundary and resumes across invocatio
     assert.equal(completed.exitCode, 0, completed.stderr);
     const completedResult = JSON.parse(completed.stdout) as GatedCliResult;
     assert.equal(completedResult.status, "succeeded");
-    assert.equal(completedResult.nextCommand, undefined);
+    assert.equal(completedResult.nextCommand, null);
     assert.deepEqual(await runStatus(), {
       status: "succeeded",
       current_stage: "feature",
