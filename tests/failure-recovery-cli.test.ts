@@ -5,7 +5,8 @@ import path from "node:path";
 import { once } from "node:events";
 import assert from "node:assert/strict";
 import test from "node:test";
-import { Pool } from "pg";
+import { initializeSchema } from "../src/db.ts";
+import { SqlitePool } from "../src/sqlite.ts";
 
 interface CliRun {
   exitCode: number | null;
@@ -91,25 +92,27 @@ async function waitForPrompt(
 }
 
 async function findFailureRun(
-  pool: Pool,
+  pool: SqlitePool,
   errorPattern: RegExp,
 ): Promise<string> {
   const result = await pool.query(
-    `SELECT run_id
+    `SELECT run_id, payload
      FROM trace_events
      WHERE event_type = 'analysis_run_failed'
-       AND payload->>'error' ~ $1
-     ORDER BY id DESC
-     LIMIT 1`,
-    [errorPattern.source],
+     ORDER BY id DESC`,
   );
 
-  assert.ok(result.rows[0], "Expected a classified analysis_run_failed event");
-  return result.rows[0].run_id as string;
+  const failedRun = result.rows.find((row) => {
+    const error = (row.payload as { error?: unknown }).error;
+    return typeof error === "string" && errorPattern.test(error);
+  });
+
+  assert.ok(failedRun, "Expected a classified analysis_run_failed event");
+  return failedRun.run_id as string;
 }
 
 async function assertFailedRun(
-  pool: Pool,
+  pool: SqlitePool,
   runId: string,
   failureCode: string,
 ): Promise<void> {
@@ -123,28 +126,23 @@ async function assertFailedRun(
 }
 
 test("database failure is classified and leaves no partial scenario proposals", async () => {
-  const databaseUrl = process.env.DATABASE_URL;
+  const databasePath = process.env.BAIZE_DB_PATH;
 
-  assert.ok(databaseUrl, "DATABASE_URL must be set");
+  assert.ok(databasePath, "BAIZE_DB_PATH must be set");
 
-  const pool = new Pool({ connectionString: databaseUrl });
+  const pool = new SqlitePool(databasePath);
 
   try {
-    await pool.query(`
-      CREATE OR REPLACE FUNCTION baize_test_fail_scenario_insert()
-      RETURNS trigger AS $$
-      BEGIN
-        RAISE EXCEPTION 'simulated database failure';
-      END;
-      $$ LANGUAGE plpgsql;
-    `);
+    await initializeSchema(pool);
     await pool.query(
-      "DROP TRIGGER IF EXISTS baize_test_scenario_failure ON scenario_proposals",
+      "DROP TRIGGER IF EXISTS baize_test_scenario_failure",
     );
     await pool.query(`
       CREATE TRIGGER baize_test_scenario_failure
       BEFORE INSERT ON scenario_proposals
-      FOR EACH STATEMENT EXECUTE FUNCTION baize_test_fail_scenario_insert();
+      BEGIN
+        SELECT RAISE(ABORT, 'simulated database failure');
+      END;
     `);
 
     const cli = await spawnCli("Add dashboard sharing", {});
@@ -163,19 +161,18 @@ test("database failure is classified and leaves no partial scenario proposals", 
     assert.equal(proposals.rows.length, 0);
   } finally {
     await pool.query(
-      "DROP TRIGGER IF EXISTS baize_test_scenario_failure ON scenario_proposals",
+      "DROP TRIGGER IF EXISTS baize_test_scenario_failure",
     );
-    await pool.query("DROP FUNCTION IF EXISTS baize_test_fail_scenario_insert()");
     await pool.end();
   }
 });
 
 test("missing MCP scenario data fails instead of inventing knowledge", async () => {
-  const databaseUrl = process.env.DATABASE_URL;
+  const databasePath = process.env.BAIZE_DB_PATH;
   const isolatedHome = await mkdtemp(path.join(tmpdir(), "baize-agent-"));
   const configPath = path.join(isolatedHome, "mcp.config.json");
 
-  assert.ok(databaseUrl, "DATABASE_URL must be set");
+  assert.ok(databasePath, "BAIZE_DB_PATH must be set");
 
   await writeFile(configPath, JSON.stringify({
     mcpServers: {
@@ -189,7 +186,7 @@ test("missing MCP scenario data fails instead of inventing knowledge", async () 
     },
   }));
 
-  const pool = new Pool({ connectionString: databaseUrl });
+  const pool = new SqlitePool(databasePath);
 
   try {
     const cli = await spawnCli("Add dashboard sharing", {
@@ -216,11 +213,11 @@ test("missing MCP scenario data fails instead of inventing knowledge", async () 
 });
 
 test("MCP tool timeout follows a deterministic failure path", async () => {
-  const databaseUrl = process.env.DATABASE_URL;
+  const databasePath = process.env.BAIZE_DB_PATH;
   const isolatedHome = await mkdtemp(path.join(tmpdir(), "baize-agent-"));
   const configPath = path.join(isolatedHome, "mcp.config.json");
 
-  assert.ok(databaseUrl, "DATABASE_URL must be set");
+  assert.ok(databasePath, "BAIZE_DB_PATH must be set");
 
   await writeFile(configPath, JSON.stringify({
     mcpServers: {
@@ -234,7 +231,7 @@ test("MCP tool timeout follows a deterministic failure path", async () => {
     },
   }));
 
-  const pool = new Pool({ connectionString: databaseUrl });
+  const pool = new SqlitePool(databasePath);
 
   try {
     const cli = await spawnCli("Add dashboard sharing", {
@@ -262,11 +259,11 @@ test("MCP tool timeout follows a deterministic failure path", async () => {
 });
 
 test("invalid model output is rejected before analysis assets are persisted", async () => {
-  const databaseUrl = process.env.DATABASE_URL;
+  const databasePath = process.env.BAIZE_DB_PATH;
 
-  assert.ok(databaseUrl, "DATABASE_URL must be set");
+  assert.ok(databasePath, "BAIZE_DB_PATH must be set");
 
-  const pool = new Pool({ connectionString: databaseUrl });
+  const pool = new SqlitePool(databasePath);
 
   try {
     const cli = await spawnCli("Add dashboard sharing", {
@@ -299,10 +296,10 @@ test("invalid model output is rejected before analysis assets are persisted", as
 });
 
 test("SIGINT cancellation leaves a coherent terminal run state", async () => {
-  const databaseUrl = process.env.DATABASE_URL;
+  const databasePath = process.env.BAIZE_DB_PATH;
   const isolatedHome = await mkdtemp(path.join(tmpdir(), "baize-agent-"));
 
-  assert.ok(databaseUrl, "DATABASE_URL must be set");
+  assert.ok(databasePath, "BAIZE_DB_PATH must be set");
 
   const child = spawn(
     process.execPath,
@@ -326,14 +323,14 @@ test("SIGINT cancellation leaves a coherent terminal run state", async () => {
   child.kill("SIGINT");
 
   const [exitCode, signal] = await once(child, "close");
-  const pool = new Pool({ connectionString: databaseUrl });
+  const pool = new SqlitePool(databasePath);
 
   try {
     assert.equal(exitCode, 130);
     assert.equal(signal, null);
 
     const run = await pool.query(
-      "SELECT id, status, failure_code FROM analysis_runs ORDER BY created_at DESC, id DESC LIMIT 1",
+      "SELECT id, status, failure_code FROM analysis_runs ORDER BY rowid DESC LIMIT 1",
     );
 
     assert.equal(run.rows[0].status, "cancelled");

@@ -2,7 +2,7 @@ import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
-import type { Pool } from "pg";
+import type { SqlitePool } from "./db.ts";
 import {
   AnalysisFailureError,
   failureCodeForError,
@@ -80,7 +80,7 @@ export class McpToolClient {
   private transport?: StdioClientTransport;
 
   constructor(
-    private readonly pool: Pool,
+    private readonly pool: SqlitePool,
     private readonly runId: string,
     private readonly serverName = "baize-analysis",
   ) {}
@@ -96,7 +96,8 @@ export class McpToolClient {
       const serverConfig = await loadServerConfig(this.serverName);
       const childEnv: Record<string, string> = {
         ...serverConfig.env,
-        DATABASE_URL: process.env.DATABASE_URL ?? "",
+        BAIZE_DB_PATH:
+          process.env.BAIZE_DB_PATH ?? path.join(process.cwd(), "baize.sqlite3"),
       };
 
       if (childEnv.PKG_EXECPATH === undefined) {

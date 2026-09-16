@@ -5,7 +5,7 @@ import path from "node:path";
 import { once } from "node:events";
 import assert from "node:assert/strict";
 import test from "node:test";
-import { Pool } from "pg";
+import { SqlitePool } from "../../src/sqlite.ts";
 
 interface CliResult {
   runId: string;
@@ -16,10 +16,10 @@ interface CliResult {
 }
 
 test("real-model smoke completes the full analysis workflow", async () => {
-  const databaseUrl = process.env.DATABASE_URL;
+  const databasePath = process.env.BAIZE_DB_PATH;
   const model = process.env.BAIZE_MODEL?.trim();
 
-  assert.ok(databaseUrl, "DATABASE_URL must be set for real-model smoke tests");
+  assert.ok(databasePath, "BAIZE_DB_PATH must be set for real-model smoke tests");
   assert.ok(
     model,
     "BAIZE_MODEL must be set for real-model smoke tests, for example deepseek/deepseek-v4-flash",
@@ -33,7 +33,7 @@ test("real-model smoke completes the full analysis workflow", async () => {
       cwd: process.cwd(),
       env: {
         ...process.env,
-        DATABASE_URL: databaseUrl,
+        BAIZE_DB_PATH: databasePath,
         BAIZE_MODEL: model,
         HOME: isolatedHome,
         PI_CODING_AGENT_DIR: path.join(isolatedHome, "pi-agent"),
@@ -68,7 +68,7 @@ test("real-model smoke completes the full analysis workflow", async () => {
   assert.ok(result.useCaseAssetCount > 0);
   assert.ok(result.featureAssetCount > 0);
 
-  const pool = new Pool({ connectionString: databaseUrl });
+  const pool = new SqlitePool(databasePath);
 
   try {
     const run = await pool.query(

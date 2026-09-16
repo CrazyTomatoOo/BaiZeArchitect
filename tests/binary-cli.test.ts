@@ -6,7 +6,7 @@ import path from "node:path";
 import { once } from "node:events";
 import assert from "node:assert/strict";
 import test, { before } from "node:test";
-import { Pool } from "pg";
+import { SqlitePool } from "../src/sqlite.ts";
 
 interface ProcessResult {
   exitCode: number | null;
@@ -70,7 +70,7 @@ async function runProcess(
 }
 
 async function getRunTrace(
-  pool: Pool,
+  pool: SqlitePool,
   requirement: string,
 ): Promise<{
   status: string;
@@ -109,9 +109,9 @@ before(async () => {
 });
 
 test("standalone binary preserves the full workflow trace and success exit", async () => {
-  const databaseUrl = process.env.DATABASE_URL;
+  const databasePath = process.env.BAIZE_DB_PATH;
 
-  assert.ok(databaseUrl, "DATABASE_URL must be set for binary CLI test");
+  assert.ok(databasePath, "BAIZE_DB_PATH must be set for binary CLI test");
 
   const binaryPath = path.join(process.cwd(), "dist", "baize");
   await access(binaryPath, constants.X_OK);
@@ -164,7 +164,7 @@ test("standalone binary preserves the full workflow trace and success exit", asy
   assert.notEqual(binaryRunId, sourceRunId);
   assert.deepEqual(binaryPayload, sourcePayload);
 
-  const pool = new Pool({ connectionString: databaseUrl });
+  const pool = new SqlitePool(databasePath);
 
   try {
     const sourceTrace = await getRunTrace(pool, sourceRequirement);
@@ -182,9 +182,9 @@ test("standalone binary preserves the full workflow trace and success exit", asy
 });
 
 test("standalone binary preserves failure exit code and classified trace", async () => {
-  const databaseUrl = process.env.DATABASE_URL;
+  const databasePath = process.env.BAIZE_DB_PATH;
 
-  assert.ok(databaseUrl, "DATABASE_URL must be set for binary CLI test");
+  assert.ok(databasePath, "BAIZE_DB_PATH must be set for binary CLI test");
 
   await access(
     path.join(process.cwd(), "dist", "baize"),
@@ -212,7 +212,7 @@ test("standalone binary preserves failure exit code and classified trace", async
   assert.equal(binary.exitCode, 1);
   assert.match(binary.stderr, /Analysis Orchestrator did not return valid JSON/);
 
-  const pool = new Pool({ connectionString: databaseUrl });
+  const pool = new SqlitePool(databasePath);
 
   try {
     const sourceTrace = await getRunTrace(pool, sourceRequirement);

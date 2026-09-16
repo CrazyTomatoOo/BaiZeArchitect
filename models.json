@@ -1,0 +1,18 @@
+{
+  "providers": {
+    "ark": {
+      "name": "Volcengine Ark",
+      "baseUrl": "https://st8tp3ajl0df3n8b8l8qu.apigateway-cn-beijing.volceapi.com/v1",
+      "api": "openai-completions",
+      "apiKey": "$ARK_API_KEY",
+      "models": [
+        {
+          "id": "glm-5.3",
+          "name": "GLM 5.3",
+          "input": ["text"],
+          "contextWindow": 1000000
+        }
+      ]
+    }
+  }
+}

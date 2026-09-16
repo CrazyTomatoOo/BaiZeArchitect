@@ -53,6 +53,11 @@ export interface AnalysisSubagentDefinition<TInput, TResult> {
   parseResult: (text: string) => TResult;
 }
 
+export interface AnalysisRevision<TProposal> {
+  feedback: string;
+  previousProposals: TProposal[];
+}
+
 export interface AnalysisSubagentResult<TResult> {
   result: TResult;
   toolCalls: AnalysisToolCall[];

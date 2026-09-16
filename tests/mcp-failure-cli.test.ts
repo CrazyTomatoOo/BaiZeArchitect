@@ -5,16 +5,16 @@ import path from "node:path";
 import { once } from "node:events";
 import assert from "node:assert/strict";
 import test from "node:test";
-import { Pool } from "pg";
+import { SqlitePool } from "../src/sqlite.ts";
 
 test("MCP startup failure produces a deterministic error path", async () => {
   const isolatedHome = await mkdtemp(path.join(tmpdir(), "baize-agent-"));
-  const databaseUrl = process.env.DATABASE_URL;
+  const databasePath = process.env.BAIZE_DB_PATH;
   const configPath = path.join(isolatedHome, "mcp.config.json");
 
   assert.ok(
-    databaseUrl,
-    "DATABASE_URL must be set for the MCP failure CLI test",
+    databasePath,
+    "BAIZE_DB_PATH must be set for the MCP failure CLI test",
   );
 
   await writeFile(
@@ -36,7 +36,7 @@ test("MCP startup failure produces a deterministic error path", async () => {
       cwd: process.cwd(),
       env: {
         ...process.env,
-        DATABASE_URL: databaseUrl,
+        BAIZE_DB_PATH: databasePath,
         HOME: isolatedHome,
         PI_CODING_AGENT_DIR: path.join(isolatedHome, "pi-agent"),
         MCP_CONFIG_PATH: configPath,
@@ -62,7 +62,7 @@ test("MCP startup failure produces a deterministic error path", async () => {
   assert.equal(exitCode, 1);
   assert.match(stderr, /MCP server failed to start/);
 
-  const pool = new Pool({ connectionString: databaseUrl });
+  const pool = new SqlitePool(databasePath);
 
   try {
     const failedRuns = await pool.query(

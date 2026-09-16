@@ -1,32 +1,13 @@
 services:
-  db:
-    image: postgres:16-alpine
-    environment:
-      POSTGRES_USER: baize
-      POSTGRES_PASSWORD: baize
-      POSTGRES_DB: baize
-    healthcheck:
-      test:
-        [
-          "CMD-SHELL",
-          "pg_isready -U baize -d baize"
-        ]
-      interval: 5s
-      timeout: 3s
-      retries: 10
-
   agent:
     build:
       context: .
       dockerfile: Dockerfile.binary
     environment:
-      DATABASE_URL: postgres://baize:baize@db:5432/baize
+      BAIZE_DB_PATH: /tmp/baize/baize.sqlite3
       MCP_CONFIG_PATH: /app/mcp.config.json
       HOME: /tmp
       PI_CODING_AGENT_DIR: /tmp/baize-agent
-    depends_on:
-      db:
-        condition: service_healthy
     command: ["Add dashboard sharing"]
 
   test:
@@ -34,13 +15,10 @@ services:
     profiles:
       - test
     environment:
-      DATABASE_URL: postgres://baize:baize@db:5432/baize
+      BAIZE_DB_PATH: /tmp/baize/baize.sqlite3
       MCP_CONFIG_PATH: /app/mcp.config.json
       HOME: /tmp
       PI_CODING_AGENT_DIR: /app/.pi-agent
-    depends_on:
-      db:
-        condition: service_healthy
     command:
       [
         "npm",

@@ -1,14 +1,13 @@
-import { Pool } from "pg";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import * as z from "zod/v4";
-import { listScenarioNodes } from "./db.ts";
+import { listScenarioNodes, SqlitePool } from "./db.ts";
 
 export async function runMcpServer(): Promise<void> {
-  const databaseUrl = process.env.DATABASE_URL;
+  const databasePath = process.env.BAIZE_DB_PATH;
 
-  if (!databaseUrl) {
-    throw new Error("DATABASE_URL is required");
+  if (!databasePath) {
+    throw new Error("BAIZE_DB_PATH is required");
   }
 
   const server = new McpServer({
@@ -19,7 +18,7 @@ export async function runMcpServer(): Promise<void> {
   server.registerTool(
     "query_scenario_tree",
     {
-      description: "Query the full scenario tree from PostgreSQL.",
+      description: "Query the full scenario tree from SQLite.",
       outputSchema: {
         count: z.number(),
         nodes: z.array(
@@ -33,7 +32,7 @@ export async function runMcpServer(): Promise<void> {
       },
     },
     async () => {
-      const pool = new Pool({ connectionString: databaseUrl });
+      const pool = new SqlitePool(databasePath);
 
       try {
         const nodes = await listScenarioNodes(pool);

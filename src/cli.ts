@@ -1,4 +1,3 @@
-import { Pool } from "pg";
 import {
   createInterface,
   type Interface as ReadlineInterface,
@@ -13,6 +12,7 @@ import {
   type AnalysisPlanStage,
   type AnalysisStageName,
 } from "./agent/orchestrator.ts";
+import type { AnalysisRevision } from "./agent/analysis-subagent.ts";
 import { McpToolClient } from "./mcp.ts";
 import { runMcpServer } from "./mcp-server.ts";
 import {
@@ -20,17 +20,33 @@ import {
   completeAnalysisRun,
   createAnalysisRun,
   failAnalysisRun,
+  getAnalysisRun,
   initializeSchema,
+  listFeatureAssetsByRun,
+  listFeatureProposalsByRun,
+  rejectFeatureProposals,
+  rejectScenarioProposals,
+  rejectUseCaseProposals,
+  listScenarioAssetsByRun,
+  listScenarioProposalsByRun,
+  listUseCaseAssetsByRun,
+  listUseCaseProposalsByRun,
   recordTraceEvent,
   saveScenarioProposals,
+  setAnalysisRunStatus,
   settleScenarioProposals,
   saveUseCaseProposals,
   settleUseCaseProposals,
   saveFeatureProposals,
   settleFeatureProposals,
+  SqlitePool,
+  type AnalysisRunStage,
   type ScenarioAsset,
+  type ScenarioProposalInput,
   type UseCaseAsset,
+  type UseCaseProposalInput,
   type FeatureAsset,
+  type FeatureProposalInput,
 } from "./db.ts";
 import {
   CancellationError,
@@ -56,6 +72,35 @@ interface CliResult {
     kind: FeatureAsset["kind"];
     title: string;
   }>;
+}
+
+interface GatedCliResult {
+  runId: string;
+  status: "awaiting_confirmation" | "succeeded" | "rejected";
+  currentStage: AnalysisRunStage | null;
+  scenarioAssetCount: number;
+  useCaseAssetCount: number;
+  featureAssetCount: number;
+  nextCommand?: string;
+}
+
+interface RunSnapshotCommands {
+  status: string;
+  approve: string;
+  reject: string;
+  revise: string;
+}
+
+interface ScenarioRunSnapshot extends GatedCliResult {
+  currentStage: "scenario";
+  stageLabel: string;
+  requirement: string;
+  gateOpen: boolean;
+  resumeBlockedReason: string | null;
+  proposals: StageProposal[];
+  nextStageOnApprove: AnalysisRunStage | null;
+  revisionStage: AnalysisRunStage;
+  commands: RunSnapshotCommands;
 }
 
 type ConfirmationResolver = (line: string) => void;
@@ -209,6 +254,12 @@ interface StageOutcome<TAsset> {
   confirmed: boolean;
 }
 
+interface SettleStageConfig<TAsset> {
+  stage: "scenario" | "use case" | "feature";
+  toolTrace: { eventPrefix: string };
+  settleProposals: (confirmed: boolean) => Promise<TAsset[]>;
+}
+
 interface AnalysisStageConfig<
   TProposal extends StageProposal,
   TAsset,
@@ -244,7 +295,7 @@ function getPlannedStage(
 }
 
 async function recordAnalysisToolTrace(
-  pool: Pool,
+  pool: SqlitePool,
   runId: string,
   config: ToolTraceConfig,
   result: ToolTraceResult,
@@ -282,13 +333,12 @@ async function recordAnalysisToolTrace(
   }
 }
 
-async function runAnalysisStage<TProposal extends StageProposal, TAsset>(
-  pool: Pool,
+async function prepareAnalysisStage<TProposal extends StageProposal, TAsset>(
+  pool: SqlitePool,
   runId: string,
-  confirmation: ConfirmationReader,
   cancellation: CancellationController,
   config: AnalysisStageConfig<TProposal, TAsset>,
-): Promise<StageOutcome<TAsset>> {
+): Promise<TProposal[]> {
   cancellation.throwIfRequested();
 
   if (config.planStage.name !== plannedStageName(config.stage)) {
@@ -319,13 +369,6 @@ async function runAnalysisStage<TProposal extends StageProposal, TAsset>(
     },
   );
 
-  console.error(`Proposed ${config.proposalLabel}:`);
-  for (const proposal of result.proposals) {
-    console.error(
-      `- [${proposal.kind}] ${proposal.title}: ${proposal.description}`,
-    );
-  }
-
   await recordTraceEvent(
     pool,
     runId,
@@ -335,7 +378,16 @@ async function runAnalysisStage<TProposal extends StageProposal, TAsset>(
     },
   );
 
-  const confirmed = await confirmation.confirm(config.stage);
+  return result.proposals;
+}
+
+async function settleAnalysisStage<TAsset>(
+  pool: SqlitePool,
+  runId: string,
+  cancellation: CancellationController,
+  config: SettleStageConfig<TAsset>,
+  confirmed: boolean,
+): Promise<StageOutcome<TAsset>> {
   cancellation.throwIfRequested();
 
   await recordTraceEvent(
@@ -363,26 +415,300 @@ async function runAnalysisStage<TProposal extends StageProposal, TAsset>(
   return { assets, confirmed };
 }
 
-async function main(): Promise<void> {
-  const requirement = process.argv[2]?.trim();
+async function runAnalysisStage<TProposal extends StageProposal, TAsset>(
+  pool: SqlitePool,
+  runId: string,
+  confirmation: ConfirmationReader,
+  cancellation: CancellationController,
+  config: AnalysisStageConfig<TProposal, TAsset>,
+): Promise<StageOutcome<TAsset>> {
+  const proposals = await prepareAnalysisStage(
+    pool,
+    runId,
+    cancellation,
+    config,
+  );
+
+  console.error(`Proposed ${config.proposalLabel}:`);
+  for (const proposal of proposals) {
+    console.error(
+      `- [${proposal.kind}] ${proposal.title}: ${proposal.description}`,
+    );
+  }
+
+  const confirmed = await confirmation.confirm(config.stage);
+  cancellation.throwIfRequested();
+
+  return settleAnalysisStage(
+    pool,
+    runId,
+    cancellation,
+    config,
+    confirmed,
+  );
+}
+
+function fixedAnalysisPlan(): AnalysisPlan {
+  return {
+    stages: [
+      {
+        name: "scenario",
+        description: "Analyze related and new scenarios.",
+      },
+      {
+        name: "use_case",
+        description:
+          "Analyze related and new use cases from confirmed scenarios.",
+      },
+      {
+        name: "feature",
+        description:
+          "Analyze affected and new features from confirmed use cases.",
+      },
+    ],
+  };
+}
+
+function resumeCommand(runId: string): string {
+  return `npm start -- resume ${runId} y`;
+}
+
+function runSnapshotCommands(runId: string): RunSnapshotCommands {
+  const approve = resumeCommand(runId);
+
+  return {
+    status: `npm start -- status ${runId}`,
+    approve,
+    reject: `npm start -- resume ${runId} n`,
+    revise: `npm start -- resume ${runId} revise -- "<revision-feedback>"`,
+  };
+}
+
+function nextStageOnApprove(stage: AnalysisRunStage): AnalysisRunStage | null {
+  if (stage === "scenario") {
+    return "use_case";
+  }
+
+  return stage === "use_case" ? "feature" : null;
+}
+
+function stageLabel(stage: AnalysisRunStage): string {
+  if (stage === "use_case") {
+    return "Use case";
+  }
+
+  return stage === "scenario" ? "Scenario" : "Feature";
+}
+
+function scenarioRunSnapshot(
+  runId: string,
+  requirement: string,
+  proposals: StageProposal[],
+): ScenarioRunSnapshot {
+  const commands = runSnapshotCommands(runId);
+
+  return {
+    runId,
+    status: "awaiting_confirmation",
+    currentStage: "scenario",
+    stageLabel: "Scenario",
+    requirement,
+    gateOpen: true,
+    resumeBlockedReason: null,
+    proposals,
+    scenarioAssetCount: 0,
+    useCaseAssetCount: 0,
+    featureAssetCount: 0,
+    nextStageOnApprove: "use_case",
+    revisionStage: "scenario",
+    nextCommand: commands.approve,
+    commands,
+  };
+}
+
+function formatScenarioGateSummary(snapshot: ScenarioRunSnapshot): string {
+  return [
+    `Requirement: ${snapshot.requirement}`,
+    `Lifecycle status: ${snapshot.status}`,
+    `Current stage: ${stageLabel(snapshot.currentStage)}`,
+    `Gate open: ${snapshot.gateOpen ? "yes" : "no"}`,
+    `Resume blocked: ${snapshot.resumeBlockedReason === null ? "no" : "yes"}`,
+    "Progress: 0 scenarios, 0 use cases, 0 features confirmed",
+    "",
+    "Proposals:",
+    ...snapshot.proposals.map(
+      (proposal) =>
+        `- [${proposal.kind}] ${proposal.title}: ${proposal.description}`,
+    ),
+    "",
+    `Approve will continue to: ${snapshot.nextStageOnApprove}`,
+    `Revise will rerun: ${snapshot.revisionStage}`,
+    "",
+    "Commands:",
+    `  status:  ${snapshot.commands.status}`,
+    `  approve: ${snapshot.commands.approve}`,
+    `  reject:  ${snapshot.commands.reject}`,
+    `  revise:  ${snapshot.commands.revise}`,
+  ].join("\n");
+}
+
+function gatedResult(
+  runId: string,
+  status: "awaiting_confirmation" | "succeeded" | "rejected",
+  currentStage: AnalysisRunStage,
+  scenarioAssetCount: number,
+  useCaseAssetCount: number,
+  featureAssetCount: number,
+): GatedCliResult {
+  return {
+    runId,
+    status,
+    currentStage,
+    scenarioAssetCount,
+    useCaseAssetCount,
+    featureAssetCount,
+    ...(status === "awaiting_confirmation"
+      ? { nextCommand: resumeCommand(runId) }
+      : {}),
+  };
+}
+
+function scenarioStageConfig(
+  pool: SqlitePool,
+  runId: string,
+  cancellation: CancellationController,
+  mcp: McpToolClient,
+  requirement: string,
+  planStage: AnalysisPlanStage,
+  revision?: AnalysisRevision<ScenarioProposalInput>,
+): AnalysisStageConfig<ScenarioProposalInput, ScenarioAsset> {
+  return {
+    stage: "scenario",
+    planStage,
+    proposalLabel: "scenarios",
+    startEventName: "scenario_subagent_started",
+    startPayload: { requirement },
+    runAnalysis: () => runScenarioAnalysis(mcp, requirement, revision),
+    toolTrace: {
+      eventPrefix: "scenario_",
+      skillName: "scenario-analysis",
+      queryToolName: "query_scenario_tree",
+      libraryEventName: "scenario_tree_queried",
+    },
+    saveProposals: (proposals) =>
+      saveScenarioProposals(pool, runId, proposals, cancellation.signal),
+    settleProposals: (confirmed) =>
+      settleScenarioProposals(pool, runId, confirmed, cancellation.signal),
+  };
+}
+
+function useCaseStageConfig(
+  pool: SqlitePool,
+  runId: string,
+  cancellation: CancellationController,
+  requirement: string,
+  scenarioAssets: ScenarioAsset[],
+  planStage: AnalysisPlanStage,
+  revision?: AnalysisRevision<UseCaseProposalInput>,
+): AnalysisStageConfig<UseCaseProposalInput, UseCaseAsset> {
+  return {
+    stage: "use case",
+    planStage,
+    proposalLabel: "use cases",
+    startEventName: "use_case_subagent_started",
+    startPayload: {
+      requirement,
+      confirmedScenarios: scenarioAssets.map((asset) => ({
+        kind: asset.kind,
+        title: asset.title,
+        description: asset.description,
+      })),
+    },
+    runAnalysis: () =>
+      runUseCaseAnalysis(pool, requirement, scenarioAssets, revision),
+    toolTrace: {
+      eventPrefix: "use_case_",
+      skillName: "use-case-analysis",
+      queryToolName: "query_use_case_library",
+      libraryEventName: "use_case_library_queried",
+    },
+    saveProposals: (proposals) =>
+      saveUseCaseProposals(
+        pool,
+        runId,
+        proposals,
+        scenarioAssets,
+        cancellation.signal,
+      ),
+    settleProposals: (confirmed) =>
+      settleUseCaseProposals(pool, runId, confirmed, cancellation.signal),
+  };
+}
+
+function featureStageConfig(
+  pool: SqlitePool,
+  runId: string,
+  cancellation: CancellationController,
+  requirement: string,
+  useCaseAssets: UseCaseAsset[],
+  planStage: AnalysisPlanStage,
+  revision?: AnalysisRevision<FeatureProposalInput>,
+): AnalysisStageConfig<FeatureProposalInput, FeatureAsset> {
+  return {
+    stage: "feature",
+    planStage,
+    proposalLabel: "features",
+    startEventName: "feature_subagent_started",
+    startPayload: {
+      requirement,
+      confirmedUseCases: useCaseAssets.map((asset) => ({
+        kind: asset.kind,
+        title: asset.title,
+        description: asset.description,
+      })),
+    },
+    runAnalysis: () =>
+      runFeatureAnalysis(pool, requirement, useCaseAssets, revision),
+    toolTrace: {
+      eventPrefix: "feature_",
+      skillName: "feature-analysis",
+      queryToolName: "query_feature_library",
+      libraryEventName: "feature_library_queried",
+    },
+    saveProposals: (proposals) =>
+      saveFeatureProposals(
+        pool,
+        runId,
+        proposals,
+        useCaseAssets,
+        cancellation.signal,
+      ),
+    settleProposals: (confirmed) =>
+      settleFeatureProposals(pool, runId, confirmed, cancellation.signal),
+  };
+}
+
+async function main(gated: boolean): Promise<void> {
+  const cliArgs = process.argv.slice(2).filter((arg) => arg !== "--gated");
+  const requirement = cliArgs[0]?.trim();
 
   if (!requirement) {
-    console.error("Usage: npm start -- <requirement>");
+    console.error("Usage: npm start -- [--gated] <requirement>");
     process.exitCode = 2;
     return;
   }
 
-  const databaseUrl = process.env.DATABASE_URL;
+  const databasePath = process.env.BAIZE_DB_PATH;
 
-  if (!databaseUrl) {
-    console.error("DATABASE_URL is required");
+  if (!databasePath) {
+    console.error("BAIZE_DB_PATH is required");
     process.exitCode = 2;
     return;
   }
 
-  const pool = new Pool({ connectionString: databaseUrl });
+  const pool = new SqlitePool(databasePath);
   const cancellation = new CancellationController();
-  const confirmation = new ConfirmationReader(cancellation);
+  const confirmation = gated ? undefined : new ConfirmationReader(cancellation);
   const model = analysisModelDescriptor();
   let runId: string | undefined;
 
@@ -437,41 +763,54 @@ async function main(): Promise<void> {
     await Promise.race([mcpStart, cancellation.promise]);
     cancellation.throwIfRequested();
 
-    let scenarioStage;
+    let scenarioStage: StageOutcome<ScenarioAsset> | undefined;
     try {
+      const scenarioConfig = scenarioStageConfig(
+        pool,
+        run.id,
+        cancellation,
+        mcp,
+        requirement,
+        scenarioPlanStage,
+      );
+
+      await setAnalysisRunStatus(pool, run.id, "running", "scenario");
+
+      if (gated) {
+        const proposals = await prepareAnalysisStage(
+          pool,
+          run.id,
+          cancellation,
+          scenarioConfig,
+        );
+        await setAnalysisRunStatus(
+          pool,
+          run.id,
+          "awaiting_confirmation",
+          "scenario",
+        );
+        await recordTraceEvent(
+          pool,
+          run.id,
+          "analysis_run_awaiting_confirmation",
+          { stage: "scenario" },
+        );
+        const snapshot = scenarioRunSnapshot(run.id, requirement, proposals);
+        console.log(JSON.stringify(snapshot));
+        console.error(formatScenarioGateSummary(snapshot));
+        return;
+      }
+
+      if (!confirmation) {
+        throw new Error("Interactive confirmation reader is required");
+      }
+
       scenarioStage = await runAnalysisStage(
         pool,
         run.id,
         confirmation,
         cancellation,
-        {
-        stage: "scenario",
-        planStage: scenarioPlanStage,
-        proposalLabel: "scenarios",
-        startEventName: "scenario_subagent_started",
-        startPayload: { requirement },
-        runAnalysis: () => runScenarioAnalysis(mcp, requirement),
-        toolTrace: {
-          eventPrefix: "scenario_",
-          skillName: "scenario-analysis",
-          queryToolName: "query_scenario_tree",
-          libraryEventName: "scenario_tree_queried",
-        },
-        saveProposals: (proposals) =>
-          saveScenarioProposals(
-            pool,
-            run.id,
-            proposals,
-            cancellation.signal,
-          ),
-        settleProposals: (confirmed) =>
-          settleScenarioProposals(
-            pool,
-            run.id,
-            confirmed,
-            cancellation.signal,
-          ),
-        },
+        scenarioConfig,
       );
     } finally {
       await mcp.close();
@@ -484,43 +823,14 @@ async function main(): Promise<void> {
           run.id,
           confirmation,
           cancellation,
-          {
-          stage: "use case",
-          planStage: useCasePlanStage,
-          proposalLabel: "use cases",
-          startEventName: "use_case_subagent_started",
-          startPayload: {
+          useCaseStageConfig(
+            pool,
+            run.id,
+            cancellation,
             requirement,
-            confirmedScenarios: scenarioAssets.map((asset) => ({
-              kind: asset.kind,
-              title: asset.title,
-              description: asset.description,
-            })),
-          },
-          runAnalysis: () =>
-            runUseCaseAnalysis(pool, requirement, scenarioAssets),
-          toolTrace: {
-            eventPrefix: "use_case_",
-            skillName: "use-case-analysis",
-            queryToolName: "query_use_case_library",
-            libraryEventName: "use_case_library_queried",
-          },
-          saveProposals: (proposals) =>
-            saveUseCaseProposals(
-              pool,
-              run.id,
-              proposals,
-              scenarioAssets,
-              cancellation.signal,
-            ),
-          settleProposals: (confirmed) =>
-            settleUseCaseProposals(
-              pool,
-              run.id,
-              confirmed,
-              cancellation.signal,
-            ),
-          },
+            scenarioAssets,
+            useCasePlanStage,
+          ),
         )
       : { assets: [] as UseCaseAsset[], confirmed: false };
     const useCaseAssets = useCaseStage.assets;
@@ -532,43 +842,14 @@ async function main(): Promise<void> {
             run.id,
             confirmation,
             cancellation,
-            {
-            stage: "feature",
-            planStage: featurePlanStage,
-            proposalLabel: "features",
-            startEventName: "feature_subagent_started",
-            startPayload: {
+            featureStageConfig(
+              pool,
+              run.id,
+              cancellation,
               requirement,
-              confirmedUseCases: useCaseAssets.map((asset) => ({
-                kind: asset.kind,
-                title: asset.title,
-                description: asset.description,
-              })),
-            },
-            runAnalysis: () =>
-              runFeatureAnalysis(pool, requirement, useCaseAssets),
-            toolTrace: {
-              eventPrefix: "feature_",
-              skillName: "feature-analysis",
-              queryToolName: "query_feature_library",
-              libraryEventName: "feature_library_queried",
-            },
-            saveProposals: (proposals) =>
-              saveFeatureProposals(
-                pool,
-                run.id,
-                proposals,
-                useCaseAssets,
-                cancellation.signal,
-              ),
-            settleProposals: (confirmed) =>
-              settleFeatureProposals(
-                pool,
-                run.id,
-                confirmed,
-                cancellation.signal,
-              ),
-            },
+              useCaseAssets,
+              featurePlanStage,
+            ),
           )
         : { assets: [] as FeatureAsset[], confirmed: false };
     const featureAssets = featureStage.assets;
@@ -651,7 +932,466 @@ async function main(): Promise<void> {
     process.exitCode = 1;
   } finally {
     cancellation.dispose();
-    confirmation.close();
+    confirmation?.close();
+    await pool.end();
+  }
+}
+
+async function reviseAnalysisStage(
+  pool: SqlitePool,
+  runId: string,
+  requirement: string,
+  cancellation: CancellationController,
+  stage: AnalysisRunStage,
+  feedback: string,
+): Promise<GatedCliResult> {
+  const analysisPlan = fixedAnalysisPlan();
+  const useCasePlanStage = getPlannedStage(analysisPlan, "use_case");
+  const featurePlanStage = getPlannedStage(analysisPlan, "feature");
+
+  if (stage === "scenario") {
+    const previousProposals = await listScenarioProposalsByRun(pool, runId);
+    await recordTraceEvent(pool, runId, "analysis_run_revision_requested", {
+      stage: "scenario",
+      feedback,
+      previousProposals,
+    });
+    await rejectScenarioProposals(pool, runId);
+    await setAnalysisRunStatus(pool, runId, "running", stage);
+
+    const mcp = new McpToolClient(pool, runId);
+    const mcpStart = mcp.start();
+    mcpStart.catch(() => undefined);
+    await Promise.race([mcpStart, cancellation.promise]);
+    cancellation.throwIfRequested();
+
+    try {
+      await prepareAnalysisStage(
+        pool,
+        runId,
+        cancellation,
+        scenarioStageConfig(
+          pool,
+          runId,
+          cancellation,
+          mcp,
+          requirement,
+          getPlannedStage(analysisPlan, "scenario"),
+          { feedback, previousProposals },
+        ),
+      );
+    } finally {
+      await mcp.close();
+    }
+
+    await setAnalysisRunStatus(pool, runId, "awaiting_confirmation", stage);
+    return gatedResult(runId, "awaiting_confirmation", stage, 0, 0, 0);
+  }
+
+  if (stage === "use_case") {
+    const previousProposals = await listUseCaseProposalsByRun(pool, runId);
+    const scenarioAssets = await listScenarioAssetsByRun(pool, runId);
+    await recordTraceEvent(pool, runId, "analysis_run_revision_requested", {
+      stage: "use_case",
+      feedback,
+      previousProposals,
+    });
+    await rejectUseCaseProposals(pool, runId);
+    await setAnalysisRunStatus(pool, runId, "running", stage);
+
+    await prepareAnalysisStage(
+      pool,
+      runId,
+      cancellation,
+      useCaseStageConfig(
+        pool,
+        runId,
+        cancellation,
+        requirement,
+        scenarioAssets,
+        useCasePlanStage,
+        { feedback, previousProposals },
+      ),
+    );
+    await setAnalysisRunStatus(pool, runId, "awaiting_confirmation", stage);
+    return gatedResult(
+      runId,
+      "awaiting_confirmation",
+      stage,
+      scenarioAssets.length,
+      0,
+      0,
+    );
+  }
+
+  const previousProposals = await listFeatureProposalsByRun(pool, runId);
+  const scenarioAssets = await listScenarioAssetsByRun(pool, runId);
+  const useCaseAssets = await listUseCaseAssetsByRun(pool, runId);
+  await recordTraceEvent(pool, runId, "analysis_run_revision_requested", {
+    stage: "feature",
+    feedback,
+    previousProposals,
+  });
+  await rejectFeatureProposals(pool, runId);
+  await setAnalysisRunStatus(pool, runId, "running", stage);
+
+  await prepareAnalysisStage(
+    pool,
+    runId,
+    cancellation,
+    featureStageConfig(
+      pool,
+      runId,
+      cancellation,
+      requirement,
+      useCaseAssets,
+      featurePlanStage,
+      { feedback, previousProposals },
+    ),
+  );
+  await setAnalysisRunStatus(pool, runId, "awaiting_confirmation", stage);
+  return gatedResult(
+    runId,
+    "awaiting_confirmation",
+    stage,
+    scenarioAssets.length,
+    useCaseAssets.length,
+    0,
+  );
+}
+
+async function resumeAnalysisRun(
+  runIdArgument: string | undefined,
+  actionArgument: string | undefined,
+  feedbackArguments: readonly string[],
+): Promise<void> {
+  if (!runIdArgument || !actionArgument) {
+    console.error(
+      "Usage: npm start -- resume <runId> <y|n|revise> [-- \"revision feedback\"]",
+    );
+    process.exitCode = 2;
+    return;
+  }
+
+  const databasePath = process.env.BAIZE_DB_PATH;
+
+  if (!databasePath) {
+    console.error("BAIZE_DB_PATH is required");
+    process.exitCode = 2;
+    return;
+  }
+
+  const action = actionArgument.trim().toLowerCase();
+  const feedbackParts = [...feedbackArguments];
+  if (feedbackParts[0] === "--") {
+    feedbackParts.shift();
+  }
+  const feedback = feedbackParts.join(" ").trim();
+
+  if (
+    !["y", "yes", "n", "no", "revise"].includes(action) ||
+    (action === "revise" && !feedback)
+  ) {
+    console.error(
+      "Resume action must be y, yes, n, no, or revise with non-empty feedback",
+    );
+    process.exitCode = 2;
+    return;
+  }
+  const confirmed = action === "y" || action === "yes";
+
+  const pool = new SqlitePool(databasePath);
+  const cancellation = new CancellationController();
+  let runId: string | undefined;
+
+  cancellation.install();
+
+  try {
+    await initializeSchema(pool);
+    cancellation.throwIfRequested();
+
+    const run = await getAnalysisRun(pool, runIdArgument);
+    if (!run) {
+      throw new Error(`Analysis run not found: ${runIdArgument}`);
+    }
+
+    if (run.status !== "awaiting_confirmation" || !run.currentStage) {
+      console.error(
+        `Analysis run is not awaiting confirmation (status: ${run.status})`,
+      );
+      process.exitCode = 2;
+      return;
+    }
+
+    runId = run.id;
+    const stage = run.currentStage;
+
+    if (action === "revise") {
+      const result = await reviseAnalysisStage(
+        pool,
+        run.id,
+        run.requirement,
+        cancellation,
+        stage,
+        feedback,
+      );
+      console.log(JSON.stringify(result));
+      return;
+    }
+
+    await recordTraceEvent(pool, run.id, "analysis_run_resumed", {
+      stage,
+      confirmed,
+    });
+    await setAnalysisRunStatus(pool, run.id, "running", stage);
+
+    const analysisPlan = fixedAnalysisPlan();
+    const useCasePlanStage = getPlannedStage(analysisPlan, "use_case");
+    const featurePlanStage = getPlannedStage(analysisPlan, "feature");
+
+    if (stage === "scenario") {
+      const scenarioStage = await settleAnalysisStage(
+        pool,
+        run.id,
+        cancellation,
+        {
+          stage: "scenario",
+          toolTrace: { eventPrefix: "scenario_" },
+          settleProposals: (shouldConfirm) =>
+            settleScenarioProposals(
+              pool,
+              run.id,
+              shouldConfirm,
+              cancellation.signal,
+            ),
+        },
+        confirmed,
+      );
+
+      if (!confirmed) {
+        await completeAnalysisRun(pool, run.id, "rejected");
+        await recordTraceEvent(pool, run.id, "analysis_run_completed", {
+          status: "rejected",
+          scenarioAssetCount: 0,
+          useCaseAssetCount: 0,
+          featureAssetCount: 0,
+        });
+        console.log(
+          JSON.stringify(
+            gatedResult(run.id, "rejected", stage, 0, 0, 0),
+          ),
+        );
+        process.exitCode = 2;
+        return;
+      }
+
+      await setAnalysisRunStatus(pool, run.id, "running", "use_case");
+      await prepareAnalysisStage(
+        pool,
+        run.id,
+        cancellation,
+        useCaseStageConfig(
+          pool,
+          run.id,
+          cancellation,
+          run.requirement,
+          scenarioStage.assets,
+          useCasePlanStage,
+        ),
+      );
+      await setAnalysisRunStatus(
+        pool,
+        run.id,
+        "awaiting_confirmation",
+        "use_case",
+      );
+      await recordTraceEvent(
+        pool,
+        run.id,
+        "analysis_run_awaiting_confirmation",
+        { stage: "use_case" },
+      );
+      console.log(
+        JSON.stringify(
+          gatedResult(
+            run.id,
+            "awaiting_confirmation",
+            "use_case",
+            scenarioStage.assets.length,
+            0,
+            0,
+          ),
+        ),
+      );
+      return;
+    }
+
+    if (stage === "use_case") {
+      const scenarioAssets = await listScenarioAssetsByRun(pool, run.id);
+      const useCaseStage = await settleAnalysisStage(
+        pool,
+        run.id,
+        cancellation,
+        {
+          stage: "use case",
+          toolTrace: { eventPrefix: "use_case_" },
+          settleProposals: (shouldConfirm) =>
+            settleUseCaseProposals(
+              pool,
+              run.id,
+              shouldConfirm,
+              cancellation.signal,
+            ),
+        },
+        confirmed,
+      );
+
+      if (!confirmed) {
+        await completeAnalysisRun(pool, run.id, "rejected");
+        await recordTraceEvent(pool, run.id, "analysis_run_completed", {
+          status: "rejected",
+          scenarioAssetCount: scenarioAssets.length,
+          useCaseAssetCount: 0,
+          featureAssetCount: 0,
+        });
+        console.log(
+          JSON.stringify(
+            gatedResult(
+              run.id,
+              "rejected",
+              stage,
+              scenarioAssets.length,
+              0,
+              0,
+            ),
+          ),
+        );
+        process.exitCode = 2;
+        return;
+      }
+
+      await setAnalysisRunStatus(pool, run.id, "running", "feature");
+      await prepareAnalysisStage(
+        pool,
+        run.id,
+        cancellation,
+        featureStageConfig(
+          pool,
+          run.id,
+          cancellation,
+          run.requirement,
+          useCaseStage.assets,
+          featurePlanStage,
+        ),
+      );
+      await setAnalysisRunStatus(
+        pool,
+        run.id,
+        "awaiting_confirmation",
+        "feature",
+      );
+      await recordTraceEvent(
+        pool,
+        run.id,
+        "analysis_run_awaiting_confirmation",
+        { stage: "feature" },
+      );
+      console.log(
+        JSON.stringify(
+          gatedResult(
+            run.id,
+            "awaiting_confirmation",
+            "feature",
+            scenarioAssets.length,
+            useCaseStage.assets.length,
+            0,
+          ),
+        ),
+      );
+      return;
+    }
+
+    const scenarioAssets = await listScenarioAssetsByRun(pool, run.id);
+    const useCaseAssets = await listUseCaseAssetsByRun(pool, run.id);
+    const featureStage = await settleAnalysisStage(
+      pool,
+      run.id,
+      cancellation,
+      {
+        stage: "feature",
+        toolTrace: { eventPrefix: "feature_" },
+        settleProposals: (shouldConfirm) =>
+          settleFeatureProposals(
+            pool,
+            run.id,
+            shouldConfirm,
+            cancellation.signal,
+          ),
+      },
+      confirmed,
+    );
+    const status = confirmed ? "succeeded" : "rejected";
+
+    await completeAnalysisRun(pool, run.id, status);
+    await recordTraceEvent(pool, run.id, "analysis_run_completed", {
+      status,
+      scenarioAssetCount: scenarioAssets.length,
+      useCaseAssetCount: useCaseAssets.length,
+      featureAssetCount: featureStage.assets.length,
+    });
+    console.log(
+      JSON.stringify(
+        gatedResult(
+          run.id,
+          status,
+          "feature",
+          scenarioAssets.length,
+          useCaseAssets.length,
+          featureStage.assets.length,
+        ),
+      ),
+    );
+    process.exitCode = confirmed ? 0 : 2;
+  } catch (error) {
+    if (error instanceof CancellationError) {
+      if (runId) {
+        try {
+          await recordTraceEvent(pool, runId, "analysis_run_cancelled", {
+            signal: error.signal,
+            error: error.message,
+          });
+          await cancelAnalysisRun(pool, runId);
+        } catch (finalizationError) {
+          console.error(
+            `Failed to record cancellation: ${errorMessage(finalizationError)}`,
+          );
+        }
+      }
+
+      process.exitCode = error.signal === "SIGINT" ? 130 : 143;
+      return;
+    }
+
+    const failureCode = failureCodeForError(error);
+
+    if (runId) {
+      try {
+        await recordTraceEvent(pool, runId, "analysis_run_failed", {
+          failureCode,
+          error: errorMessage(error),
+        });
+        await failAnalysisRun(pool, runId, failureCode);
+      } catch (finalizationError) {
+        console.error(
+          `Failed to record analysis failure: ${errorMessage(finalizationError)}`,
+        );
+      }
+    }
+
+    console.error(errorMessage(error));
+    process.exitCode = 1;
+  } finally {
+    cancellation.dispose();
     await pool.end();
   }
 }
@@ -662,7 +1402,16 @@ void (async () => {
     return;
   }
 
-  await main();
+  if (process.argv[2] === "resume") {
+    await resumeAnalysisRun(
+      process.argv[3],
+      process.argv[4],
+      process.argv.slice(5),
+    );
+    return;
+  }
+
+  await main(process.argv.includes("--gated"));
 })().catch((error: unknown) => {
   console.error(errorMessage(error));
   process.exitCode = 1;

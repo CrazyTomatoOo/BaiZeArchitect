@@ -11,8 +11,8 @@
     "build:binary": "npm run build && node scripts/build-binary.mjs",
     "start": "tsx src/cli.ts",
     "start:dist": "node dist/cli.js",
-    "test": "node --import tsx --test --test-concurrency=1 tests/*.test.ts",
-    "test:binary": "node --import tsx --test --test-concurrency=1 tests/binary-cli.test.ts",
+    "test": "node --import tsx --import ./tests/test-env.ts --test --test-concurrency=1 tests/*.test.ts",
+    "test:binary": "node --import tsx --import ./tests/test-env.ts --test --test-concurrency=1 tests/binary-cli.test.ts",
     "test:smoke": "node --import tsx --test --test-concurrency=1 tests/smoke/*.test.ts",
     "test:docker": "docker compose run --build --rm test",
     "typecheck": "tsc -p tsconfig.json"
@@ -21,7 +21,7 @@
     "@earendil-works/pi-ai": "0.83.0",
     "@earendil-works/pi-coding-agent": "0.83.0",
     "@modelcontextprotocol/sdk": "1.30.0",
-    "pg": "8.16.0",
+    "better-sqlite3": "^13.0.3",
     "typebox": "1.3.7",
     "zod": "4.6.5"
   },
@@ -29,10 +29,15 @@
     "brace-expansion": "5.0.9",
     "undici": "8.10.2"
   },
+  "pkg": {
+    "assets": [
+      "node_modules/better-sqlite3/prebuilds/*.node"
+    ]
+  },
   "devDependencies": {
-    "@yao-pkg/pkg": "6.22.0",
+    "@types/better-sqlite3": "^9.6.0",
     "@types/node": "22.15.0",
-    "@types/pg": "8.15.5",
+    "@yao-pkg/pkg": "6.22.0",
     "esbuild": "0.28.2",
     "tsx": "4.20.3",
     "typescript": "5.8.3"

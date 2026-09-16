@@ -1,10 +1,28 @@
 import { randomUUID } from "node:crypto";
-import { type Pool, type QueryResult } from "pg";
 import { AnalysisFailureError, type AnalysisFailureCode } from "./errors.ts";
+import { SqlitePool, type QueryResult } from "./sqlite.ts";
+
+export { SqlitePool };
+export type { QueryResult };
 
 export interface AnalysisRun {
   id: string;
   requirement: string;
+}
+
+export type AnalysisRunStatus =
+  | "running"
+  | "awaiting_confirmation"
+  | "succeeded"
+  | "rejected"
+  | "failed"
+  | "cancelled";
+
+export type AnalysisRunStage = "scenario" | "use_case" | "feature";
+
+export interface AnalysisRunRecord extends AnalysisRun {
+  status: AnalysisRunStatus;
+  currentStage: AnalysisRunStage | null;
 }
 
 export interface ScenarioNode {
@@ -18,6 +36,10 @@ export interface ScenarioProposalInput {
   kind: "related" | "new";
   title: string;
   description: string;
+}
+
+export interface ScenarioProposalRecord extends ScenarioProposalInput {
+  status: "proposed" | "confirmed" | "rejected";
 }
 
 export interface ScenarioAsset {
@@ -43,6 +65,10 @@ export interface UseCaseProposalInput {
   scenarioTitle: string;
 }
 
+export interface UseCaseProposalRecord extends UseCaseProposalInput {
+  status: "proposed" | "confirmed" | "rejected";
+}
+
 export interface UseCaseAsset {
   id: string;
   kind: "related" | "new";
@@ -63,6 +89,10 @@ export interface FeatureProposalInput {
   useCaseTitle: string;
 }
 
+export interface FeatureProposalRecord extends FeatureProposalInput {
+  status: "proposed" | "confirmed" | "rejected";
+}
+
 export interface FeatureAsset {
   id: string;
   kind: "affected" | "new";
@@ -70,58 +100,102 @@ export interface FeatureAsset {
   description: string;
 }
 
-export async function initializeSchema(pool: Pool): Promise<void> {
-  await pool.query(`
+interface ScenarioProposalRow {
+  id: string;
+  existing_scenario_id: string | null;
+  title: string;
+  description: string;
+  kind: "related" | "new";
+}
+
+interface UseCaseProposalRow {
+  id: string;
+  existing_use_case_id: string | null;
+  scenario_asset_id: string;
+  title: string;
+  description: string;
+  kind: "related" | "new";
+  scenario_id: string;
+}
+
+interface FeatureProposalRow {
+  id: string;
+  existing_feature_id: string | null;
+  use_case_asset_id: string;
+  title: string;
+  description: string;
+  kind: "affected" | "new";
+}
+
+export async function initializeSchema(pool: SqlitePool): Promise<void> {
+  pool.database.exec(`
     CREATE TABLE IF NOT EXISTS analysis_runs (
-      id UUID PRIMARY KEY,
+      id TEXT PRIMARY KEY,
       requirement TEXT NOT NULL,
-      status TEXT NOT NULL DEFAULT 'running',
+      status TEXT NOT NULL DEFAULT 'running'
+        CHECK (status IN (
+          'running',
+          'awaiting_confirmation',
+          'succeeded',
+          'rejected',
+          'failed',
+          'cancelled'
+        )),
+      current_stage TEXT DEFAULT NULL
+        CHECK (current_stage IS NULL OR current_stage IN (
+          'scenario',
+          'use_case',
+          'feature'
+        )),
       failure_code TEXT,
-      created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-      completed_at TIMESTAMPTZ
+      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      completed_at TEXT,
+      CHECK (
+        status <> 'awaiting_confirmation' OR current_stage IS NOT NULL
+      )
     );
 
     CREATE TABLE IF NOT EXISTS trace_events (
-      id BIGSERIAL PRIMARY KEY,
-      run_id UUID NOT NULL REFERENCES analysis_runs(id) ON DELETE CASCADE,
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      run_id TEXT NOT NULL REFERENCES analysis_runs(id) ON DELETE CASCADE,
       event_type TEXT NOT NULL,
-      payload JSONB NOT NULL DEFAULT '{}'::jsonb,
-      created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+      payload TEXT NOT NULL DEFAULT '{}',
+      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
     );
 
     CREATE INDEX IF NOT EXISTS trace_events_run_id_idx
       ON trace_events(run_id);
 
     CREATE TABLE IF NOT EXISTS scenario_nodes (
-      id UUID PRIMARY KEY,
-      parent_id UUID REFERENCES scenario_nodes(id),
+      id TEXT PRIMARY KEY,
+      parent_id TEXT REFERENCES scenario_nodes(id),
       name TEXT NOT NULL UNIQUE,
       description TEXT NOT NULL,
-      created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
     );
 
     CREATE TABLE IF NOT EXISTS scenario_proposals (
-      id UUID PRIMARY KEY,
-      run_id UUID NOT NULL REFERENCES analysis_runs(id) ON DELETE CASCADE,
-      existing_scenario_id UUID REFERENCES scenario_nodes(id),
+      id TEXT PRIMARY KEY,
+      run_id TEXT NOT NULL REFERENCES analysis_runs(id) ON DELETE CASCADE,
+      existing_scenario_id TEXT REFERENCES scenario_nodes(id),
       title TEXT NOT NULL,
       description TEXT NOT NULL,
       kind TEXT NOT NULL CHECK (kind IN ('related', 'new')),
       status TEXT NOT NULL DEFAULT 'proposed'
         CHECK (status IN ('proposed', 'confirmed', 'rejected')),
-      created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-      confirmed_at TIMESTAMPTZ
+      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      confirmed_at TEXT
     );
 
     CREATE TABLE IF NOT EXISTS scenario_assets (
-      id UUID PRIMARY KEY,
-      run_id UUID NOT NULL REFERENCES analysis_runs(id) ON DELETE CASCADE,
-      proposal_id UUID NOT NULL REFERENCES scenario_proposals(id) ON DELETE CASCADE,
-      existing_scenario_id UUID REFERENCES scenario_nodes(id),
+      id TEXT PRIMARY KEY,
+      run_id TEXT NOT NULL REFERENCES analysis_runs(id) ON DELETE CASCADE,
+      proposal_id TEXT NOT NULL REFERENCES scenario_proposals(id) ON DELETE CASCADE,
+      existing_scenario_id TEXT REFERENCES scenario_nodes(id),
       title TEXT NOT NULL,
       description TEXT NOT NULL,
       kind TEXT NOT NULL,
-      created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
     );
 
     CREATE INDEX IF NOT EXISTS scenario_proposals_run_id_idx
@@ -130,37 +204,37 @@ export async function initializeSchema(pool: Pool): Promise<void> {
       ON scenario_assets(run_id);
 
     CREATE TABLE IF NOT EXISTS use_case_nodes (
-      id UUID PRIMARY KEY,
-      scenario_id UUID NOT NULL REFERENCES scenario_nodes(id),
+      id TEXT PRIMARY KEY,
+      scenario_id TEXT NOT NULL REFERENCES scenario_nodes(id),
       title TEXT NOT NULL UNIQUE,
       description TEXT NOT NULL,
-      created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
     );
 
     CREATE TABLE IF NOT EXISTS use_case_proposals (
-      id UUID PRIMARY KEY,
-      run_id UUID NOT NULL REFERENCES analysis_runs(id) ON DELETE CASCADE,
-      existing_use_case_id UUID REFERENCES use_case_nodes(id),
-      scenario_asset_id UUID NOT NULL REFERENCES scenario_assets(id),
+      id TEXT PRIMARY KEY,
+      run_id TEXT NOT NULL REFERENCES analysis_runs(id) ON DELETE CASCADE,
+      existing_use_case_id TEXT REFERENCES use_case_nodes(id),
+      scenario_asset_id TEXT NOT NULL REFERENCES scenario_assets(id),
       title TEXT NOT NULL,
       description TEXT NOT NULL,
       kind TEXT NOT NULL CHECK (kind IN ('related', 'new')),
       status TEXT NOT NULL DEFAULT 'proposed'
         CHECK (status IN ('proposed', 'confirmed', 'rejected')),
-      created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-      confirmed_at TIMESTAMPTZ
+      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      confirmed_at TEXT
     );
 
     CREATE TABLE IF NOT EXISTS use_case_assets (
-      id UUID PRIMARY KEY,
-      run_id UUID NOT NULL REFERENCES analysis_runs(id) ON DELETE CASCADE,
-      proposal_id UUID NOT NULL REFERENCES use_case_proposals(id) ON DELETE CASCADE,
-      existing_use_case_id UUID REFERENCES use_case_nodes(id),
-      scenario_asset_id UUID NOT NULL REFERENCES scenario_assets(id),
+      id TEXT PRIMARY KEY,
+      run_id TEXT NOT NULL REFERENCES analysis_runs(id) ON DELETE CASCADE,
+      proposal_id TEXT NOT NULL REFERENCES use_case_proposals(id) ON DELETE CASCADE,
+      existing_use_case_id TEXT REFERENCES use_case_nodes(id),
+      scenario_asset_id TEXT NOT NULL REFERENCES scenario_assets(id),
       title TEXT NOT NULL,
       description TEXT NOT NULL,
       kind TEXT NOT NULL,
-      created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
     );
 
     CREATE INDEX IF NOT EXISTS use_case_proposals_run_id_idx
@@ -169,36 +243,36 @@ export async function initializeSchema(pool: Pool): Promise<void> {
       ON use_case_assets(run_id);
 
     CREATE TABLE IF NOT EXISTS feature_nodes (
-      id UUID PRIMARY KEY,
+      id TEXT PRIMARY KEY,
       title TEXT NOT NULL UNIQUE,
       description TEXT NOT NULL,
-      created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
     );
 
     CREATE TABLE IF NOT EXISTS feature_proposals (
-      id UUID PRIMARY KEY,
-      run_id UUID NOT NULL REFERENCES analysis_runs(id) ON DELETE CASCADE,
-      existing_feature_id UUID REFERENCES feature_nodes(id),
-      use_case_asset_id UUID NOT NULL REFERENCES use_case_assets(id),
+      id TEXT PRIMARY KEY,
+      run_id TEXT NOT NULL REFERENCES analysis_runs(id) ON DELETE CASCADE,
+      existing_feature_id TEXT REFERENCES feature_nodes(id),
+      use_case_asset_id TEXT NOT NULL REFERENCES use_case_assets(id),
       title TEXT NOT NULL,
       description TEXT NOT NULL,
       kind TEXT NOT NULL CHECK (kind IN ('affected', 'new')),
       status TEXT NOT NULL DEFAULT 'proposed'
         CHECK (status IN ('proposed', 'confirmed', 'rejected')),
-      created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-      confirmed_at TIMESTAMPTZ
+      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      confirmed_at TEXT
     );
 
     CREATE TABLE IF NOT EXISTS feature_assets (
-      id UUID PRIMARY KEY,
-      run_id UUID NOT NULL REFERENCES analysis_runs(id) ON DELETE CASCADE,
-      proposal_id UUID NOT NULL REFERENCES feature_proposals(id) ON DELETE CASCADE,
-      existing_feature_id UUID REFERENCES feature_nodes(id),
-      use_case_asset_id UUID NOT NULL REFERENCES use_case_assets(id),
+      id TEXT PRIMARY KEY,
+      run_id TEXT NOT NULL REFERENCES analysis_runs(id) ON DELETE CASCADE,
+      proposal_id TEXT NOT NULL REFERENCES feature_proposals(id) ON DELETE CASCADE,
+      existing_feature_id TEXT REFERENCES feature_nodes(id),
+      use_case_asset_id TEXT NOT NULL REFERENCES use_case_assets(id),
       title TEXT NOT NULL,
       description TEXT NOT NULL,
       kind TEXT NOT NULL,
-      created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
     );
 
     CREATE INDEX IF NOT EXISTS feature_proposals_run_id_idx
@@ -207,11 +281,7 @@ export async function initializeSchema(pool: Pool): Promise<void> {
       ON feature_assets(run_id);
   `);
 
-  await pool.query(
-    "ALTER TABLE analysis_runs ADD COLUMN IF NOT EXISTS failure_code TEXT",
-  );
-
-  await pool.query(`
+  pool.database.exec(`
     INSERT INTO scenario_nodes (id, parent_id, name, description)
     VALUES
       ('00000000-0000-0000-0000-000000000001', NULL, 'Dashboard', 'The dashboard scenario family.'),
@@ -221,7 +291,7 @@ export async function initializeSchema(pool: Pool): Promise<void> {
     ON CONFLICT (name) DO NOTHING;
   `);
 
-  await pool.query(`
+  pool.database.exec(`
     INSERT INTO use_case_nodes (id, scenario_id, title, description)
     VALUES
       ('00000000-0000-0000-0000-000000000101', '00000000-0000-0000-0000-000000000002', 'View dashboard on desktop', 'A user opens the dashboard on a desktop device.'),
@@ -230,7 +300,7 @@ export async function initializeSchema(pool: Pool): Promise<void> {
     ON CONFLICT (title) DO NOTHING;
   `);
 
-  await pool.query(`
+  pool.database.exec(`
     INSERT INTO feature_nodes (id, title, description)
     VALUES
       ('00000000-0000-0000-0000-000000000201', 'Dashboard rendering', 'Renders dashboard widgets and layout.'),
@@ -241,7 +311,7 @@ export async function initializeSchema(pool: Pool): Promise<void> {
 }
 
 export async function createAnalysisRun(
-  pool: Pool,
+  pool: SqlitePool,
   requirement: string,
 ): Promise<AnalysisRun> {
   const id = randomUUID();
@@ -253,8 +323,64 @@ export async function createAnalysisRun(
   return { id, requirement };
 }
 
+export async function getAnalysisRun(
+  pool: SqlitePool,
+  runId: string,
+): Promise<AnalysisRunRecord | null> {
+  const result = await pool.query<{
+    id: string;
+    requirement: string;
+    status: AnalysisRunStatus;
+    currentStage: AnalysisRunStage | null;
+  }>(
+    'SELECT id, requirement, status, current_stage AS "currentStage" FROM analysis_runs WHERE id = $1',
+    [runId],
+  );
+
+  return result.rows[0] ?? null;
+}
+
+export async function setAnalysisRunStatus(
+  pool: SqlitePool,
+  runId: string,
+  status: AnalysisRunStatus,
+  currentStage?: AnalysisRunStage,
+): Promise<void> {
+  if (status === "awaiting_confirmation" && !currentStage) {
+    throw new Error("An awaiting confirmation run requires a current stage");
+  }
+
+  const isTerminal = [
+    "succeeded",
+    "rejected",
+    "failed",
+    "cancelled",
+  ].includes(status);
+  const completedAt = isTerminal ? new Date().toISOString() : null;
+
+  await pool.query(
+    `UPDATE analysis_runs
+     SET status = $2,
+         completed_at = $3,
+         failure_code = CASE
+           WHEN $4 = 'failed' THEN failure_code
+           WHEN $4 = 'cancelled' THEN 'cancelled'
+           ELSE NULL
+         END
+         ${currentStage ? ", current_stage = $5" : ""}
+     WHERE id = $1`,
+    [
+      runId,
+      status,
+      completedAt,
+      status,
+      ...(currentStage ? [currentStage] : []),
+    ],
+  );
+}
+
 export async function recordTraceEvent(
-  pool: Pool,
+  pool: SqlitePool,
   runId: string,
   eventType: string,
   payload: Record<string, unknown>,
@@ -266,44 +392,44 @@ export async function recordTraceEvent(
 }
 
 export async function completeAnalysisRun(
-  pool: Pool,
+  pool: SqlitePool,
   runId: string,
   status: "succeeded" | "rejected" = "succeeded",
 ): Promise<void> {
   await pool.query(
-    "UPDATE analysis_runs SET status = $2, completed_at = now() WHERE id = $1",
-    [runId, status],
+    "UPDATE analysis_runs SET status = $2, completed_at = $3, failure_code = NULL WHERE id = $1",
+    [runId, status, new Date().toISOString()],
   );
 }
 
 export async function failAnalysisRun(
-  pool: Pool,
+  pool: SqlitePool,
   runId: string,
   failureCode: AnalysisFailureCode,
 ): Promise<void> {
   await pool.query(
-    "UPDATE analysis_runs SET status = 'failed', failure_code = $2, completed_at = now() WHERE id = $1",
-    [runId, failureCode],
+    "UPDATE analysis_runs SET status = 'failed', failure_code = $2, completed_at = $3 WHERE id = $1",
+    [runId, failureCode, new Date().toISOString()],
   );
 }
 
 export async function cancelAnalysisRun(
-  pool: Pool,
+  pool: SqlitePool,
   runId: string,
 ): Promise<void> {
   await pool.query(
-    "UPDATE analysis_runs SET status = 'cancelled', failure_code = 'cancelled', completed_at = now() WHERE id = $1",
-    [runId],
+    "UPDATE analysis_runs SET status = 'cancelled', failure_code = 'cancelled', completed_at = $2 WHERE id = $1",
+    [runId, new Date().toISOString()],
   );
 }
 
-type TransactionQuery = (
+type TransactionQuery = <T = any>(
   text: string,
   values?: unknown[],
-) => Promise<QueryResult>;
+) => Promise<QueryResult<T>>;
 
 async function withTransaction<T>(
-  pool: Pool,
+  pool: SqlitePool,
   operation: (query: TransactionQuery) => Promise<T>,
   signal?: AbortSignal,
 ): Promise<T> {
@@ -332,9 +458,14 @@ async function withTransaction<T>(
 }
 
 export async function listScenarioNodes(
-  pool: Pool,
+  pool: SqlitePool,
 ): Promise<ScenarioNode[]> {
-  const result = await pool.query(
+  const result = await pool.query<{
+    id: string;
+    parent_id: string | null;
+    name: string;
+    description: string;
+  }>(
     "SELECT id, parent_id, name, description FROM scenario_nodes ORDER BY name",
   );
 
@@ -346,10 +477,68 @@ export async function listScenarioNodes(
   }));
 }
 
+export async function listScenarioAssetsByRun(
+  pool: SqlitePool,
+  runId: string,
+): Promise<ScenarioAsset[]> {
+  const result = await pool.query<{
+    id: string;
+    existing_scenario_id: string;
+    title: string;
+    description: string;
+    kind: "related" | "new";
+  }>(
+    `SELECT id, existing_scenario_id, title, description, kind
+     FROM scenario_assets
+     WHERE run_id = $1
+     ORDER BY rowid`,
+    [runId],
+  );
+
+  return result.rows.map((row) => ({
+    id: row.id,
+    kind: row.kind,
+    title: row.title,
+    description: row.description,
+    scenarioId: row.existing_scenario_id,
+  }));
+}
+
+export async function listScenarioProposalsByRun(
+  pool: SqlitePool,
+  runId: string,
+): Promise<ScenarioProposalRecord[]> {
+  const result = await pool.query<ScenarioProposalRecord>(
+    `SELECT kind, title, description, status
+     FROM scenario_proposals
+     WHERE run_id = $1 AND status = 'proposed'
+     ORDER BY rowid`,
+    [runId],
+  );
+
+  return result.rows;
+}
+
+export async function rejectScenarioProposals(
+  pool: SqlitePool,
+  runId: string,
+): Promise<void> {
+  await pool.query(
+    "UPDATE scenario_proposals SET status = 'rejected' WHERE run_id = $1 AND status = 'proposed'",
+    [runId],
+  );
+}
+
 export async function listUseCaseNodes(
-  pool: Pool,
+  pool: SqlitePool,
 ): Promise<UseCaseNode[]> {
-  const result = await pool.query(
+  const result = await pool.query<{
+    id: string;
+    scenario_id: string;
+    scenario_name: string;
+    title: string;
+    description: string;
+  }>(
     `SELECT uc.id, uc.scenario_id, s.name AS scenario_name,
             uc.title, uc.description
      FROM use_case_nodes uc
@@ -366,10 +555,65 @@ export async function listUseCaseNodes(
   }));
 }
 
+export async function listUseCaseAssetsByRun(
+  pool: SqlitePool,
+  runId: string,
+): Promise<UseCaseAsset[]> {
+  const result = await pool.query<{
+    id: string;
+    title: string;
+    description: string;
+    kind: "related" | "new";
+  }>(
+    `SELECT id, title, description, kind
+     FROM use_case_assets
+     WHERE run_id = $1
+     ORDER BY rowid`,
+    [runId],
+  );
+
+  return result.rows.map((row) => ({
+    id: row.id,
+    kind: row.kind,
+    title: row.title,
+    description: row.description,
+  }));
+}
+
+export async function listUseCaseProposalsByRun(
+  pool: SqlitePool,
+  runId: string,
+): Promise<UseCaseProposalRecord[]> {
+  const result = await pool.query<UseCaseProposalRecord>(
+    `SELECT p.kind, p.title, p.description, sa.title AS scenario_title, p.status
+     FROM use_case_proposals p
+     JOIN scenario_assets sa ON sa.id = p.scenario_asset_id
+     WHERE p.run_id = $1 AND p.status = 'proposed'
+     ORDER BY p.rowid`,
+    [runId],
+  );
+
+  return result.rows;
+}
+
+export async function rejectUseCaseProposals(
+  pool: SqlitePool,
+  runId: string,
+): Promise<void> {
+  await pool.query(
+    "UPDATE use_case_proposals SET status = 'rejected' WHERE run_id = $1 AND status = 'proposed'",
+    [runId],
+  );
+}
+
 export async function listFeatureNodes(
-  pool: Pool,
+  pool: SqlitePool,
 ): Promise<FeatureNode[]> {
-  const result = await pool.query(
+  const result = await pool.query<{
+    id: string;
+    title: string;
+    description: string;
+  }>(
     "SELECT id, title, description FROM feature_nodes ORDER BY title",
   );
 
@@ -380,8 +624,59 @@ export async function listFeatureNodes(
   }));
 }
 
+export async function listFeatureAssetsByRun(
+  pool: SqlitePool,
+  runId: string,
+): Promise<FeatureAsset[]> {
+  const result = await pool.query<{
+    id: string;
+    title: string;
+    description: string;
+    kind: "affected" | "new";
+  }>(
+    `SELECT id, title, description, kind
+     FROM feature_assets
+     WHERE run_id = $1
+     ORDER BY rowid`,
+    [runId],
+  );
+
+  return result.rows.map((row) => ({
+    id: row.id,
+    kind: row.kind,
+    title: row.title,
+    description: row.description,
+  }));
+}
+
+export async function listFeatureProposalsByRun(
+  pool: SqlitePool,
+  runId: string,
+): Promise<FeatureProposalRecord[]> {
+  const result = await pool.query<FeatureProposalRecord>(
+    `SELECT p.kind, p.title, p.description, ua.title AS use_case_title, p.status
+     FROM feature_proposals p
+     JOIN use_case_assets ua ON ua.id = p.use_case_asset_id
+     WHERE p.run_id = $1 AND p.status = 'proposed'
+     ORDER BY p.rowid`,
+    [runId],
+  );
+
+  return result.rows;
+}
+
+export async function rejectFeatureProposals(
+  pool: SqlitePool,
+  runId: string,
+): Promise<void> {
+  await pool.query(
+    "UPDATE feature_proposals SET status = 'rejected' WHERE run_id = $1 AND status = 'proposed'",
+    [runId],
+  );
+}
+
 export async function saveScenarioProposals(
-  pool: Pool,
+  pool: SqlitePool,
   runId: string,
   proposals: ScenarioProposalInput[],
   signal?: AbortSignal,
@@ -391,7 +686,7 @@ export async function saveScenarioProposals(
       let existingScenarioId: string | null = null;
 
       if (proposal.kind === "related") {
-        const result = await query(
+        const result = await query<{ id: string }>(
           "SELECT id FROM scenario_nodes WHERE name = $1",
           [proposal.title],
         );
@@ -424,7 +719,7 @@ export async function saveScenarioProposals(
 }
 
 export async function settleScenarioProposals(
-  pool: Pool,
+  pool: SqlitePool,
   runId: string,
   confirmed: boolean,
   signal?: AbortSignal,
@@ -439,11 +734,11 @@ export async function settleScenarioProposals(
     }
 
     await query(
-      "UPDATE scenario_proposals SET status = 'confirmed', confirmed_at = now() WHERE run_id = $1 AND status = 'proposed'",
-      [runId],
+      "UPDATE scenario_proposals SET status = 'confirmed', confirmed_at = $2 WHERE run_id = $1 AND status = 'proposed'",
+      [runId, new Date().toISOString()],
     );
 
-    const proposals = await query(
+    const proposals = await query<ScenarioProposalRow>(
       `SELECT id, existing_scenario_id, title, description, kind
        FROM scenario_proposals
        WHERE run_id = $1 AND status = 'confirmed'`,
@@ -456,7 +751,7 @@ export async function settleScenarioProposals(
       let scenarioId = proposal.existing_scenario_id;
 
       if (proposal.kind === "new") {
-        const inserted = await query(
+        const inserted = await query<{ id: string }>(
           `INSERT INTO scenario_nodes (id, parent_id, name, description)
            VALUES ($1, NULL, $2, $3)
            ON CONFLICT (name) DO NOTHING
@@ -467,7 +762,7 @@ export async function settleScenarioProposals(
         scenarioId =
           inserted.rows[0]?.id ??
           (
-            await query(
+            await query<{ id: string }>(
               "SELECT id FROM scenario_nodes WHERE name = $1",
               [proposal.title],
             )
@@ -476,6 +771,13 @@ export async function settleScenarioProposals(
         await query(
           "UPDATE scenario_proposals SET existing_scenario_id = $2 WHERE id = $1",
           [proposal.id, scenarioId],
+        );
+      }
+
+      if (!scenarioId) {
+        throw new AnalysisFailureError(
+          "missing_data",
+          `Confirmed scenario is missing its library reference: ${proposal.title}`,
         );
       }
 
@@ -509,7 +811,7 @@ export async function settleScenarioProposals(
 }
 
 export async function saveUseCaseProposals(
-  pool: Pool,
+  pool: SqlitePool,
   runId: string,
   proposals: UseCaseProposalInput[],
   scenarioAssets: ScenarioAsset[],
@@ -531,7 +833,7 @@ export async function saveUseCaseProposals(
       let existingUseCaseId: string | null = null;
 
       if (proposal.kind === "related") {
-        const result = await query(
+        const result = await query<{ id: string }>(
           "SELECT id FROM use_case_nodes WHERE title = $1",
           [proposal.title],
         );
@@ -565,7 +867,7 @@ export async function saveUseCaseProposals(
 }
 
 export async function settleUseCaseProposals(
-  pool: Pool,
+  pool: SqlitePool,
   runId: string,
   confirmed: boolean,
   signal?: AbortSignal,
@@ -580,10 +882,11 @@ export async function settleUseCaseProposals(
     }
 
     await query(
-      "UPDATE use_case_proposals SET status = 'confirmed', confirmed_at = now() WHERE run_id = $1 AND status = 'proposed'",
-      [runId],
+      "UPDATE use_case_proposals SET status = 'confirmed', confirmed_at = $2 WHERE run_id = $1 AND status = 'proposed'",
+      [runId, new Date().toISOString()],
     );
-    const proposals = await query(
+
+    const proposals = await query<UseCaseProposalRow>(
       `SELECT p.id, p.existing_use_case_id, p.scenario_asset_id,
               p.title, p.description, p.kind, sa.existing_scenario_id AS scenario_id
        FROM use_case_proposals p
@@ -597,18 +900,23 @@ export async function settleUseCaseProposals(
       let useCaseId = proposal.existing_use_case_id;
 
       if (proposal.kind === "new") {
-        const inserted = await query(
+        const inserted = await query<{ id: string }>(
           `INSERT INTO use_case_nodes (id, scenario_id, title, description)
            VALUES ($1, $2, $3, $4)
            ON CONFLICT (title) DO NOTHING
            RETURNING id`,
-          [randomUUID(), proposal.scenario_id, proposal.title, proposal.description],
+          [
+            randomUUID(),
+            proposal.scenario_id,
+            proposal.title,
+            proposal.description,
+          ],
         );
 
         useCaseId =
           inserted.rows[0]?.id ??
           (
-            await query(
+            await query<{ id: string }>(
               "SELECT id FROM use_case_nodes WHERE title = $1",
               [proposal.title],
             )
@@ -650,7 +958,7 @@ export async function settleUseCaseProposals(
 }
 
 export async function saveFeatureProposals(
-  pool: Pool,
+  pool: SqlitePool,
   runId: string,
   proposals: FeatureProposalInput[],
   useCaseAssets: UseCaseAsset[],
@@ -672,7 +980,7 @@ export async function saveFeatureProposals(
       let existingFeatureId: string | null = null;
 
       if (proposal.kind === "affected") {
-        const result = await query(
+        const result = await query<{ id: string }>(
           "SELECT id FROM feature_nodes WHERE title = $1",
           [proposal.title],
         );
@@ -706,7 +1014,7 @@ export async function saveFeatureProposals(
 }
 
 export async function settleFeatureProposals(
-  pool: Pool,
+  pool: SqlitePool,
   runId: string,
   confirmed: boolean,
   signal?: AbortSignal,
@@ -721,11 +1029,11 @@ export async function settleFeatureProposals(
     }
 
     await query(
-      "UPDATE feature_proposals SET status = 'confirmed', confirmed_at = now() WHERE run_id = $1 AND status = 'proposed'",
-      [runId],
+      "UPDATE feature_proposals SET status = 'confirmed', confirmed_at = $2 WHERE run_id = $1 AND status = 'proposed'",
+      [runId, new Date().toISOString()],
     );
 
-    const proposals = await query(
+    const proposals = await query<FeatureProposalRow>(
       `SELECT id, existing_feature_id, use_case_asset_id,
               title, description, kind
        FROM feature_proposals
@@ -739,7 +1047,7 @@ export async function settleFeatureProposals(
       let featureId = proposal.existing_feature_id;
 
       if (proposal.kind === "new") {
-        const inserted = await query(
+        const inserted = await query<{ id: string }>(
           `INSERT INTO feature_nodes (id, title, description)
            VALUES ($1, $2, $3)
            ON CONFLICT (title) DO NOTHING
@@ -750,7 +1058,7 @@ export async function settleFeatureProposals(
         featureId =
           inserted.rows[0]?.id ??
           (
-            await query(
+            await query<{ id: string }>(
               "SELECT id FROM feature_nodes WHERE title = $1",
               [proposal.title],
             )

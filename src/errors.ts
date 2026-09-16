@@ -41,6 +41,7 @@ export function isDatabaseError(error: unknown): boolean {
   return (
     typeof code === "string" &&
     (/^[0-9A-Z]{5}$/.test(code) ||
+      /^SQLITE_[0-9A-Z_]+$/.test(code) ||
       [
         "ECONNREFUSED",
         "ECONNRESET",

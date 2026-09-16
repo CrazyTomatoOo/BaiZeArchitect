@@ -5,15 +5,15 @@ import path from "node:path";
 import { once } from "node:events";
 import assert from "node:assert/strict";
 import test from "node:test";
-import { Pool } from "pg";
+import { SqlitePool } from "../src/sqlite.ts";
 
 test("full chain CLI orchestrates the complete analysis workflow", async () => {
   const isolatedHome = await mkdtemp(path.join(tmpdir(), "baize-agent-"));
-  const databaseUrl = process.env.DATABASE_URL;
+  const databasePath = process.env.BAIZE_DB_PATH;
 
   assert.ok(
-    databaseUrl,
-    "DATABASE_URL must be set for the full chain CLI integration test",
+    databasePath,
+    "BAIZE_DB_PATH must be set for the full chain CLI integration test",
   );
 
   const child = spawn(
@@ -23,7 +23,7 @@ test("full chain CLI orchestrates the complete analysis workflow", async () => {
       cwd: process.cwd(),
       env: {
         ...process.env,
-        DATABASE_URL: databaseUrl,
+        BAIZE_DB_PATH: databasePath,
         HOME: isolatedHome,
         PI_CODING_AGENT_DIR: path.join(isolatedHome, "pi-agent"),
       },
@@ -66,7 +66,7 @@ test("full chain CLI orchestrates the complete analysis workflow", async () => {
   assert.equal(result.useCaseAssetCount, 2);
   assert.equal(result.featureAssetCount, 2);
 
-  const pool = new Pool({ connectionString: databaseUrl });
+  const pool = new SqlitePool(databasePath);
 
   try {
     const run = await pool.query(

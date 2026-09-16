@@ -1,19 +1,21 @@
-import type { Pool } from "pg";
+import type { SqlitePool } from "../db.ts";
 import {
   listFeatureNodes,
   type FeatureProposalInput,
   type UseCaseAsset,
 } from "../db.ts";
 import {
+  type AnalysisRevision,
   runAnalysisSubagent,
   type AnalysisSubagentDefinition,
   type AnalysisSubagentResult,
 } from "./analysis-subagent.ts";
 
 interface FeatureAnalysisInput {
-  pool: Pool;
+  pool: SqlitePool;
   requirement: string;
   confirmedUseCases: UseCaseAsset[];
+  revision?: AnalysisRevision<FeatureProposalInput>;
 }
 
 type FeatureAnalysisResult = Omit<
@@ -35,7 +37,7 @@ const featureAnalysisSubagent: AnalysisSubagentDefinition<
   queryTool: {
     name: "query_feature_library",
     label: "Query feature library",
-    description: "Query the full feature library from PostgreSQL.",
+    description: "Query the full feature library from SQLite.",
     data: (input) => listFeatureNodes(input.pool),
   },
   prompt: (input) =>
@@ -45,6 +47,7 @@ const featureAnalysisSubagent: AnalysisSubagentDefinition<
         title: useCase.title,
         description: useCase.description,
       })),
+      ...(input.revision ? { revision: input.revision } : {}),
     }),
   finalResponse: {
     proposals: [
@@ -68,13 +71,14 @@ const featureAnalysisSubagent: AnalysisSubagentDefinition<
 };
 
 export async function runFeatureAnalysis(
-  pool: Pool,
+  pool: SqlitePool,
   requirement: string,
   confirmedUseCases: UseCaseAsset[],
+  revision?: AnalysisRevision<FeatureProposalInput>,
 ): Promise<FeatureAnalysisResult> {
   const { result, ...agentResult } = await runAnalysisSubagent(
     featureAnalysisSubagent,
-    { pool, requirement, confirmedUseCases },
+    { pool, requirement, confirmedUseCases, revision },
   );
 
   return {

@@ -1,6 +1,7 @@
 import type { ScenarioProposalInput } from "../db.ts";
 import { AnalysisFailureError } from "../errors.ts";
 import {
+  type AnalysisRevision,
   runAnalysisSubagent,
   type AnalysisSubagentDefinition,
   type AnalysisSubagentResult,
@@ -10,6 +11,7 @@ import type { McpToolClient } from "../mcp.ts";
 interface ScenarioAnalysisInput {
   mcp: McpToolClient;
   requirement: string;
+  revision?: AnalysisRevision<ScenarioProposalInput>;
 }
 
 type ScenarioAnalysisResult = Omit<
@@ -31,7 +33,7 @@ const scenarioAnalysisSubagent: AnalysisSubagentDefinition<
   queryTool: {
     name: "query_scenario_tree",
     label: "Query scenario tree",
-    description: "Query the full scenario tree from PostgreSQL.",
+    description: "Query the full scenario tree from SQLite.",
     data: async (input) => {
       const result = await input.mcp.callTool("query_scenario_tree", {});
       const structured = result.structuredContent as {
@@ -55,7 +57,13 @@ const scenarioAnalysisSubagent: AnalysisSubagentDefinition<
       return structured.nodes;
     },
   },
-  prompt: (input) => input.requirement,
+  prompt: (input) =>
+    input.revision
+      ? JSON.stringify({
+          requirement: input.requirement,
+          revision: input.revision,
+        })
+      : input.requirement,
   finalResponse: {
     proposals: [
       {
@@ -77,10 +85,11 @@ const scenarioAnalysisSubagent: AnalysisSubagentDefinition<
 export async function runScenarioAnalysis(
   mcp: McpToolClient,
   requirement: string,
+  revision?: AnalysisRevision<ScenarioProposalInput>,
 ): Promise<ScenarioAnalysisResult> {
   const { result, ...agentResult } = await runAnalysisSubagent(
     scenarioAnalysisSubagent,
-    { mcp, requirement },
+    { mcp, requirement, revision },
   );
 
   return {

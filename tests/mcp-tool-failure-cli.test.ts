@@ -5,16 +5,16 @@ import path from "node:path";
 import { once } from "node:events";
 import assert from "node:assert/strict";
 import test from "node:test";
-import { Pool } from "pg";
+import { SqlitePool } from "../src/sqlite.ts";
 
 test("MCP tool failure produces a deterministic error path", async () => {
   const isolatedHome = await mkdtemp(path.join(tmpdir(), "baize-agent-"));
-  const databaseUrl = process.env.DATABASE_URL;
+  const databasePath = process.env.BAIZE_DB_PATH;
   const configPath = path.join(isolatedHome, "mcp.config.json");
 
   assert.ok(
-    databaseUrl,
-    "DATABASE_URL must be set for the MCP tool failure CLI test",
+    databasePath,
+    "BAIZE_DB_PATH must be set for the MCP tool failure CLI test",
   );
 
   await writeFile(
@@ -36,7 +36,7 @@ test("MCP tool failure produces a deterministic error path", async () => {
       cwd: process.cwd(),
       env: {
         ...process.env,
-        DATABASE_URL: databaseUrl,
+        BAIZE_DB_PATH: databasePath,
         HOME: isolatedHome,
         PI_CODING_AGENT_DIR: path.join(isolatedHome, "pi-agent"),
         MCP_CONFIG_PATH: configPath,
@@ -62,15 +62,15 @@ test("MCP tool failure produces a deterministic error path", async () => {
   assert.equal(exitCode, 1);
   assert.match(stderr, /Analysis tool failed: query_scenario_tree/);
 
-  const pool = new Pool({ connectionString: databaseUrl });
+  const pool = new SqlitePool(databasePath);
 
   try {
     const failedRuns = await pool.query(
       `SELECT run_id
        FROM trace_events
        WHERE event_type = 'mcp_tool_result'
-         AND payload->>'toolName' = 'query_scenario_tree'
-         AND payload->>'isError' = 'true'
+         AND json_extract(payload, '$.toolName') = 'query_scenario_tree'
+         AND json_extract(payload, '$.isError') = 1
        ORDER BY id DESC
        LIMIT 1`,
     );

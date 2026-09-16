@@ -5,13 +5,13 @@ import path from "node:path";
 import { once } from "node:events";
 import assert from "node:assert/strict";
 import test from "node:test";
-import { Pool } from "pg";
+import { SqlitePool } from "../src/sqlite.ts";
 
 test("MCP-backed scenario analysis completes the full workflow", async () => {
   const isolatedHome = await mkdtemp(path.join(tmpdir(), "baize-agent-"));
-  const databaseUrl = process.env.DATABASE_URL;
+  const databasePath = process.env.BAIZE_DB_PATH;
 
-  assert.ok(databaseUrl, "DATABASE_URL must be set for the MCP CLI test");
+  assert.ok(databasePath, "BAIZE_DB_PATH must be set for the MCP CLI test");
 
   const child = spawn(
     process.execPath,
@@ -20,7 +20,7 @@ test("MCP-backed scenario analysis completes the full workflow", async () => {
       cwd: process.cwd(),
       env: {
         ...process.env,
-        DATABASE_URL: databaseUrl,
+        BAIZE_DB_PATH: databasePath,
         HOME: isolatedHome,
         PI_CODING_AGENT_DIR: path.join(isolatedHome, "pi-agent"),
       },
@@ -69,7 +69,7 @@ test("MCP-backed scenario analysis completes the full workflow", async () => {
   assert.equal(serverConfig?.command, "node");
   assert.deepEqual(serverConfig?.args, ["dist/mcp-server.js"]);
 
-  const pool = new Pool({ connectionString: databaseUrl });
+  const pool = new SqlitePool(databasePath);
 
   try {
     const trace = await pool.query(

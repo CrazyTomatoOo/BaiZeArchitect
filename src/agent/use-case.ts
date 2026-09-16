@@ -1,19 +1,21 @@
-import type { Pool } from "pg";
+import type { SqlitePool } from "../db.ts";
 import {
   listUseCaseNodes,
   type ScenarioAsset,
   type UseCaseProposalInput,
 } from "../db.ts";
 import {
+  type AnalysisRevision,
   runAnalysisSubagent,
   type AnalysisSubagentDefinition,
   type AnalysisSubagentResult,
 } from "./analysis-subagent.ts";
 
 interface UseCaseAnalysisInput {
-  pool: Pool;
+  pool: SqlitePool;
   requirement: string;
   confirmedScenarios: ScenarioAsset[];
+  revision?: AnalysisRevision<UseCaseProposalInput>;
 }
 
 type UseCaseAnalysisResult = Omit<
@@ -35,7 +37,7 @@ const useCaseAnalysisSubagent: AnalysisSubagentDefinition<
   queryTool: {
     name: "query_use_case_library",
     label: "Query use case library",
-    description: "Query the full use-case library from PostgreSQL.",
+    description: "Query the full use-case library from SQLite.",
     data: (input) => listUseCaseNodes(input.pool),
   },
   prompt: (input) =>
@@ -45,6 +47,7 @@ const useCaseAnalysisSubagent: AnalysisSubagentDefinition<
         title: scenario.title,
         description: scenario.description,
       })),
+      ...(input.revision ? { revision: input.revision } : {}),
     }),
   finalResponse: {
     proposals: [
@@ -67,13 +70,14 @@ const useCaseAnalysisSubagent: AnalysisSubagentDefinition<
 };
 
 export async function runUseCaseAnalysis(
-  pool: Pool,
+  pool: SqlitePool,
   requirement: string,
   confirmedScenarios: ScenarioAsset[],
+  revision?: AnalysisRevision<UseCaseProposalInput>,
 ): Promise<UseCaseAnalysisResult> {
   const { result, ...agentResult } = await runAnalysisSubagent(
     useCaseAnalysisSubagent,
-    { pool, requirement, confirmedScenarios },
+    { pool, requirement, confirmedScenarios, revision },
   );
 
   return {

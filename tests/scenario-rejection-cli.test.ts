@@ -5,15 +5,15 @@ import path from "node:path";
 import { once } from "node:events";
 import assert from "node:assert/strict";
 import test from "node:test";
-import { Pool } from "pg";
+import { SqlitePool } from "../src/sqlite.ts";
 
 test("scenario CLI rejects proposals without persisting assets", async () => {
   const isolatedHome = await mkdtemp(path.join(tmpdir(), "baize-agent-"));
-  const databaseUrl = process.env.DATABASE_URL;
+  const databasePath = process.env.BAIZE_DB_PATH;
 
   assert.ok(
-    databaseUrl,
-    "DATABASE_URL must be set for the scenario rejection integration test",
+    databasePath,
+    "BAIZE_DB_PATH must be set for the scenario rejection integration test",
   );
 
   const child = spawn(
@@ -23,7 +23,7 @@ test("scenario CLI rejects proposals without persisting assets", async () => {
       cwd: process.cwd(),
       env: {
         ...process.env,
-        DATABASE_URL: databaseUrl,
+        BAIZE_DB_PATH: databasePath,
         HOME: isolatedHome,
         PI_CODING_AGENT_DIR: path.join(isolatedHome, "pi-agent"),
       },
@@ -60,7 +60,7 @@ test("scenario CLI rejects proposals without persisting assets", async () => {
   assert.equal(result.scenarioAssetCount, 0);
   assert.deepEqual(result.confirmedScenarios, []);
 
-  const pool = new Pool({ connectionString: databaseUrl });
+  const pool = new SqlitePool(databasePath);
 
   try {
     const proposals = await pool.query(

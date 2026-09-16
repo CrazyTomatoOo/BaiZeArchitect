@@ -1,10 +1,10 @@
 # Real-model smoke tests
 
 Run the release smoke suite separately from routine CI. Replace the database
-URL with one that is reachable from the process running the tests:
+path with a writable SQLite file:
 
 ```bash
-DATABASE_URL=<database-url> \
+BAIZE_DB_PATH=<sqlite-file-path> \
 BAIZE_MODEL=deepseek/deepseek-v4-flash \
 DEEPSEEK_API_KEY=<key> \
 npm run test:smoke
@@ -14,6 +14,7 @@ Inside the Compose environment, pass the provider key explicitly:
 
 ```bash
 docker compose run --rm \
+  -e BAIZE_DB_PATH=/tmp/baize/baize.sqlite3 \
   -e BAIZE_MODEL=deepseek/deepseek-v4-flash \
   -e DEEPSEEK_API_KEY \
   test npm run test:smoke

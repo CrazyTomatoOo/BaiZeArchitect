@@ -120,6 +120,7 @@ await build({
   outfile: bundlePath,
   sourcemap: false,
   logLevel: "info",
+  external: ["better-sqlite3"],
   banner: {
     js: 'const __baize_import_meta_url = require("node:url").pathToFileURL(__filename).href;',
   },
@@ -157,6 +158,8 @@ await new Promise((resolve, reject) => {
     [
       pkgBinary,
       bundlePath,
+      "--config",
+      "package.json",
       "--targets",
       target,
       "--output",
