@@ -585,7 +585,7 @@ export async function listUseCaseProposalsByRun(
   runId: string,
 ): Promise<UseCaseProposalRecord[]> {
   const result = await pool.query<UseCaseProposalRecord>(
-    `SELECT p.kind, p.title, p.description, sa.title AS scenario_title, p.status
+    `SELECT p.kind, p.title, p.description, sa.title AS scenarioTitle, p.status
      FROM use_case_proposals p
      JOIN scenario_assets sa ON sa.id = p.scenario_asset_id
      WHERE p.run_id = $1 AND p.status = 'proposed'
@@ -654,7 +654,7 @@ export async function listFeatureProposalsByRun(
   runId: string,
 ): Promise<FeatureProposalRecord[]> {
   const result = await pool.query<FeatureProposalRecord>(
-    `SELECT p.kind, p.title, p.description, ua.title AS use_case_title, p.status
+    `SELECT p.kind, p.title, p.description, ua.title AS useCaseTitle, p.status
      FROM feature_proposals p
      JOIN use_case_assets ua ON ua.id = p.use_case_asset_id
      WHERE p.run_id = $1 AND p.status = 'proposed'
