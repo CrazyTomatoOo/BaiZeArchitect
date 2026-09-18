@@ -98,12 +98,13 @@ test("each analysis stage waits for its human confirmation before continuing", a
     );
 
     let run = await pool.query(
-      "SELECT id, status FROM analysis_runs WHERE requirement = $1",
+      "SELECT id, status, current_stage FROM analysis_runs WHERE requirement = $1",
       [requirement],
     );
     assert.equal(run.rows.length, 1, "Expected one analysis run");
     const runId = run.rows[0].id as string;
-    assert.equal(run.rows[0].status, "running");
+    assert.equal(run.rows[0].status, "awaiting_confirmation");
+    assert.equal(run.rows[0].current_stage, "scenario");
 
     async function traceEvents(): Promise<string[]> {
       const trace = await pool.query(
@@ -126,6 +127,14 @@ test("each analysis stage waits for its human confirmation before continuing", a
       /Confirm use case proposals\? \[y\/N\]/,
     );
 
+    run = await pool.query(
+      "SELECT status, current_stage FROM analysis_runs WHERE id = $1",
+      [runId],
+    );
+    assert.deepEqual(run.rows, [
+      { status: "awaiting_confirmation", current_stage: "use_case" },
+    ]);
+
     events = await traceEvents();
     assert.ok(events.includes("scenario_assets_persisted"));
     assert.ok(events.includes("use_case_confirmation_requested"));
@@ -138,6 +147,14 @@ test("each analysis stage waits for its human confirmation before continuing", a
       stderr,
       /Confirm feature proposals\? \[y\/N\]/,
     );
+
+    run = await pool.query(
+      "SELECT status, current_stage FROM analysis_runs WHERE id = $1",
+      [runId],
+    );
+    assert.deepEqual(run.rows, [
+      { status: "awaiting_confirmation", current_stage: "feature" },
+    ]);
 
     events = await traceEvents();
     assert.ok(events.includes("use_case_assets_persisted"));
@@ -155,10 +172,12 @@ test("each analysis stage waits for its human confirmation before continuing", a
     assert.equal(result.status, "succeeded");
 
     run = await pool.query(
-      "SELECT status FROM analysis_runs WHERE id = $1",
+      "SELECT status, current_stage FROM analysis_runs WHERE id = $1",
       [runId],
     );
-    assert.equal(run.rows[0].status, "succeeded");
+    assert.deepEqual(run.rows, [
+      { status: "succeeded", current_stage: "feature" },
+    ]);
   } finally {
     if (child.exitCode === null) {
       child.kill("SIGTERM");

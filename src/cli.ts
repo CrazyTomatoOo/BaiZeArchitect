@@ -434,8 +434,25 @@ async function runAnalysisStage<TProposal extends StageProposal, TAsset>(
     );
   }
 
+  await setAnalysisRunStatus(
+    pool,
+    runId,
+    "awaiting_confirmation",
+    plannedStageName(config.stage),
+  );
+  await recordTraceEvent(pool, runId, "analysis_run_awaiting_confirmation", {
+    stage: plannedStageName(config.stage),
+  });
+
   const confirmed = await confirmation.confirm(config.stage);
   cancellation.throwIfRequested();
+
+  await setAnalysisRunStatus(
+    pool,
+    runId,
+    "running",
+    plannedStageName(config.stage),
+  );
 
   return settleAnalysisStage(
     pool,

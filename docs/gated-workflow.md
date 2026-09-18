@@ -1,13 +1,8 @@
 # Gated analysis workflow
 
-The default CLI invocation remains the original one-process workflow:
-
-```bash
-BAIZE_DB_PATH=<sqlite-file-path> npm start -- "Add dashboard sharing"
-```
-
-It prints each proposal set and waits for `y` or `n` at every library-update
-boundary. All three answers must be provided to the same process.
+The CLI uses the same Confirmation Gate state model for interactive and durable
+review. Every stage persists its lifecycle status and Current Stage while it
+waits for confirmation, then advances only after that stage is settled.
 
 Use `--gated` when a human may review each proposal set in a separate CLI
 invocation:
@@ -38,6 +33,18 @@ run. A running run reports `run_is_running`; a terminal run reports
 Runtime, database, model, and MCP failures exit with code `1`. Failures during
 analysis actions record failure state when the database is available; read-only
 commands never change run state, including when a read fails.
+
+Successful status and no-action resume commands, approvals, and revisions exit
+with code `0`. Rejections, usage errors, unknown run IDs, and actions attempted
+outside an open gate exit with code `2`. SIGINT exits with `130` and SIGTERM
+exits with `143`.
+
+Each Run Snapshot includes the run ID, lifecycle status, Current Stage, stage
+label, requirement, gate state, blocked reason, current proposals, confirmed
+asset counts, next stage, revision stage, next command, and the complete status,
+approve, reject, and revise commands. JSON is written only to stdout; the
+human-readable requirement, stage, progress, and available commands are written
+to stderr.
 
 Approve or reject the current gate with:
 
