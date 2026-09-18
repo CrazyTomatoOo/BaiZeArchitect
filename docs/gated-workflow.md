@@ -22,6 +22,23 @@ The initial invocation writes the scenario proposals, records
 successfully. Its stdout is one stage-aware Run Snapshot, while stderr carries
 the human-readable gate summary.
 
+Read the current Run Snapshot without changing the run:
+
+```bash
+BAIZE_DB_PATH=<sqlite-file-path> npm start -- status <runId>
+BAIZE_DB_PATH=<sqlite-file-path> npm start -- resume <runId>
+```
+
+Both commands are read-only, wait for no stdin, print exactly one JSON Run
+Snapshot to stdout, and print the human-readable summary to stderr. Unknown
+run IDs and usage errors exit with code `2` and write no stdout JSON. Actions
+against a running or terminal run also exit with code `2` without mutating the
+run. A running run reports `run_is_running`; a terminal run reports
+`run_is_terminal` and provides no approve, reject, or revise commands.
+Runtime, database, model, and MCP failures exit with code `1`. Failures during
+analysis actions record failure state when the database is available; read-only
+commands never change run state, including when a read fails.
+
 Approve or reject the current gate with:
 
 ```bash

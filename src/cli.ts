@@ -40,7 +40,9 @@ import {
   saveFeatureProposals,
   settleFeatureProposals,
   SqlitePool,
+  type AnalysisRunRecord,
   type AnalysisRunStage,
+  type AnalysisRunStatus,
   type ScenarioAsset,
   type ScenarioProposalInput,
   type UseCaseAsset,
@@ -83,9 +85,9 @@ interface RunSnapshotCommands {
 
 interface RunSnapshot {
   runId: string;
-  status: "awaiting_confirmation" | "succeeded" | "rejected";
-  currentStage: AnalysisRunStage;
-  stageLabel: string;
+  status: AnalysisRunStatus;
+  currentStage: AnalysisRunStage | null;
+  stageLabel: string | null;
   requirement: string;
   gateOpen: boolean;
   resumeBlockedReason: string | null;
@@ -508,14 +510,23 @@ function stageLabel(stage: AnalysisRunStage): string {
 function runSnapshot(
   runId: string,
   requirement: string,
-  status: "awaiting_confirmation" | "succeeded" | "rejected",
-  currentStage: AnalysisRunStage,
+  status: AnalysisRunStatus,
+  currentStage: AnalysisRunStage | null,
   proposals: StageProposal[],
   scenarioAssetCount: number,
   useCaseAssetCount: number,
   featureAssetCount: number,
 ): RunSnapshot {
-  const gateOpen = status === "awaiting_confirmation";
+  const openStage =
+    status === "awaiting_confirmation" && currentStage !== null
+      ? currentStage
+      : null;
+  const gateOpen = openStage !== null;
+  const blockedReason = gateOpen
+    ? null
+    : status === "running"
+      ? "run_is_running"
+      : "run_is_terminal";
   const commands = gateOpen
     ? runSnapshotCommands(runId)
     : terminalRunSnapshotCommands(runId);
@@ -524,16 +535,16 @@ function runSnapshot(
     runId,
     status,
     currentStage,
-    stageLabel: stageLabel(currentStage),
+    stageLabel: currentStage ? stageLabel(currentStage) : null,
     requirement,
     gateOpen,
-    resumeBlockedReason: gateOpen ? null : "run_is_terminal",
+    resumeBlockedReason: blockedReason,
     proposals,
     scenarioAssetCount,
     useCaseAssetCount,
     featureAssetCount,
-    nextStageOnApprove: gateOpen ? nextStageOnApprove(currentStage) : null,
-    revisionStage: gateOpen ? currentStage : null,
+    nextStageOnApprove: openStage ? nextStageOnApprove(openStage) : null,
+    revisionStage: openStage,
     nextCommand: gateOpen ? commands.approve : null,
     commands,
   };
@@ -543,7 +554,9 @@ function formatRunSnapshotSummary(snapshot: RunSnapshot): string {
   const summary = [
     `Requirement: ${snapshot.requirement}`,
     `Lifecycle status: ${snapshot.status}`,
-    `Current stage: ${stageLabel(snapshot.currentStage)}`,
+    `Current stage: ${
+      snapshot.currentStage ? stageLabel(snapshot.currentStage) : "none"
+    }`,
     `Gate open: ${snapshot.gateOpen ? "yes" : "no"}`,
     `Resume blocked: ${snapshot.resumeBlockedReason ?? "no"}`,
     `Progress: ${snapshot.scenarioAssetCount} scenarios, ${snapshot.useCaseAssetCount} use cases, ${snapshot.featureAssetCount} features confirmed`,
@@ -583,6 +596,113 @@ function formatRunSnapshotSummary(snapshot: RunSnapshot): string {
 function printRunSnapshot(snapshot: RunSnapshot): void {
   console.log(JSON.stringify(snapshot));
   console.error(formatRunSnapshotSummary(snapshot));
+}
+
+async function currentStageProposals(
+  pool: SqlitePool,
+  run: AnalysisRunRecord,
+): Promise<StageProposal[]> {
+  if (run.status !== "awaiting_confirmation" || run.currentStage === null) {
+    return [];
+  }
+
+  const stage = run.currentStage;
+
+  if (stage === "scenario") {
+    const proposals = await listScenarioProposalsByRun(pool, run.id);
+    return proposals.map(({ kind, title, description }) => ({
+      kind,
+      title,
+      description,
+    }));
+  }
+
+  if (stage === "use_case") {
+    const proposals = await listUseCaseProposalsByRun(pool, run.id);
+    return proposals.map(
+      ({ kind, title, description, scenarioTitle }) => ({
+        kind,
+        title,
+        description,
+        scenarioTitle,
+      }),
+    );
+  }
+
+  const proposals = await listFeatureProposalsByRun(pool, run.id);
+  return proposals.map(({ kind, title, description, useCaseTitle }) => ({
+    kind,
+    title,
+    description,
+    useCaseTitle,
+  }));
+}
+
+async function runSnapshotFromAnalysisRun(
+  pool: SqlitePool,
+  run: AnalysisRunRecord,
+): Promise<RunSnapshot> {
+  const [scenarioAssets, useCaseAssets, featureAssets, proposals] =
+    await Promise.all([
+      listScenarioAssetsByRun(pool, run.id),
+      listUseCaseAssetsByRun(pool, run.id),
+      listFeatureAssetsByRun(pool, run.id),
+      currentStageProposals(pool, run),
+    ]);
+
+  return runSnapshot(
+    run.id,
+    run.requirement,
+    run.status,
+    run.currentStage,
+    proposals,
+    scenarioAssets.length,
+    useCaseAssets.length,
+    featureAssets.length,
+  );
+}
+
+async function readAnalysisRunSnapshot(runIdArgument: string): Promise<void> {
+  const databasePath = process.env.BAIZE_DB_PATH;
+
+  if (!databasePath) {
+    console.error("BAIZE_DB_PATH is required");
+    process.exitCode = 2;
+    return;
+  }
+
+  const pool = new SqlitePool(databasePath);
+
+  try {
+    const run = await getAnalysisRun(pool, runIdArgument);
+
+    if (!run) {
+      console.error(`Analysis run not found: ${runIdArgument}`);
+      process.exitCode = 2;
+      return;
+    }
+
+    const snapshot = await runSnapshotFromAnalysisRun(pool, run);
+    printRunSnapshot(snapshot);
+  } catch (error) {
+    console.error(errorMessage(error));
+    process.exitCode = 1;
+  } finally {
+    await pool.end();
+  }
+}
+
+async function statusAnalysisRun(
+  runIdArgument: string | undefined,
+  extraArguments: readonly string[],
+): Promise<void> {
+  if (!runIdArgument || extraArguments.length > 0) {
+    console.error("Usage: npm start -- status <runId>");
+    process.exitCode = 2;
+    return;
+  }
+
+  await readAnalysisRunSnapshot(runIdArgument);
 }
 
 function scenarioStageConfig(
@@ -1099,11 +1219,23 @@ async function resumeAnalysisRun(
   actionArgument: string | undefined,
   feedbackArguments: readonly string[],
 ): Promise<void> {
-  if (!runIdArgument || !actionArgument) {
-    console.error(
-      "Usage: npm start -- resume <runId> <y|n|revise> [-- \"revision feedback\"]",
-    );
+  const resumeUsage =
+    "Usage: npm start -- resume <runId> [y|n|revise -- \"<revision-feedback>\"]";
+
+  if (!runIdArgument) {
+    console.error(resumeUsage);
     process.exitCode = 2;
+    return;
+  }
+
+  if (actionArgument === undefined) {
+    if (feedbackArguments.length > 0) {
+      console.error(resumeUsage);
+      process.exitCode = 2;
+      return;
+    }
+
+    await readAnalysisRunSnapshot(runIdArgument);
     return;
   }
 
@@ -1116,22 +1248,37 @@ async function resumeAnalysisRun(
   }
 
   const action = actionArgument.trim().toLowerCase();
-  const feedbackParts = [...feedbackArguments];
-  if (feedbackParts[0] === "--") {
-    feedbackParts.shift();
-  }
-  const feedback = feedbackParts.join(" ").trim();
+  const validAction = ["y", "yes", "n", "no", "revise"].includes(action);
 
-  if (
-    !["y", "yes", "n", "no", "revise"].includes(action) ||
-    (action === "revise" && !feedback)
-  ) {
+  if (!validAction) {
     console.error(
       "Resume action must be y, yes, n, no, or revise with non-empty feedback",
     );
     process.exitCode = 2;
     return;
   }
+
+  if (
+    (action !== "revise" && feedbackArguments.length > 0) ||
+    (action === "revise" &&
+      (feedbackArguments[0] !== "--" || feedbackArguments.length !== 2))
+  ) {
+    console.error(resumeUsage);
+    process.exitCode = 2;
+    return;
+  }
+
+  const feedback =
+    action === "revise" ? feedbackArguments.slice(1).join(" ").trim() : "";
+
+  if (action === "revise" && !feedback) {
+    console.error(
+      "Resume action must be y, yes, n, no, or revise with non-empty feedback",
+    );
+    process.exitCode = 2;
+    return;
+  }
+
   const confirmed = action === "y" || action === "yes";
 
   const pool = new SqlitePool(databasePath);
@@ -1146,7 +1293,9 @@ async function resumeAnalysisRun(
 
     const run = await getAnalysisRun(pool, runIdArgument);
     if (!run) {
-      throw new Error(`Analysis run not found: ${runIdArgument}`);
+      console.error(`Analysis run not found: ${runIdArgument}`);
+      process.exitCode = 2;
+      return;
     }
 
     if (run.status !== "awaiting_confirmation" || !run.currentStage) {
@@ -1461,6 +1610,11 @@ void (async () => {
       process.argv[4],
       process.argv.slice(5),
     );
+    return;
+  }
+
+  if (process.argv[2] === "status") {
+    await statusAnalysisRun(process.argv[3], process.argv.slice(4));
     return;
   }
 
