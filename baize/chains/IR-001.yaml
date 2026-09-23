@@ -1,0 +1,8 @@
+chain: IR-001
+stages:
+  ir:       { state: done, confirmedBy: crazytomatooo, at: 2026-09-23 }
+  sr:       { state: done }
+  ar:       { state: done }
+  scenario: { state: done }
+  usecase:  { state: done }
+  function: { state: in_progress }
