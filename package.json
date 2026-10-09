@@ -1,0 +1,26 @@
+{
+  "name": "baize",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "极薄的设计校验 CLI：发号、校验、查询 baize/ 下的设计条目",
+  "bin": {
+    "baize": "./bin/baize.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "node --import tsx --test test/*.test.ts",
+    "baize": "node --import tsx bin/baize.ts"
+  },
+  "dependencies": {
+    "yaml": "^2.9.1"
+  },
+  "devDependencies": {
+    "@types/node": "^22",
+    "tsx": "^4",
+    "typescript": "^5"
+  },
+  "allowScripts": {
+    "esbuild@0.28.2": true
+  }
+}
