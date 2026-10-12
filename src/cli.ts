@@ -1,4 +1,5 @@
 import path from "node:path";
+import { accept, DEFAULT_USER } from "./confirm.ts";
 import { BaizeError } from "./errors.ts";
 import { LAYERS } from "./layers.ts";
 import { BAIZE_DIR, nextId, scaffold, writeFileAtomic } from "./store.ts";
@@ -6,6 +7,7 @@ import { chainStatus, chainSummaries, itemStatus } from "./status.ts";
 import { validate } from "./validate.ts";
 import {
   SCHEMA_VERSION,
+  renderAccepted,
   renderChain,
   renderChains,
   renderCreated,
@@ -22,6 +24,8 @@ export interface RunResult {
 }
 export interface RunOptions {
   cwd?: string;
+  /** 注入时钟（本仓唯一的测试替身）：accept 的 `at` 从这里取 ISO 时间戳。 */
+  now?: Date | string | number;
 }
 
 interface ParsedArgs {
@@ -213,7 +217,35 @@ async function runStatus(args: ParsedArgs, cwd: string): Promise<CommandOutput> 
   };
 }
 
-async function dispatch(args: ParsedArgs, cwd: string): Promise<CommandOutput> {
+async function runAccept(
+  args: ParsedArgs,
+  cwd: string,
+  now: Date,
+): Promise<CommandOutput> {
+  const id = args.positionals[0];
+  if (id === undefined) {
+    throw new BaizeError("cli.usage", "用法：baize accept <id>（如 baize accept IR-001）");
+  }
+  if (args.positionals.length > 1) {
+    throw new BaizeError("cli.usage", `多余参数：${args.positionals.slice(1).join(" ")}`);
+  }
+  if (args.chain !== undefined || args.item !== undefined || args.strict) {
+    throw new BaizeError("cli.usage", "accept 只接受 --json（不支持 --chain / --item / --strict）");
+  }
+  const by = process.env.BAIZE_USER ?? DEFAULT_USER;
+  const confirmed = await accept(cwd, id, { by, now });
+  return {
+    data: { schemaVersion: SCHEMA_VERSION, confirmed },
+    human: renderAccepted(confirmed),
+    exitCode: 0,
+  };
+}
+
+async function dispatch(
+  args: ParsedArgs,
+  cwd: string,
+  now: Date,
+): Promise<CommandOutput> {
   switch (args.command) {
     case "new":
       return runNew(args, cwd);
@@ -221,8 +253,10 @@ async function dispatch(args: ParsedArgs, cwd: string): Promise<CommandOutput> {
       return runValidate(args, cwd);
     case "status":
       return runStatus(args, cwd);
+    case "accept":
+      return runAccept(args, cwd, now);
     case undefined:
-      throw new BaizeError("cli.usage", "用法：baize <new|validate|status> [选项]");
+      throw new BaizeError("cli.usage", "用法：baize <new|validate|status|accept> [选项]");
     default:
       throw new BaizeError("cli.usage", `未知命令：${args.command}`);
   }
@@ -237,11 +271,12 @@ export async function run(
   options: RunOptions = {},
 ): Promise<RunResult> {
   const cwd = options.cwd ?? process.cwd();
+  const now = options.now !== undefined ? new Date(options.now) : new Date();
   const wantsJson = argv.includes("--json");
 
   try {
     const args = parseArgs(argv);
-    const output = await dispatch(args, cwd);
+    const output = await dispatch(args, cwd, now);
     return {
       exitCode: output.exitCode,
       stdout: args.json ? toJson(output.data) : output.human,

@@ -34,12 +34,18 @@ interface CreatedOutput {
   schemaVersion: number;
   created: { id: string; path: string };
 }
+interface ConfirmationView {
+  state: "unconfirmed" | "confirmed" | "stale";
+  by: string | null;
+  at: string | null;
+}
 interface ItemView {
   id: string;
   layer: string;
   title: string;
   path: string;
   parent: string | null;
+  confirmation: ConfirmationView;
 }
 interface StatusItemOutput {
   schemaVersion: number;
@@ -565,4 +571,241 @@ covers: [IR-001#a1]
   assert.equal(chain.id, "IR-001");
   const ids = chain.items.map((i) => i.id);
   assert.deepEqual(ids.sort(), ["IR-001", "SR-001"]);
+});
+
+// —— accept：认领与确认失效（#151）——
+
+const SR_WITH_COVERS = `---
+id: SR-001
+title: 统一导出服务
+parent: IR-001
+covers: [IR-001#a1]
+---
+
+把「数据可带走」落成服务端导出能力。
+`;
+
+/** 注入 BAIZE_USER 并在用例结束后还原（accept 的 by 从环境变量取）。 */
+function injectUser(t: { after: (fn: () => void) => void }, value: string | undefined): void {
+  const original = process.env.BAIZE_USER;
+  if (value === undefined) delete process.env.BAIZE_USER;
+  else process.env.BAIZE_USER = value;
+  t.after(() => {
+    if (original === undefined) delete process.env.BAIZE_USER;
+    else process.env.BAIZE_USER = original;
+  });
+}
+
+const FIXED_NOW = "2026-10-12T08:00:00.000Z";
+
+async function acceptAndRead(
+  cwd: string,
+  id: string,
+): Promise<Record<string, unknown>> {
+  const accepted = await run(["accept", id, "--json"], { cwd, now: FIXED_NOW });
+  assert.equal(accepted.exitCode, 0, accepted.stdout);
+  return parseJson<{ schemaVersion: number; confirmed: Record<string, unknown> }>(
+    accepted.stdout,
+  ).confirmed;
+}
+
+test("accept IR-001 写入 confirmed: {by, at, fingerprint}（by 取 BAIZE_USER，at 用注入时钟）", async (t) => {
+  const cwd = mkdtempSync(join(tmpdir(), "baize-"));
+  t.after(() => rmSync(cwd, { recursive: true, force: true }));
+  injectUser(t, "alice");
+  write(cwd, "baize/ir/IR-001.md", LEGAL_IR);
+
+  const confirmed = await acceptAndRead(cwd, "IR-001");
+  assert.equal(confirmed["by"], "alice");
+  assert.equal(confirmed["at"], FIXED_NOW);
+  assert.match(confirmed["fingerprint"] as string, /^[0-9a-f]{64}$/);
+
+  // 落盘：frontmatter 里的 confirmed 与输出一致（是本条目的实质字段指纹）
+  const text = readFileSync(join(cwd, "baize/ir/IR-001.md"), "utf8");
+  assert.match(text, /^confirmed:/m);
+  assert.match(text, /^  by: alice$/m);
+  assert.match(text, new RegExp(`^  at: ${FIXED_NOW.replace(/[.]/g, "\\.")}$`, "m"));
+  assert.match(text, /^  fingerprint: [0-9a-f]{64}$/m);
+
+  // status --item 读回同一份确认状态：已确认且未失效
+  const status = await run(["status", "--item", "IR-001", "--json"], { cwd });
+  assert.equal(status.exitCode, 0, status.stdout);
+  const view = parseJson<StatusItemOutput>(status.stdout).item.confirmation;
+  assert.equal(view.state, "confirmed");
+  assert.equal(view.by, "alice");
+  assert.equal(view.at, FIXED_NOW);
+});
+
+test("accept：BAIZE_USER 未设置时 by 落明确默认值，测试不依赖真实环境", async (t) => {
+  const cwd = mkdtempSync(join(tmpdir(), "baize-"));
+  t.after(() => rmSync(cwd, { recursive: true, force: true }));
+  injectUser(t, undefined);
+  write(cwd, "baize/ir/IR-001.md", LEGAL_IR);
+
+  const confirmed = await acceptAndRead(cwd, "IR-001");
+  assert.equal(confirmed["by"], "unknown");
+  assert.equal(confirmed["at"], FIXED_NOW);
+});
+
+test("accept：缺 id 或条目不存在 → exit 2，不写文件", async (t) => {
+  const cwd = mkdtempSync(join(tmpdir(), "baize-"));
+  t.after(() => rmSync(cwd, { recursive: true, force: true }));
+  injectUser(t, "alice");
+  write(cwd, "baize/ir/IR-001.md", LEGAL_IR);
+
+  const noId = await run(["accept", "--json"], { cwd, now: FIXED_NOW });
+  assert.equal(noId.exitCode, 2, noId.stdout);
+  assert.equal(parseJson<ErrorOutput>(noId.stdout).error.rule, "cli.usage");
+
+  const missing = await run(["accept", "IR-999", "--json"], { cwd, now: FIXED_NOW });
+  assert.equal(missing.exitCode, 2, missing.stdout);
+  assert.equal(parseJson<ErrorOutput>(missing.stdout).error.rule, "item.not-found");
+
+  const text = readFileSync(join(cwd, "baize/ir/IR-001.md"), "utf8");
+  assert.ok(!/^confirmed:/m.test(text), "不成立的请求不应写 confirmed");
+});
+
+test("status --item 给出确认状态：未确认 → unconfirmed（IR 录入门禁由它算出 pending，#156 呈现）", async (t) => {
+  const cwd = mkdtempSync(join(tmpdir(), "baize-"));
+  t.after(() => rmSync(cwd, { recursive: true, force: true }));
+  write(cwd, "baize/ir/IR-001.md", LEGAL_IR);
+
+  const machine = await run(["status", "--item", "IR-001", "--json"], { cwd });
+  assert.equal(machine.exitCode, 0, machine.stdout);
+  const view = parseJson<StatusItemOutput>(machine.stdout).item.confirmation;
+  assert.equal(view.state, "unconfirmed");
+  assert.equal(view.by, null);
+  assert.equal(view.at, null);
+
+  const human = await run(["status", "--item", "IR-001"], { cwd });
+  assert.equal(human.exitCode, 0, human.stdout);
+  assert.ok(human.stdout.includes("未确认"), human.stdout);
+});
+
+test("改 statement 后确认自动失效：不落盘、无需单独操作，status 显示已失效", async (t) => {
+  const cwd = mkdtempSync(join(tmpdir(), "baize-"));
+  t.after(() => rmSync(cwd, { recursive: true, force: true }));
+  injectUser(t, "alice");
+  write(cwd, "baize/ir/IR-001.md", LEGAL_IR);
+  await acceptAndRead(cwd, "IR-001");
+
+  // 只改 statement，confirmed 记录原样留在盘上
+  const text = readFileSync(join(cwd, "baize/ir/IR-001.md"), "utf8");
+  const changed = text.replace(
+    "产品要求用户能把数据带走，不能锁死在系统里。",
+    "产品要求用户能把数据带走，格式由用户自选。",
+  );
+  assert.notEqual(changed, text, "本用例必须真的改掉 statement");
+  write(cwd, "baize/ir/IR-001.md", changed);
+
+  const machine = await run(["status", "--item", "IR-001", "--json"], { cwd });
+  assert.equal(machine.exitCode, 0, machine.stdout);
+  const view = parseJson<StatusItemOutput>(machine.stdout).item.confirmation;
+  assert.equal(view.state, "stale");
+  assert.equal(view.by, "alice", "确认记录本身还在，只是失效");
+  assert.equal(view.at, FIXED_NOW);
+
+  // 失效不落盘：盘上 confirmed 仍是原指纹，stale 是现算的
+  assert.match(readFileSync(join(cwd, "baize/ir/IR-001.md"), "utf8"), /^  by: alice$/m);
+
+  const human = await run(["status", "--item", "IR-001"], { cwd });
+  assert.equal(human.exitCode, 0, human.stdout);
+  assert.ok(human.stdout.includes("已失效"), human.stdout);
+});
+
+test("改 acceptance 后确认自动失效", async (t) => {
+  const cwd = mkdtempSync(join(tmpdir(), "baize-"));
+  t.after(() => rmSync(cwd, { recursive: true, force: true }));
+  injectUser(t, "alice");
+  write(cwd, "baize/ir/IR-001.md", LEGAL_IR);
+  await acceptAndRead(cwd, "IR-001");
+
+  // 加一条验收线索
+  write(
+    cwd,
+    "baize/ir/IR-001.md",
+    readFileSync(join(cwd, "baize/ir/IR-001.md"), "utf8").replace(
+      "  a2: 能导出 Excel\n",
+      "  a2: 能导出 Excel\n  a3: 导出可断点续传\n",
+    ),
+  );
+
+  const machine = await run(["status", "--item", "IR-001", "--json"], { cwd });
+  assert.equal(machine.exitCode, 0, machine.stdout);
+  assert.equal(
+    parseJson<StatusItemOutput>(machine.stdout).item.confirmation.state,
+    "stale",
+  );
+});
+
+test("改出边 covers 后确认自动失效——实质字段含出边（#155 陈旧复用同一份逻辑）", async (t) => {
+  const cwd = mkdtempSync(join(tmpdir(), "baize-"));
+  t.after(() => rmSync(cwd, { recursive: true, force: true }));
+  injectUser(t, "alice");
+  write(cwd, "baize/ir/IR-001.md", LEGAL_IR);
+  write(cwd, "baize/sr/SR-001.md", SR_WITH_COVERS);
+  await acceptAndRead(cwd, "SR-001");
+
+  const confirmed = await run(["status", "--item", "SR-001", "--json"], { cwd });
+  assert.equal(
+    parseJson<StatusItemOutput>(confirmed.stdout).item.confirmation.state,
+    "confirmed",
+  );
+
+  // SR 改 covers（出边是实质字段的一部分）——在盘上现有内容里改，保留 confirmed；
+  // accept 落盘时 yaml 会展开流式数组，所以匹配块式写法
+  write(
+    cwd,
+    "baize/sr/SR-001.md",
+    readFileSync(join(cwd, "baize/sr/SR-001.md"), "utf8").replace(
+      "  - IR-001#a1\n",
+      "  - IR-001#a1\n  - IR-001#a2\n",
+    ),
+  );
+
+  const machine = await run(["status", "--item", "SR-001", "--json"], { cwd });
+  assert.equal(machine.exitCode, 0, machine.stdout);
+  assert.equal(
+    parseJson<StatusItemOutput>(machine.stdout).item.confirmation.state,
+    "stale",
+  );
+});
+
+test("改 title / priority 不失效", async (t) => {
+  const cwd = mkdtempSync(join(tmpdir(), "baize-"));
+  t.after(() => rmSync(cwd, { recursive: true, force: true }));
+  injectUser(t, "alice");
+  write(cwd, "baize/ir/IR-001.md", LEGAL_IR);
+  await acceptAndRead(cwd, "IR-001");
+
+  const text = readFileSync(join(cwd, "baize/ir/IR-001.md"), "utf8");
+  const changed = text
+    .replace("title: 支持用户数据导出", "title: 数据导出（改名了）\npriority: high");
+  write(cwd, "baize/ir/IR-001.md", changed);
+
+  const machine = await run(["status", "--item", "IR-001", "--json"], { cwd });
+  assert.equal(machine.exitCode, 0, machine.stdout);
+  const view = parseJson<StatusItemOutput>(machine.stdout).item.confirmation;
+  assert.equal(view.state, "confirmed");
+  assert.equal(view.by, "alice");
+});
+
+test("没有 unaccept：撤销类命令不存在 → exit 2 未知命令", async (t) => {
+  const cwd = mkdtempSync(join(tmpdir(), "baize-"));
+  t.after(() => rmSync(cwd, { recursive: true, force: true }));
+  injectUser(t, "alice");
+  write(cwd, "baize/ir/IR-001.md", LEGAL_IR);
+  await acceptAndRead(cwd, "IR-001");
+
+  const result = await run(["unaccept", "IR-001", "--json"], { cwd, now: FIXED_NOW });
+  assert.equal(result.exitCode, 2, result.stdout);
+  const error = parseJson<ErrorOutput>(result.stdout).error;
+  assert.equal(error.rule, "cli.usage");
+
+  // 确认记录不受影响
+  const machine = await run(["status", "--item", "IR-001", "--json"], { cwd });
+  assert.equal(
+    parseJson<StatusItemOutput>(machine.stdout).item.confirmation.state,
+    "confirmed",
+  );
 });
