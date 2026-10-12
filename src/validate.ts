@@ -87,13 +87,13 @@ function refIssues(entry: Entry, byId: Record<string, Entry>): Issue[] {
   const issues: Issue[] = [];
   const parentId = parentIdOf(entry);
 
-  // ref.orphan：SR / AR 必须有父（null / 缺失 / 空都算）。IR 的 parent: null 是链顶端，合法。
-  if ((entry.layer.key === "sr" || entry.layer.key === "ar") && parentId === undefined) {
+  // ref.orphan：除 IR（链顶端，parent 恒为 null）外，各层必须有父。null / 缺失 / 空都算。
+  if (entry.layer.key !== "ir" && parentId === undefined) {
     issues.push({
       level: "ERROR",
       rule: "ref.orphan",
       path: entry.path,
-      message: `${entry.layer.prefix} 缺少父条目：parent 为空或缺失（SR/AR 必由上层条目分解而来）`,
+      message: `${entry.layer.prefix} 缺少父条目：parent 为空或缺失（各层必由上层条目分解而来）`,
       fix: `给 ${entry.path} 的 frontmatter 补上 parent（上层条目 id）`,
     });
   }
@@ -138,6 +138,31 @@ function refIssues(entry: Entry, byId: Record<string, Entry>): Issue[] {
     }
   }
 
+  // ref.unknown-target：多对多关联边（用例 appearsIn → 场景、功能项 realizes → 用例）
+  // 指向的条目必须存在。
+  const edgeFields: Array<{ name: string; target: string }> = [];
+  if (entry.layer.key === "usecases") {
+    edgeFields.push({ name: "appearsIn", target: "场景" });
+  }
+  if (entry.layer.key === "function-items") {
+    edgeFields.push({ name: "realizes", target: "用例" });
+  }
+  for (const edge of edgeFields) {
+    const items = entry.frontmatter[edge.name];
+    if (!Array.isArray(items)) continue;
+    for (const item of items) {
+      if (typeof item === "string" && Object.hasOwn(byId, item)) continue;
+      const shown = typeof item === "string" ? item : (JSON.stringify(item) ?? String(item));
+      issues.push({
+        level: "ERROR",
+        rule: "ref.unknown-target",
+        path: entry.path,
+        message: `${edge.name} 指向不存在的${edge.target}条目：${shown}`,
+        fix: `核对 ${edge.name} 里的条目 id（或先建出 ${shown}）`,
+      });
+    }
+  }
+
   return issues;
 }
 
@@ -166,10 +191,43 @@ export async function validate(
   }
 
   const issues = scoped.flatMap((entry) => issuesFor(entry, byId));
+  issues.push(...unrealizedUsecaseIssues(scoped, entries));
   issues.sort((a, b) =>
     a.path === b.path
       ? a.rule.localeCompare(b.rule)
       : a.path.localeCompare(b.path),
   );
+  return issues;
+}
+
+/**
+ * coverage.unrealized-usecase：每条用例至少要被一个功能项的 realizes 指向
+ * （功能侧必须有人承载这条用例）。realizes 集合取全仓（跨链引用也合法），
+ * 报告范围按 --chain 作用域限定。
+ */
+function unrealizedUsecaseIssues(scoped: Entry[], all: Entry[]): Issue[] {
+  const realized = new Set<string>();
+  for (const entry of all) {
+    if (entry.layer.key !== "function-items") continue;
+    const items = entry.frontmatter["realizes"];
+    if (!Array.isArray(items)) continue;
+    for (const item of items) {
+      if (typeof item === "string") realized.add(item);
+    }
+  }
+
+  const issues: Issue[] = [];
+  for (const entry of scoped) {
+    if (entry.layer.key !== "usecases") continue;
+    const id = idOf(entry);
+    if (id === undefined || realized.has(id)) continue;
+    issues.push({
+      level: "ERROR",
+      rule: "coverage.unrealized-usecase",
+      path: entry.path,
+      message: `用例 ${id} 未被任何功能项 realizes（功能侧没有承载它的实现）`,
+      fix: `在某条 function-item 的 realizes 里加上 ${id}，或确认该用例应废弃`,
+    });
+  }
   return issues;
 }
