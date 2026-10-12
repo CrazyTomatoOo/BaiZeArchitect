@@ -365,6 +365,182 @@ test("new 拒绝不适用选项（--item 等）→ exit 2，不写文件", async
   assert.ok(!existsSync(join(cwd, "baize/ir/IR-001.md")), "不成立请求不应写文件");
 });
 
+const LEGAL_SR = `---
+id: SR-001
+title: 统一导出服务
+parent: IR-001
+covers: [IR-001#a1]
+---
+
+系统应提供统一的导出能力。
+`;
+
+test("new sr --parent IR-001 建出带父边的 SR-001；new ar --parent SR-001 同理", async (t) => {
+  const cwd = mkdtempSync(join(tmpdir(), "baize-"));
+  t.after(() => rmSync(cwd, { recursive: true, force: true }));
+
+  const sr = await run(["new", "sr", "--parent", "IR-001", "--json"], { cwd });
+  assert.equal(sr.exitCode, 0, sr.stdout);
+  const created = parseJson<CreatedOutput>(sr.stdout).created;
+  assert.equal(created.id, "SR-001");
+  assert.equal(created.path, "baize/sr/SR-001.md");
+  const srText = readFileSync(join(cwd, "baize/sr/SR-001.md"), "utf8");
+  assert.match(srText, /^id: SR-001$/m);
+  assert.match(srText, /^parent: IR-001$/m);
+  assert.match(srText, /^covers:/m);
+
+  const ar = await run(["new", "ar", "--parent", "SR-001", "--json"], { cwd });
+  assert.equal(ar.exitCode, 0, ar.stdout);
+  assert.equal(parseJson<CreatedOutput>(ar.stdout).created.id, "AR-001");
+  const arText = readFileSync(join(cwd, "baize/ar/AR-001.md"), "utf8");
+  assert.match(arText, /^id: AR-001$/m);
+  assert.match(arText, /^parent: SR-001$/m);
+});
+
+test("new sr / new ar 缺 --parent → exit 2 且不写文件", async (t) => {
+  const cwd = mkdtempSync(join(tmpdir(), "baize-"));
+  t.after(() => rmSync(cwd, { recursive: true, force: true }));
+
+  for (const layer of ["sr", "ar"]) {
+    const result = await run(["new", layer, "--json"], { cwd });
+    assert.equal(result.exitCode, 2, result.stdout);
+    assert.ok(parseJson<ErrorOutput>(result.stdout).error.rule);
+  }
+  assert.ok(!existsSync(join(cwd, "baize")), "不成立请求不应写任何文件");
+});
+
+test("new ir 不接受 --parent（IR 是链顶端，parent 恒为 null）", async (t) => {
+  const cwd = mkdtempSync(join(tmpdir(), "baize-"));
+  t.after(() => rmSync(cwd, { recursive: true, force: true }));
+
+  const result = await run(["new", "ir", "--parent", "IR-001", "--json"], {
+    cwd,
+  });
+  assert.equal(result.exitCode, 2, result.stdout);
+  assert.ok(parseJson<ErrorOutput>(result.stdout).error.rule);
+  assert.ok(!existsSync(join(cwd, "baize/ir/IR-001.md")), "不成立请求不应写文件");
+});
+
+test("new 不写反向关系：建完 SR 后父 IR 文件一字未变", async (t) => {
+  const cwd = mkdtempSync(join(tmpdir(), "baize-"));
+  t.after(() => rmSync(cwd, { recursive: true, force: true }));
+  write(cwd, "baize/ir/IR-001.md", LEGAL_IR);
+  const before = readFileSync(join(cwd, "baize/ir/IR-001.md"), "utf8");
+
+  const result = await run(["new", "sr", "--parent", "IR-001"], { cwd });
+  assert.equal(result.exitCode, 0, result.stdout);
+  assert.ok(existsSync(join(cwd, "baize/sr/SR-001.md")), "SR-001.md 应存在");
+
+  const after = readFileSync(join(cwd, "baize/ir/IR-001.md"), "utf8");
+  assert.equal(after, before, "父条目文件内容必须一字未变（关系只存单向）");
+});
+
+test("new sr --covers IR-001#a1,IR-001#a2 写入 covers 数组", async (t) => {
+  const cwd = mkdtempSync(join(tmpdir(), "baize-"));
+  t.after(() => rmSync(cwd, { recursive: true, force: true }));
+
+  const result = await run(
+    ["new", "sr", "--parent", "IR-001", "--covers", "IR-001#a1,IR-001#a2"],
+    { cwd },
+  );
+  assert.equal(result.exitCode, 0, result.stdout);
+  const text = readFileSync(join(cwd, "baize/sr/SR-001.md"), "utf8");
+  assert.match(text, /^covers:\s*$/m);
+  assert.match(text, /^\s+- IR-001#a1$/m);
+  assert.match(text, /^\s+- IR-001#a2$/m);
+});
+
+test("validate：ref.orphan —— SR/AR 无 parent 报 ERROR；IR 的 parent: null 合法", async (t) => {
+  const cwd = mkdtempSync(join(tmpdir(), "baize-"));
+  t.after(() => rmSync(cwd, { recursive: true, force: true }));
+  write(cwd, "baize/ir/IR-001.md", LEGAL_IR);
+  write(cwd, "baize/sr/SR-001.md", LEGAL_SR.replace("parent: IR-001", "parent: null"));
+  // parent 整段缺失也算孤儿
+  write(
+    cwd,
+    "baize/ar/AR-001.md",
+    `---
+id: AR-001
+title: 导出由报表服务负责
+---
+
+分配说明。
+`,
+  );
+
+  const result = await run(["validate", "--json"], { cwd });
+  assert.equal(result.exitCode, 1, result.stdout);
+  const issues = parseJson<ValidateOutput>(result.stdout).issues;
+  const orphans = issues.filter((i) => i.rule === "ref.orphan");
+  assert.equal(orphans.length, 2, result.stdout);
+  assert.ok(
+    orphans.every(
+      (i) => i.level === "ERROR" && i.path !== "baize/ir/IR-001.md",
+    ),
+    "IR 的 parent: null 不得触发 ref.orphan：" + result.stdout,
+  );
+  assert.ok(
+    !issues.some(
+      (i) => i.rule === "ref.orphan" && i.path === "baize/ir/IR-001.md",
+    ),
+    "IR 的 parent: null 不得触发 ref.orphan：" + result.stdout,
+  );
+});
+
+test("validate：ref.parent-missing —— parent 指向不存在的条目", async (t) => {
+  const cwd = mkdtempSync(join(tmpdir(), "baize-"));
+  t.after(() => rmSync(cwd, { recursive: true, force: true }));
+  write(cwd, "baize/ir/IR-001.md", LEGAL_IR);
+  write(cwd, "baize/sr/SR-001.md", LEGAL_SR.replace("parent: IR-001", "parent: IR-999"));
+
+  const result = await run(["validate", "--json"], { cwd });
+  assert.equal(result.exitCode, 1, result.stdout);
+  const issues = parseJson<ValidateOutput>(result.stdout).issues;
+  const missing = issues.find((i) => i.rule === "ref.parent-missing");
+  assert.ok(missing, result.stdout);
+  assert.equal(missing.level, "ERROR");
+  assert.equal(missing.path, "baize/sr/SR-001.md");
+  assert.ok(missing.message.includes("IR-999"), "message 应指出是哪个 id");
+});
+
+test("validate：ref.unknown-clue —— covers 指向不存在的验收线索", async (t) => {
+  const cwd = mkdtempSync(join(tmpdir(), "baize-"));
+  t.after(() => rmSync(cwd, { recursive: true, force: true }));
+  write(cwd, "baize/ir/IR-001.md", LEGAL_IR);
+  // 父条目存在，但 acceptance 里没有 a9
+  write(cwd, "baize/sr/SR-001.md", LEGAL_SR.replace("IR-001#a1", "IR-001#a9"));
+  // 父条目不存在
+  write(
+    cwd,
+    "baize/sr/SR-002.md",
+    LEGAL_SR.replace("id: SR-001", "id: SR-002").replace(
+      "covers: [IR-001#a1]",
+      "covers: [IR-999#a1]",
+    ),
+  );
+
+  const result = await run(["validate", "--json"], { cwd });
+  assert.equal(result.exitCode, 1, result.stdout);
+  const issues = parseJson<ValidateOutput>(result.stdout).issues;
+  const clues = issues.filter((i) => i.rule === "ref.unknown-clue");
+  assert.equal(clues.length, 2, result.stdout);
+  assert.ok(
+    clues.every((i) => i.level === "ERROR"),
+    result.stdout,
+  );
+
+  // 合法引用不报错：修正 SR-002，SR-001 覆盖 a1（covers: [] 也不触发本 rule）
+  write(cwd, "baize/sr/SR-001.md", LEGAL_SR.replace("covers: [IR-001#a1]", "covers: []"));
+  write(cwd, "baize/sr/SR-002.md", LEGAL_SR.replace("id: SR-001", "id: SR-002"));
+  const clean = await run(["validate", "--json"], { cwd });
+  assert.equal(clean.exitCode, 0, clean.stdout);
+  const cleanIssues = parseJson<ValidateOutput>(clean.stdout).issues;
+  assert.ok(
+    !cleanIssues.some((i) => i.rule === "ref.unknown-clue"),
+    clean.stdout,
+  );
+});
+
 test("status --chain IR-001 给出该链的条目", async (t) => {
   const cwd = mkdtempSync(join(tmpdir(), "baize-"));
   t.after(() => rmSync(cwd, { recursive: true, force: true }));

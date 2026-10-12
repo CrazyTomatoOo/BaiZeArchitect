@@ -31,6 +31,8 @@ interface ParsedArgs {
   strict: boolean;
   chain: string | undefined;
   item: string | undefined;
+  parent: string | undefined;
+  covers: string | undefined;
 }
 
 interface CommandOutput {
@@ -45,6 +47,8 @@ function parseArgs(argv: string[]): ParsedArgs {
   let strict = false;
   let chain: string | undefined;
   let item: string | undefined;
+  let parent: string | undefined;
+  let covers: string | undefined;
 
   for (let i = 0; i < argv.length; i++) {
     const token = argv[i];
@@ -67,6 +71,16 @@ function parseArgs(argv: string[]): ParsedArgs {
       i++;
       continue;
     }
+    if (token === "--parent" || token === "--covers") {
+      const value = argv[i + 1];
+      if (value === undefined || value.startsWith("--")) {
+        throw new BaizeError("cli.usage", `${token} 需要一个取值`);
+      }
+      if (token === "--parent") parent = value;
+      else covers = value;
+      i++;
+      continue;
+    }
     if (token.startsWith("--")) {
       throw new BaizeError("cli.usage", `未知选项：${token}`);
     }
@@ -80,6 +94,8 @@ function parseArgs(argv: string[]): ParsedArgs {
     strict,
     chain,
     item,
+    parent,
+    covers,
   };
 }
 
@@ -105,9 +121,33 @@ async function runNew(args: ParsedArgs, cwd: string): Promise<CommandOutput> {
     throw new BaizeError("cli.usage", `暂不支持新建该层：${layerKey}`);
   }
 
+  // 父边：IR 是链顶端（parent 恒为 null），SR / AR 必须有 --parent。引用是否存在不在这里
+  // 挡——由 validate 的 ref.* 规则报（new 只负责把声明写对形状）。
+  if (layer.key === "ir" && args.parent !== undefined) {
+    throw new BaizeError("cli.usage", "ir 是链顶端，不接受 --parent（parent 恒为 null）");
+  }
+  if ((layer.key === "sr" || layer.key === "ar") && args.parent === undefined) {
+    throw new BaizeError(
+      "cli.usage",
+      `新建 ${layer.key} 必须指定 --parent <条目id>（SR/AR 必由上层条目分解而来）`,
+    );
+  }
+  if (args.covers !== undefined && layer.key !== "sr") {
+    throw new BaizeError("cli.usage", "--covers 只适用于 sr（SR → IR 验收线索）");
+  }
+
+  const overrides: Record<string, unknown> = {};
+  if (args.parent !== undefined) overrides["parent"] = args.parent;
+  if (args.covers !== undefined) {
+    overrides["covers"] = args.covers
+      .split(",")
+      .map((item) => item.trim())
+      .filter((item) => item !== "");
+  }
+
   const id = await nextId(cwd, layer);
   const relPath = path.posix.join(BAIZE_DIR, layer.dir, `${id}.md`);
-  await writeFileAtomic(path.join(cwd, relPath), scaffold(layer, id));
+  await writeFileAtomic(path.join(cwd, relPath), scaffold(layer, id, overrides));
   const created: Created = { id, path: relPath };
   return {
     data: { schemaVersion: SCHEMA_VERSION, created },
