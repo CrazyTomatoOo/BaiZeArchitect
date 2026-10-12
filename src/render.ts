@@ -39,7 +39,10 @@ export function renderCreated(created: Created): string {
 }
 
 export function renderAccepted(accepted: Accepted): string {
-  return `已确认 ${accepted.id}：${accepted.by} @ ${accepted.at}\n`;
+  const upstreams = Object.keys(accepted.reviewed).sort();
+  const reviewed =
+    upstreams.length > 0 ? `（已复核上游：${upstreams.join("、")}）` : "";
+  return `已确认 ${accepted.id}：${accepted.by} @ ${accepted.at}${reviewed}\n`;
 }
 
 /** 确认状态的人读渲染（与 --json 的 state/by/at 同源）。 */
@@ -88,7 +91,21 @@ export function renderChain(chain: ChainDetail): string {
   for (const coverage of chain.coverage) {
     lines.push(`  ${coverage.id} ${coverage.covered}/${coverage.total} 已覆盖`);
   }
+  lines.push(renderChainStale(chain.stale));
   return `${lines.join("\n")}\n`;
+}
+
+/** 链级陈旧汇总：「直接下游 N 条待复核（…）；另有 M 条下游受影响」。 */
+function renderChainStale(stale: ChainDetail["stale"]): string {
+  if (stale.direct.length === 0 && stale.transitive === 0) return "  陈旧：无";
+  const parts: string[] = [];
+  if (stale.direct.length > 0) {
+    parts.push(`直接下游 ${stale.direct.length} 条待复核（${stale.direct.join("、")}）`);
+  }
+  if (stale.transitive > 0) {
+    parts.push(`另有 ${stale.transitive} 条下游受影响`);
+  }
+  return `  陈旧：${parts.join("；")}`;
 }
 
 export function renderItem(item: ItemView): string {

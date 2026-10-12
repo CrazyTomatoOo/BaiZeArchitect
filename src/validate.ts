@@ -15,6 +15,7 @@ import { readCatalogs } from "./catalogs.ts";
 import { isPlainObject } from "./guards.ts";
 import type { FieldKind } from "./layers.ts";
 import { readEntries } from "./store.ts";
+import { staleIssues } from "./stale.ts";
 import type { Issue } from "./types.ts";
 
 /**
@@ -293,6 +294,8 @@ export async function validate(
     ...(await stageIssues(cwd, options.chain)),
     ...coverageIssues(scoped),
     ...unrealizedUsecaseIssues(scoped, entries),
+    // #155 陈旧：上下游关系现算不落盘；WARNING 直接下游 / INFO 传递（见 stale.ts 注释）。
+    ...staleIssues(scoped),
   ];
   issues.sort((a, b) =>
     a.path === b.path

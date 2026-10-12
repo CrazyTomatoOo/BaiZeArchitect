@@ -1,7 +1,7 @@
 import path from "node:path";
 import { stringify as stringifyYaml } from "yaml";
 import type { Entry } from "./entry.ts";
-import { idOf } from "./entry.ts";
+import { idOf, parentIdOf } from "./entry.ts";
 import { BaizeError } from "./errors.ts";
 import { fingerprintOf } from "./fingerprint.ts";
 import { isPlainObject } from "./guards.ts";
@@ -23,6 +23,8 @@ export interface Accepted {
   by: string;
   at: string;
   fingerprint: string;
+  /** 对上游的复核（一条命令两个方向）：父条目 id → 父条目当前实质字段指纹。无父为空对象。 */
+  reviewed: Record<string, string>;
 }
 
 interface ConfirmedRecord {
@@ -63,7 +65,8 @@ export function confirmationOf(entry: Entry): ConfirmationView {
 
 /**
  * 认领一条目：把 `confirmed: { by, at, fingerprint }` 写进该条目的 frontmatter。
- * 指纹取该条目自己的实质字段（#155 的陈旧比对复用同一份 `fingerprintOf`）。
+ * 一条命令两个方向（#155）：对自己写 `confirmed`（指纹取自己的实质字段），
+ * 对上游写 `reviewed: { <父 id>: <父条目实质字段摘要> }`——上游集合 = `parent`（单亲分解树）。
  * 重复 accept 是「按现在这版再认一次」，覆盖旧记录。
  */
 export async function accept(
@@ -75,18 +78,34 @@ export async function accept(
   const entry = entries.find((candidate) => idOf(candidate) === id);
   if (!entry) throw new BaizeError("item.not-found", `条目不存在：${id}`);
 
+  // 对上游的复核：摘要取父条目当前实质字段（与 #151 的陈旧比对共用 fingerprintOf）。
+  const reviewed: Record<string, string> = {};
+  const parentId = parentIdOf(entry);
+  if (parentId !== undefined) {
+    const upstream = entries.find((candidate) => idOf(candidate) === parentId);
+    if (upstream) reviewed[parentId] = fingerprintOf(upstream);
+  }
+
   const accepted: Accepted = {
     id,
     by: options.by,
     at: options.now.toISOString(),
     fingerprint: fingerprintOf(entry),
+    reviewed,
   };
 
   const abs = path.join(cwd, entry.path);
-  // 只改 frontmatter 的 confirmed，正文与其余字段原样保留（body 含原始换行）。
-  await writeFileAtomic(
-    abs,
-    `---\n${stringifyYaml({ ...entry.frontmatter, confirmed: accepted })}---\n${entry.body}`,
-  );
+  // 只改 frontmatter 的 confirmed / reviewed，正文与其余字段原样保留（body 含原始换行）。
+  const frontmatter: Record<string, unknown> = {
+    ...entry.frontmatter,
+    confirmed: {
+      id: accepted.id,
+      by: accepted.by,
+      at: accepted.at,
+      fingerprint: accepted.fingerprint,
+    },
+  };
+  if (Object.keys(reviewed).length > 0) frontmatter["reviewed"] = reviewed;
+  await writeFileAtomic(abs, `---\n${stringifyYaml(frontmatter)}---\n${entry.body}`);
   return accepted;
 }

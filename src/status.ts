@@ -13,6 +13,7 @@ import {
 import { computeCoverage, type EntryCoverage } from "./coverage.ts";
 import { isPlainObject } from "./guards.ts";
 import { readEntries } from "./store.ts";
+import { staleFindings } from "./stale.ts";
 
 export interface ChainSummary {
   id: string;
@@ -37,12 +38,20 @@ export interface StageView {
   /** 仅「功能拆分」段：两个子层级（items / points）各自的跳过记录。 */
   subStages?: { items: SkipRecord | null; points: SkipRecord | null };
 }
+/** 链的陈旧汇总（#155）：直接下游待复核 + 另有 N 条下游受传递影响。 */
+export interface ChainStaleView {
+  /** 直接下游陈旧的条目 id（升序）。 */
+  direct: string[];
+  /** 另有 N 条下游受传递影响（陈旧条目的严格后代，自身不重复计）。 */
+  transitive: number;
+}
 export interface ChainDetail {
   id: string;
   items: ChainItem[];
   stages: StageView[];
   /** 链内每条 IR 的线索覆盖率（与 validate 的 coverage.missing-clue 同一份数据）。 */
   coverage: EntryCoverage[];
+  stale: ChainStaleView;
 }
 export interface ItemView {
   id: string;
@@ -112,7 +121,18 @@ export async function chainStatus(cwd: string, id: string): Promise<ChainDetail>
     }
     return { stage, skipped: skipRecordOf(state?.skipped[stage]) };
   });
-  return { id, items, stages, coverage: computeCoverage(members) };
+  // #155 陈旧：上下游关系现算不落盘；WARNING 直接下游 / INFO 传递（见 stale.ts 注释）。
+  const { direct, transitive } = staleFindings(members);
+  return {
+    id,
+    items,
+    stages,
+    coverage: computeCoverage(members),
+    stale: {
+      direct: direct.map((entry) => idOf(entry) ?? ""),
+      transitive: transitive.length,
+    },
+  };
 }
 
 /** 单条目的正反向视图入口（#148 只做条目本身；反向关系与覆盖率归后续工单）。 */
