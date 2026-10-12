@@ -112,12 +112,15 @@ export interface DirectStaleView {
 
 /**
  * 直接下游陈旧的结构化清单（`stale.direct-downstream` 那份数据）。
- * validate（报成 issue）与 status（功能拆分门禁的待签字清单）共用本函数，不各算一套。
+ * validate（报成 issue）与 status（功能拆分门禁的待签字清单）共用本函数，不各算一套；
+ * 调用方已算过 staleFindings 时把结果传入，不重复遍历关系图。
  */
-export function directStaleViews(scoped: Entry[]): DirectStaleView[] {
+export function directStaleViews(
+  scoped: Entry[],
+  findings: StaleFinding = staleFindings(scoped),
+): DirectStaleView[] {
   const byId = byIdOf(scoped);
-  const { direct } = staleFindings(scoped);
-  return direct.map((entry) => ({
+  return findings.direct.map((entry) => ({
     id: idOf(entry) ?? entry.path,
     path: entry.path,
     upstreams: staleUpstreamIdsOf(entry, byId),

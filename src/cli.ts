@@ -281,10 +281,15 @@ async function runAccept(
     throw new BaizeError("cli.usage", "accept 只接受 --json（不支持 --chain / --item / --strict）");
   }
   const by = process.env.BAIZE_USER ?? DEFAULT_USER;
-  const confirmed = await accept(cwd, id, { by, now });
+  const accepted = await accept(cwd, id, { by, now });
+  // B1：同一动作的两个方向用域模型的两个词——IR 是 confirmed，其余层是 reviewed。
+  const data =
+    accepted.kind === "confirmed"
+      ? { schemaVersion: SCHEMA_VERSION, confirmed: accepted }
+      : { schemaVersion: SCHEMA_VERSION, reviewed: accepted };
   return {
-    data: { schemaVersion: SCHEMA_VERSION, confirmed },
-    human: renderAccepted(confirmed),
+    data,
+    human: renderAccepted(accepted),
     exitCode: 0,
   };
 }

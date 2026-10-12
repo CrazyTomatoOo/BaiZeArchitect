@@ -19,10 +19,13 @@ export interface ConfirmationView {
 }
 
 export interface Accepted {
+  /** 方向（#147）：IR 上是 `confirmed`（对自己）；其余层是 `reviewed`（对上游）。 */
+  kind: "confirmed" | "reviewed";
   id: string;
   by: string;
   at: string;
-  fingerprint: string;
+  /** 仅 `confirmed`：本条目实质字段的指纹。 */
+  fingerprint?: string;
   /** 对上游的复核（一条命令两个方向）：父条目 id → 父条目当前实质字段指纹。无父为空对象。 */
   reviewed: Record<string, string>;
 }
@@ -64,10 +67,11 @@ export function confirmationOf(entry: Entry): ConfirmationView {
 }
 
 /**
- * 认领一条目：把 `confirmed: { by, at, fingerprint }` 写进该条目的 frontmatter。
- * 一条命令两个方向（#155）：对自己写 `confirmed`（指纹取自己的实质字段），
- * 对上游写 `reviewed: { <父 id>: <父条目实质字段摘要> }`——上游集合 = `parent`（单亲分解树）。
- * 重复 accept 是「按现在这版再认一次」，覆盖旧记录。
+ * 认领一条目。一条命令两个方向（#147 / #155）：
+ * - **IR** → 写 `confirmed: { by, at, fingerprint }`（对自己；恰好三项，见域模型「确认」词条）；
+ * - **非 IR** → 只写 `reviewed: { <父 id>: <父条目实质字段摘要> }`（对上游），
+ *   **不写 `confirmed`**——确认只用在 IR 上。
+ * 上游集合 = `parent`（单亲分解树）；重复 accept 是「按现在这版再认一次」，覆盖旧记录。
  */
 export async function accept(
   cwd: string,
@@ -86,25 +90,28 @@ export async function accept(
     if (upstream) reviewed[parentId] = fingerprintOf(upstream);
   }
 
-  const accepted: Accepted = {
-    id,
-    by: options.by,
-    at: options.now.toISOString(),
-    fingerprint: fingerprintOf(entry),
-    reviewed,
-  };
+  const isIr = entry.layer.key === "ir";
+  const accepted: Accepted = isIr
+    ? {
+        kind: "confirmed",
+        id,
+        by: options.by,
+        at: options.now.toISOString(),
+        fingerprint: fingerprintOf(entry),
+        reviewed,
+      }
+    : { kind: "reviewed", id, by: options.by, at: options.now.toISOString(), reviewed };
 
   const abs = path.join(cwd, entry.path);
   // 只改 frontmatter 的 confirmed / reviewed，正文与其余字段原样保留（body 含原始换行）。
-  const frontmatter: Record<string, unknown> = {
-    ...entry.frontmatter,
-    confirmed: {
-      id: accepted.id,
+  const frontmatter: Record<string, unknown> = { ...entry.frontmatter };
+  if (isIr && accepted.fingerprint !== undefined) {
+    frontmatter["confirmed"] = {
       by: accepted.by,
       at: accepted.at,
       fingerprint: accepted.fingerprint,
-    },
-  };
+    };
+  }
   if (Object.keys(reviewed).length > 0) frontmatter["reviewed"] = reviewed;
   await writeFileAtomic(abs, `---\n${stringifyYaml(frontmatter)}---\n${entry.body}`);
   return accepted;

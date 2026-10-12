@@ -16,9 +16,19 @@
     ]
   },
   "bin": {
-    "baize": "./bin/baize.ts"
+    "baize": "./dist/bin/baize.js"
   },
+  "files": [
+    "dist",
+    "skills",
+    "extensions",
+    "scripts",
+    "hooks",
+    ".claude-plugin"
+  ],
   "scripts": {
+    "build": "tsc -p tsconfig.build.json && node -e \"require('fs').chmodSync('dist/bin/baize.js', 0o755)\"",
+    "prepack": "npm run build",
     "typecheck": "tsc --noEmit",
     "test": "node --import tsx --test test/*.test.ts",
     "baize": "node --import tsx bin/baize.ts"

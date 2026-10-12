@@ -38,6 +38,21 @@ export interface LayerDef {
   fields: FieldSpec[];
 }
 
+/**
+ * 分解树允许的上层（CONTEXT.md「分解树」）：`IR → SR → {AR, 场景, 用例, 功能项}`、
+ * `功能项 → 功能点`。IR 是链顶端，不允许任何上层。
+ * 例外：场景可挂场景——「parent 天然支持场景挂场景」（能表达 ≠ 必须分级）。
+ * 父边指到别的层由 validate 的 `ref.parent-not-allowed` 报（父不存在另走 parent-missing）。
+ */
+export const ALLOWED_PARENTS: Record<LayerKey, readonly LayerKey[]> = {
+  ir: [],
+  sr: ["ir"],
+  ar: ["sr"],
+  scenarios: ["sr", "scenarios"],
+  usecases: ["sr"],
+  "function-items": ["sr"],
+  "function-points": ["function-items"],
+};
 export const LAYERS: readonly LayerDef[] = [
   {
     key: "ir",
@@ -251,13 +266,7 @@ export const LAYERS: readonly LayerDef[] = [
         kind: "array",
         emptyMessage: "字段为空：stakeholders",
       },
-      {
-        name: "statement",
-        source: "body",
-        nonEmpty: true,
-        kind: "string",
-        emptyMessage: "字段为空：statement（正文不能为空）",
-      },
+      // 无 statement：CONTEXT.md 的「statement」是需求的陈述，场景的必填止于六项 + id/title/parent/catalog。
     ],
   },
   {
@@ -339,13 +348,7 @@ export const LAYERS: readonly LayerDef[] = [
         kind: "array",
         emptyMessage: "字段为空：stakeholders",
       },
-      {
-        name: "statement",
-        source: "body",
-        nonEmpty: true,
-        kind: "string",
-        emptyMessage: "字段为空：statement（正文不能为空）",
-      },
+      // 无 statement：CONTEXT.md 的「statement」是需求的陈述，用例的必填止于上面六项。
     ],
   },
   {

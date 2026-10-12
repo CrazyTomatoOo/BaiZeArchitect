@@ -16,7 +16,7 @@ import { computeCoverage, parseClueRef, unrealizedUsecases, type EntryCoverage }
 import { fieldDefectsOf } from "./fieldcheck.ts";
 import { isPlainObject } from "./guards.ts";
 import { readEntries } from "./store.ts";
-import { directStaleViews, staleFindings } from "./stale.ts";
+import { directStaleViews, staleFindings, type DirectStaleView } from "./stale.ts";
 
 /** 门禁判据原文（#139/#141）：criterion 原样输出，签字人对照它签；改文案 = 改判据。 */
 export const IR_ENTRY_CRITERION = "父 IR 的 statement 与 acceptance 已人工确认";
@@ -80,6 +80,11 @@ export interface GateView {
     unrealizedUsecases: { id: string; path: string }[];
     unreviewedStale: { id: string; path: string; upstreams: string[] }[];
   };
+  /** 仅 function-split：签字记录里存的判据（无有效签字为 null）。
+   * 判据文案改了，旧签字不再算数——`criterion`（当前判据）与它都要能取到，供对照。 */
+  signedCriterion?: string | null;
+  /** 仅 function-split：state 为 pending 时缺的是哪几样（签字 / 判据一致 / 三项自动挡）。 */
+  missing?: string[];
 }
 export interface ChainDetail {
   id: string;
@@ -178,11 +183,16 @@ export async function chainSummaries(cwd: string): Promise<ChainSummary[]> {
  * （功能拆分，读链状态文件的 gates 记录）。门禁状态一概不落盘（能算的不写盘）；
  * 自动挡的三项与 validate 的 coverage.unrealized-usecase / field.* / stale.direct-downstream
  * 共用同一份数据（coverage.ts / fieldcheck.ts / stale.ts）。
+ *
+ * 功能拆分门禁 = **签字 + 三项自动挡 + 签字判据与当前判据一致**，三者不齐即 pending，
+ * `missing` 逐样点名。unreviewedStale 由调用方算好传入（chainStatus 已算过陈旧分级，
+ * 不重复遍历关系图）。
  */
 function gatesOf(
   members: Entry[],
   all: Entry[],
   state: ChainState | undefined,
+  unreviewedStale: DirectStaleView[],
 ): GateView[] {
   const irs = members.filter((entry) => entry.layer.key === "ir");
   const irEntryPassed = irs.every(
@@ -204,7 +214,22 @@ function gatesOf(
     (entry) =>
       entry.layer.key === "function-points" && fieldDefectsOf(entry).length > 0,
   );
-  const unreviewedStale = directStaleViews(members);
+  const checks: { check: string; passed: boolean }[] = [
+    { check: "每条用例都有功能点 realizes 它", passed: unrealized.length === 0 },
+    { check: "每个功能点五项字段齐备", passed: incompletePoints.length === 0 },
+    { check: "无未复核的直接下游陈旧", passed: unreviewedStale.length === 0 },
+  ];
+  const autoPassed = checks.every((check) => check.passed);
+  const criterionMatched = signature?.criterion === FUNCTION_SPLIT_CRITERION;
+  const missing: string[] = [];
+  if (signature === null) {
+    missing.push("签字：gates.function-split 缺 by + at 的人工通过记录");
+  } else if (!criterionMatched) {
+    missing.push("签字判据与当前判据不一致（判据文案已改，需按当前判据重签）");
+  }
+  for (const check of checks) {
+    if (!check.passed) missing.push(`自动挡未过：${check.check}`);
+  }
 
   return [
     {
@@ -229,19 +254,14 @@ function gatesOf(
       gate: "function-split",
       kind: "signed",
       blocking: true,
-      state: signature !== null ? "passed" : "pending",
+      state: signature !== null && criterionMatched && autoPassed ? "passed" : "pending",
       criterion: FUNCTION_SPLIT_CRITERION,
       by: signature?.by ?? null,
       at: signature?.at ?? null,
-      checks: [
-        { check: "每条用例都有功能点 realizes 它", passed: unrealized.length === 0 },
-        {
-          check: "每个功能点五项字段齐备",
-          passed: incompletePoints.length === 0,
-        },
-        { check: "无未复核的直接下游陈旧", passed: unreviewedStale.length === 0 },
-      ],
+      checks,
       pending: { unrealizedUsecases: unrealized, unreviewedStale },
+      signedCriterion: signature?.criterion ?? null,
+      missing,
     },
   ];
 }
@@ -265,17 +285,19 @@ export async function chainStatus(cwd: string, id: string): Promise<ChainDetail>
     return { stage, skipped: skipRecordOf(state?.skipped[stage]) };
   });
   // #155 陈旧：上下游关系现算不落盘；WARNING 直接下游 / INFO 传递（见 stale.ts 注释）。
-  const { direct, transitive } = staleFindings(members);
+  // 分级只算一次：链视图的陈旧汇总与门禁的待签字清单共用同一份结果，不重复遍历。
+  const findings = staleFindings(members);
+  const unreviewedStale = directStaleViews(members, findings);
   return {
     id,
     items,
     stages,
     coverage: computeCoverage(members),
     stale: {
-      direct: direct.map((entry) => idOf(entry) ?? ""),
-      transitive: transitive.length,
+      direct: findings.direct.map((entry) => idOf(entry) ?? ""),
+      transitive: findings.transitive.length,
     },
-    gates: gatesOf(members, entries, state),
+    gates: gatesOf(members, entries, state, unreviewedStale),
   };
 }
 

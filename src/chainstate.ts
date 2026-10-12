@@ -160,10 +160,14 @@ export function functionSkipOf(value: unknown): FunctionSkipView {
   return { whole: skipRecordOf(value), items: null, points: null };
 }
 
-/** 一条人工通过记录（门禁签字）：谁签的、什么时候。by / at 缺任一项视为无效（= 未签，无从追问）。 */
+/** 一条人工通过记录（门禁签字）：谁签的、什么时候、对着哪一版判据。
+ * by / at 缺任一项视为无效（= 未签，无从追问）。criterion 是签字时对的判据文案——
+ * 判据改了，旧签字就不再算数（status 据此判「签字判据与当前判据一致」）。 */
 export interface GateRecord {
   by: string;
   at: string;
+  /** 签字记录里的判据文案；没写或不是字符串为 null。 */
+  criterion: string | null;
 }
 
 /** 收窄链状态文件 gates 里的一条签字记录；不是带非空 by/at 的对象返回 null。 */
@@ -173,5 +177,6 @@ export function gateRecordOf(value: unknown): GateRecord | null {
   const at = value["at"];
   if (typeof by !== "string" || by.trim() === "") return null;
   if (typeof at !== "string" || at.trim() === "") return null;
-  return { by, at };
+  const criterion = value["criterion"];
+  return { by, at, criterion: typeof criterion === "string" ? criterion : null };
 }

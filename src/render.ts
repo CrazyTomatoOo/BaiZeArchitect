@@ -39,10 +39,12 @@ export function renderCreated(created: Created): string {
 }
 
 export function renderAccepted(accepted: Accepted): string {
-  const upstreams = Object.keys(accepted.reviewed).sort();
-  const reviewed =
-    upstreams.length > 0 ? `（已复核上游：${upstreams.join("、")}）` : "";
-  return `已确认 ${accepted.id}：${accepted.by} @ ${accepted.at}${reviewed}\n`;
+  // 与 --json 同源：IR 是「已确认」，其余层是「已复核」（对上游）。
+  if (accepted.kind === "reviewed") {
+    const upstreams = Object.keys(accepted.reviewed).sort();
+    return `已复核 ${accepted.id}：${accepted.by} @ ${accepted.at}（上游：${upstreams.join("、")}）\n`;
+  }
+  return `已确认 ${accepted.id}：${accepted.by} @ ${accepted.at}\n`;
 }
 
 /** 确认状态的人读渲染（与 --json 的 state/by/at 同源）。 */
@@ -87,6 +89,17 @@ function renderGates(gates: ChainDetail["gates"]): string[] {
     lines.push(`    判据：${gate.criterion}`);
     for (const check of gate.checks ?? []) {
       lines.push(`    ${check.passed ? "✓" : "✗"} ${check.check}`);
+    }
+    // B2：签字记录里的判据与当前判据不一致时原样亮出（签字人对照着重签）
+    if (
+      gate.signedCriterion !== undefined &&
+      gate.signedCriterion !== null &&
+      gate.signedCriterion !== gate.criterion
+    ) {
+      lines.push(`    签字判据：${gate.signedCriterion}`);
+    }
+    if (gate.missing !== undefined && gate.missing.length > 0) {
+      lines.push(`    缺：${gate.missing.join("；")}`);
     }
     const pending = gate.pending;
     if (pending !== undefined) {

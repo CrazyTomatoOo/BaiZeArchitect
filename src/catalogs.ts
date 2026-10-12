@@ -2,8 +2,7 @@ import { promises as fs } from "node:fs";
 import path from "node:path";
 import { parse as parseYaml } from "yaml";
 import { isPlainObject } from "./guards.ts";
-
-export const BAIZE_DIR = "baize";
+import { BAIZE_DIR } from "./store.ts";
 
 function isEnoent(error: unknown): boolean {
   return (
@@ -24,9 +23,18 @@ export interface Catalogs {
   scenarioCatalogs: ReadonlySet<string>;
 }
 
-/** 读一份清单文件：一个顶层键（如 `components`）+ 其下稳定 slug → { name, description? }。
- * 取该顶层键映射的 slug 集；缺文件 = 空清单，不是错误。 */
-async function readSlugSet(cwd: string, file: string): Promise<ReadonlySet<string>> {
+/**
+ * 读一份清单文件：只读**配定的顶层键**（architecture.yaml → `components`、
+ * scenario-catalogs.yaml → `catalogs`）映射下的 slug 集——同一约定里
+ * 「一个 YAML 文件只有一个顶层键」，但文件里完全可能先出现别的键（如
+ * `metadata`）；不配定键名就会把先出现的映射误当清单。
+ * 缺文件 = 空清单，不是错误；配定键缺失/不是映射同样按空清单（引用由 ref.* 报）。
+ */
+async function readSlugSet(
+  cwd: string,
+  file: string,
+  topKey: string,
+): Promise<ReadonlySet<string>> {
   let text: string;
   try {
     text = await fs.readFile(path.join(cwd, BAIZE_DIR, file), "utf8");
@@ -36,16 +44,15 @@ async function readSlugSet(cwd: string, file: string): Promise<ReadonlySet<strin
   }
   const parsed: unknown = parseYaml(text);
   if (!isPlainObject(parsed)) return new Set();
-  // 统一约定：一个 YAML 文件只有一个顶层键；slug 是它值映射的键。值里的额外字段一律忽略。
-  const top = Object.values(parsed).find(isPlainObject);
-  if (top === undefined) return new Set();
+  const top = parsed[topKey];
+  if (!isPlainObject(top)) return new Set();
   return new Set(Object.keys(top));
 }
 
 export async function readCatalogs(cwd: string): Promise<Catalogs> {
   const [components, scenarioCatalogs] = await Promise.all([
-    readSlugSet(cwd, "architecture.yaml"),
-    readSlugSet(cwd, "scenario-catalogs.yaml"),
+    readSlugSet(cwd, "architecture.yaml", "components"),
+    readSlugSet(cwd, "scenario-catalogs.yaml", "catalogs"),
   ]);
   return { components, scenarioCatalogs };
 }

@@ -1,6 +1,6 @@
 ---
 name: baize-validate
-description: Use when you have written or edited any baize entry, and before any gate.
+description: Use when any baize entry has just been written or edited — however small the change — or when its author asks to check the freshly written entries for mistakes, and before any gate.
 ---
 
 # baize-validate：随时校验

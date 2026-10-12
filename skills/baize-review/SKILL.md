@@ -1,6 +1,6 @@
 ---
 name: baize-review
-description: Use when a human needs to see what a fan-out point produced, before passing a gate.
+description: Use when a human — the boss, a reviewer, the team — wants to look over what has been produced before confirming or committing, or needs a readable summary of the design entries.
 ---
 
 # baize-review：门禁前审阅

@@ -14,9 +14,21 @@ import { fieldDefectsOf } from "./fieldcheck.ts";
 import type { Catalogs } from "./catalogs.ts";
 import { readCatalogs } from "./catalogs.ts";
 import { isPlainObject } from "./guards.ts";
+import { ALLOWED_PARENTS } from "./layers.ts";
 import { readEntries } from "./store.ts";
 import { staleIssues } from "./stale.ts";
 import type { Issue } from "./types.ts";
+
+/** 层的中文叫法（错误消息里人读用）：键为 layer key。 */
+const LAYER_LABEL: Record<string, string> = {
+  ir: "初始需求",
+  sr: "系统需求",
+  ar: "分配需求",
+  scenarios: "场景",
+  usecases: "用例",
+  "function-items": "功能项",
+  "function-points": "功能点",
+};
 
 function fieldIssues(entry: Entry): Issue[] {
   const issues: Issue[] = [];
@@ -91,6 +103,29 @@ function refIssues(entry: Entry, byId: Record<string, Entry>, catalogs: Catalogs
     });
   }
 
+  // ref.parent-not-allowed：父条目存在，但不是本层分解树允许的上层
+  // （IR → SR → {AR, 场景, 用例, 功能项}、功能项 → 功能点；IR 是链顶端）。
+  if (parentId !== undefined) {
+    const parent = byId[parentId];
+    const allowed = ALLOWED_PARENTS[entry.layer.key];
+    if (parent !== undefined && !allowed.includes(parent.layer.key)) {
+      const ownLabel = LAYER_LABEL[entry.layer.key] ?? entry.layer.key;
+      const parentLabel = LAYER_LABEL[parent.layer.key] ?? parent.layer.key;
+      const allowedText = allowed.map((key) => LAYER_LABEL[key] ?? key).join("、");
+      const tail =
+        allowed.length === 0
+          ? "；IR 是链顶端，不允许有上层"
+          : `；${ownLabel}只允许挂在${allowedText}层下`;
+      issues.push({
+        level: "ERROR",
+        rule: "ref.parent-not-allowed",
+        path: entry.path,
+        message: `parent 指向的 ${parentId} 是${parentLabel}层条目，不是${ownLabel}层允许的上层${tail}`,
+        fix: `把 ${entry.path} 的 parent 改成本层允许的上层条目 id`,
+      });
+    }
+  }
+
   // ref.unknown-clue：covers 指向的验收线索必须存在（父条目存在，且其 acceptance 里有该线索）。
   const covers = entry.frontmatter["covers"];
   if (Array.isArray(covers)) {
@@ -121,42 +156,75 @@ function refIssues(entry: Entry, byId: Record<string, Entry>, catalogs: Catalogs
   }
 
   // ref.unknown-target：多对多关联边（用例 appearsIn → 场景、功能项 realizes → 用例）
-  // 指向的条目必须存在。
-  const edgeFields: Array<{ name: string; target: string }> = [];
+  // 指向的条目必须存在，且必须是它该指的那一层（appearsIn 指场景、realizes 指用例）。
+  const edgeFields: Array<{ name: string; target: string; targetLayer: string }> = [];
   if (entry.layer.key === "usecases") {
-    edgeFields.push({ name: "appearsIn", target: "场景" });
+    edgeFields.push({ name: "appearsIn", target: "场景", targetLayer: "scenarios" });
   }
   if (entry.layer.key === "function-items") {
-    edgeFields.push({ name: "realizes", target: "用例" });
+    edgeFields.push({ name: "realizes", target: "用例", targetLayer: "usecases" });
   }
   for (const edge of edgeFields) {
     const items = entry.frontmatter[edge.name];
     if (!Array.isArray(items)) continue;
     for (const item of items) {
-      if (typeof item === "string" && Object.hasOwn(byId, item)) continue;
       const shown = typeof item === "string" ? item : (JSON.stringify(item) ?? String(item));
-      issues.push({
-        level: "ERROR",
-        rule: "ref.unknown-target",
-        path: entry.path,
-        message: `${edge.name} 指向不存在的${edge.target}条目：${shown}`,
-        fix: `核对 ${edge.name} 里的条目 id（或先建出 ${shown}）`,
-      });
+      const target = typeof item === "string" ? byId[item] : undefined;
+      if (target === undefined) {
+        issues.push({
+          level: "ERROR",
+          rule: "ref.unknown-target",
+          path: entry.path,
+          message: `${edge.name} 指向不存在的${edge.target}条目：${shown}`,
+          fix: `核对 ${edge.name} 里的条目 id（或先建出 ${shown}）`,
+        });
+        continue;
+      }
+      if (target.layer.key !== edge.targetLayer) {
+        const targetLabel = LAYER_LABEL[target.layer.key] ?? target.layer.key;
+        issues.push({
+          level: "ERROR",
+          rule: "ref.unknown-target",
+          path: entry.path,
+          message: `${edge.name} 指向的不是${edge.target}：${item}（是${targetLabel}层条目；${edge.name} 只能指向${edge.target}）`,
+          fix: `把 ${entry.path} 的 ${edge.name} 改成${edge.target}条目 id`,
+        });
+      }
     }
   }
 
-  // ref.unknown-element：AR 的 allocates 指向受控清单 baize/architecture.yaml 里的组件 slug；
-  // 清单缺失 = 空清单，引用任何 slug 都报本条。空/缺失的 allocates 由 field.* 报，这里不重复。
+  // ref.unknown-element：AR 的 allocates 必须是**恰好一个**受控清单
+  // baize/architecture.yaml 里的组件 slug。三种子问题都走本条：
+  // ① 形状不是非空标量（数组/映射/数字/空串）——共担表达为两条 AR 各挂同一 SR；
+  // ② slug 不在清单里；③ 清单缺失 = 空清单，引用任何 slug 都报。
+  // null（写了空值）交 field.empty、整段缺失交 field.absent，这里不重复。
   if (entry.layer.key === "ar") {
     const allocates = entry.frontmatter["allocates"];
-    if (typeof allocates === "string" && allocates.trim() !== "" && !catalogs.components.has(allocates)) {
-      issues.push({
-        level: "ERROR",
-        rule: "ref.unknown-element",
-        path: entry.path,
-        message: `allocates 指向清单里不存在的组件：${allocates}（受控清单 baize/architecture.yaml）`,
-        fix: "核对组件 slug，或先在受控清单里登记该组件",
-      });
+    if (allocates !== null && allocates !== undefined) {
+      const shapeName = Array.isArray(allocates)
+        ? "数组"
+        : isPlainObject(allocates)
+          ? "映射"
+          : typeof allocates === "string" && allocates.trim() === ""
+            ? "空串"
+            : (JSON.stringify(allocates) ?? typeof allocates);
+      if (typeof allocates !== "string" || allocates.trim() === "") {
+        issues.push({
+          level: "ERROR",
+          rule: "ref.unknown-element",
+          path: entry.path,
+          message: `allocates 必须是恰好一个组件 slug（标量）：当前是${shapeName}（受控清单 baize/architecture.yaml）`,
+          fix: "把 allocates 改成恰好一个清单里的组件 slug；共担表达为两条 AR 各挂同一 SR",
+        });
+      } else if (!catalogs.components.has(allocates)) {
+        issues.push({
+          level: "ERROR",
+          rule: "ref.unknown-element",
+          path: entry.path,
+          message: `allocates 指向清单里不存在的组件：${allocates}（受控清单 baize/architecture.yaml）`,
+          fix: "核对组件 slug，或先在受控清单里登记该组件",
+        });
+      }
     }
   }
 

@@ -11,7 +11,7 @@
  * 探针静默变成「探的不是预想的状态」。
  */
 import { execFile } from "node:child_process";
-import { promises as fs } from "node:fs";
+import { promises as fs, existsSync } from "node:fs";
 import path from "node:path";
 
 const sh = (cmd, args, opts = {}) =>
@@ -30,8 +30,13 @@ const w = (dir, rel, text) =>
     fs.writeFile(path.join(dir, rel), text, "utf8"),
   );
 
-/** 项目装本地 checkout 的 baize 包（#135 开发期形态：指向本地包，不发布）。 */
+/** 项目装本地 checkout 的 baize 包（#135 开发期形态：指向本地包，不发布）。
+ * bin 指向编出来的 dist（C2），所以先确保 checkout 里 dist 存在——file: 安装是
+ * 符号链接，不会触发 prepack；缺了就编一次（增量，之后都是秒级 no-op）。 */
 async function withBaizePackage(dir, repo) {
+  if (!existsSync(path.join(repo, "dist", "bin", "baize.js"))) {
+    await sh("npm", ["run", "build"], { cwd: repo });
+  }
   await w(
     dir,
     "package.json",
