@@ -3,8 +3,9 @@
  *
  * `ir` 的 schema 在 #148 落地（tracer bullet 的唯一一条最窄路径）；`sr` / `ar`
  * 的 schema 由 #149 补上（含必填的 `parent` 与 SR 的 `covers`）。
- * 其余层的目录/前缀先登记（扫描与 id 校验要用），字段 schema 由后续工单逐层补上
- * （#152 受控清单与 AR 分配 / #154 分析三层与关联边）。
+ * 分析四层（场景 / 用例 / 功能项 / 功能点）的 schema 由 #154 补上，
+ * 含关联边（用例 `appearsIn` → 场景、功能项 `realizes` → 用例）。
+ * 场景的 `catalog` 字段与 AR 分配由 #152 补（受控清单），本文件不预置。
  */
 export type LayerKey =
   | "ir"
@@ -161,8 +162,283 @@ export const LAYERS: readonly LayerDef[] = [
       },
     ],
   },
-  { key: "scenarios", dir: "scenarios", prefix: "SC", fields: [] },
-  { key: "usecases", dir: "usecases", prefix: "UC", fields: [] },
-  { key: "function-items", dir: "function-items", prefix: "FN", fields: [] },
-  { key: "function-points", dir: "function-points", prefix: "FP", fields: [] },
+  {
+    key: "scenarios",
+    dir: "scenarios",
+    prefix: "SC",
+    fields: [
+      {
+        name: "id",
+        source: "frontmatter",
+        nonEmpty: true,
+        kind: "string",
+        emptyMessage: "字段为空：id（应为 SC-<三位数字> 形式的顺序编号）",
+      },
+      {
+        name: "title",
+        source: "frontmatter",
+        nonEmpty: true,
+        kind: "string",
+        emptyMessage: "字段为空：title（人类可读的短名）",
+      },
+      {
+        // 场景的父边指向 SR。为空/缺失由 ref.orphan 报。
+        name: "parent",
+        source: "frontmatter",
+        nonEmpty: false,
+        kind: "scalar",
+        emptyMessage: "字段为空：parent",
+      },
+      {
+        name: "preconditions",
+        source: "frontmatter",
+        nonEmpty: false,
+        kind: "array",
+        emptyMessage: "字段为空：preconditions",
+      },
+      {
+        name: "trigger",
+        source: "frontmatter",
+        nonEmpty: true,
+        kind: "string",
+        emptyMessage: "字段为空：trigger（场景的触发条件）",
+      },
+      {
+        name: "mainFlow",
+        source: "frontmatter",
+        nonEmpty: false,
+        kind: "array",
+        emptyMessage: "字段为空：mainFlow",
+      },
+      {
+        // 空数组合法：看过了确实没有备选流。
+        name: "alternateFlows",
+        source: "frontmatter",
+        nonEmpty: false,
+        kind: "array",
+        emptyMessage: "字段为空：alternateFlows",
+      },
+      {
+        name: "expectedOutcome",
+        source: "frontmatter",
+        nonEmpty: true,
+        kind: "string",
+        emptyMessage: "字段为空：expectedOutcome（场景的预期结果）",
+      },
+      {
+        name: "stakeholders",
+        source: "frontmatter",
+        nonEmpty: false,
+        kind: "array",
+        emptyMessage: "字段为空：stakeholders",
+      },
+      {
+        name: "statement",
+        source: "body",
+        nonEmpty: true,
+        kind: "string",
+        emptyMessage: "字段为空：statement（正文不能为空）",
+      },
+    ],
+  },
+  {
+    key: "usecases",
+    dir: "usecases",
+    prefix: "UC",
+    fields: [
+      {
+        name: "id",
+        source: "frontmatter",
+        nonEmpty: true,
+        kind: "string",
+        emptyMessage: "字段为空：id（应为 UC-<三位数字> 形式的顺序编号）",
+      },
+      {
+        name: "title",
+        source: "frontmatter",
+        nonEmpty: true,
+        kind: "string",
+        emptyMessage: "字段为空：title（人类可读的短名）",
+      },
+      {
+        // 用例的父边指向 SR。为空/缺失由 ref.orphan 报。
+        name: "parent",
+        source: "frontmatter",
+        nonEmpty: false,
+        kind: "scalar",
+        emptyMessage: "字段为空：parent",
+      },
+      {
+        // 多对多关联边：一条用例可同时出现在多个场景（不必复制用例）。
+        // 允许空数组（声明暂不属于任何场景）；引用是否存在由 ref.unknown-target 报。
+        name: "appearsIn",
+        source: "frontmatter",
+        nonEmpty: false,
+        kind: "array",
+        emptyMessage: "字段为空：appearsIn",
+      },
+      {
+        name: "goal",
+        source: "frontmatter",
+        nonEmpty: true,
+        kind: "string",
+        emptyMessage: "字段为空：goal（用例的目标）",
+      },
+      {
+        name: "preconditions",
+        source: "frontmatter",
+        nonEmpty: false,
+        kind: "array",
+        emptyMessage: "字段为空：preconditions",
+      },
+      {
+        name: "mainFlow",
+        source: "frontmatter",
+        nonEmpty: false,
+        kind: "array",
+        emptyMessage: "字段为空：mainFlow",
+      },
+      {
+        // 空数组合法：看过了确实没有备选流。
+        name: "alternativeFlows",
+        source: "frontmatter",
+        nonEmpty: false,
+        kind: "array",
+        emptyMessage: "字段为空：alternativeFlows",
+      },
+      {
+        name: "postconditions",
+        source: "frontmatter",
+        nonEmpty: false,
+        kind: "array",
+        emptyMessage: "字段为空：postconditions",
+      },
+      {
+        name: "stakeholders",
+        source: "frontmatter",
+        nonEmpty: false,
+        kind: "array",
+        emptyMessage: "字段为空：stakeholders",
+      },
+      {
+        name: "statement",
+        source: "body",
+        nonEmpty: true,
+        kind: "string",
+        emptyMessage: "字段为空：statement（正文不能为空）",
+      },
+    ],
+  },
+  {
+    // 功能项是薄层：title + description，内容由子功能点承载。无 statement（#139 明确否掉）。
+    key: "function-items",
+    dir: "function-items",
+    prefix: "FN",
+    fields: [
+      {
+        name: "id",
+        source: "frontmatter",
+        nonEmpty: true,
+        kind: "string",
+        emptyMessage: "字段为空：id（应为 FN-<三位数字> 形式的顺序编号）",
+      },
+      {
+        name: "title",
+        source: "frontmatter",
+        nonEmpty: true,
+        kind: "string",
+        emptyMessage: "字段为空：title（人类可读的短名）",
+      },
+      {
+        // 功能项的父边指向 SR。为空/缺失由 ref.orphan 报。
+        name: "parent",
+        source: "frontmatter",
+        nonEmpty: false,
+        kind: "scalar",
+        emptyMessage: "字段为空：parent",
+      },
+      {
+        // 功能域只是功能项上的一个字段，不是一层。
+        name: "domain",
+        source: "frontmatter",
+        nonEmpty: true,
+        kind: "string",
+        emptyMessage: "字段为空：domain（功能域）",
+      },
+      {
+        // 多对多关联边：一个功能项可服务多条用例。
+        // 允许空数组；引用是否存在由 ref.unknown-target 报。
+        name: "realizes",
+        source: "frontmatter",
+        nonEmpty: false,
+        kind: "array",
+        emptyMessage: "字段为空：realizes",
+      },
+      {
+        name: "description",
+        source: "frontmatter",
+        nonEmpty: true,
+        kind: "string",
+        emptyMessage: "字段为空：description（功能项的一句话说明）",
+      },
+    ],
+  },
+  {
+    // 功能点五项必填：职责 / 输入 / 输出 / 业务规则 / 验收条件。无 statement。
+    key: "function-points",
+    dir: "function-points",
+    prefix: "FP",
+    fields: [
+      {
+        name: "id",
+        source: "frontmatter",
+        nonEmpty: true,
+        kind: "string",
+        emptyMessage: "字段为空：id（应为 FP-<三位数字> 形式的顺序编号）",
+      },
+      {
+        // 功能点的父边指向功能项。为空/缺失由 ref.orphan 报。
+        name: "parent",
+        source: "frontmatter",
+        nonEmpty: false,
+        kind: "scalar",
+        emptyMessage: "字段为空：parent",
+      },
+      {
+        name: "responsibility",
+        source: "frontmatter",
+        nonEmpty: true,
+        kind: "string",
+        emptyMessage: "字段为空：responsibility（功能点的职责）",
+      },
+      {
+        name: "inputs",
+        source: "frontmatter",
+        nonEmpty: false,
+        kind: "array",
+        emptyMessage: "字段为空：inputs",
+      },
+      {
+        name: "outputs",
+        source: "frontmatter",
+        nonEmpty: false,
+        kind: "array",
+        emptyMessage: "字段为空：outputs",
+      },
+      {
+        name: "businessRules",
+        source: "frontmatter",
+        nonEmpty: false,
+        kind: "array",
+        emptyMessage: "字段为空：businessRules",
+      },
+      {
+        name: "acceptanceCriteria",
+        source: "frontmatter",
+        nonEmpty: false,
+        kind: "array",
+        emptyMessage: "字段为空：acceptanceCriteria",
+      },
+    ],
+  },
 ];

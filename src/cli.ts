@@ -37,6 +37,8 @@ interface ParsedArgs {
   item: string | undefined;
   parent: string | undefined;
   covers: string | undefined;
+  appearsIn: string | undefined;
+  realizes: string | undefined;
 }
 
 interface CommandOutput {
@@ -53,6 +55,8 @@ function parseArgs(argv: string[]): ParsedArgs {
   let item: string | undefined;
   let parent: string | undefined;
   let covers: string | undefined;
+  let appearsIn: string | undefined;
+  let realizes: string | undefined;
 
   for (let i = 0; i < argv.length; i++) {
     const token = argv[i];
@@ -75,13 +79,20 @@ function parseArgs(argv: string[]): ParsedArgs {
       i++;
       continue;
     }
-    if (token === "--parent" || token === "--covers") {
+    if (
+      token === "--parent" ||
+      token === "--covers" ||
+      token === "--appears-in" ||
+      token === "--realizes"
+    ) {
       const value = argv[i + 1];
       if (value === undefined || value.startsWith("--")) {
         throw new BaizeError("cli.usage", `${token} 需要一个取值`);
       }
       if (token === "--parent") parent = value;
-      else covers = value;
+      else if (token === "--covers") covers = value;
+      else if (token === "--appears-in") appearsIn = value;
+      else realizes = value;
       i++;
       continue;
     }
@@ -100,6 +111,8 @@ function parseArgs(argv: string[]): ParsedArgs {
     item,
     parent,
     covers,
+    appearsIn,
+    realizes,
   };
 }
 
@@ -114,7 +127,15 @@ async function runNew(args: ParsedArgs, cwd: string): Promise<CommandOutput> {
   if (args.chain !== undefined || args.item !== undefined || args.strict) {
     throw new BaizeError("cli.usage", "new 只接受 --json（不支持 --chain / --item / --strict）");
   }
-  const layer = LAYERS.find((candidate) => candidate.key === layerKey);
+  // 分析层的常用单数叫法（票面与验收均写 baize new scenario|usecase|function-item|function-point）。
+  const NEW_ALIASES: Record<string, string> = {
+    scenario: "scenarios",
+    usecase: "usecases",
+    "function-item": "function-items",
+    "function-point": "function-points",
+  };
+  const resolvedKey = NEW_ALIASES[layerKey] ?? layerKey;
+  const layer = LAYERS.find((candidate) => candidate.key === resolvedKey);
   if (!layer) {
     throw new BaizeError(
       "layer.unknown",
@@ -125,29 +146,38 @@ async function runNew(args: ParsedArgs, cwd: string): Promise<CommandOutput> {
     throw new BaizeError("cli.usage", `暂不支持新建该层：${layerKey}`);
   }
 
-  // 父边：IR 是链顶端（parent 恒为 null），SR / AR 必须有 --parent。引用是否存在不在这里
-  // 挡——由 validate 的 ref.* 规则报（new 只负责把声明写对形状）。
+  // 父边：IR 是链顶端（parent 恒为 null），其余各层（SR/AR 与分析四层）必须有 --parent。
+  // 引用是否存在不在这里挡——由 validate 的 ref.* 规则报（new 只负责把声明写对形状）。
   if (layer.key === "ir" && args.parent !== undefined) {
     throw new BaizeError("cli.usage", "ir 是链顶端，不接受 --parent（parent 恒为 null）");
   }
-  if ((layer.key === "sr" || layer.key === "ar") && args.parent === undefined) {
+  if (layer.key !== "ir" && args.parent === undefined) {
     throw new BaizeError(
       "cli.usage",
-      `新建 ${layer.key} 必须指定 --parent <条目id>（SR/AR 必由上层条目分解而来）`,
+      `新建 ${layer.key} 必须指定 --parent <条目id>（必由上层条目分解而来）`,
     );
   }
   if (args.covers !== undefined && layer.key !== "sr") {
     throw new BaizeError("cli.usage", "--covers 只适用于 sr（SR → IR 验收线索）");
   }
+  if (args.appearsIn !== undefined && layer.key !== "usecases") {
+    throw new BaizeError("cli.usage", "--appears-in 只适用于 usecase（用例 → 场景）");
+  }
+  if (args.realizes !== undefined && layer.key !== "function-items") {
+    throw new BaizeError("cli.usage", "--realizes 只适用于 function-item（功能项 → 用例）");
+  }
 
-  const overrides: Record<string, unknown> = {};
-  if (args.parent !== undefined) overrides["parent"] = args.parent;
-  if (args.covers !== undefined) {
-    overrides["covers"] = args.covers
+  const splitList = (raw: string): string[] =>
+    raw
       .split(",")
       .map((item) => item.trim())
       .filter((item) => item !== "");
-  }
+
+  const overrides: Record<string, unknown> = {};
+  if (args.parent !== undefined) overrides["parent"] = args.parent;
+  if (args.covers !== undefined) overrides["covers"] = splitList(args.covers);
+  if (args.appearsIn !== undefined) overrides["appearsIn"] = splitList(args.appearsIn);
+  if (args.realizes !== undefined) overrides["realizes"] = splitList(args.realizes);
 
   const id = await nextId(cwd, layer);
   const relPath = path.posix.join(BAIZE_DIR, layer.dir, `${id}.md`);

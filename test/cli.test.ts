@@ -405,6 +405,74 @@ covers: [IR-001#a1]
 系统应提供统一的导出能力。
 `;
 
+// 分析层合法条目（#154）。场景/用例字段全必填但允许空数组（alternateFlows: [] = 看过了确实没有）。
+const LEGAL_SC = `---
+id: SC-001
+title: 下单主流程
+parent: SR-001
+preconditions:
+  - 用户已登录
+trigger: 用户点击下单
+mainFlow:
+  - 选择商品并确认
+alternateFlows: []
+expectedOutcome: 订单创建成功
+stakeholders:
+  - 买家
+---
+
+场景陈述：买家从选购到下单成功的完整过程。
+`;
+
+const LEGAL_UC = `---
+id: UC-001
+title: 提交订单
+parent: SR-001
+appearsIn:
+  - SC-001
+goal: 买家能提交购物车生成订单
+preconditions:
+  - 购物车非空
+mainFlow:
+  - 确认购物车并提交
+alternativeFlows: []
+postconditions:
+  - 生成订单号
+stakeholders:
+  - 买家
+---
+
+用例陈述：买家提交购物车，系统生成订单。
+`;
+
+// 功能项是薄层：title + description（内容由子功能点承载），无 statement。
+const LEGAL_FN = `---
+id: FN-001
+title: 订单服务
+parent: SR-001
+domain: 交易
+realizes:
+  - UC-001
+description: 承载下单与订单查询的功能项。
+---
+`;
+
+// 功能点五项必填：职责 / 输入 / 输出 / 业务规则 / 验收条件；无 statement。
+const LEGAL_FP = `---
+id: FP-001
+parent: FN-001
+responsibility: 校验并创建订单
+inputs:
+  - 购物车快照
+outputs:
+  - 订单号
+businessRules:
+  - 库存不足时拒绝下单
+acceptanceCriteria:
+  - 非法参数返回 400
+---
+`;
+
 test("new sr --parent IR-001 建出带父边的 SR-001；new ar --parent SR-001 同理", async (t) => {
   const cwd = mkdtempSync(join(tmpdir(), "baize-"));
   t.after(() => rmSync(cwd, { recursive: true, force: true }));
@@ -1109,32 +1177,166 @@ test("validate：coverage.missing-clue —— 未覆盖的线索报 ERROR 且指
   t.after(() => rmSync(cwd, { recursive: true, force: true }));
   write(cwd, "baize/ir/IR-001.md", IR_THREE_CLUES);
   write(cwd, "baize/sr/SR-001.md", srWithCovers("SR-001", "IR-001#a1"));
+});
+
+// ── #154 分析三层与关联边 ─────────────────────────────────────────────
+
+test("new 分析四层各自可建：scenario / usecase / function-item / function-point 带 --parent 与全字段", async (t) => {
+  const cwd = mkdtempSync(join(tmpdir(), "baize-"));
+  t.after(() => rmSync(cwd, { recursive: true, force: true }));
+
+  const scenario = await run(["new", "scenario", "--parent", "SR-001", "--json"], { cwd });
+  assert.equal(scenario.exitCode, 0, scenario.stdout);
+  assert.equal(parseJson<CreatedOutput>(scenario.stdout).created.id, "SC-001");
+  const scText = readFileSync(join(cwd, "baize/scenarios/SC-001.md"), "utf8");
+  assert.match(scText, /^id: SC-001$/m);
+  assert.match(scText, /^parent: SR-001$/m);
+  assert.match(scText, /^preconditions:/m);
+  assert.match(scText, /^trigger:/m);
+  assert.match(scText, /^mainFlow:/m);
+  assert.match(scText, /^alternateFlows:/m);
+  assert.match(scText, /^expectedOutcome:/m);
+  assert.match(scText, /^stakeholders:/m);
+
+  const usecase = await run(["new", "usecase", "--parent", "SR-001", "--json"], { cwd });
+  assert.equal(usecase.exitCode, 0, usecase.stdout);
+  assert.equal(parseJson<CreatedOutput>(usecase.stdout).created.id, "UC-001");
+  const ucText = readFileSync(join(cwd, "baize/usecases/UC-001.md"), "utf8");
+  assert.match(ucText, /^appearsIn:/m);
+  assert.match(ucText, /^goal:/m);
+  assert.match(ucText, /^alternativeFlows:/m);
+  assert.match(ucText, /^postconditions:/m);
+
+  // 功能项是薄层：title + description，无 statement。
+  const fn = await run(["new", "function-item", "--parent", "SR-001", "--json"], { cwd });
+  assert.equal(fn.exitCode, 0, fn.stdout);
+  assert.equal(parseJson<CreatedOutput>(fn.stdout).created.id, "FN-001");
+  const fnText = readFileSync(join(cwd, "baize/function-items/FN-001.md"), "utf8");
+  assert.match(fnText, /^title:/m);
+  assert.match(fnText, /^domain:/m);
+  assert.match(fnText, /^realizes:/m);
+  assert.match(fnText, /^description:/m);
+  assert.ok(!/^statement:/m.test(fnText), "功能项是薄层，不应有 statement");
+
+  // 功能点五项必填；无 statement / title。
+  const fp = await run(["new", "function-point", "--parent", "FN-001", "--json"], { cwd });
+  assert.equal(fp.exitCode, 0, fp.stdout);
+  assert.equal(parseJson<CreatedOutput>(fp.stdout).created.id, "FP-001");
+  const fpText = readFileSync(join(cwd, "baize/function-points/FP-001.md"), "utf8");
+  assert.match(fpText, /^parent: FN-001$/m);
+  assert.match(fpText, /^responsibility:/m);
+  assert.match(fpText, /^inputs:/m);
+  assert.match(fpText, /^outputs:/m);
+  assert.match(fpText, /^businessRules:/m);
+  assert.match(fpText, /^acceptanceCriteria:/m);
+  assert.ok(!/^statement:/m.test(fpText), "功能点无 statement");
+  assert.ok(!/^title:/m.test(fpText), "功能点按契约无 title");
+});
+
+test("new 分析四层缺 --parent → exit 2 且不写文件", async (t) => {
+  const cwd = mkdtempSync(join(tmpdir(), "baize-"));
+  t.after(() => rmSync(cwd, { recursive: true, force: true }));
+
+  for (const layer of ["scenario", "usecase", "function-item", "function-point"]) {
+    const result = await run(["new", layer, "--json"], { cwd });
+    assert.equal(result.exitCode, 2, result.stdout);
+    assert.ok(parseJson<ErrorOutput>(result.stdout).error.rule);
+  }
+  assert.ok(!existsSync(join(cwd, "baize")), "不成立请求不应写任何文件");
+});
+
+test("功能域不是一层：new function-domain → exit 2（未知层级）", async (t) => {
+  const cwd = mkdtempSync(join(tmpdir(), "baize-"));
+  t.after(() => rmSync(cwd, { recursive: true, force: true }));
+
+  const result = await run(["new", "function-domain", "--parent", "SR-001", "--json"], { cwd });
+  assert.equal(result.exitCode, 2, result.stdout);
+  assert.ok(!existsSync(join(cwd, "baize")), "不成立请求不应写文件");
+});
+
+test("new usecase --appears-in SC-001,SC-002 写入数组（一条用例同时出现在多个场景，不必复制）", async (t) => {
+  const cwd = mkdtempSync(join(tmpdir(), "baize-"));
+  t.after(() => rmSync(cwd, { recursive: true, force: true }));
+
+  const result = await run(
+    ["new", "usecase", "--parent", "SR-001", "--appears-in", "SC-001,SC-002"],
+    { cwd },
+  );
+  assert.equal(result.exitCode, 0, result.stdout);
+  const text = readFileSync(join(cwd, "baize/usecases/UC-001.md"), "utf8");
+  assert.match(text, /^appearsIn:\s*$/m);
+  assert.match(text, /^\s+- SC-001$/m);
+  assert.match(text, /^\s+- SC-002$/m);
+});
+
+test("new function-item --realizes UC-001,UC-002 写入数组（一个功能项服务多条用例）", async (t) => {
+  const cwd = mkdtempSync(join(tmpdir(), "baize-"));
+  t.after(() => rmSync(cwd, { recursive: true, force: true }));
+
+  const result = await run(
+    ["new", "function-item", "--parent", "SR-001", "--realizes", "UC-001,UC-002"],
+    { cwd },
+  );
+  assert.equal(result.exitCode, 0, result.stdout);
+  const text = readFileSync(join(cwd, "baize/function-items/FN-001.md"), "utf8");
+  assert.match(text, /^realizes:\s*$/m);
+  assert.match(text, /^\s+- UC-001$/m);
+  assert.match(text, /^\s+- UC-002$/m);
+});
+
+test("new 拒绝张冠李戴的关联选项（--appears-in 只适用 usecase，--realizes 只适用 function-item）", async (t) => {
+  const cwd = mkdtempSync(join(tmpdir(), "baize-"));
+  t.after(() => rmSync(cwd, { recursive: true, force: true }));
+
+  const wrongAppearsIn = await run(
+    ["new", "scenario", "--parent", "SR-001", "--appears-in", "SC-001"],
+    { cwd },
+  );
+  assert.equal(wrongAppearsIn.exitCode, 2, wrongAppearsIn.stdout);
+
+  const wrongRealizes = await run(
+    ["new", "function-point", "--parent", "FN-001", "--realizes", "UC-001"],
+    { cwd },
+  );
+  assert.equal(wrongRealizes.exitCode, 2, wrongRealizes.stdout);
+  assert.ok(!existsSync(join(cwd, "baize")), "不成立请求不应写文件");
+});
+
+test("validate：ref.unknown-target —— appearsIn / realizes 指向不存在的条目 → ERROR", async (t) => {
+  const cwd = mkdtempSync(join(tmpdir(), "baize-"));
+  t.after(() => rmSync(cwd, { recursive: true, force: true }));
+  write(cwd, "baize/ir/IR-001.md", LEGAL_IR);
+  write(cwd, "baize/sr/SR-001.md", LEGAL_SR);
+  write(cwd, "baize/scenarios/SC-001.md", LEGAL_SC);
+  write(cwd, "baize/usecases/UC-001.md", LEGAL_UC.replace("SC-001", "SC-999"));
+  write(cwd, "baize/function-items/FN-001.md", LEGAL_FN.replace("UC-001", "UC-999"));
 
   const result = await run(["validate", "--json"], { cwd });
   assert.equal(result.exitCode, 1, result.stdout);
   const issues = parseJson<ValidateOutput>(result.stdout).issues;
-  const missing = issues.filter((i) => i.rule === "coverage.missing-clue");
-  assert.equal(missing.length, 2, result.stdout);
+  const unknown = issues.filter((i) => i.rule === "ref.unknown-target");
+  assert.equal(unknown.length, 2, result.stdout);
+  assert.ok(unknown.every((i) => i.level === "ERROR"), result.stdout);
   assert.ok(
-    missing.every((i) => i.level === "ERROR" && i.path === "baize/ir/IR-001.md"),
-    result.stdout,
+    unknown.some((i) => i.path === "baize/usecases/UC-001.md" && i.message.includes("SC-999")),
+    "appearsIn 的悬空引用应指出 SC-999：" + result.stdout,
   );
-  const byClue = (clue: string) => missing.find((i) => i.message.includes(clue));
-  const a2 = byClue("IR-001#a2");
-  const a3 = byClue("IR-001#a3");
-  assert.ok(a2, "应报出 IR-001#a2：" + result.stdout);
-  assert.ok(a3, "应报出 IR-001#a3：" + result.stdout);
-  assert.ok(a2.message.includes("能导出 Excel"), "message 应带线索文本：" + a2.message);
-  assert.ok(a3.message.includes("能设置导出范围"), "message 应带线索文本：" + a3.message);
+  assert.ok(
+    unknown.some(
+      (i) => i.path === "baize/function-items/FN-001.md" && i.message.includes("UC-999"),
+    ),
+    "realizes 的悬空引用应指出 UC-999：" + result.stdout,
+  );
 
-  // 补齐覆盖后全绿；多条 SR 拼覆盖也成立
+  // 指向存在的条目则不报本 rule；补齐线索覆盖（#150）后全绿
+  write(cwd, "baize/usecases/UC-001.md", LEGAL_UC);
+  write(cwd, "baize/function-items/FN-001.md", LEGAL_FN);
   write(cwd, "baize/sr/SR-002.md", srWithCovers("SR-002", "IR-001#a2"));
-  write(cwd, "baize/sr/SR-003.md", srWithCovers("SR-003", "IR-001#a3"));
   const clean = await run(["validate", "--json"], { cwd });
   assert.equal(clean.exitCode, 0, clean.stdout);
   assert.ok(
     !parseJson<ValidateOutput>(clean.stdout).issues.some(
-      (i) => i.rule === "coverage.missing-clue",
+      (i) => i.rule === "ref.unknown-target",
     ),
     clean.stdout,
   );
@@ -1296,4 +1498,90 @@ test("validate 与 status 对同一份覆盖率数据说法一致", async (t) =>
     .map((i) => i.message.match(/IR-001#\w+/)?.[0] ?? "")
     .sort();
   assert.deepEqual(reportedIds, missingIds);
+});
+
+test("validate：coverage.unrealized-usecase —— 未被任何功能项 realizes 的用例 → ERROR", async (t) => {
+  const cwd = mkdtempSync(join(tmpdir(), "baize-"));
+  t.after(() => rmSync(cwd, { recursive: true, force: true }));
+  write(cwd, "baize/ir/IR-001.md", LEGAL_IR);
+  write(cwd, "baize/sr/SR-001.md", LEGAL_SR);
+  write(cwd, "baize/scenarios/SC-001.md", LEGAL_SC);
+  write(cwd, "baize/usecases/UC-001.md", LEGAL_UC);
+  const legalUc2 = LEGAL_UC.replace("id: UC-001", "id: UC-002").replace(
+    "title: 提交订单",
+    "title: 取消订单",
+  );
+  write(cwd, "baize/usecases/UC-002.md", legalUc2);
+  // FN-001 只 realizes UC-001；UC-002 无人承载
+  write(cwd, "baize/function-items/FN-001.md", LEGAL_FN);
+
+  const result = await run(["validate", "--json"], { cwd });
+  assert.equal(result.exitCode, 1, result.stdout);
+  const issues = parseJson<ValidateOutput>(result.stdout).issues;
+  const unrealized = issues.filter((i) => i.rule === "coverage.unrealized-usecase");
+  assert.equal(unrealized.length, 1, result.stdout);
+  assert.equal(unrealized[0]!.level, "ERROR");
+  assert.equal(unrealized[0]!.path, "baize/usecases/UC-002.md");
+  assert.ok(unrealized[0]!.message.includes("UC-002"), "message 应指出是哪个用例");
+
+  // 补上 realizes 后全绿；同时补齐线索覆盖（#150）
+  write(
+    cwd,
+    "baize/function-items/FN-001.md",
+    LEGAL_FN.replace("realizes:\n  - UC-001", "realizes:\n  - UC-001\n  - UC-002"),
+  );
+  write(cwd, "baize/sr/SR-002.md", srWithCovers("SR-002", "IR-001#a2"));
+  const clean = await run(["validate", "--json"], { cwd });
+  assert.equal(clean.exitCode, 0, clean.stdout);
+  assert.equal(parseJson<ValidateOutput>(clean.stdout).issues.length, 0, clean.stdout);
+});
+
+test("validate：场景/用例字段全必填但允许空数组 —— 缺 alternateFlows/alternativeFlows 报 field.absent，空数组不报错", async (t) => {
+  const cwd = mkdtempSync(join(tmpdir(), "baize-"));
+  t.after(() => rmSync(cwd, { recursive: true, force: true }));
+  write(cwd, "baize/ir/IR-001.md", LEGAL_IR);
+  write(cwd, "baize/sr/SR-001.md", LEGAL_SR);
+  // 场景整段缺 alternateFlows；用例整段缺 alternativeFlows
+  write(cwd, "baize/scenarios/SC-001.md", LEGAL_SC.replace("alternateFlows: []\n", ""));
+  write(
+    cwd,
+    "baize/usecases/UC-001.md",
+    LEGAL_UC.replace("alternativeFlows: []\n", ""),
+  );
+
+  const result = await run(["validate", "--json"], { cwd });
+  assert.equal(result.exitCode, 1, result.stdout);
+  const issues = parseJson<ValidateOutput>(result.stdout).issues;
+  const absent = issues.filter((i) => i.rule === "field.absent");
+  assert.ok(
+    absent.some(
+      (i) => i.path === "baize/scenarios/SC-001.md" && i.message.includes("alternateFlows"),
+    ),
+    "缺 alternateFlows 应报 field.absent：" + result.stdout,
+  );
+  assert.ok(
+    absent.some(
+      (i) =>
+        i.path === "baize/usecases/UC-001.md" && i.message.includes("alternativeFlows"),
+    ),
+    "缺 alternativeFlows 应报 field.absent：" + result.stdout,
+  );
+
+  // 空数组合法：[] = 看过了确实没有。补回空数组并配齐 realizes 与线索覆盖（#150）使全仓全绿
+  write(cwd, "baize/scenarios/SC-001.md", LEGAL_SC);
+  write(cwd, "baize/usecases/UC-001.md", LEGAL_UC);
+  write(cwd, "baize/function-items/FN-001.md", LEGAL_FN);
+  write(cwd, "baize/sr/SR-002.md", srWithCovers("SR-002", "IR-001#a2"));
+  const clean = await run(["validate", "--json"], { cwd });
+  assert.equal(clean.exitCode, 0, clean.stdout);
+  const cleanIssues = parseJson<ValidateOutput>(clean.stdout).issues;
+  assert.ok(
+    !cleanIssues.some(
+      (i) =>
+        (i.rule === "field.absent" || i.rule === "field.empty") &&
+        (i.path === "baize/scenarios/SC-001.md" ||
+          i.path === "baize/usecases/UC-001.md"),
+    ),
+    "空数组不应触发 field.empty / field.absent：" + clean.stdout,
+  );
 });
