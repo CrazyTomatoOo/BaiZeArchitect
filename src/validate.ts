@@ -9,57 +9,36 @@ import {
   missingSkipFields,
   readChainState,
 } from "./chainstate.ts";
-import { computeCoverage, parseClueRef } from "./coverage.ts";
+import { computeCoverage, parseClueRef, unrealizedUsecases } from "./coverage.ts";
+import { fieldDefectsOf } from "./fieldcheck.ts";
 import type { Catalogs } from "./catalogs.ts";
 import { readCatalogs } from "./catalogs.ts";
 import { isPlainObject } from "./guards.ts";
-import type { FieldKind } from "./layers.ts";
 import { readEntries } from "./store.ts";
 import { staleIssues } from "./stale.ts";
 import type { Issue } from "./types.ts";
 
-/**
- * 空判定按字段种类走。
- * - `string`：空/纯空白
- * - `array` / `map`：**任何空容器**（`[]` 与 `{}` 都可能是「没写」）
- * - `scalar`：`null`
- * 其它类型不符（例：集合字段给了非空标量）视为「已填」，本票不引入类型类 rule。
- */
-function isEmptyValue(kind: FieldKind, value: unknown): boolean {
-  if (kind === "string") return typeof value === "string" && value.trim() === "";
-  if (kind === "scalar") return value === null;
-  if (Array.isArray(value)) return value.length === 0;
-  if (isPlainObject(value)) return Object.keys(value).length === 0;
-  return false;
-}
-
 function fieldIssues(entry: Entry): Issue[] {
   const issues: Issue[] = [];
-  for (const field of entry.layer.fields) {
-    const present =
-      field.source === "body" || Object.hasOwn(entry.frontmatter, field.name);
-    if (!present) {
+  for (const defect of fieldDefectsOf(entry)) {
+    if (defect.problem === "absent") {
       issues.push({
         level: "ERROR",
         rule: "field.absent",
         path: entry.path,
-        message: `缺少必填字段：${field.name}`,
-        fix: `在 ${entry.path} 的 frontmatter 中补上 ${field.name}`,
+        message: `缺少必填字段：${defect.name}`,
+        fix: `在 ${entry.path} 的 frontmatter 中补上 ${defect.name}`,
       });
       continue;
     }
-    if (!field.nonEmpty) continue;
-    const value =
-      field.source === "body" ? entry.body : entry.frontmatter[field.name];
-    if (isEmptyValue(field.kind, value)) {
-      issues.push({
-        level: "ERROR",
-        rule: "field.empty",
-        path: entry.path,
-        message: field.emptyMessage,
-        fix: `补上 ${field.name} 的内容（空数组/空对象只用于「看过了确实没有」）`,
-      });
-    }
+    const field = entry.layer.fields.find((spec) => spec.name === defect.name);
+    issues.push({
+      level: "ERROR",
+      rule: "field.empty",
+      path: entry.path,
+      message: field?.emptyMessage ?? `字段为空：${defect.name}`,
+      fix: `补上 ${defect.name} 的内容（空数组/空对象只用于「看过了确实没有」）`,
+    });
   }
   return issues;
 }
@@ -307,32 +286,15 @@ export async function validate(
 
 /**
  * coverage.unrealized-usecase：每条用例至少要被一个功能项的 realizes 指向
- * （功能侧必须有人承载这条用例）。realizes 集合取全仓（跨链引用也合法），
- * 报告范围按 --chain 作用域限定。
+ * （功能侧必须有人承载这条用例）。未覆盖清单与 status 的功能拆分门禁共用
+ * coverage.ts 的 unrealizedUsecases（同一份数据，不各算一套）。
  */
 function unrealizedUsecaseIssues(scoped: Entry[], all: Entry[]): Issue[] {
-  const realized = new Set<string>();
-  for (const entry of all) {
-    if (entry.layer.key !== "function-items") continue;
-    const items = entry.frontmatter["realizes"];
-    if (!Array.isArray(items)) continue;
-    for (const item of items) {
-      if (typeof item === "string") realized.add(item);
-    }
-  }
-
-  const issues: Issue[] = [];
-  for (const entry of scoped) {
-    if (entry.layer.key !== "usecases") continue;
-    const id = idOf(entry);
-    if (id === undefined || realized.has(id)) continue;
-    issues.push({
-      level: "ERROR",
-      rule: "coverage.unrealized-usecase",
-      path: entry.path,
-      message: `用例 ${id} 未被任何功能项 realizes（功能侧没有承载它的实现）`,
-      fix: `在某条 function-item 的 realizes 里加上 ${id}，或确认该用例应废弃`,
-    });
-  }
-  return issues;
+  return unrealizedUsecases(scoped, all).map((usecase) => ({
+    level: "ERROR" as const,
+    rule: "coverage.unrealized-usecase",
+    path: usecase.path,
+    message: `用例 ${usecase.id} 未被任何功能项 realizes（功能侧没有承载它的实现）`,
+    fix: `在某条 function-item 的 realizes 里加上 ${usecase.id}，或确认该用例应废弃`,
+  }));
 }

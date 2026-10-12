@@ -159,3 +159,19 @@ export function functionSkipOf(value: unknown): FunctionSkipView {
   }
   return { whole: skipRecordOf(value), items: null, points: null };
 }
+
+/** 一条人工通过记录（门禁签字）：谁签的、什么时候。by / at 缺任一项视为无效（= 未签，无从追问）。 */
+export interface GateRecord {
+  by: string;
+  at: string;
+}
+
+/** 收窄链状态文件 gates 里的一条签字记录；不是带非空 by/at 的对象返回 null。 */
+export function gateRecordOf(value: unknown): GateRecord | null {
+  if (!isPlainObject(value)) return null;
+  const by = value["by"];
+  const at = value["at"];
+  if (typeof by !== "string" || by.trim() === "") return null;
+  if (typeof at !== "string" || at.trim() === "") return null;
+  return { by, at };
+}
