@@ -1,3 +1,4 @@
+import type { Accepted, ConfirmationView } from "./confirm.ts";
 import type { ChainDetail, ChainSummary, ItemView } from "./status.ts";
 import type { Issue } from "./types.ts";
 
@@ -36,6 +37,21 @@ export function renderCreated(created: Created): string {
   return `已创建 ${created.path}（${created.id}）\n`;
 }
 
+export function renderAccepted(accepted: Accepted): string {
+  return `已确认 ${accepted.id}：${accepted.by} @ ${accepted.at}\n`;
+}
+
+/** 确认状态的人读渲染（与 --json 的 state/by/at 同源）。 */
+function renderConfirmation(confirmation: ConfirmationView): string {
+  if (confirmation.state === "confirmed") {
+    return `已确认（${confirmation.by} @ ${confirmation.at}）`;
+  }
+  if (confirmation.state === "stale") {
+    return `已失效（${confirmation.by} @ ${confirmation.at} 确认后实质内容已改）`;
+  }
+  return "未确认";
+}
+
 export function renderChains(chains: ChainSummary[]): string {
   if (chains.length === 0) return "没有链。\n";
   const lines = [`链：${chains.length} 条`];
@@ -59,6 +75,7 @@ export function renderItem(item: ItemView): string {
     `  title: ${item.title}`,
     `  path: ${item.path}`,
     `  parent: ${item.parent ?? "—"}`,
+    `  confirmation: ${renderConfirmation(item.confirmation)}`,
     `  statement: ${item.statement}`,
   ];
   const clues = Object.keys(item.acceptance);

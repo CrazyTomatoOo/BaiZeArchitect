@@ -2,6 +2,7 @@ import type { Entry } from "./entry.ts";
 import { idOf, parentIdOf } from "./entry.ts";
 import { BaizeError } from "./errors.ts";
 import { chainMembers } from "./chain.ts";
+import { confirmationOf, type ConfirmationView } from "./confirm.ts";
 import { isPlainObject } from "./guards.ts";
 import { readEntries } from "./store.ts";
 
@@ -30,6 +31,8 @@ export interface ItemView {
   parent: string | null;
   statement: string;
   acceptance: Record<string, string>;
+  /** 确认状态（#151）：失效靠现算指纹，IR 录入门禁由它推出（未确认 → pending）。 */
+  confirmation: ConfirmationView;
 }
 
 function titleOf(entry: Entry): string {
@@ -94,5 +97,6 @@ export async function itemStatus(cwd: string, id: string): Promise<ItemView> {
     parent: parentIdOf(entry) ?? null,
     statement: entry.body.trim(),
     acceptance: stringMapOf(entry.frontmatter["acceptance"]),
+    confirmation: confirmationOf(entry),
   };
 }
