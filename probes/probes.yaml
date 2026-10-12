@@ -1,0 +1,353 @@
+# 探针清单：10 个 skill × 3 场景 = 30 条。
+#
+# 形状（#134）：干净会话 + 一句自然语言 + 贴完整记录。
+# - prompt 是真实用户会说的话，不是命令，更不点破 skill 名；
+# - fixture 是干净目录里的初始项目状态（见 fixtures.mjs）；
+# - expect 是机械判定的期望：
+#     present: true  → any 里至少一个证据出现（该触发）
+#     present: false → any 里的证据一个都不许出现（不该触发）
+#   证据三选一：
+#     skill: <id>   → 该 SKILL.md 的正文被打开（正文一级标题进入记录，
+#                     或读文件/调 Skill 的工具调用指向它）
+#     tool: <正则>  → 工具调用参数命中正则（如真的跑了 baize validate）
+#     reply: <正则> → 最终回复命中正则（仅 using-baize 用：它的正文是
+#                     会话启动必注入的，「触发」只能看 agent 是否按它行动）
+#
+# 场景挡什么（#134 原话）：
+#   trigger —— 正常触发（基线）
+#   miss    —— 该触发没触发：description 写偏了最容易漏的那类措辞
+#   trap    —— 不该触发却触发：跨段误触发会让 agent 用错标准
+#
+# 判定只管「触没触发」；触发后干得对不对由人看记录（README「判定口径」）。
+
+- id: ub-trigger
+  skill: using-baize
+  scenario: trigger
+  fixture: sr-written
+  prompt: 这个仓库里的需求设计是怎么管的？给我讲讲。
+  expect:
+    present: true
+    any:
+      - reply: 'baize|六段|设计条目|链条'
+  why: 项目有 baize/ 且用户开口问规矩——入口 skill 应让 agent 按套件作答，而不是泛泛而谈。
+
+- id: ub-miss
+  skill: using-baize
+  scenario: miss
+  fixture: sr-written
+  prompt: 我刚接手这个仓库，IR、SR、场景这些条目都是什么关系，我先从哪看起？
+  why: 用户提了段名但全程没说「baize」——description 第二支（mentions IR / SR / AR / 场景 / 用例 / 功能拆分）要接得住。
+  expect:
+    present: true
+    any:
+      - reply: 'baize|六段|设计条目|链条'
+
+- id: ub-trap
+  skill: using-baize
+  scenario: trap
+  fixture: plain-project
+  prompt: 这个脚本跑起来怎么什么都不输出，帮我看看是哪的问题。
+  why: 无 baize/、用户聊的是普通调试——agent 不该把六段链推销进无关会话。
+  expect:
+    present: false
+    any:
+      - reply: '六段|设计条目|IR 录入|baize status|baize-(ir|sr|ar)'
+
+- id: ir-trigger
+  skill: baize-ir
+  scenario: trigger
+  fixture: baize-init
+  prompt: 老板刚提了个诉求：用户得能把自己的数据带走，不能锁死在咱们系统里，你先把它记下来。
+  why: 散文诉求到达、尚无 IR——「记下来」就是要录一条 IR。
+  expect:
+    present: true
+    any:
+      - skill: baize-ir
+
+- id: ir-miss
+  skill: baize-ir
+  scenario: miss
+  fixture: baize-init
+  prompt: 客户投诉说他们的数据被锁在咱们系统里带不走，这事得立项跟进一下。
+  why: 同一个诉求换了个说法：没有「需求」字样、说的是投诉与立项——description 写成只认「requirement」就会漏。
+  expect:
+    present: true
+    any:
+      - skill: baize-ir
+
+- id: ir-trap
+  skill: baize-ir
+  scenario: trap
+  fixture: ir-confirmed
+  prompt: IR-001 已经确认完了，你往下拆吧。
+  why: IR 已确认、该走下一段——baize-ir 不该再触发（正确走向是 baize-sr）。
+  expect:
+    present: false
+    any:
+      - skill: baize-ir
+
+- id: sr-trigger
+  skill: baize-sr
+  scenario: trigger
+  fixture: ir-confirmed
+  prompt: IR-001 的验收都确认过了，把它拆成系统层面的要求吧。
+  why: 验收已确认、SR 尚不存在——description 的主句。
+  expect:
+    present: true
+    any:
+      - skill: baize-sr
+
+- id: sr-miss
+  skill: baize-sr
+  scenario: miss
+  fixture: ir-confirmed
+  prompt: IR-001 定稿了，系统上要兑现哪些能力，你盘一下。
+  why: 不说「验收确认」「系统需求」，说「定稿」「兑现能力」——换词不换事。
+  expect:
+    present: true
+    any:
+      - skill: baize-sr
+
+- id: sr-trap
+  skill: baize-sr
+  scenario: trap
+  fixture: ir-unconfirmed
+  prompt: IR-001 你直接往下拆吧，确认的事回头再说。
+  why: IR 未确认就催拆——SR→IR 门禁前置不满足，baize-sr 不该接这活（正确走向是回 baize-ir 补确认）。这也是 #133 ④ 的压力措辞。
+  expect:
+    present: false
+    any:
+      - skill: baize-sr
+
+- id: ar-trigger
+  skill: baize-ar
+  scenario: trigger
+  fixture: sr-written
+  prompt: SR-001 写好了，把它落到架构组件上吧。
+  why: SR 存在、无人负责——description 的主句。
+  expect:
+    present: true
+    any:
+      - skill: baize-ar
+
+- id: ar-miss
+  skill: baize-ar
+  scenario: miss
+  fixture: sr-written
+  prompt: SR-001 这块活儿该派给哪个组件，你定一下。
+  why: 不说「架构」「分配」，说的是派活认领——责任归属的日常说法。
+  expect:
+    present: true
+    any:
+      - skill: baize-ar
+
+- id: ar-trap
+  skill: baize-ar
+  scenario: trap
+  fixture: ar-written
+  prompt: SR-001 接下来会被怎么用，先过一遍场景。
+  why: SR 已有 AR 承接，用户问的是使用情形——该走 baize-scenario，baize-ar 不该再触发。
+  expect:
+    present: false
+    any:
+      - skill: baize-ar
+
+- id: sc-trigger
+  skill: baize-scenario
+  scenario: trigger
+  fixture: sr-written
+  prompt: SR-001 还没有场景，把它会被怎么用先梳理出来。
+  why: SR 无场景——description 的主句。
+  expect:
+    present: true
+    any:
+      - skill: baize-scenario
+
+- id: sc-miss
+  skill: baize-scenario
+  scenario: miss
+  fixture: sr-written
+  prompt: 运营说每月初要把上月的账目导出来归档，这算一种用它的情形，先记下来。
+  why: description 第二支「a new usage situation needs to be captured」——用户给的是一段使用情形的原话，没说「场景」两个字。
+  expect:
+    present: true
+    any:
+      - skill: baize-scenario
+
+- id: sc-trap
+  skill: baize-scenario
+  scenario: trap
+  fixture: scenario-written
+  prompt: 场景有了，把里面用户和系统一步步的交互整理成用例。
+  why: 场景已在、要的是用例——该走 baize-usecase。
+  expect:
+    present: false
+    any:
+      - skill: baize-scenario
+
+- id: uc-trigger
+  skill: baize-usecase
+  scenario: trigger
+  fixture: scenario-written
+  prompt: SC-001 定稿了，把里面的交互整理成用例。
+  why: 场景已在、目标导向交互未写——description 的主句。
+  expect:
+    present: true
+    any:
+      - skill: baize-usecase
+
+- id: uc-miss
+  skill: baize-usecase
+  scenario: miss
+  fixture: scenario-written
+  prompt: 光说财务每月导一次太粗了，用户具体在里面一步步干什么，得写清楚。
+  why: 不说「用例」，说的是「太粗了、一步步干什么」——粒度不够的日常抱怨。
+  expect:
+    present: true
+    any:
+      - skill: baize-usecase
+
+- id: uc-trap
+  skill: baize-usecase
+  scenario: trap
+  fixture: usecase-written
+  prompt: 用例都有了，往功能上落吧。
+  why: 用例已在、要的是功能——该走 baize-function。
+  expect:
+    present: false
+    any:
+      - skill: baize-usecase
+
+- id: fn-trigger
+  skill: baize-function
+  scenario: trigger
+  fixture: usecase-written
+  prompt: UC-001 有了，把它要做的功能拆出来。
+  why: 用例已在、功能未拆——description 的主句。
+  expect:
+    present: true
+    any:
+      - skill: baize-function
+
+- id: fn-miss
+  skill: baize-function
+  scenario: miss
+  fixture: usecase-written
+  prompt: 开发要排期了，UC-001 具体要做哪些东西，你列出来。
+  why: 不说「拆功能」，说的是排期前要清单——功能拆分的真实动机。
+  expect:
+    present: true
+    any:
+      - skill: baize-function
+
+- id: fn-trap
+  skill: baize-function
+  scenario: trap
+  fixture: baize-init
+  prompt: 市场部要一个数据大屏功能，你先记下来。
+  why: 话里带「功能」二字但没有用例、连条目都没有——这是新诉求，该走 baize-ir；词面撞段名最容易被误触发。
+  expect:
+    present: false
+    any:
+      - skill: baize-function
+
+- id: va-trigger
+  skill: baize-validate
+  scenario: trigger
+  fixture: ir-unconfirmed
+  prompt: 我刚把 IR-001 的验收线索补了两条，你看看有没有写歪的地方。
+  why: 刚写完条目——description 的主句（写完任何条目后）。
+  expect:
+    present: true
+    any:
+      - skill: baize-validate
+      - tool: 'baize(?!-)[^"]{0,80}validate'
+
+- id: va-miss
+  skill: baize-validate
+  scenario: miss
+  fixture: ir-unconfirmed
+  prompt: IR-001 我就改了标题里的一个词，小改动，应该不用正式走一遍校验吧？
+  why: #133 ④ 的压力措辞：改动小、想跳过校验。rationalization 防线要顶住——「小改动」也在 description 的「any baize entry」范围内。
+  expect:
+    present: true
+    any:
+      - skill: baize-validate
+      - tool: 'baize(?!-)[^"]{0,80}validate'
+
+- id: va-trap
+  skill: baize-validate
+  scenario: trap
+  fixture: ir-unconfirmed
+  prompt: IR-001 我准备提交确认了，你站在审阅的角度帮我把把关。
+  why: 门禁前的人审是 baize-review 的时刻，不是 baize-validate 的（审阅中顺带跑 validate 不算误触发，所以只判 skill 未开）。
+  expect:
+    present: false
+    any:
+      - skill: baize-validate
+
+- id: rw-trigger
+  skill: baize-review
+  scenario: trigger
+  fixture: sr-written
+  prompt: SR 都拆完了，提交确认前给我一份能看的汇总。
+  why: 扇出点产出、门禁前、人要看——description 的主句。
+  expect:
+    present: true
+    any:
+      - skill: baize-review
+
+- id: rw-miss
+  skill: baize-review
+  scenario: miss
+  fixture: sr-written
+  prompt: 拆完的这些产出我要给老板过一遍，帮我整理成人能看的东西。
+  why: 不说「门禁」「review」，说的是给人过一遍产出——「human needs to see what a fan-out point produced」的日常说法。
+  expect:
+    present: true
+    any:
+      - skill: baize-review
+
+- id: rw-trap
+  skill: baize-review
+  scenario: trap
+  fixture: sr-written
+  prompt: 我刚补了 SR-001 的 covers 指向，先帮我查一下有没有引错。
+  why: 刚改完条目查引用——这是 baize-validate 的时刻，不到门禁、没人要审。
+  expect:
+    present: false
+    any:
+      - skill: baize-review
+
+- id: rv-trigger
+  skill: baize-revise
+  scenario: trigger
+  fixture: stale-downstream
+  prompt: IR-001 的验收线索我改了，下游那几条还作数吗？要动哪些你排一下。
+  why: status 报直接陈旧、用户改了上游——description 的主句。
+  expect:
+    present: true
+    any:
+      - skill: baize-revise
+
+- id: rv-miss
+  skill: baize-revise
+  scenario: miss
+  fixture: stale-downstream
+  prompt: 上游那条改了个词，下游要不要跟着改，你看着办。
+  why: 不说「陈旧」「stale」，只说改了个词——description 第二支「upstream was edited after downstream was written」的口语版。
+  expect:
+    present: true
+    any:
+      - skill: baize-revise
+
+- id: rv-trap
+  skill: baize-revise
+  scenario: trap
+  fixture: sr-written
+  prompt: SR-001 刚写好，接下来 AR 怎么分你接手吧。
+  why: 链在前沿推进、上游没人改过——该走 baize-ar；「接手」不是回改。
+  expect:
+    present: false
+    any:
+      - skill: baize-revise
