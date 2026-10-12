@@ -2,6 +2,8 @@ import type { Entry } from "./entry.ts";
 import { idOf, parentIdOf } from "./entry.ts";
 import { BaizeError } from "./errors.ts";
 import { chainMembers } from "./chain.ts";
+import type { Catalogs } from "./catalogs.ts";
+import { readCatalogs } from "./catalogs.ts";
 import { isPlainObject } from "./guards.ts";
 import type { FieldKind } from "./layers.ts";
 import { readEntries } from "./store.ts";
@@ -83,17 +85,20 @@ function parseClueRef(item: unknown): { entryId: string; clueId: string } | null
   return { entryId: item.slice(0, hash), clueId: item.slice(hash + 1) };
 }
 
-function refIssues(entry: Entry, byId: Record<string, Entry>): Issue[] {
+function refIssues(entry: Entry, byId: Record<string, Entry>, catalogs: Catalogs): Issue[] {
   const issues: Issue[] = [];
   const parentId = parentIdOf(entry);
 
-  // ref.orphan：SR / AR 必须有父（null / 缺失 / 空都算）。IR 的 parent: null 是链顶端，合法。
-  if ((entry.layer.key === "sr" || entry.layer.key === "ar") && parentId === undefined) {
+  // ref.orphan：SR / AR / 场景必须有父（null / 缺失 / 空都算）。IR 的 parent: null 是链顶端，合法。
+  if (
+    (entry.layer.key === "sr" || entry.layer.key === "ar" || entry.layer.key === "scenarios") &&
+    parentId === undefined
+  ) {
     issues.push({
       level: "ERROR",
       rule: "ref.orphan",
       path: entry.path,
-      message: `${entry.layer.prefix} 缺少父条目：parent 为空或缺失（SR/AR 必由上层条目分解而来）`,
+      message: `${entry.layer.prefix} 缺少父条目：parent 为空或缺失（必由上层条目分解而来）`,
       fix: `给 ${entry.path} 的 frontmatter 补上 parent（上层条目 id）`,
     });
   }
@@ -138,11 +143,66 @@ function refIssues(entry: Entry, byId: Record<string, Entry>): Issue[] {
     }
   }
 
+  // ref.unknown-element：AR 的 allocates 指向受控清单 baize/architecture.yaml 里的组件 slug；
+  // 清单缺失 = 空清单，引用任何 slug 都报本条。空/缺失的 allocates 由 field.* 报，这里不重复。
+  if (entry.layer.key === "ar") {
+    const allocates = entry.frontmatter["allocates"];
+    if (typeof allocates === "string" && allocates.trim() !== "" && !catalogs.components.has(allocates)) {
+      issues.push({
+        level: "ERROR",
+        rule: "ref.unknown-element",
+        path: entry.path,
+        message: `allocates 指向清单里不存在的组件：${allocates}（受控清单 baize/architecture.yaml）`,
+        fix: "核对组件 slug，或先在受控清单里登记该组件",
+      });
+    }
+  }
+
+  // ref.unknown-catalog：场景的 catalog 必须是受控清单 baize/scenario-catalogs.yaml 里的目录 slug。
+  if (entry.layer.key === "scenarios") {
+    const catalog = entry.frontmatter["catalog"];
+    if (typeof catalog === "string" && catalog.trim() !== "" && !catalogs.scenarioCatalogs.has(catalog)) {
+      issues.push({
+        level: "ERROR",
+        rule: "ref.unknown-catalog",
+        path: entry.path,
+        message: `catalog 不在场景目录词表里：${catalog}（受控清单 baize/scenario-catalogs.yaml）`,
+        fix: "核对目录 slug，或先在受控清单里登记该目录",
+      });
+    }
+  }
+
   return issues;
 }
 
-function issuesFor(entry: Entry, byId: Record<string, Entry>): Issue[] {
-  return [...idIssue(entry), ...fieldIssues(entry), ...refIssues(entry, byId)];
+// sr.unallocated：SR 没有 AR 挂上（没有 AR 以它为 parent）→ WARNING。
+// 反向关系现算，不落盘。
+function allocationIssues(entry: Entry, byId: Record<string, Entry>): Issue[] {
+  if (entry.layer.key !== "sr") return [];
+  const id = idOf(entry);
+  if (id === undefined) return []; // 缺 id 由 id.* / field.* 报
+  const hasAr = Object.values(byId).some(
+    (candidate) => candidate.layer.key === "ar" && parentIdOf(candidate) === id,
+  );
+  if (hasAr) return [];
+  return [
+    {
+      level: "WARNING",
+      rule: "sr.unallocated",
+      path: entry.path,
+      message: `SR 没有任何 AR 承接：${id}（需求拆到 AR 才算落到了架构组件上）`,
+      fix: `为 ${id} 建一条 parent 指向它的 AR，或在 AR 的 allocates 里挂好组件`,
+    },
+  ];
+}
+
+function issuesFor(entry: Entry, byId: Record<string, Entry>, catalogs: Catalogs): Issue[] {
+  return [
+    ...idIssue(entry),
+    ...fieldIssues(entry),
+    ...refIssues(entry, byId, catalogs),
+    ...allocationIssues(entry, byId),
+  ];
 }
 
 /** 全仓（或限定一条链）跑 field / id / ref 规则，返回按 path、rule 排序的问题。 */
@@ -151,6 +211,7 @@ export async function validate(
   options: { chain?: string } = {},
 ): Promise<Issue[]> {
   const entries = await readEntries(cwd);
+  const catalogs = await readCatalogs(cwd);
   const byId: Record<string, Entry> = {};
   for (const entry of entries) {
     const id = idOf(entry);
@@ -165,7 +226,7 @@ export async function validate(
     scoped = chainMembers(entries, options.chain);
   }
 
-  const issues = scoped.flatMap((entry) => issuesFor(entry, byId));
+  const issues = scoped.flatMap((entry) => issuesFor(entry, byId, catalogs));
   issues.sort((a, b) =>
     a.path === b.path
       ? a.rule.localeCompare(b.rule)

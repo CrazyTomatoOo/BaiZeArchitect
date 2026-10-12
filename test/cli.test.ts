@@ -87,6 +87,37 @@ acceptance: {}
 产品要求用户能把数据带走，不能锁死在系统里。
 `;
 
+const LEGAL_AR = `---
+id: AR-001
+title: 分配导出服务
+parent: SR-001
+allocates: export-service
+---
+
+把导出能力分配给既有组件。
+`;
+
+// 受控清单：一个顶层键 + 稳定 slug → { name, description? }；值里的额外字段一律忽略。
+const ARCHITECTURE_YAML = `components:
+  export-service: { name: 导出服务, description: 产出可下载的数据文件 }
+  audit-log: { name: 审计服务, owner: platform }
+`;
+
+const SCENARIO_CATALOGS_YAML = `catalogs:
+  order-flow: { name: 订单流程 }
+  self-service: { name: 客户自助 }
+`;
+
+const LEGAL_SCENARIO = `---
+id: SC-001
+title: 下单后导出报表
+parent: SR-001
+catalog: order-flow
+---
+
+用户在订单流程里导出报表。
+`;
+
 test("new ir 建出 IR-001 与 IR-002，frontmatter 带 id/title/parent/acceptance", async (t) => {
   const cwd = mkdtempSync(join(tmpdir(), "baize-"));
   t.after(() => rmSync(cwd, { recursive: true, force: true }));
@@ -565,4 +596,180 @@ covers: [IR-001#a1]
   assert.equal(chain.id, "IR-001");
   const ids = chain.items.map((i) => i.id);
   assert.deepEqual(ids.sort(), ["IR-001", "SR-001"]);
+});
+
+test("new scenario --parent SR-001 --catalog order-flow 写入 catalog", async (t) => {
+  const cwd = mkdtempSync(join(tmpdir(), "baize-"));
+  t.after(() => rmSync(cwd, { recursive: true, force: true }));
+
+  const result = await run(["new", "scenario", "--parent", "SR-001", "--catalog", "order-flow"], { cwd });
+  assert.equal(result.exitCode, 0, result.stdout);
+  const text = readFileSync(join(cwd, "baize/scenarios/SC-001.md"), "utf8");
+  assert.match(text, /^id: SC-001$/m);
+  assert.match(text, /^parent: SR-001$/m);
+  assert.match(text, /^catalog: order-flow$/m);
+});
+
+test("new scenario 缺 --parent → exit 2 且不写文件", async (t) => {
+  const cwd = mkdtempSync(join(tmpdir(), "baize-"));
+  t.after(() => rmSync(cwd, { recursive: true, force: true }));
+
+  const result = await run(["new", "scenario", "--catalog", "order-flow"], { cwd });
+  assert.equal(result.exitCode, 2);
+  assert.equal(existsSync(join(cwd, "baize/scenarios/SC-001.md")), false);
+});
+
+test("new ar --parent SR-001 --allocates export-service 写入标量 allocates（不是数组）", async (t) => {
+  const cwd = mkdtempSync(join(tmpdir(), "baize-"));
+  t.after(() => rmSync(cwd, { recursive: true, force: true }));
+
+  const result = await run(["new", "ar", "--parent", "SR-001", "--allocates", "export-service"], { cwd });
+  assert.equal(result.exitCode, 0, result.stdout);
+  const text = readFileSync(join(cwd, "baize/ar/AR-001.md"), "utf8");
+  assert.match(text, /^allocates: export-service$/m, "allocates 应是标量字符串");
+  assert.doesNotMatch(text, /^\\s*- export-service$/m, "allocates 不应写成数组");
+});
+
+test("new 拒绝张冠李戴的选项：--catalog 只给 scenario、--allocates 只给 ar", async (t) => {
+  const cwd = mkdtempSync(join(tmpdir(), "baize-"));
+  t.after(() => rmSync(cwd, { recursive: true, force: true }));
+
+  const badCatalog = await run(["new", "sr", "--parent", "IR-001", "--catalog", "order-flow"], { cwd });
+  assert.equal(badCatalog.exitCode, 2);
+
+  const badAllocates = await run(["new", "ir", "--allocates", "export-service"], { cwd });
+  assert.equal(badAllocates.exitCode, 2);
+  assert.equal(existsSync(join(cwd, "baize/ir/IR-001.md")), false);
+});
+
+test("validate：ref.unknown-element —— AR 的 allocates 指向清单里没有的组件时报 ERROR；存在的 slug（含带额外字段的）不报", async (t) => {
+  const cwd = mkdtempSync(join(tmpdir(), "baize-"));
+  t.after(() => rmSync(cwd, { recursive: true, force: true }));
+  write(cwd, "baize/ir/IR-001.md", LEGAL_IR);
+  write(cwd, "baize/sr/SR-001.md", LEGAL_SR);
+  write(
+    cwd,
+    "baize/ar/AR-001.md",
+    LEGAL_AR.replace("allocates: export-service", "allocates: ghost-service"),
+  );
+  write(cwd, "baize/architecture.yaml", ARCHITECTURE_YAML);
+
+  const bad = await run(["validate", "--json"], { cwd });
+  assert.equal(bad.exitCode, 1, bad.stdout);
+  const badIssues = parseJson<ValidateOutput>(bad.stdout).issues;
+  assert.ok(
+    badIssues.some((issue) => issue.rule === "ref.unknown-element" && issue.level === "ERROR"),
+    `应报 ref.unknown-element：${JSON.stringify(badIssues)}`,
+  );
+
+  // audit-log 的值里有额外字段（owner），按统一约定忽略——引用它仍合法。
+  write(
+    cwd,
+    "baize/ar/AR-001.md",
+    LEGAL_AR.replace("allocates: export-service", "allocates: audit-log"),
+  );
+  const good = await run(["validate", "--json"], { cwd });
+  assert.equal(good.exitCode, 0, good.stdout);
+  assert.deepEqual(parseJson<ValidateOutput>(good.stdout).issues, []);
+});
+
+test("validate：ref.unknown-catalog —— scenario 的 catalog 不在词表里时报 ERROR", async (t) => {
+  const cwd = mkdtempSync(join(tmpdir(), "baize-"));
+  t.after(() => rmSync(cwd, { recursive: true, force: true }));
+  write(cwd, "baize/ir/IR-001.md", LEGAL_IR);
+  write(cwd, "baize/sr/SR-001.md", LEGAL_SR);
+  write(cwd, "baize/scenario-catalogs.yaml", SCENARIO_CATALOGS_YAML);
+
+  write(
+    cwd,
+    "baize/scenarios/SC-001.md",
+    LEGAL_SCENARIO.replace("catalog: order-flow", "catalog: no-such-catalog"),
+  );
+  const bad = await run(["validate", "--json"], { cwd });
+  assert.equal(bad.exitCode, 1, bad.stdout);
+  const badIssues = parseJson<ValidateOutput>(bad.stdout).issues;
+  assert.ok(
+    badIssues.some((issue) => issue.rule === "ref.unknown-catalog" && issue.level === "ERROR"),
+    `应报 ref.unknown-catalog：${JSON.stringify(badIssues)}`,
+  );
+
+  write(cwd, "baize/scenarios/SC-001.md", LEGAL_SCENARIO);
+  const good = await run(["validate", "--json"], { cwd });
+  assert.equal(good.exitCode, 0, good.stdout);
+});
+
+test("validate：sr.unallocated —— 没有 AR 挂上的 SR 报 WARNING；有 AR 则不报", async (t) => {
+  const cwd = mkdtempSync(join(tmpdir(), "baize-"));
+  t.after(() => rmSync(cwd, { recursive: true, force: true }));
+  write(cwd, "baize/ir/IR-001.md", LEGAL_IR);
+  write(cwd, "baize/sr/SR-001.md", LEGAL_SR);
+
+  const unallocated = await run(["validate", "--json"], { cwd });
+  assert.equal(unallocated.exitCode, 0, "WARNING 不挡 exit code");
+  const issues = parseJson<ValidateOutput>(unallocated.stdout).issues;
+  assert.deepEqual(
+    issues.map((issue) => issue.rule),
+    ["sr.unallocated"],
+  );
+  assert.equal(issues[0]?.level, "WARNING");
+
+  write(cwd, "baize/architecture.yaml", ARCHITECTURE_YAML);
+  write(cwd, "baize/ar/AR-001.md", LEGAL_AR);
+  const allocated = await run(["validate", "--json"], { cwd });
+  assert.equal(allocated.exitCode, 0, allocated.stdout);
+  assert.deepEqual(parseJson<ValidateOutput>(allocated.stdout).issues, []);
+});
+
+test("validate --strict 把 WARNING（sr.unallocated）也算失败（exit 1）", async (t) => {
+  const cwd = mkdtempSync(join(tmpdir(), "baize-"));
+  t.after(() => rmSync(cwd, { recursive: true, force: true }));
+  write(cwd, "baize/ir/IR-001.md", LEGAL_IR);
+  write(cwd, "baize/sr/SR-001.md", LEGAL_SR);
+
+  const lax = await run(["validate"], { cwd });
+  assert.equal(lax.exitCode, 0);
+
+  const strict = await run(["validate", "--strict"], { cwd });
+  assert.equal(strict.exitCode, 1);
+});
+
+test("受控清单不是条目：清单项不会被报成孤儿（回归）", async (t) => {
+  const cwd = mkdtempSync(join(tmpdir(), "baize-"));
+  t.after(() => rmSync(cwd, { recursive: true, force: true }));
+  write(cwd, "baize/ir/IR-001.md", LEGAL_IR);
+  write(cwd, "baize/sr/SR-001.md", LEGAL_SR);
+  write(cwd, "baize/ar/AR-001.md", LEGAL_AR);
+  write(cwd, "baize/scenarios/SC-001.md", LEGAL_SCENARIO);
+  write(cwd, "baize/architecture.yaml", ARCHITECTURE_YAML);
+  write(cwd, "baize/scenario-catalogs.yaml", SCENARIO_CATALOGS_YAML);
+
+  const result = await run(["validate", "--json"], { cwd });
+  assert.equal(result.exitCode, 0, result.stdout);
+  const issues = parseJson<ValidateOutput>(result.stdout).issues;
+  assert.ok(
+    !issues.some((issue) => issue.rule === "ref.orphan"),
+    `清单项不应被报成孤儿：${JSON.stringify(issues)}`,
+  );
+  assert.deepEqual(issues, []);
+});
+
+test("缺清单文件 = 空清单，不是错误：不引用清单的仓 exit 0；引用了 slug 而清单缺失时报 unknown", async (t) => {
+  const cwd = mkdtempSync(join(tmpdir(), "baize-"));
+  t.after(() => rmSync(cwd, { recursive: true, force: true }));
+  write(cwd, "baize/ir/IR-001.md", LEGAL_IR);
+  write(cwd, "baize/sr/SR-001.md", LEGAL_SR);
+
+  // 没有 baize/architecture.yaml 且仓里没有引用：清单缺失本身不是错误
+  // （唯一的 sr.unallocated 是 WARNING，不挡 exit code）。
+  const plain = await run(["validate", "--json"], { cwd });
+  assert.equal(plain.exitCode, 0, plain.stdout);
+
+  // 引用了 slug 而清单缺失（= 空清单）→ 只有 ref.unknown-element 一条。
+  write(cwd, "baize/ar/AR-001.md", LEGAL_AR);
+  const referenced = await run(["validate", "--json"], { cwd });
+  assert.equal(referenced.exitCode, 1, referenced.stdout);
+  assert.deepEqual(
+    parseJson<ValidateOutput>(referenced.stdout).issues.map((issue) => issue.rule),
+    ["ref.unknown-element"],
+  );
 });

@@ -3,8 +3,9 @@
  *
  * `ir` 的 schema 在 #148 落地（tracer bullet 的唯一一条最窄路径）；`sr` / `ar`
  * 的 schema 由 #149 补上（含必填的 `parent` 与 SR 的 `covers`）。
- * 其余层的目录/前缀先登记（扫描与 id 校验要用），字段 schema 由后续工单逐层补上
- * （#152 受控清单与 AR 分配 / #154 分析三层与关联边）。
+ * #152 补上 AR 的 `allocates` 与场景层的最小 schema（id/title/parent/catalog/statement；
+ * 其余场景字段归 #154）。usecases / function-items / function-points 的目录/前缀先登记
+ * （扫描与 id 校验要用），字段 schema 由后续工单逐层补上（#154 分析三层与关联边）。
  */
 export type LayerKey =
   | "ir"
@@ -153,6 +154,15 @@ export const LAYERS: readonly LayerDef[] = [
         emptyMessage: "字段为空：parent",
       },
       {
+        // AR 必须恰好分配一个架构组件（受控清单 baize/architecture.yaml 的 slug）。
+        // 标量；引用的 slug 是否存在由 ref.unknown-element 报。
+        name: "allocates",
+        source: "frontmatter",
+        nonEmpty: true,
+        kind: "scalar",
+        emptyMessage: "字段为空：allocates（AR 必须恰好分配一个架构组件）",
+      },
+      {
         name: "statement",
         source: "body",
         nonEmpty: true,
@@ -161,7 +171,53 @@ export const LAYERS: readonly LayerDef[] = [
       },
     ],
   },
-  { key: "scenarios", dir: "scenarios", prefix: "SC", fields: [] },
+  {
+    // 本票（#152）只让场景层「能建」：id/title/parent/catalog/statement。
+    // 其余场景字段（preconditions/trigger/mainFlow/…）归 #154。
+    key: "scenarios",
+    dir: "scenarios",
+    prefix: "SC",
+    fields: [
+      {
+        name: "id",
+        source: "frontmatter",
+        nonEmpty: true,
+        kind: "string",
+        emptyMessage: "字段为空：id（应为 SC-<三位数字> 形式的顺序编号）",
+      },
+      {
+        name: "title",
+        source: "frontmatter",
+        nonEmpty: true,
+        kind: "string",
+        emptyMessage: "字段为空：title（人类可读的短名）",
+      },
+      {
+        // 同 SR/AR：为空/缺失由 ref.orphan 报。
+        name: "parent",
+        source: "frontmatter",
+        nonEmpty: false,
+        kind: "scalar",
+        emptyMessage: "字段为空：parent",
+      },
+      {
+        // 场景挂受控清单 baize/scenario-catalogs.yaml 的一个目录 slug。
+        // 引用的 slug 是否存在由 ref.unknown-catalog 报。
+        name: "catalog",
+        source: "frontmatter",
+        nonEmpty: true,
+        kind: "string",
+        emptyMessage: "字段为空：catalog（场景必须挂一个场景目录）",
+      },
+      {
+        name: "statement",
+        source: "body",
+        nonEmpty: true,
+        kind: "string",
+        emptyMessage: "字段为空：statement（正文不能为空）",
+      },
+    ],
+  },
   { key: "usecases", dir: "usecases", prefix: "UC", fields: [] },
   { key: "function-items", dir: "function-items", prefix: "FN", fields: [] },
   { key: "function-points", dir: "function-points", prefix: "FP", fields: [] },

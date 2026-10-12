@@ -33,6 +33,8 @@ interface ParsedArgs {
   item: string | undefined;
   parent: string | undefined;
   covers: string | undefined;
+  catalog: string | undefined;
+  allocates: string | undefined;
 }
 
 interface CommandOutput {
@@ -49,6 +51,8 @@ function parseArgs(argv: string[]): ParsedArgs {
   let item: string | undefined;
   let parent: string | undefined;
   let covers: string | undefined;
+  let catalog: string | undefined;
+  let allocates: string | undefined;
 
   for (let i = 0; i < argv.length; i++) {
     const token = argv[i];
@@ -71,13 +75,15 @@ function parseArgs(argv: string[]): ParsedArgs {
       i++;
       continue;
     }
-    if (token === "--parent" || token === "--covers") {
+    if (token === "--parent" || token === "--covers" || token === "--catalog" || token === "--allocates") {
       const value = argv[i + 1];
       if (value === undefined || value.startsWith("--")) {
         throw new BaizeError("cli.usage", `${token} 需要一个取值`);
       }
       if (token === "--parent") parent = value;
-      else covers = value;
+      else if (token === "--covers") covers = value;
+      else if (token === "--catalog") catalog = value;
+      else allocates = value;
       i++;
       continue;
     }
@@ -96,11 +102,14 @@ function parseArgs(argv: string[]): ParsedArgs {
     item,
     parent,
     covers,
+    catalog,
+    allocates,
   };
 }
 
 async function runNew(args: ParsedArgs, cwd: string): Promise<CommandOutput> {
-  const layerKey = args.positionals[0];
+  // `baize new scenario` 是场景层的口头层名（注册键为复数 scenarios）。
+  const layerKey = args.positionals[0] === "scenario" ? "scenarios" : args.positionals[0];
   if (layerKey === undefined) {
     throw new BaizeError("cli.usage", "用法：baize new <layer>（如 baize new ir）");
   }
@@ -121,19 +130,28 @@ async function runNew(args: ParsedArgs, cwd: string): Promise<CommandOutput> {
     throw new BaizeError("cli.usage", `暂不支持新建该层：${layerKey}`);
   }
 
-  // 父边：IR 是链顶端（parent 恒为 null），SR / AR 必须有 --parent。引用是否存在不在这里
+  // 父边：IR 是链顶端（parent 恒为 null），SR / AR / 场景必须有 --parent。引用是否存在不在这里
   // 挡——由 validate 的 ref.* 规则报（new 只负责把声明写对形状）。
   if (layer.key === "ir" && args.parent !== undefined) {
     throw new BaizeError("cli.usage", "ir 是链顶端，不接受 --parent（parent 恒为 null）");
   }
-  if ((layer.key === "sr" || layer.key === "ar") && args.parent === undefined) {
+  if (
+    (layer.key === "sr" || layer.key === "ar" || layer.key === "scenarios") &&
+    args.parent === undefined
+  ) {
     throw new BaizeError(
       "cli.usage",
-      `新建 ${layer.key} 必须指定 --parent <条目id>（SR/AR 必由上层条目分解而来）`,
+      `新建 ${layer.key} 必须指定 --parent <条目id>（必由上层条目分解而来）`,
     );
   }
   if (args.covers !== undefined && layer.key !== "sr") {
     throw new BaizeError("cli.usage", "--covers 只适用于 sr（SR → IR 验收线索）");
+  }
+  if (args.catalog !== undefined && layer.key !== "scenarios") {
+    throw new BaizeError("cli.usage", "--catalog 只适用于 scenario（场景挂场景目录）");
+  }
+  if (args.allocates !== undefined && layer.key !== "ar") {
+    throw new BaizeError("cli.usage", "--allocates 只适用于 ar（AR 分配架构组件）");
   }
 
   const overrides: Record<string, unknown> = {};
@@ -144,6 +162,8 @@ async function runNew(args: ParsedArgs, cwd: string): Promise<CommandOutput> {
       .map((item) => item.trim())
       .filter((item) => item !== "");
   }
+  if (args.catalog !== undefined) overrides["catalog"] = args.catalog;
+  if (args.allocates !== undefined) overrides["allocates"] = args.allocates;
 
   const id = await nextId(cwd, layer);
   const relPath = path.posix.join(BAIZE_DIR, layer.dir, `${id}.md`);
