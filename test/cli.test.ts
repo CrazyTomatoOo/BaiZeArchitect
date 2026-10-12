@@ -49,9 +49,19 @@ interface StatusChainsOutput {
   schemaVersion: number;
   chains: unknown[];
 }
+interface SkipRecordView {
+  by: string;
+  at: string;
+  why: string;
+}
+interface StageView {
+  stage: string;
+  skipped: SkipRecordView | null;
+  subStages?: { items: SkipRecordView | null; points: SkipRecordView | null };
+}
 interface ChainOutput {
   schemaVersion: number;
-  chain: { id: string; items: { id: string }[] };
+  chain: { id: string; items: { id: string }[]; stages: StageView[] };
 }
 
 // 被 JSON.parse 标为已知契约形状（JSON.parse 返回 any；测试里一次性收窄）
@@ -389,4 +399,218 @@ covers: [IR-001#a1]
   assert.equal(chain.id, "IR-001");
   const ids = chain.items.map((i) => i.id);
   assert.deepEqual(ids.sort(), ["IR-001", "SR-001"]);
+});
+
+const COMPLETE_SKIP = `by: crazytomatooo
+at: 2026-10-12
+why: 本需求由 SR 直接承载，无需独立架构决策
+`;
+
+test("status --chain：状态文件缺失不是错误——六段全部未跳过，且不落任何状态文件", async (t) => {
+  const cwd = mkdtempSync(join(tmpdir(), "baize-"));
+  t.after(() => rmSync(cwd, { recursive: true, force: true }));
+  write(cwd, "baize/ir/IR-001.md", LEGAL_IR);
+
+  const machine = await run(["status", "--chain", "IR-001", "--json"], { cwd });
+  assert.equal(machine.exitCode, 0, machine.stdout);
+  const chain = parseJson<ChainOutput>(machine.stdout).chain;
+  assert.deepEqual(
+    chain.stages.map((s) => s.stage),
+    ["ir", "sr", "ar", "scenario", "usecase", "function"],
+  );
+  for (const stage of chain.stages) {
+    assert.equal(stage.skipped, null, `段 ${stage.stage} 应无跳过记录`);
+    // 没有「未开始 / 进行中 / 已完成」这类状态枚举
+    assert.ok(!("state" in stage), `段 ${stage.stage} 不得有 state 字段`);
+  }
+  const fn = chain.stages[5];
+  assert.ok(fn);
+  assert.deepEqual(fn.subStages, { items: null, points: null });
+
+  // status 只现算不落盘：能算的东西一概不写进 baize/chains/
+  assert.ok(!existsSync(join(cwd, "baize/chains")), "status 不得写状态文件");
+
+  const human = await run(["status", "--chain", "IR-001"], { cwd });
+  assert.equal(human.exitCode, 0, human.stdout);
+  assert.match(human.stdout, /ir: 未跳过/);
+  assert.match(human.stdout, /function: 未跳过（items 未跳过 \/ points 未跳过）/);
+  assert.ok(!human.stdout.includes("已跳过"), "无跳过时人读输出不应出现「已跳过」");
+  for (const word of ["未开始", "进行中", "已完成"]) {
+    assert.ok(!human.stdout.includes(word), `不得出现状态枚举词：${word}`);
+  }
+
+  // 状态文件缺失同样不是 validate 的错误
+  const validated = await run(["validate", "--json"], { cwd });
+  assert.equal(validated.exitCode, 0, validated.stdout);
+  assert.deepEqual(parseJson<ValidateOutput>(validated.stdout).issues, []);
+});
+
+test("validate：stage.skip-missing-reason —— 跳过记录缺 by / at / why 任一项报 ERROR", async (t) => {
+  const missing = [
+    ["by", `at: 2026-10-12\nwhy: 理由\n`],
+    ["at", `by: crazytomatooo\nwhy: 理由\n`],
+    ["why", `by: crazytomatooo\nat: 2026-10-12\n`],
+  ] as const;
+  for (const [field, body] of missing) {
+    const cwd = mkdtempSync(join(tmpdir(), "baize-"));
+    t.after(() => rmSync(cwd, { recursive: true, force: true }));
+    write(cwd, "baize/ir/IR-001.md", LEGAL_IR);
+    write(cwd, "baize/chains/IR-001.yaml", `skipped:\n  sr:\n${body.split("\n").map((l) => `    ${l}`).join("\n")}`);
+
+    const result = await run(["validate", "--json"], { cwd });
+    assert.equal(result.exitCode, 1, result.stdout);
+    const issues = parseJson<ValidateOutput>(result.stdout).issues;
+    const issue = issues.find((i) => i.rule === "stage.skip-missing-reason");
+    assert.ok(issue, `缺 ${field} 应报 stage.skip-missing-reason：${result.stdout}`);
+    assert.equal(issue.level, "ERROR");
+    assert.equal(issue.path, "baize/chains/IR-001.yaml");
+    assert.ok(issue.message.includes("sr"), issue.message);
+    assert.ok(issue.message.includes(field), issue.message);
+    assert.equal(issues.length, 1, "只应有一个问题：" + result.stdout);
+  }
+
+  // 三字段齐备 → 不报
+  const cwd = mkdtempSync(join(tmpdir(), "baize-"));
+  t.after(() => rmSync(cwd, { recursive: true, force: true }));
+  write(cwd, "baize/ir/IR-001.md", LEGAL_IR);
+  write(
+    cwd,
+    "baize/chains/IR-001.yaml",
+    `skipped:\n  sr:\n${COMPLETE_SKIP.split("\n").map((l) => `    ${l}`).join("\n")}`,
+  );
+  const ok = await run(["validate", "--json"], { cwd });
+  assert.equal(ok.exitCode, 0, ok.stdout);
+  assert.deepEqual(parseJson<ValidateOutput>(ok.stdout).issues, []);
+
+  // --chain 限定作用域同样生效
+  const scoped = await run(["validate", "--chain", "IR-001", "--json"], { cwd });
+  assert.equal(scoped.exitCode, 0, scoped.stdout);
+});
+
+test("status --chain：区分「已跳过」与「未跳过」的段（JSON 与人类可读同源）", async (t) => {
+  const cwd = mkdtempSync(join(tmpdir(), "baize-"));
+  t.after(() => rmSync(cwd, { recursive: true, force: true }));
+  write(cwd, "baize/ir/IR-001.md", LEGAL_IR);
+  write(
+    cwd,
+    "baize/chains/IR-001.yaml",
+    `skipped:\n  scenario:\n${COMPLETE_SKIP.split("\n").map((l) => `    ${l}`).join("\n")}`,
+  );
+
+  const machine = await run(["status", "--chain", "IR-001", "--json"], { cwd });
+  assert.equal(machine.exitCode, 0, machine.stdout);
+  const stages = parseJson<ChainOutput>(machine.stdout).chain.stages;
+  const scenario = stages.find((s) => s.stage === "scenario");
+  assert.ok(scenario);
+  assert.equal(scenario.skipped?.by, "crazytomatooo");
+  assert.equal(scenario.skipped?.at, "2026-10-12");
+  assert.equal(
+    scenario.skipped?.why,
+    "本需求由 SR 直接承载，无需独立架构决策",
+  );
+  for (const stage of stages.filter((s) => s.stage !== "scenario")) {
+    assert.equal(stage.skipped, null, `段 ${stage.stage} 应为未跳过`);
+  }
+
+  const human = await run(["status", "--chain", "IR-001"], { cwd });
+  assert.equal(human.exitCode, 0, human.stdout);
+  assert.match(human.stdout, /scenario: 已跳过 — crazytomatooo @ 2026-10-12：/);
+  assert.match(human.stdout, /sr: 未跳过/);
+  assert.match(human.stdout, /usecase: 未跳过/);
+  // 人读输出 = 同一份数据的渲染：by / at / why 都要在
+  assert.ok(human.stdout.includes("本需求由 SR 直接承载，无需独立架构决策"));
+});
+
+test("status --chain：功能拆分一段写成 items / points 两个子项，可分别跳过", async (t) => {
+  const cwd = mkdtempSync(join(tmpdir(), "baize-"));
+  t.after(() => rmSync(cwd, { recursive: true, force: true }));
+  write(cwd, "baize/ir/IR-001.md", LEGAL_IR);
+  write(
+    cwd,
+    "baize/chains/IR-001.yaml",
+    `skipped:
+  function:
+    items:
+      by: crazytomatooo
+      at: 2026-10-12
+      why: 本需求颗粒度足够细，直接进功能点
+`,
+  );
+
+  const machine = await run(["status", "--chain", "IR-001", "--json"], { cwd });
+  assert.equal(machine.exitCode, 0, machine.stdout);
+  const fn = parseJson<ChainOutput>(machine.stdout).chain.stages[5];
+  assert.ok(fn);
+  assert.equal(fn.stage, "function");
+  assert.equal(fn.skipped, null, "整段未跳过时 skipped 应为 null");
+  assert.equal(fn.subStages?.items?.by, "crazytomatooo");
+  assert.equal(fn.subStages?.items?.why, "本需求颗粒度足够细，直接进功能点");
+  assert.equal(fn.subStages?.points, null);
+
+  const human = await run(["status", "--chain", "IR-001"], { cwd });
+  assert.match(human.stdout, /function: 未跳过（items 已跳过 — crazytomatooo @ 2026-10-12：/);
+  assert.match(human.stdout, / \/ points 未跳过）/);
+
+  // 子项记录缺字段同样报 stage.skip-missing-reason
+  const badCwd = mkdtempSync(join(tmpdir(), "baize-"));
+  t.after(() => rmSync(badCwd, { recursive: true, force: true }));
+  write(badCwd, "baize/ir/IR-001.md", LEGAL_IR);
+  write(
+    badCwd,
+    "baize/chains/IR-001.yaml",
+    `skipped:
+  function:
+    items:
+      by: crazytomatooo
+      at: 2026-10-12
+`,
+  );
+  const bad = await run(["validate", "--json"], { cwd: badCwd });
+  assert.equal(bad.exitCode, 1, bad.stdout);
+  const issue = parseJson<ValidateOutput>(bad.stdout).issues.find(
+    (i) => i.rule === "stage.skip-missing-reason",
+  );
+  assert.ok(issue, bad.stdout);
+  assert.ok(issue.message.includes("function.items"), issue.message);
+  assert.ok(issue.message.includes("why"), issue.message);
+});
+
+test("链状态文件只存 skipped 与 gates：gates 通过校验且不落地为段状态", async (t) => {
+  const cwd = mkdtempSync(join(tmpdir(), "baize-"));
+  t.after(() => rmSync(cwd, { recursive: true, force: true }));
+  write(cwd, "baize/ir/IR-001.md", LEGAL_IR);
+  // 只有功能拆分门禁留人工通过记录；IR 录入与 SR→AR 两处门禁由事实算出，不落盘
+  write(
+    cwd,
+    "baize/chains/IR-001.yaml",
+    `skipped:
+  ar:
+    by: crazytomatooo
+    at: 2026-10-12
+    why: 单 SR 直接对应实现，无需 AR
+gates:
+  function:
+    confirmedBy: crazytomatooo
+    at: 2026-10-12
+    statement: 这套功能拆分足以支撑实现；未覆盖的用例与未复核的陈旧已处置。
+`,
+  );
+
+  const validated = await run(["validate", "--json"], { cwd });
+  assert.equal(validated.exitCode, 0, validated.stdout);
+
+  const machine = await run(["status", "--chain", "IR-001", "--json"], { cwd });
+  assert.equal(machine.exitCode, 0, machine.stdout);
+  const stages = parseJson<ChainOutput>(machine.stdout).chain.stages;
+  for (const stage of stages) {
+    // 门禁签字不显示为段状态；文件里没有进度 / 覆盖率 / 陈旧
+    assert.ok(!("gate" in stage) && !("gates" in stage), `段 ${stage.stage} 不得含门禁状态`);
+    assert.ok(!("progress" in stage) && !("coverage" in stage) && !("stale" in stage));
+  }
+  const ar = stages.find((s) => s.stage === "ar");
+  assert.equal(ar?.skipped?.why, "单 SR 直接对应实现，无需 AR");
+
+  const human = await run(["status", "--chain", "IR-001"], { cwd });
+  assert.ok(!human.stdout.includes("gate"), "人读输出不得出现门禁记录：" + human.stdout);
+  assert.ok(!human.stdout.includes("足以支撑实现"));
 });

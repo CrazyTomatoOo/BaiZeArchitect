@@ -2,6 +2,13 @@ import type { Entry } from "./entry.ts";
 import { idOf } from "./entry.ts";
 import { BaizeError } from "./errors.ts";
 import { chainMembers } from "./chain.ts";
+import {
+  chainIdsWithState,
+  chainStateRelPath,
+  flattenSkipped,
+  missingSkipFields,
+  readChainState,
+} from "./chainstate.ts";
 import { isPlainObject } from "./guards.ts";
 import type { FieldKind } from "./layers.ts";
 import { readEntries } from "./store.ts";
@@ -79,7 +86,33 @@ function issuesFor(entry: Entry): Issue[] {
   return [...idIssue(entry), ...fieldIssues(entry)];
 }
 
-/** 全仓（或限定一条链）跑 field / id 规则，返回按 path、rule 排序的问题。 */
+/**
+ * 阶段状态文件的规则：跳段是全模型里代价最高的决定之一，
+ * skipped 的任一段缺 by / at / why 都报 stage.skip-missing-reason（ERROR）。
+ * 状态文件缺失不是错误（等价于无跳过）。
+ */
+async function stageIssues(cwd: string, chain: string | undefined): Promise<Issue[]> {
+  const ids = chain !== undefined ? [chain] : await chainIdsWithState(cwd);
+  const issues: Issue[] = [];
+  for (const id of ids) {
+    const state = await readChainState(cwd, id);
+    if (state === undefined) continue;
+    for (const { stagePath, value } of flattenSkipped(state.skipped)) {
+      const missing = missingSkipFields(value);
+      if (missing.length === 0) continue;
+      issues.push({
+        level: "ERROR",
+        rule: "stage.skip-missing-reason",
+        path: chainStateRelPath(id),
+        message: `跳过记录不完整：${stagePath} 缺 ${missing.join(" / ")}（跳段必须留下 by + at + why）`,
+        fix: `补齐 ${stagePath} 的 ${missing.join(" / ")}`,
+      });
+    }
+  }
+  return issues;
+}
+
+/** 全仓（或限定一条链）跑 field / id / stage 规则，返回按 path、rule 排序的问题。 */
 export async function validate(
   cwd: string,
   options: { chain?: string } = {},
@@ -94,7 +127,7 @@ export async function validate(
     scoped = chainMembers(entries, options.chain);
   }
 
-  const issues = scoped.flatMap(issuesFor);
+  const issues = [...scoped.flatMap(issuesFor), ...(await stageIssues(cwd, options.chain))];
   issues.sort((a, b) =>
     a.path === b.path
       ? a.rule.localeCompare(b.rule)

@@ -2,6 +2,13 @@ import type { Entry } from "./entry.ts";
 import { idOf, parentIdOf } from "./entry.ts";
 import { BaizeError } from "./errors.ts";
 import { chainMembers } from "./chain.ts";
+import {
+  STAGES,
+  functionSkipOf,
+  readChainState,
+  skipRecordOf,
+  type SkipRecord,
+} from "./chainstate.ts";
 import { isPlainObject } from "./guards.ts";
 import { readEntries } from "./store.ts";
 
@@ -18,9 +25,20 @@ export interface ChainItem {
   path: string;
   parent: string | null;
 }
+/**
+ * 一段链路的现算视图：有 skipped 记录 = 已跳过，没有 = 未跳过。
+ * 没有「未开始 / 进行中 / 已完成」状态枚举（进度归 status 现算，不落盘）。
+ */
+export interface StageView {
+  stage: string;
+  skipped: SkipRecord | null;
+  /** 仅「功能拆分」段：两个子层级（items / points）各自的跳过记录。 */
+  subStages?: { items: SkipRecord | null; points: SkipRecord | null };
+}
 export interface ChainDetail {
   id: string;
   items: ChainItem[];
+  stages: StageView[];
 }
 export interface ItemView {
   id: string;
@@ -70,7 +88,7 @@ export async function chainSummaries(cwd: string): Promise<ChainSummary[]> {
     .sort((a, b) => a.id.localeCompare(b.id));
 }
 
-/** 一条链的详情：起始条目 + 全部后代。链不存在时抛 `chain.not-found`（exit 2）。 */
+/** 一条链的详情：起始条目 + 全部后代 + 六段链路的跳过视图。链不存在时抛 `chain.not-found`（exit 2）。 */
 export async function chainStatus(cwd: string, id: string): Promise<ChainDetail> {
   const entries = await readEntries(cwd);
   if (!entries.some((entry) => idOf(entry) === id)) {
@@ -78,7 +96,16 @@ export async function chainStatus(cwd: string, id: string): Promise<ChainDetail>
   }
   const items = chainMembers(entries, id).map(chainItemOf);
   items.sort((a, b) => a.id.localeCompare(b.id));
-  return { id, items };
+  const state = await readChainState(cwd, id);
+  const stages: StageView[] = STAGES.map((stage) => {
+    if (stage === "function") {
+      const fn = functionSkipOf(state?.skipped["function"]);
+      if (fn.whole !== null) return { stage, skipped: fn.whole };
+      return { stage, skipped: null, subStages: { items: fn.items, points: fn.points } };
+    }
+    return { stage, skipped: skipRecordOf(state?.skipped[stage]) };
+  });
+  return { id, items, stages };
 }
 
 /** 单条目的正反向视图入口（#148 只做条目本身；反向关系与覆盖率归后续工单）。 */
