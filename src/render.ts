@@ -1,4 +1,5 @@
 import type { Accepted, ConfirmationView } from "./confirm.ts";
+import type { SkipRecord } from "./chainstate.ts";
 import type { ChainDetail, ChainSummary, ItemView } from "./status.ts";
 import type { Issue } from "./types.ts";
 
@@ -65,6 +66,24 @@ export function renderChain(chain: ChainDetail): string {
   const lines = [`链 ${chain.id}：${chain.items.length} 个条目`];
   for (const item of chain.items) {
     lines.push(`  ${item.id} [${item.layer}] ${item.title}`);
+  }
+  lines.push("阶段：");
+  for (const stage of chain.stages) {
+    const own =
+      stage.skipped === null
+        ? "未跳过"
+        : `已跳过 — ${stage.skipped.by} @ ${stage.skipped.at}：${stage.skipped.why}`;
+    if (stage.subStages !== undefined) {
+      const sub = (record: SkipRecord | null): string =>
+        record === null
+          ? "未跳过"
+          : `已跳过 — ${record.by} @ ${record.at}：${record.why}`;
+      lines.push(
+        `  ${stage.stage}: ${own}（items ${sub(stage.subStages.items)} / points ${sub(stage.subStages.points)}）`,
+      );
+    } else {
+      lines.push(`  ${stage.stage}: ${own}`);
+    }
   }
   return `${lines.join("\n")}\n`;
 }
