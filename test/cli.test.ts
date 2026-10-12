@@ -55,9 +55,13 @@ interface StatusChainsOutput {
   schemaVersion: number;
   chains: unknown[];
 }
+interface ChainStaleView {
+  direct: string[];
+  transitive: number;
+}
 interface ChainOutput {
   schemaVersion: number;
-  chain: { id: string; items: { id: string }[] };
+  chain: { id: string; items: { id: string }[]; stale: ChainStaleView };
 }
 
 // 被 JSON.parse 标为已知契约形状（JSON.parse 返回 any；测试里一次性收窄）
@@ -808,4 +812,369 @@ test("没有 unaccept：撤销类命令不存在 → exit 2 未知命令", async
     parseJson<StatusItemOutput>(machine.stdout).item.confirmation.state,
     "confirmed",
   );
+});
+
+// —— 陈旧：指纹比对、传播与分级（#155）——
+
+const AR_UNDER_SR001 = `---
+id: AR-001
+title: 导出服务架构
+parent: SR-001
+---
+
+导出能力的架构决策。
+`;
+
+const SR2_UNDER_IR001 = `---
+id: SR-002
+title: 导出权限控制
+parent: IR-001
+covers: [IR-001#a2]
+---
+
+谁可以导出、导出什么范围。
+`;
+
+/** 铺 IR-001 → SR-001 → AR-001 与 IR-001 → SR-002 两条路径。 */
+function writeChain(cwd: string): void {
+  write(cwd, "baize/ir/IR-001.md", LEGAL_IR);
+  write(cwd, "baize/sr/SR-001.md", SR_WITH_COVERS);
+  write(cwd, "baize/ar/AR-001.md", AR_UNDER_SR001);
+  write(cwd, "baize/sr/SR-002.md", SR2_UNDER_IR001);
+}
+
+/** 只改上游 IR-001 的 statement（实质字段）。 */
+function changeIrStatement(cwd: string): void {
+  const text = readFileSync(join(cwd, "baize/ir/IR-001.md"), "utf8");
+  const changed = text.replace(
+    "产品要求用户能把数据带走，不能锁死在系统里。",
+    "产品要求用户能把数据带走，格式由用户自选。",
+  );
+  assert.notEqual(changed, text, "本用例必须真的改掉 statement");
+  write(cwd, "baize/ir/IR-001.md", changed);
+}
+
+async function acceptAll(cwd: string, ids: string[]): Promise<void> {
+  for (const id of ids) await acceptAndRead(cwd, id);
+}
+
+interface AcceptedOutput {
+  schemaVersion: number;
+  confirmed: {
+    id: string;
+    by: string;
+    at: string;
+    fingerprint: string;
+    reviewed: Record<string, string>;
+  };
+}
+
+test("accept SR-001 一条命令两个方向：对自己写 confirmed、对上游写 reviewed", async (t) => {
+  const cwd = mkdtempSync(join(tmpdir(), "baize-"));
+  t.after(() => rmSync(cwd, { recursive: true, force: true }));
+  injectUser(t, "alice");
+  write(cwd, "baize/ir/IR-001.md", LEGAL_IR);
+  write(cwd, "baize/sr/SR-001.md", SR_WITH_COVERS);
+
+  const result = await run(["accept", "SR-001", "--json"], { cwd, now: FIXED_NOW });
+  assert.equal(result.exitCode, 0, result.stdout);
+  const confirmed = parseJson<AcceptedOutput>(result.stdout).confirmed;
+  assert.equal(confirmed.id, "SR-001");
+  assert.match(confirmed.fingerprint, /^[0-9a-f]{64}$/);
+  const reviewed = confirmed.reviewed;
+  assert.deepEqual(Object.keys(reviewed), ["IR-001"], "上游集合 = parent（单亲分解树）");
+  assert.match(reviewed["IR-001"] ?? "", /^[0-9a-f]{64}$/);
+
+  // 落盘：SR-001 同时带 confirmed 与 reviewed；上游 IR-001 文件不被反向改写
+  const srText = readFileSync(join(cwd, "baize/sr/SR-001.md"), "utf8");
+  assert.match(srText, /^confirmed:/m);
+  assert.match(srText, /^  by: alice$/m);
+  assert.match(srText, /^reviewed:/m);
+  assert.match(srText, /^  IR-001: [0-9a-f]{64}$/m);
+  const irText = readFileSync(join(cwd, "baize/ir/IR-001.md"), "utf8");
+  assert.ok(!/^reviewed:/m.test(irText), "上游文件不写反向关系（目录是位置、边是语义）");
+
+  // reviewed 记的是上游当前实质字段摘要：改 IR 的 title（非实质字段）后重 accept，摘要不变
+  const before = reviewed["IR-001"];
+  write(
+    cwd,
+    "baize/ir/IR-001.md",
+    irText.replace("title: 支持用户数据导出", "title: 数据导出（改名了）"),
+  );
+  const again = parseJson<AcceptedOutput>(
+    (await run(["accept", "SR-001", "--json"], { cwd, now: FIXED_NOW })).stdout,
+  ).confirmed;
+  assert.equal(again.reviewed["IR-001"], before, "title 不进实质字段，复核指纹不变");
+});
+
+test("accept 链顶端（IR 无 parent）不写 reviewed", async (t) => {
+  const cwd = mkdtempSync(join(tmpdir(), "baize-"));
+  t.after(() => rmSync(cwd, { recursive: true, force: true }));
+  injectUser(t, "alice");
+  write(cwd, "baize/ir/IR-001.md", LEGAL_IR);
+
+  const result = await run(["accept", "IR-001", "--json"], { cwd, now: FIXED_NOW });
+  assert.equal(result.exitCode, 0, result.stdout);
+  assert.deepEqual(parseJson<AcceptedOutput>(result.stdout).confirmed.reviewed, {});
+  const text = readFileSync(join(cwd, "baize/ir/IR-001.md"), "utf8");
+  assert.match(text, /^confirmed:/m);
+  assert.ok(!/^reviewed:/m.test(text), "链顶端没有上游，不写 reviewed");
+});
+
+test("stale.direct-downstream：上游实质字段被改后报 WARNING，exit 0；--strict 升级为失败", async (t) => {
+  const cwd = mkdtempSync(join(tmpdir(), "baize-"));
+  t.after(() => rmSync(cwd, { recursive: true, force: true }));
+  injectUser(t, "alice");
+  writeChain(cwd);
+  await acceptAll(cwd, ["SR-001", "AR-001", "SR-002"]);
+  changeIrStatement(cwd);
+
+  const loose = await run(["validate", "--json"], { cwd });
+  assert.equal(loose.exitCode, 0, loose.stdout);
+  const issues = parseJson<ValidateOutput>(loose.stdout).issues;
+  const direct = issues.filter((issue) => issue.rule === "stale.direct-downstream");
+  assert.deepEqual(
+    direct.map((issue) => issue.level),
+    ["WARNING", "WARNING"],
+  );
+  assert.deepEqual(
+    direct.map((issue) => issue.path).sort(),
+    ["baize/sr/SR-001.md", "baize/sr/SR-002.md"],
+  );
+
+  const human = await run(["validate"], { cwd });
+  assert.equal(human.exitCode, 0, human.stdout);
+  for (const issue of direct) {
+    assert.ok(human.stdout.includes(issue.rule), human.stdout);
+    assert.ok(human.stdout.includes(issue.message), human.stdout);
+  }
+
+  const strict = await run(["validate", "--strict", "--json"], { cwd });
+  assert.equal(strict.exitCode, 1, strict.stdout);
+  assert.deepEqual(parseJson<ValidateOutput>(strict.stdout).issues, issues);
+});
+
+test("陈旧不会自己消失：重复 validate 结果一致，且上下游关系现算不落盘", async (t) => {
+  const cwd = mkdtempSync(join(tmpdir(), "baize-"));
+  t.after(() => rmSync(cwd, { recursive: true, force: true }));
+  injectUser(t, "alice");
+  writeChain(cwd);
+  await acceptAll(cwd, ["SR-001", "AR-001", "SR-002"]);
+  changeIrStatement(cwd);
+
+  const snapshot = (rel: string) => readFileSync(join(cwd, rel), "utf8");
+  const srBefore = snapshot("baize/sr/SR-001.md");
+  const arBefore = snapshot("baize/ar/AR-001.md");
+
+  const first = await run(["validate", "--json"], { cwd });
+  const second = await run(["validate", "--json"], { cwd });
+  assert.equal(first.exitCode, 0, first.stdout);
+  assert.deepEqual(
+    parseJson<ValidateOutput>(second.stdout).issues,
+    parseJson<ValidateOutput>(first.stdout).issues,
+    "陈旧现算、不落盘，不会自己消失",
+  );
+  assert.equal(snapshot("baize/sr/SR-001.md"), srBefore, "validate 不改写条目文件");
+  assert.equal(snapshot("baize/ar/AR-001.md"), arBefore, "validate 不改写条目文件");
+});
+
+test("未复核过不算陈旧：没有 reviewed 记录就没有「又变了」", async (t) => {
+  const cwd = mkdtempSync(join(tmpdir(), "baize-"));
+  t.after(() => rmSync(cwd, { recursive: true, force: true }));
+  writeChain(cwd);
+  changeIrStatement(cwd); // 从未 accept 过任何条目
+
+  const result = await run(["validate", "--json"], { cwd });
+  assert.equal(result.exitCode, 0, result.stdout);
+  const issues = parseJson<ValidateOutput>(result.stdout).issues;
+  assert.ok(
+    issues.every((issue) => !issue.rule.startsWith("stale.")),
+    `未复核的下游不应报陈旧：${JSON.stringify(issues)}`,
+  );
+});
+
+test("上游只改 title 不产生陈旧（title 不在实质字段清单）", async (t) => {
+  const cwd = mkdtempSync(join(tmpdir(), "baize-"));
+  t.after(() => rmSync(cwd, { recursive: true, force: true }));
+  injectUser(t, "alice");
+  writeChain(cwd);
+  await acceptAll(cwd, ["SR-001", "AR-001", "SR-002"]);
+
+  const text = readFileSync(join(cwd, "baize/ir/IR-001.md"), "utf8");
+  write(
+    cwd,
+    "baize/ir/IR-001.md",
+    text.replace("title: 支持用户数据导出", "title: 数据导出（改名了）\npriority: high"),
+  );
+
+  const result = await run(["validate", "--json"], { cwd });
+  assert.equal(result.exitCode, 0, result.stdout);
+  const issues = parseJson<ValidateOutput>(result.stdout).issues;
+  assert.ok(
+    issues.every((issue) => !issue.rule.startsWith("stale.")),
+    `title/priority 非实质字段，不应产生陈旧：${JSON.stringify(issues)}`,
+  );
+});
+
+test("重新 accept 按现版复核：陈旧比对恢复一致", async (t) => {
+  const cwd = mkdtempSync(join(tmpdir(), "baize-"));
+  t.after(() => rmSync(cwd, { recursive: true, force: true }));
+  injectUser(t, "alice");
+  writeChain(cwd);
+  await acceptAll(cwd, ["SR-001", "AR-001", "SR-002"]);
+  changeIrStatement(cwd);
+
+  const stale = await run(["validate", "--json"], { cwd });
+  assert.ok(
+    parseJson<ValidateOutput>(stale.stdout).issues.some(
+      (issue) => issue.rule === "stale.direct-downstream" && issue.path === "baize/sr/SR-001.md",
+    ),
+  );
+
+  await acceptAll(cwd, ["SR-001", "SR-002"]); // 按现版上游复核
+  const fresh = await run(["validate", "--json"], { cwd });
+  assert.equal(fresh.exitCode, 0, fresh.stdout);
+  const issues = parseJson<ValidateOutput>(fresh.stdout).issues;
+  assert.ok(
+    issues.every((issue) => issue.rule !== "stale.direct-downstream"),
+    `复核后不应再有直接下游陈旧：${JSON.stringify(issues)}`,
+  );
+});
+
+test("stale.transitive：陈旧条目的严格后代报 INFO，陈旧条目自己不报传递", async (t) => {
+  const cwd = mkdtempSync(join(tmpdir(), "baize-"));
+  t.after(() => rmSync(cwd, { recursive: true, force: true }));
+  injectUser(t, "alice");
+  writeChain(cwd);
+  await acceptAll(cwd, ["SR-001", "AR-001", "SR-002"]);
+  changeIrStatement(cwd);
+
+  const loose = await run(["validate", "--json"], { cwd });
+  assert.equal(loose.exitCode, 0, loose.stdout); // 不传 --strict 时两条都不影响 exit code
+  const issues = parseJson<ValidateOutput>(loose.stdout).issues;
+
+  const transitive = issues.filter((issue) => issue.rule === "stale.transitive");
+  assert.deepEqual(
+    transitive.map((issue) => [issue.level, issue.path]),
+    [["INFO", "baize/ar/AR-001.md"]],
+    "AR-001 是 SR-001 的严格后代、自己复核未失效",
+  );
+  // 陈旧条目自己不算传递：SR-001 只有 WARNING direct，没有 INFO transitive
+  const srIssues = issues.filter((issue) => issue.path === "baize/sr/SR-001.md");
+  assert.deepEqual(
+    srIssues.map((issue) => issue.rule).sort(),
+    ["stale.direct-downstream"],
+  );
+
+  const human = await run(["validate"], { cwd });
+  assert.ok(human.stdout.includes("stale.transitive"), human.stdout);
+  assert.ok(human.stdout.includes(transitive[0]?.message ?? ""), human.stdout);
+});
+
+test("自身已直接陈旧的条目不重复计入传递影响", async (t) => {
+  const cwd = mkdtempSync(join(tmpdir(), "baize-"));
+  t.after(() => rmSync(cwd, { recursive: true, force: true }));
+  injectUser(t, "alice");
+  writeChain(cwd);
+  await acceptAll(cwd, ["SR-001", "AR-001", "SR-002"]);
+
+  // 上游 IR 与中间 SR 都改：AR-001 自己的 reviewed 也失效 → 直接陈旧，不再算传递
+  changeIrStatement(cwd);
+  const srText = readFileSync(join(cwd, "baize/sr/SR-001.md"), "utf8");
+  write(
+    cwd,
+    "baize/sr/SR-001.md",
+    srText.replace("把「数据可带走」落成服务端导出能力。", "导出能力，含异步任务队列。"),
+  );
+
+  const result = await run(["validate", "--json"], { cwd });
+  assert.equal(result.exitCode, 0, result.stdout);
+  const issues = parseJson<ValidateOutput>(result.stdout).issues;
+  const transitive = issues.filter((issue) => issue.rule === "stale.transitive");
+  assert.deepEqual(transitive, [], "AR-001 已直接陈旧，不重复报传递 INFO");
+  const direct = issues.filter((issue) => issue.rule === "stale.direct-downstream");
+  assert.deepEqual(
+    direct.map((issue) => issue.path).sort(),
+    ["baize/ar/AR-001.md", "baize/sr/SR-001.md", "baize/sr/SR-002.md"],
+  );
+});
+
+test("--strict 只升级直接下游的陈旧：stale.transitive 的 INFO 永不升级", async (t) => {
+  const cwd = mkdtempSync(join(tmpdir(), "baize-"));
+  t.after(() => rmSync(cwd, { recursive: true, force: true }));
+  injectUser(t, "alice");
+  writeChain(cwd);
+  await acceptAll(cwd, ["SR-001", "AR-001", "SR-002"]);
+  changeIrStatement(cwd);
+
+  const strict = await run(["validate", "--strict", "--json"], { cwd });
+  assert.equal(strict.exitCode, 1, strict.stdout);
+  const issues = parseJson<ValidateOutput>(strict.stdout).issues;
+  const transitive = issues.filter((issue) => issue.rule === "stale.transitive");
+  assert.ok(transitive.length > 0, "本用例应存在传递影响");
+  assert.deepEqual(
+    transitive.map((issue) => issue.level),
+    transitive.map(() => "INFO"),
+    "INFO 在 --strict 下仍是 INFO（永不升级）；exit 1 只由 WARNING 造成",
+  );
+});
+
+test("validate --chain 限定陈旧作用域", async (t) => {
+  const cwd = mkdtempSync(join(tmpdir(), "baize-"));
+  t.after(() => rmSync(cwd, { recursive: true, force: true }));
+  injectUser(t, "alice");
+  write(cwd, "baize/ir/IR-001.md", LEGAL_IR);
+  write(cwd, "baize/ir/IR-002.md", LEGAL_IR.replace("id: IR-001", "id: IR-002"));
+  write(cwd, "baize/sr/SR-001.md", SR_WITH_COVERS);
+  write(
+    cwd,
+    "baize/sr/SR-002.md",
+    SR2_UNDER_IR001.replace("parent: IR-001", "parent: IR-002"),
+  );
+  await acceptAll(cwd, ["SR-001", "SR-002"]);
+  changeIrStatement(cwd); // 只改 IR-001
+
+  const other = await run(["validate", "--chain", "IR-002", "--json"], { cwd });
+  assert.equal(other.exitCode, 0, other.stdout);
+  assert.ok(
+    parseJson<ValidateOutput>(other.stdout).issues.every(
+      (issue) => !issue.rule.startsWith("stale."),
+    ),
+    "IR-002 链不应有陈旧",
+  );
+
+  const affected = await run(["validate", "--chain", "IR-001", "--json"], { cwd });
+  assert.equal(affected.exitCode, 0, affected.stdout);
+  assert.ok(
+    parseJson<ValidateOutput>(affected.stdout).issues.some(
+      (issue) => issue.rule === "stale.direct-downstream" && issue.path === "baize/sr/SR-001.md",
+    ),
+  );
+});
+
+test("status --chain 汇总传递影响：另有 N 条下游受影响", async (t) => {
+  const cwd = mkdtempSync(join(tmpdir(), "baize-"));
+  t.after(() => rmSync(cwd, { recursive: true, force: true }));
+  injectUser(t, "alice");
+  writeChain(cwd);
+  await acceptAll(cwd, ["SR-001", "AR-001", "SR-002"]);
+  changeIrStatement(cwd);
+
+  const machine = await run(["status", "--chain", "IR-001", "--json"], { cwd });
+  assert.equal(machine.exitCode, 0, machine.stdout);
+  const stale = parseJson<ChainOutput>(machine.stdout).chain.stale;
+  assert.deepEqual(stale.direct, ["SR-001", "SR-002"], "两条直接下游待复核（升序）");
+  assert.equal(stale.transitive, 1, "AR-001 是 SR-001 的严格后代，另有 1 条受影响");
+
+  const human = await run(["status", "--chain", "IR-001"], { cwd });
+  assert.equal(human.exitCode, 0, human.stdout);
+  assert.ok(human.stdout.includes("另有 1 条下游受影响"), human.stdout);
+  assert.ok(human.stdout.includes("SR-001"), human.stdout);
+
+  // 复核两条直接下游后，链上不再有陈旧
+  await acceptAll(cwd, ["SR-001", "SR-002"]);
+  const fresh = parseJson<ChainOutput>(
+    (await run(["status", "--chain", "IR-001", "--json"], { cwd })).stdout,
+  ).chain.stale;
+  assert.deepEqual(fresh, { direct: [], transitive: 0 });
 });

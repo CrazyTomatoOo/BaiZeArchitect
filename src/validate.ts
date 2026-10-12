@@ -5,6 +5,7 @@ import { chainMembers } from "./chain.ts";
 import { isPlainObject } from "./guards.ts";
 import type { FieldKind } from "./layers.ts";
 import { readEntries } from "./store.ts";
+import { staleIssues } from "./stale.ts";
 import type { Issue } from "./types.ts";
 
 /**
@@ -165,7 +166,11 @@ export async function validate(
     scoped = chainMembers(entries, options.chain);
   }
 
-  const issues = scoped.flatMap((entry) => issuesFor(entry, byId));
+  const issues = [
+    ...scoped.flatMap((entry) => issuesFor(entry, byId)),
+    // #155 陈旧：上下游关系现算不落盘；WARNING 直接下游 / INFO 传递（见 stale.ts 注释）。
+    ...staleIssues(scoped),
+  ];
   issues.sort((a, b) =>
     a.path === b.path
       ? a.rule.localeCompare(b.rule)
