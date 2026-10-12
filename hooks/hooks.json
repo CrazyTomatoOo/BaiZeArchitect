@@ -1,0 +1,16 @@
+{
+  "description": "BaiZe 软件全量设计套件：会话启动时注入 using-baize 入口正文（与 pi 侧共享同一份剥 frontmatter 后的文本）。",
+  "hooks": {
+    "SessionStart": [
+      {
+        "matcher": "startup|clear|compact",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/scripts/baize-bootstrap.mjs\" --claude"
+          }
+        ]
+      }
+    ]
+  }
+}

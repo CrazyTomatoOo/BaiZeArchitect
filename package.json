@@ -4,6 +4,17 @@
   "private": true,
   "type": "module",
   "description": "极薄的设计校验 CLI：发号、校验、查询 baize/ 下的设计条目",
+  "keywords": [
+    "pi-package"
+  ],
+  "pi": {
+    "extensions": [
+      "./extensions/baize-context.ts"
+    ],
+    "skills": [
+      "./skills"
+    ]
+  },
   "bin": {
     "baize": "./bin/baize.ts"
   },
@@ -14,6 +25,14 @@
   },
   "dependencies": {
     "yaml": "^2.9.1"
+  },
+  "peerDependencies": {
+    "@earendil-works/pi-coding-agent": "*"
+  },
+  "peerDependenciesMeta": {
+    "@earendil-works/pi-coding-agent": {
+      "optional": true
+    }
   },
   "devDependencies": {
     "@types/node": "^22",

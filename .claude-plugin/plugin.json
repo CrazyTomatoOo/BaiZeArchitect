@@ -1,0 +1,5 @@
+{
+  "name": "baize",
+  "description": "BaiZe 软件全量设计套件：把需求从录入逐层拆成可追溯、可校验的设计条目（CLI + 十个 skill + pi/Claude Code 注入）。",
+  "version": "0.0.0"
+}
