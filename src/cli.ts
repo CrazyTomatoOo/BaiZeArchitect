@@ -39,6 +39,8 @@ interface ParsedArgs {
   covers: string | undefined;
   appearsIn: string | undefined;
   realizes: string | undefined;
+  catalog: string | undefined;
+  allocates: string | undefined;
 }
 
 interface CommandOutput {
@@ -57,6 +59,8 @@ function parseArgs(argv: string[]): ParsedArgs {
   let covers: string | undefined;
   let appearsIn: string | undefined;
   let realizes: string | undefined;
+  let catalog: string | undefined;
+  let allocates: string | undefined;
 
   for (let i = 0; i < argv.length; i++) {
     const token = argv[i];
@@ -83,7 +87,9 @@ function parseArgs(argv: string[]): ParsedArgs {
       token === "--parent" ||
       token === "--covers" ||
       token === "--appears-in" ||
-      token === "--realizes"
+      token === "--realizes" ||
+      token === "--catalog" ||
+      token === "--allocates"
     ) {
       const value = argv[i + 1];
       if (value === undefined || value.startsWith("--")) {
@@ -92,7 +98,9 @@ function parseArgs(argv: string[]): ParsedArgs {
       if (token === "--parent") parent = value;
       else if (token === "--covers") covers = value;
       else if (token === "--appears-in") appearsIn = value;
-      else realizes = value;
+      else if (token === "--realizes") realizes = value;
+      else if (token === "--catalog") catalog = value;
+      else allocates = value;
       i++;
       continue;
     }
@@ -113,11 +121,14 @@ function parseArgs(argv: string[]): ParsedArgs {
     covers,
     appearsIn,
     realizes,
+    catalog,
+    allocates,
   };
 }
 
 async function runNew(args: ParsedArgs, cwd: string): Promise<CommandOutput> {
-  const layerKey = args.positionals[0];
+  // `baize new scenario` 是场景层的口头层名（注册键为复数 scenarios）。
+  const layerKey = args.positionals[0] === "scenario" ? "scenarios" : args.positionals[0];
   if (layerKey === undefined) {
     throw new BaizeError("cli.usage", "用法：baize new <layer>（如 baize new ir）");
   }
@@ -166,18 +177,25 @@ async function runNew(args: ParsedArgs, cwd: string): Promise<CommandOutput> {
   if (args.realizes !== undefined && layer.key !== "function-items") {
     throw new BaizeError("cli.usage", "--realizes 只适用于 function-item（功能项 → 用例）");
   }
+  if (args.catalog !== undefined && layer.key !== "scenarios") {
+    throw new BaizeError("cli.usage", "--catalog 只适用于 scenario（场景挂场景目录）");
+  }
+  if (args.allocates !== undefined && layer.key !== "ar") {
+    throw new BaizeError("cli.usage", "--allocates 只适用于 ar（AR 分配架构组件）");
+  }
 
   const splitList = (raw: string): string[] =>
     raw
       .split(",")
       .map((item) => item.trim())
       .filter((item) => item !== "");
-
   const overrides: Record<string, unknown> = {};
   if (args.parent !== undefined) overrides["parent"] = args.parent;
   if (args.covers !== undefined) overrides["covers"] = splitList(args.covers);
   if (args.appearsIn !== undefined) overrides["appearsIn"] = splitList(args.appearsIn);
   if (args.realizes !== undefined) overrides["realizes"] = splitList(args.realizes);
+  if (args.catalog !== undefined) overrides["catalog"] = args.catalog;
+  if (args.allocates !== undefined) overrides["allocates"] = args.allocates;
 
   const id = await nextId(cwd, layer);
   const relPath = path.posix.join(BAIZE_DIR, layer.dir, `${id}.md`);

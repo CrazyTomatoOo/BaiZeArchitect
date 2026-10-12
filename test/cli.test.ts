@@ -113,6 +113,46 @@ acceptance: {}
 产品要求用户能把数据带走，不能锁死在系统里。
 `;
 
+const LEGAL_AR = `---
+id: AR-001
+title: 分配导出服务
+parent: SR-001
+allocates: export-service
+---
+
+把导出能力分配给既有组件。
+`;
+
+// 受控清单：一个顶层键 + 稳定 slug → { name, description? }；值里的额外字段一律忽略。
+const ARCHITECTURE_YAML = `components:
+  export-service: { name: 导出服务, description: 产出可下载的数据文件 }
+  audit-log: { name: 审计服务, owner: platform }
+`;
+
+const SCENARIO_CATALOGS_YAML = `catalogs:
+  order-flow: { name: 订单流程 }
+  self-service: { name: 客户自助 }
+`;
+
+const LEGAL_SCENARIO = `---
+id: SC-001
+title: 下单后导出报表
+parent: SR-001
+catalog: order-flow
+preconditions:
+  - 用户已登录
+trigger: 用户在订单页点击导出
+mainFlow:
+  - 系统生成报表文件
+alternateFlows: []
+expectedOutcome: 浏览器开始下载报表
+stakeholders:
+  - 买家
+---
+
+用户在订单流程里导出报表。
+`;
+
 test("new ir 建出 IR-001 与 IR-002，frontmatter 带 id/title/parent/acceptance", async (t) => {
   const cwd = mkdtempSync(join(tmpdir(), "baize-"));
   t.after(() => rmSync(cwd, { recursive: true, force: true }));
@@ -142,6 +182,9 @@ test("validate：合法条目 exit 0 且 issues 为空", async (t) => {
   write(cwd, "baize/ir/IR-001.md", LEGAL_IR);
   // 线索级覆盖率（#150）：合法仓库要求每条验收线索都有 SR 覆盖
   write(cwd, "baize/sr/SR-001.md", srWithCovers("SR-001", "IR-001#a1, IR-001#a2"));
+  // AR 分配（#152）：合法仓库要求每条 SR 都有 AR 承接
+  write(cwd, "baize/architecture.yaml", ARCHITECTURE_YAML);
+  write(cwd, "baize/ar/AR-001.md", LEGAL_AR);
 
   const result = await run(["validate", "--json"], { cwd });
   assert.equal(result.exitCode, 0, result.stdout);
@@ -311,6 +354,9 @@ test("默认全仓、--chain 限定作用域", async (t) => {
   write(cwd, "baize/ir/IR-001.md", LEGAL_IR);
   // IR-001 的线索全覆盖，隔离 coverage.missing-clue（#150），只留 id.invalid 变量
   write(cwd, "baize/sr/SR-001.md", srWithCovers("SR-001", "IR-001#a1, IR-001#a2"));
+  // AR 承接（#152），隔离 sr.unallocated
+  write(cwd, "baize/architecture.yaml", ARCHITECTURE_YAML);
+  write(cwd, "baize/ar/AR-001.md", LEGAL_AR);
   // IR-002 的 id 格式不合法
   write(
     cwd,
@@ -405,11 +451,23 @@ covers: [IR-001#a1]
 系统应提供统一的导出能力。
 `;
 
+// 线索全覆盖变体：#150 起合法仓库要求 IR 的每条线索都有 SR 覆盖（LEGAL_IR 有 a1/a2 两条）。
+const LEGAL_SR_FULL = `---
+id: SR-001
+title: 统一导出服务
+parent: IR-001
+covers: [IR-001#a1, IR-001#a2]
+---
+
+系统应提供统一的导出能力。
+`;
+
 // 分析层合法条目（#154）。场景/用例字段全必填但允许空数组（alternateFlows: [] = 看过了确实没有）。
 const LEGAL_SC = `---
 id: SC-001
 title: 下单主流程
 parent: SR-001
+catalog: order-flow
 preconditions:
   - 用户已登录
 trigger: 用户点击下单
@@ -924,6 +982,9 @@ test("status --chain：状态文件缺失不是错误——六段全部未跳过
   write(cwd, "baize/ir/IR-001.md", LEGAL_IR);
   // 线索全覆盖（#150），隔离 coverage.missing-clue，只验段状态
   write(cwd, "baize/sr/SR-001.md", srWithCovers("SR-001", "IR-001#a1, IR-001#a2"));
+  // AR 承接（#152），隔离 sr.unallocated
+  write(cwd, "baize/architecture.yaml", ARCHITECTURE_YAML);
+  write(cwd, "baize/ar/AR-001.md", LEGAL_AR);
 
   const machine = await run(["status", "--chain", "IR-001", "--json"], { cwd });
   assert.equal(machine.exitCode, 0, machine.stdout);
@@ -971,6 +1032,9 @@ test("validate：stage.skip-missing-reason —— 跳过记录缺 by / at / why 
     write(cwd, "baize/ir/IR-001.md", LEGAL_IR);
     // 线索全覆盖（#150），只留 stage.skip-missing-reason 一个变量
     write(cwd, "baize/sr/SR-001.md", srWithCovers("SR-001", "IR-001#a1, IR-001#a2"));
+    // AR 承接（#152），隔离 sr.unallocated
+    write(cwd, "baize/architecture.yaml", ARCHITECTURE_YAML);
+    write(cwd, "baize/ar/AR-001.md", LEGAL_AR);
     write(cwd, "baize/chains/IR-001.yaml", `skipped:\n  sr:\n${body.split("\n").map((l) => `    ${l}`).join("\n")}`);
 
     const result = await run(["validate", "--json"], { cwd });
@@ -991,6 +1055,9 @@ test("validate：stage.skip-missing-reason —— 跳过记录缺 by / at / why 
   write(cwd, "baize/ir/IR-001.md", LEGAL_IR);
   // 线索全覆盖（#150），只留段状态变量
   write(cwd, "baize/sr/SR-001.md", srWithCovers("SR-001", "IR-001#a1, IR-001#a2"));
+  // AR 承接（#152），隔离 sr.unallocated
+  write(cwd, "baize/architecture.yaml", ARCHITECTURE_YAML);
+  write(cwd, "baize/ar/AR-001.md", LEGAL_AR);
   write(
     cwd,
     "baize/chains/IR-001.yaml",
@@ -1302,12 +1369,189 @@ test("new 拒绝张冠李戴的关联选项（--appears-in 只适用 usecase，-
   assert.ok(!existsSync(join(cwd, "baize")), "不成立请求不应写文件");
 });
 
+test("new scenario --parent SR-001 --catalog order-flow 写入 catalog", async (t) => {
+  const cwd = mkdtempSync(join(tmpdir(), "baize-"));
+  t.after(() => rmSync(cwd, { recursive: true, force: true }));
+
+  const result = await run(["new", "scenario", "--parent", "SR-001", "--catalog", "order-flow"], { cwd });
+  assert.equal(result.exitCode, 0, result.stdout);
+  const text = readFileSync(join(cwd, "baize/scenarios/SC-001.md"), "utf8");
+  assert.match(text, /^id: SC-001$/m);
+  assert.match(text, /^parent: SR-001$/m);
+  assert.match(text, /^catalog: order-flow$/m);
+});
+
+test("new scenario 缺 --parent → exit 2 且不写文件", async (t) => {
+  const cwd = mkdtempSync(join(tmpdir(), "baize-"));
+  t.after(() => rmSync(cwd, { recursive: true, force: true }));
+
+  const result = await run(["new", "scenario", "--catalog", "order-flow"], { cwd });
+  assert.equal(result.exitCode, 2);
+  assert.equal(existsSync(join(cwd, "baize/scenarios/SC-001.md")), false);
+});
+
+test("new ar --parent SR-001 --allocates export-service 写入标量 allocates（不是数组）", async (t) => {
+  const cwd = mkdtempSync(join(tmpdir(), "baize-"));
+  t.after(() => rmSync(cwd, { recursive: true, force: true }));
+
+  const result = await run(["new", "ar", "--parent", "SR-001", "--allocates", "export-service"], { cwd });
+  assert.equal(result.exitCode, 0, result.stdout);
+  const text = readFileSync(join(cwd, "baize/ar/AR-001.md"), "utf8");
+  assert.match(text, /^allocates: export-service$/m, "allocates 应是标量字符串");
+  assert.doesNotMatch(text, /^\\s*- export-service$/m, "allocates 不应写成数组");
+});
+
+test("new 拒绝张冠李戴的选项：--catalog 只给 scenario、--allocates 只给 ar", async (t) => {
+  const cwd = mkdtempSync(join(tmpdir(), "baize-"));
+  t.after(() => rmSync(cwd, { recursive: true, force: true }));
+
+  const badCatalog = await run(["new", "sr", "--parent", "IR-001", "--catalog", "order-flow"], { cwd });
+  assert.equal(badCatalog.exitCode, 2);
+
+  const badAllocates = await run(["new", "ir", "--allocates", "export-service"], { cwd });
+  assert.equal(badAllocates.exitCode, 2);
+  assert.equal(existsSync(join(cwd, "baize/ir/IR-001.md")), false);
+});
+
+test("validate：ref.unknown-element —— AR 的 allocates 指向清单里没有的组件时报 ERROR；存在的 slug（含带额外字段的）不报", async (t) => {
+  const cwd = mkdtempSync(join(tmpdir(), "baize-"));
+  t.after(() => rmSync(cwd, { recursive: true, force: true }));
+  write(cwd, "baize/ir/IR-001.md", LEGAL_IR);
+  write(cwd, "baize/sr/SR-001.md", LEGAL_SR_FULL);
+  write(
+    cwd,
+    "baize/ar/AR-001.md",
+    LEGAL_AR.replace("allocates: export-service", "allocates: ghost-service"),
+  );
+  write(cwd, "baize/architecture.yaml", ARCHITECTURE_YAML);
+
+  const bad = await run(["validate", "--json"], { cwd });
+  assert.equal(bad.exitCode, 1, bad.stdout);
+  const badIssues = parseJson<ValidateOutput>(bad.stdout).issues;
+  assert.ok(
+    badIssues.some((issue) => issue.rule === "ref.unknown-element" && issue.level === "ERROR"),
+    `应报 ref.unknown-element：${JSON.stringify(badIssues)}`,
+  );
+
+  // audit-log 的值里有额外字段（owner），按统一约定忽略——引用它仍合法。
+  write(
+    cwd,
+    "baize/ar/AR-001.md",
+    LEGAL_AR.replace("allocates: export-service", "allocates: audit-log"),
+  );
+  const good = await run(["validate", "--json"], { cwd });
+  assert.equal(good.exitCode, 0, good.stdout);
+  assert.deepEqual(parseJson<ValidateOutput>(good.stdout).issues, []);
+});
+
+test("validate：ref.unknown-catalog —— scenario 的 catalog 不在词表里时报 ERROR", async (t) => {
+  const cwd = mkdtempSync(join(tmpdir(), "baize-"));
+  t.after(() => rmSync(cwd, { recursive: true, force: true }));
+  write(cwd, "baize/ir/IR-001.md", LEGAL_IR);
+  write(cwd, "baize/sr/SR-001.md", LEGAL_SR_FULL);
+  write(cwd, "baize/scenario-catalogs.yaml", SCENARIO_CATALOGS_YAML);
+
+  write(
+    cwd,
+    "baize/scenarios/SC-001.md",
+    LEGAL_SCENARIO.replace("catalog: order-flow", "catalog: no-such-catalog"),
+  );
+  const bad = await run(["validate", "--json"], { cwd });
+  assert.equal(bad.exitCode, 1, bad.stdout);
+  const badIssues = parseJson<ValidateOutput>(bad.stdout).issues;
+  assert.ok(
+    badIssues.some((issue) => issue.rule === "ref.unknown-catalog" && issue.level === "ERROR"),
+    `应报 ref.unknown-catalog：${JSON.stringify(badIssues)}`,
+  );
+
+  write(cwd, "baize/scenarios/SC-001.md", LEGAL_SCENARIO);
+  const good = await run(["validate", "--json"], { cwd });
+  assert.equal(good.exitCode, 0, good.stdout);
+});
+
+test("validate：sr.unallocated —— 没有 AR 挂上的 SR 报 WARNING；有 AR 则不报", async (t) => {
+  const cwd = mkdtempSync(join(tmpdir(), "baize-"));
+  t.after(() => rmSync(cwd, { recursive: true, force: true }));
+  write(cwd, "baize/ir/IR-001.md", LEGAL_IR);
+  write(cwd, "baize/sr/SR-001.md", LEGAL_SR_FULL);
+
+  const unallocated = await run(["validate", "--json"], { cwd });
+  assert.equal(unallocated.exitCode, 0, "WARNING 不挡 exit code");
+  const issues = parseJson<ValidateOutput>(unallocated.stdout).issues;
+  assert.deepEqual(
+    issues.map((issue) => issue.rule),
+    ["sr.unallocated"],
+  );
+  assert.equal(issues[0]?.level, "WARNING");
+
+  write(cwd, "baize/architecture.yaml", ARCHITECTURE_YAML);
+  write(cwd, "baize/ar/AR-001.md", LEGAL_AR);
+  const allocated = await run(["validate", "--json"], { cwd });
+  assert.equal(allocated.exitCode, 0, allocated.stdout);
+  assert.deepEqual(parseJson<ValidateOutput>(allocated.stdout).issues, []);
+});
+
+test("validate --strict 把 WARNING（sr.unallocated）也算失败（exit 1）", async (t) => {
+  const cwd = mkdtempSync(join(tmpdir(), "baize-"));
+  t.after(() => rmSync(cwd, { recursive: true, force: true }));
+  write(cwd, "baize/ir/IR-001.md", LEGAL_IR);
+  write(cwd, "baize/sr/SR-001.md", LEGAL_SR_FULL);
+
+  const lax = await run(["validate"], { cwd });
+  assert.equal(lax.exitCode, 0);
+
+  const strict = await run(["validate", "--strict"], { cwd });
+  assert.equal(strict.exitCode, 1);
+});
+
+test("受控清单不是条目：清单项不会被报成孤儿（回归）", async (t) => {
+  const cwd = mkdtempSync(join(tmpdir(), "baize-"));
+  t.after(() => rmSync(cwd, { recursive: true, force: true }));
+  write(cwd, "baize/ir/IR-001.md", LEGAL_IR);
+  write(cwd, "baize/sr/SR-001.md", LEGAL_SR_FULL);
+  write(cwd, "baize/ar/AR-001.md", LEGAL_AR);
+  write(cwd, "baize/scenarios/SC-001.md", LEGAL_SCENARIO);
+  write(cwd, "baize/architecture.yaml", ARCHITECTURE_YAML);
+  write(cwd, "baize/scenario-catalogs.yaml", SCENARIO_CATALOGS_YAML);
+
+  const result = await run(["validate", "--json"], { cwd });
+  assert.equal(result.exitCode, 0, result.stdout);
+  const issues = parseJson<ValidateOutput>(result.stdout).issues;
+  assert.ok(
+    !issues.some((issue) => issue.rule === "ref.orphan"),
+    `清单项不应被报成孤儿：${JSON.stringify(issues)}`,
+  );
+  assert.deepEqual(issues, []);
+});
+
+test("缺清单文件 = 空清单，不是错误：不引用清单的仓 exit 0；引用了 slug 而清单缺失时报 unknown", async (t) => {
+  const cwd = mkdtempSync(join(tmpdir(), "baize-"));
+  t.after(() => rmSync(cwd, { recursive: true, force: true }));
+  write(cwd, "baize/ir/IR-001.md", LEGAL_IR);
+  write(cwd, "baize/sr/SR-001.md", LEGAL_SR_FULL);
+
+  // 没有 baize/architecture.yaml 且仓里没有引用：清单缺失本身不是错误
+  // （唯一的 sr.unallocated 是 WARNING，不挡 exit code）。
+  const plain = await run(["validate", "--json"], { cwd });
+  assert.equal(plain.exitCode, 0, plain.stdout);
+
+  // 引用了 slug 而清单缺失（= 空清单）→ 只有 ref.unknown-element 一条。
+  write(cwd, "baize/ar/AR-001.md", LEGAL_AR);
+  const referenced = await run(["validate", "--json"], { cwd });
+  assert.equal(referenced.exitCode, 1, referenced.stdout);
+  assert.deepEqual(
+    parseJson<ValidateOutput>(referenced.stdout).issues.map((issue) => issue.rule),
+    ["ref.unknown-element"],
+  );
+});
+
 test("validate：ref.unknown-target —— appearsIn / realizes 指向不存在的条目 → ERROR", async (t) => {
   const cwd = mkdtempSync(join(tmpdir(), "baize-"));
   t.after(() => rmSync(cwd, { recursive: true, force: true }));
   write(cwd, "baize/ir/IR-001.md", LEGAL_IR);
-  write(cwd, "baize/sr/SR-001.md", LEGAL_SR);
+  write(cwd, "baize/sr/SR-001.md", LEGAL_SR_FULL);
   write(cwd, "baize/scenarios/SC-001.md", LEGAL_SC);
+  write(cwd, "baize/scenario-catalogs.yaml", SCENARIO_CATALOGS_YAML);
   write(cwd, "baize/usecases/UC-001.md", LEGAL_UC.replace("SC-001", "SC-999"));
   write(cwd, "baize/function-items/FN-001.md", LEGAL_FN.replace("UC-001", "UC-999"));
 
@@ -1347,6 +1591,9 @@ test("validate：covers: [] 合法（不报 field/ref），缺 covers 字段走 
   t.after(() => rmSync(cwd, { recursive: true, force: true }));
   write(cwd, "baize/ir/IR-001.md", IR_TWO_CLUES);
   write(cwd, "baize/sr/SR-001.md", srWithCovers("SR-001", ""));
+  // AR 承接（#152），隔离 sr.unallocated——本测试只验 covers 的 field/ref 行为
+  write(cwd, "baize/architecture.yaml", ARCHITECTURE_YAML);
+  write(cwd, "baize/ar/AR-001.md", LEGAL_AR);
 
   // covers: [] —— SR 自身没有任何 field/ref 问题；覆盖率另算（两条线索都没人覆盖）
   const empty = await run(["validate", "--json"], { cwd });
@@ -1504,8 +1751,11 @@ test("validate：coverage.unrealized-usecase —— 未被任何功能项 realiz
   const cwd = mkdtempSync(join(tmpdir(), "baize-"));
   t.after(() => rmSync(cwd, { recursive: true, force: true }));
   write(cwd, "baize/ir/IR-001.md", LEGAL_IR);
-  write(cwd, "baize/sr/SR-001.md", LEGAL_SR);
+  write(cwd, "baize/sr/SR-001.md", LEGAL_SR_FULL);
   write(cwd, "baize/scenarios/SC-001.md", LEGAL_SC);
+  write(cwd, "baize/scenario-catalogs.yaml", SCENARIO_CATALOGS_YAML);
+  write(cwd, "baize/architecture.yaml", ARCHITECTURE_YAML);
+  write(cwd, "baize/ar/AR-001.md", LEGAL_AR);
   write(cwd, "baize/usecases/UC-001.md", LEGAL_UC);
   const legalUc2 = LEGAL_UC.replace("id: UC-001", "id: UC-002").replace(
     "title: 提交订单",
@@ -1524,13 +1774,12 @@ test("validate：coverage.unrealized-usecase —— 未被任何功能项 realiz
   assert.equal(unrealized[0]!.path, "baize/usecases/UC-002.md");
   assert.ok(unrealized[0]!.message.includes("UC-002"), "message 应指出是哪个用例");
 
-  // 补上 realizes 后全绿；同时补齐线索覆盖（#150）
+  // 补上 realizes 后全绿；线索覆盖已由 SR-001（LEGAL_SR_FULL）补齐
   write(
     cwd,
     "baize/function-items/FN-001.md",
     LEGAL_FN.replace("realizes:\n  - UC-001", "realizes:\n  - UC-001\n  - UC-002"),
   );
-  write(cwd, "baize/sr/SR-002.md", srWithCovers("SR-002", "IR-001#a2"));
   const clean = await run(["validate", "--json"], { cwd });
   assert.equal(clean.exitCode, 0, clean.stdout);
   assert.equal(parseJson<ValidateOutput>(clean.stdout).issues.length, 0, clean.stdout);
@@ -1543,6 +1792,7 @@ test("validate：场景/用例字段全必填但允许空数组 —— 缺 alter
   write(cwd, "baize/sr/SR-001.md", LEGAL_SR);
   // 场景整段缺 alternateFlows；用例整段缺 alternativeFlows
   write(cwd, "baize/scenarios/SC-001.md", LEGAL_SC.replace("alternateFlows: []\n", ""));
+  write(cwd, "baize/scenario-catalogs.yaml", SCENARIO_CATALOGS_YAML);
   write(
     cwd,
     "baize/usecases/UC-001.md",

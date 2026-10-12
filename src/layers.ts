@@ -5,7 +5,7 @@
  * 的 schema 由 #149 补上（含必填的 `parent` 与 SR 的 `covers`）。
  * 分析四层（场景 / 用例 / 功能项 / 功能点）的 schema 由 #154 补上，
  * 含关联边（用例 `appearsIn` → 场景、功能项 `realizes` → 用例）。
- * 场景的 `catalog` 字段与 AR 分配由 #152 补（受控清单），本文件不预置。
+ * 场景的 `catalog` 字段与 AR 的 `allocates` 由 #152 补（受控清单）。
  */
 export type LayerKey =
   | "ir"
@@ -154,6 +154,15 @@ export const LAYERS: readonly LayerDef[] = [
         emptyMessage: "字段为空：parent",
       },
       {
+        // AR 必须恰好分配一个架构组件（受控清单 baize/architecture.yaml 的 slug）。
+        // 标量；引用的 slug 是否存在由 ref.unknown-element 报。
+        name: "allocates",
+        source: "frontmatter",
+        nonEmpty: true,
+        kind: "scalar",
+        emptyMessage: "字段为空：allocates（AR 必须恰好分配一个架构组件）",
+      },
+      {
         name: "statement",
         source: "body",
         nonEmpty: true,
@@ -163,6 +172,7 @@ export const LAYERS: readonly LayerDef[] = [
     ],
   },
   {
+    // 场景层完整 schema：#152 的 catalog（受控清单）+ #154 的分析字段。
     key: "scenarios",
     dir: "scenarios",
     prefix: "SC",
@@ -182,12 +192,21 @@ export const LAYERS: readonly LayerDef[] = [
         emptyMessage: "字段为空：title（人类可读的短名）",
       },
       {
-        // 场景的父边指向 SR。为空/缺失由 ref.orphan 报。
+        // 同 SR/AR：为空/缺失由 ref.orphan 报。
         name: "parent",
         source: "frontmatter",
         nonEmpty: false,
         kind: "scalar",
         emptyMessage: "字段为空：parent",
+      },
+      {
+        // 场景挂受控清单 baize/scenario-catalogs.yaml 的一个目录 slug。
+        // 引用的 slug 是否存在由 ref.unknown-catalog 报。
+        name: "catalog",
+        source: "frontmatter",
+        nonEmpty: true,
+        kind: "string",
+        emptyMessage: "字段为空：catalog（场景必须挂一个场景目录）",
       },
       {
         name: "preconditions",

@@ -10,6 +10,8 @@ import {
   readChainState,
 } from "./chainstate.ts";
 import { computeCoverage, parseClueRef } from "./coverage.ts";
+import type { Catalogs } from "./catalogs.ts";
+import { readCatalogs } from "./catalogs.ts";
 import { isPlainObject } from "./guards.ts";
 import type { FieldKind } from "./layers.ts";
 import { readEntries } from "./store.ts";
@@ -83,7 +85,7 @@ function idIssue(entry: Entry): Issue[] {
   ];
 }
 
-function refIssues(entry: Entry, byId: Record<string, Entry>): Issue[] {
+function refIssues(entry: Entry, byId: Record<string, Entry>, catalogs: Catalogs): Issue[] {
   const issues: Issue[] = [];
   const parentId = parentIdOf(entry);
 
@@ -163,11 +165,66 @@ function refIssues(entry: Entry, byId: Record<string, Entry>): Issue[] {
     }
   }
 
+  // ref.unknown-element：AR 的 allocates 指向受控清单 baize/architecture.yaml 里的组件 slug；
+  // 清单缺失 = 空清单，引用任何 slug 都报本条。空/缺失的 allocates 由 field.* 报，这里不重复。
+  if (entry.layer.key === "ar") {
+    const allocates = entry.frontmatter["allocates"];
+    if (typeof allocates === "string" && allocates.trim() !== "" && !catalogs.components.has(allocates)) {
+      issues.push({
+        level: "ERROR",
+        rule: "ref.unknown-element",
+        path: entry.path,
+        message: `allocates 指向清单里不存在的组件：${allocates}（受控清单 baize/architecture.yaml）`,
+        fix: "核对组件 slug，或先在受控清单里登记该组件",
+      });
+    }
+  }
+
+  // ref.unknown-catalog：场景的 catalog 必须是受控清单 baize/scenario-catalogs.yaml 里的目录 slug。
+  if (entry.layer.key === "scenarios") {
+    const catalog = entry.frontmatter["catalog"];
+    if (typeof catalog === "string" && catalog.trim() !== "" && !catalogs.scenarioCatalogs.has(catalog)) {
+      issues.push({
+        level: "ERROR",
+        rule: "ref.unknown-catalog",
+        path: entry.path,
+        message: `catalog 不在场景目录词表里：${catalog}（受控清单 baize/scenario-catalogs.yaml）`,
+        fix: "核对目录 slug，或先在受控清单里登记该目录",
+      });
+    }
+  }
+
   return issues;
 }
 
-function issuesFor(entry: Entry, byId: Record<string, Entry>): Issue[] {
-  return [...idIssue(entry), ...fieldIssues(entry), ...refIssues(entry, byId)];
+// sr.unallocated：SR 没有 AR 挂上（没有 AR 以它为 parent）→ WARNING。
+// 反向关系现算，不落盘。
+function allocationIssues(entry: Entry, byId: Record<string, Entry>): Issue[] {
+  if (entry.layer.key !== "sr") return [];
+  const id = idOf(entry);
+  if (id === undefined) return []; // 缺 id 由 id.* / field.* 报
+  const hasAr = Object.values(byId).some(
+    (candidate) => candidate.layer.key === "ar" && parentIdOf(candidate) === id,
+  );
+  if (hasAr) return [];
+  return [
+    {
+      level: "WARNING",
+      rule: "sr.unallocated",
+      path: entry.path,
+      message: `SR 没有任何 AR 承接：${id}（需求拆到 AR 才算落到了架构组件上）`,
+      fix: `为 ${id} 建一条 parent 指向它的 AR，或在 AR 的 allocates 里挂好组件`,
+    },
+  ];
+}
+
+function issuesFor(entry: Entry, byId: Record<string, Entry>, catalogs: Catalogs): Issue[] {
+  return [
+    ...idIssue(entry),
+    ...fieldIssues(entry),
+    ...refIssues(entry, byId, catalogs),
+    ...allocationIssues(entry, byId),
+  ];
 }
 
 /**
@@ -216,6 +273,7 @@ export async function validate(
   options: { chain?: string } = {},
 ): Promise<Issue[]> {
   const entries = await readEntries(cwd);
+  const catalogs = await readCatalogs(cwd);
   const byId: Record<string, Entry> = {};
   for (const entry of entries) {
     const id = idOf(entry);
@@ -231,7 +289,7 @@ export async function validate(
   }
 
   const issues = [
-    ...scoped.flatMap((entry) => issuesFor(entry, byId)),
+    ...scoped.flatMap((entry) => issuesFor(entry, byId, catalogs)),
     ...(await stageIssues(cwd, options.chain)),
     ...coverageIssues(scoped),
     ...unrealizedUsecaseIssues(scoped, entries),
