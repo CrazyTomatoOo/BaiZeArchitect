@@ -1,5 +1,5 @@
 import type { Entry } from "./entry.ts";
-import { idOf } from "./entry.ts";
+import { idOf, parentIdOf } from "./entry.ts";
 import { BaizeError } from "./errors.ts";
 import { chainMembers } from "./chain.ts";
 import { isPlainObject } from "./guards.ts";
@@ -75,26 +75,97 @@ function idIssue(entry: Entry): Issue[] {
   ];
 }
 
-function issuesFor(entry: Entry): Issue[] {
-  return [...idIssue(entry), ...fieldIssues(entry)];
+/** 解析 covers 项 `<条目id>#<线索id>`；不是这个形状返回 null。 */
+function parseClueRef(item: unknown): { entryId: string; clueId: string } | null {
+  if (typeof item !== "string") return null;
+  const hash = item.indexOf("#");
+  if (hash <= 0 || hash === item.length - 1) return null;
+  return { entryId: item.slice(0, hash), clueId: item.slice(hash + 1) };
 }
 
-/** 全仓（或限定一条链）跑 field / id 规则，返回按 path、rule 排序的问题。 */
+function refIssues(entry: Entry, byId: Record<string, Entry>): Issue[] {
+  const issues: Issue[] = [];
+  const parentId = parentIdOf(entry);
+
+  // ref.orphan：SR / AR 必须有父（null / 缺失 / 空都算）。IR 的 parent: null 是链顶端，合法。
+  if ((entry.layer.key === "sr" || entry.layer.key === "ar") && parentId === undefined) {
+    issues.push({
+      level: "ERROR",
+      rule: "ref.orphan",
+      path: entry.path,
+      message: `${entry.layer.prefix} 缺少父条目：parent 为空或缺失（SR/AR 必由上层条目分解而来）`,
+      fix: `给 ${entry.path} 的 frontmatter 补上 parent（上层条目 id）`,
+    });
+  }
+
+  // ref.parent-missing：parent 指向的条目必须存在。
+  if (parentId !== undefined && !Object.hasOwn(byId, parentId)) {
+    issues.push({
+      level: "ERROR",
+      rule: "ref.parent-missing",
+      path: entry.path,
+      message: `parent 指向不存在的条目：${parentId}`,
+      fix: `把 ${entry.path} 的 parent 改成存在的条目 id（或先建出 ${parentId}）`,
+    });
+  }
+
+  // ref.unknown-clue：covers 指向的验收线索必须存在（父条目存在，且其 acceptance 里有该线索）。
+  const covers = entry.frontmatter["covers"];
+  if (Array.isArray(covers)) {
+    for (const item of covers) {
+      const ref = parseClueRef(item);
+      const parent = ref === null ? undefined : byId[ref.entryId];
+      const known =
+        ref !== null &&
+        parent !== undefined &&
+        isPlainObject(parent.frontmatter["acceptance"]) &&
+        Object.hasOwn(parent.frontmatter["acceptance"] as object, ref.clueId);
+      if (known) continue;
+      const shown = typeof item === "string" ? item : (JSON.stringify(item) ?? String(item));
+      const why =
+        ref === null
+          ? "不是 <条目id>#<线索id> 形式"
+          : parent === undefined
+            ? `条目 ${ref.entryId} 不存在`
+            : `条目 ${ref.entryId} 的 acceptance 里没有线索 ${ref.clueId}`;
+      issues.push({
+        level: "ERROR",
+        rule: "ref.unknown-clue",
+        path: entry.path,
+        message: `covers 引用了不存在的验收线索：${shown}（${why}）`,
+        fix: "核对线索 id（父条目的 acceptance 键），或先在父条目补上该线索",
+      });
+    }
+  }
+
+  return issues;
+}
+
+function issuesFor(entry: Entry, byId: Record<string, Entry>): Issue[] {
+  return [...idIssue(entry), ...fieldIssues(entry), ...refIssues(entry, byId)];
+}
+
+/** 全仓（或限定一条链）跑 field / id / ref 规则，返回按 path、rule 排序的问题。 */
 export async function validate(
   cwd: string,
   options: { chain?: string } = {},
 ): Promise<Issue[]> {
   const entries = await readEntries(cwd);
+  const byId: Record<string, Entry> = {};
+  for (const entry of entries) {
+    const id = idOf(entry);
+    if (id !== undefined && !Object.hasOwn(byId, id)) byId[id] = entry;
+  }
 
   let scoped = entries;
   if (options.chain !== undefined) {
-    if (!entries.some((entry) => idOf(entry) === options.chain)) {
+    if (!Object.hasOwn(byId, options.chain)) {
       throw new BaizeError("chain.not-found", `链不存在：${options.chain}`);
     }
     scoped = chainMembers(entries, options.chain);
   }
 
-  const issues = scoped.flatMap(issuesFor);
+  const issues = scoped.flatMap((entry) => issuesFor(entry, byId));
   issues.sort((a, b) =>
     a.path === b.path
       ? a.rule.localeCompare(b.rule)

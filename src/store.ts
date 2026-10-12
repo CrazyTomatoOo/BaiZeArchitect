@@ -70,13 +70,19 @@ function emptyValue(kind: FieldKind): unknown {
   }
 }
 
-/** 建文件的初始内容：frontmatter 写齐该层必填字段（值留空），正文留空待填。 */
-export function scaffold(layer: LayerDef, id: string): string {
+/** 建文件的初始内容：frontmatter 写齐该层必填字段（值留空），正文留空待填。
+ *  overrides 覆盖默认值（如 --parent / --covers 把声明写进 frontmatter）。 */
+export function scaffold(
+  layer: LayerDef,
+  id: string,
+  overrides: Record<string, unknown> = {},
+): string {
   const frontmatter: Record<string, unknown> = {};
   for (const field of layer.fields) {
     if (field.source !== "frontmatter") continue;
     frontmatter[field.name] = field.name === "id" ? id : emptyValue(field.kind);
   }
+  Object.assign(frontmatter, overrides);
   return `---\n${stringifyYaml(frontmatter)}---\n\n`;
 }
 
