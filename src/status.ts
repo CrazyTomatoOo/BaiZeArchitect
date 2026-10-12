@@ -10,6 +10,7 @@ import {
   skipRecordOf,
   type SkipRecord,
 } from "./chainstate.ts";
+import { computeCoverage, type EntryCoverage } from "./coverage.ts";
 import { isPlainObject } from "./guards.ts";
 import { readEntries } from "./store.ts";
 
@@ -40,6 +41,8 @@ export interface ChainDetail {
   id: string;
   items: ChainItem[];
   stages: StageView[];
+  /** 链内每条 IR 的线索覆盖率（与 validate 的 coverage.missing-clue 同一份数据）。 */
+  coverage: EntryCoverage[];
 }
 export interface ItemView {
   id: string;
@@ -97,7 +100,8 @@ export async function chainStatus(cwd: string, id: string): Promise<ChainDetail>
   if (!entries.some((entry) => idOf(entry) === id)) {
     throw new BaizeError("chain.not-found", `链不存在：${id}`);
   }
-  const items = chainMembers(entries, id).map(chainItemOf);
+  const members = chainMembers(entries, id);
+  const items = members.map(chainItemOf);
   items.sort((a, b) => a.id.localeCompare(b.id));
   const state = await readChainState(cwd, id);
   const stages: StageView[] = STAGES.map((stage) => {
@@ -108,7 +112,7 @@ export async function chainStatus(cwd: string, id: string): Promise<ChainDetail>
     }
     return { stage, skipped: skipRecordOf(state?.skipped[stage]) };
   });
-  return { id, items, stages };
+  return { id, items, stages, coverage: computeCoverage(members) };
 }
 
 /** 单条目的正反向视图入口（#148 只做条目本身；反向关系与覆盖率归后续工单）。 */

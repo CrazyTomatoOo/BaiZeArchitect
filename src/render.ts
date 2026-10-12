@@ -85,6 +85,9 @@ export function renderChain(chain: ChainDetail): string {
       lines.push(`  ${stage.stage}: ${own}`);
     }
   }
+  for (const coverage of chain.coverage) {
+    lines.push(`  ${coverage.id} ${coverage.covered}/${coverage.total} 已覆盖`);
+  }
   return `${lines.join("\n")}\n`;
 }
 
