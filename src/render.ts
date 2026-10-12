@@ -60,9 +60,45 @@ export function renderChains(chains: ChainSummary[]): string {
   if (chains.length === 0) return "没有链。\n";
   const lines = [`链：${chains.length} 条`];
   for (const chain of chains) {
-    lines.push(`  ${chain.id}  ${chain.title}  ${chain.path}`);
+    lines.push(
+      `  ${chain.id}  ${chain.title}  ${chain.items} 个条目  覆盖 ${chain.coverage.covered}/${chain.coverage.total}  陈旧 直接 ${chain.stale.direct} / 传递 ${chain.stale.transitive}`,
+    );
   }
   return `${lines.join("\n")}\n`;
+}
+
+const GATE_LABEL: Record<string, string> = {
+  "ir-entry": "IR 录入",
+  "sr-ar": "SR→AR 分配",
+  "function-split": "功能拆分",
+};
+
+/** 门禁的人读渲染：kind（auto/signed）、阻塞还是提醒、判据原文、签字人与两项清单。 */
+function renderGates(gates: ChainDetail["gates"]): string[] {
+  const lines = ["门禁："];
+  for (const gate of gates) {
+    const label = GATE_LABEL[gate.gate] ?? gate.gate;
+    const kind = gate.kind === "auto" ? "自动" : "需签字";
+    const role = gate.blocking ? "阻塞" : "提醒";
+    const signer =
+      gate.by !== null && gate.at !== null ? ` — ${gate.by} @ ${gate.at} 签字` : "";
+    const state = gate.state === "passed" ? "已通过" : "未过";
+    lines.push(`  ${label} [${kind}·${role}] ${state}${signer}`);
+    lines.push(`    判据：${gate.criterion}`);
+    for (const check of gate.checks ?? []) {
+      lines.push(`    ${check.passed ? "✓" : "✗"} ${check.check}`);
+    }
+    const pending = gate.pending;
+    if (pending !== undefined) {
+      const unrealized = pending.unrealizedUsecases.map((u) => u.id).join("、");
+      if (unrealized !== "") lines.push(`    未覆盖的用例：${unrealized}`);
+      const stale = pending.unreviewedStale
+        .map((s) => `${s.id}（上游 ${s.upstreams.join("、")}）`)
+        .join("、");
+      if (stale !== "") lines.push(`    未复核的陈旧：${stale}`);
+    }
+  }
+  return lines;
 }
 
 export function renderChain(chain: ChainDetail): string {
@@ -92,6 +128,7 @@ export function renderChain(chain: ChainDetail): string {
     lines.push(`  ${coverage.id} ${coverage.covered}/${coverage.total} 已覆盖`);
   }
   lines.push(renderChainStale(chain.stale));
+  lines.push(...renderGates(chain.gates));
   return `${lines.join("\n")}\n`;
 }
 
@@ -114,6 +151,7 @@ export function renderItem(item: ItemView): string {
     `  title: ${item.title}`,
     `  path: ${item.path}`,
     `  parent: ${item.parent ?? "—"}`,
+    `  chain: ${item.chain ?? "—"}`,
     `  confirmation: ${renderConfirmation(item.confirmation)}`,
     `  statement: ${item.statement}`,
   ];
@@ -123,6 +161,25 @@ export function renderItem(item: ItemView): string {
     for (const clue of clues) {
       lines.push(`    ${clue}: ${item.acceptance[clue] ?? ""}`);
     }
+  }
+  if (item.clueCoverage !== undefined && item.clueCoverage.length > 0) {
+    lines.push("  线索覆盖（被哪些 SR 覆盖）：");
+    for (const clue of item.clueCoverage) {
+      const by =
+        clue.coveredBy.length > 0
+          ? `被 ${clue.coveredBy.join("、")} 覆盖`
+          : "未覆盖";
+      lines.push(`    ${clue.clueId}: ${clue.text} — ${by}`);
+    }
+  }
+  if (item.catalogs !== undefined && item.catalogs.length > 0) {
+    const sources = item.catalogs
+      .map((source) => `${source.scenario} → ${source.catalog}`)
+      .join("、");
+    lines.push(`  继承自场景目录：${sources}`);
+  }
+  if (item.realizedBy !== undefined && item.realizedBy.length > 0) {
+    lines.push(`  realizedBy: ${item.realizedBy.join("、")}`);
   }
   return `${lines.join("\n")}\n`;
 }

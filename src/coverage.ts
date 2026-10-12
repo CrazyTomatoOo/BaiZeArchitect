@@ -75,3 +75,38 @@ export function computeCoverage(entries: Entry[]): EntryCoverage[] {
   result.sort((a, b) => a.id.localeCompare(b.id));
   return result;
 }
+
+export interface UnrealizedUsecase {
+  id: string;
+  path: string;
+}
+
+/**
+ * 未被任何功能项 realizes 的用例（`coverage.unrealized-usecase` 那份数据）。
+ * realizes 集合取全仓（跨链引用也合法），报告范围按传入的 scoped 限定。
+ * validate（报成 issue）与 status（功能拆分门禁的待签字清单）共用本函数，不各算一套。
+ */
+export function unrealizedUsecases(
+  scoped: Entry[],
+  all: Entry[],
+): UnrealizedUsecase[] {
+  const realized = new Set<string>();
+  for (const entry of all) {
+    if (entry.layer.key !== "function-items") continue;
+    const items = entry.frontmatter["realizes"];
+    if (!Array.isArray(items)) continue;
+    for (const item of items) {
+      if (typeof item === "string") realized.add(item);
+    }
+  }
+
+  const result: UnrealizedUsecase[] = [];
+  for (const entry of scoped) {
+    if (entry.layer.key !== "usecases") continue;
+    const id = idOf(entry);
+    if (id === undefined || realized.has(id)) continue;
+    result.push({ id, path: entry.path });
+  }
+  result.sort((a, b) => a.id.localeCompare(b.id));
+  return result;
+}

@@ -103,6 +103,27 @@ export function staleFindings(scoped: Entry[]): StaleFinding {
   return { direct, transitive };
 }
 
+export interface DirectStaleView {
+  id: string;
+  path: string;
+  /** 指纹与当前实质字段不符、待复核的上游 id（升序）。 */
+  upstreams: string[];
+}
+
+/**
+ * 直接下游陈旧的结构化清单（`stale.direct-downstream` 那份数据）。
+ * validate（报成 issue）与 status（功能拆分门禁的待签字清单）共用本函数，不各算一套。
+ */
+export function directStaleViews(scoped: Entry[]): DirectStaleView[] {
+  const byId = byIdOf(scoped);
+  const { direct } = staleFindings(scoped);
+  return direct.map((entry) => ({
+    id: idOf(entry) ?? entry.path,
+    path: entry.path,
+    upstreams: staleUpstreamIdsOf(entry, byId),
+  }));
+}
+
 /** 传递条目的消息里点出直接陈旧的祖先（沿 parent 链在作用域内回溯，升序去重）。 */
 function staleAncestorsOf(
   entry: Entry,

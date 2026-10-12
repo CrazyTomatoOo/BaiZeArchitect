@@ -1171,7 +1171,8 @@ test("链状态文件只存 skipped 与 gates：gates 通过校验且不落地�
   write(cwd, "baize/ir/IR-001.md", LEGAL_IR);
   // 线索全覆盖（#150），隔离 coverage.missing-clue
   write(cwd, "baize/sr/SR-001.md", srWithCovers("SR-001", "IR-001#a1, IR-001#a2"));
-  // 只有功能拆分门禁留人工通过记录；IR 录入与 SR→AR 两处门禁由事实算出，不落盘
+  // 只有功能拆分门禁留人工通过记录（#156 定形：gates.function-split = by/at/criterion）；
+  // IR 录入与 SR→AR 两处门禁由事实算出，不落盘
   write(
     cwd,
     "baize/chains/IR-001.yaml",
@@ -1181,10 +1182,10 @@ test("链状态文件只存 skipped 与 gates：gates 通过校验且不落地�
     at: 2026-10-12
     why: 单 SR 直接对应实现，无需 AR
 gates:
-  function:
-    confirmedBy: crazytomatooo
+  function-split:
+    by: crazytomatooo
     at: 2026-10-12
-    statement: 这套功能拆分足以支撑实现；未覆盖的用例与未复核的陈旧已处置。
+    criterion: 这套功能拆分足以支撑实现；未覆盖的用例与未复核的陈旧已处置。
 `,
   );
 
@@ -1193,18 +1194,21 @@ gates:
 
   const machine = await run(["status", "--chain", "IR-001", "--json"], { cwd });
   assert.equal(machine.exitCode, 0, machine.stdout);
-  const stages = parseJson<ChainOutput>(machine.stdout).chain.stages;
+  const chain = parseJson<ChainOutput>(machine.stdout).chain;
+  const stages = chain.stages;
   for (const stage of stages) {
-    // 门禁签字不显示为段状态；文件里没有进度 / 覆盖率 / 陈旧
+    // 门禁签字不显示为段状态；段视图里没有进度 / 覆盖率 / 陈旧
     assert.ok(!("gate" in stage) && !("gates" in stage), `段 ${stage.stage} 不得含门禁状态`);
     assert.ok(!("progress" in stage) && !("coverage" in stage) && !("stale" in stage));
   }
   const ar = stages.find((s) => s.stage === "ar");
   assert.equal(ar?.skipped?.why, "单 SR 直接对应实现，无需 AR");
 
+  // #156 起 status 呈现门禁（本断言在 #153 是「不得出现」，呈现归本票）
   const human = await run(["status", "--chain", "IR-001"], { cwd });
-  assert.ok(!human.stdout.includes("gate"), "人读输出不得出现门禁记录：" + human.stdout);
-  assert.ok(!human.stdout.includes("足以支撑实现"));
+  assert.ok(human.stdout.includes("门禁"));
+  assert.ok(human.stdout.includes("足以支撑实现"));
+  assert.ok(human.stdout.includes("crazytomatooo @ 2026-10-12 签字"));
 });
 
 const IR_THREE_CLUES = `---
@@ -2211,4 +2215,427 @@ test("status --chain 汇总传递影响：另有 N 条下游受影响", async (t
     (await run(["status", "--chain", "IR-001", "--json"], { cwd })).stdout,
   ).chain.stale;
   assert.deepEqual(fresh, { direct: [], transitive: 0 });
+});
+
+// —— #156：status 全貌（三入口、两类门禁、反向视图）——
+
+/** 功能拆分门禁的固定判据原文（#139）：签字人要对着它签，必须能原样取出。 */
+const FUNCTION_SPLIT_CRITERION =
+  "这套功能拆分足以支撑实现；未覆盖的用例与未复核的陈旧已处置。";
+
+interface GateCheckView {
+  check: string;
+  passed: boolean;
+}
+interface GatePendingView {
+  unrealizedUsecases: { id: string; path: string }[];
+  unreviewedStale: { id: string; path: string; upstreams: string[] }[];
+}
+interface GateView {
+  gate: string;
+  kind: "auto" | "signed";
+  blocking: boolean;
+  state: "pending" | "passed";
+  criterion: string;
+  by: string | null;
+  at: string | null;
+  checks?: GateCheckView[];
+  pending?: GatePendingView;
+}
+interface ChainGatesOutput {
+  schemaVersion: number;
+  chain: {
+    id: string;
+    coverage: { id: string; covered: number; total: number }[];
+    stale: ChainStaleView;
+    gates: GateView[];
+  };
+}
+interface ChainSummaryView {
+  id: string;
+  layer: string;
+  title: string;
+  path: string;
+  items: number;
+  coverage: { covered: number; total: number };
+  stale: { direct: number; transitive: number };
+}
+interface StatusChainsOverviewOutput {
+  schemaVersion: number;
+  chains: ChainSummaryView[];
+}
+interface ItemClueCoverageView {
+  clueId: string;
+  text: string;
+  covered: boolean;
+  coveredBy: string[];
+}
+interface ItemCatalogSourceView {
+  scenario: string;
+  catalog: string;
+}
+interface FullItemView extends ItemView {
+  chain: string | null;
+  clueCoverage?: ItemClueCoverageView[];
+  catalogs?: ItemCatalogSourceView[];
+  realizedBy?: string[];
+}
+interface StatusFullItemOutput {
+  schemaVersion: number;
+  item: FullItemView;
+}
+
+const SC_SELF_SERVICE = LEGAL_SC.replace("id: SC-001", "id: SC-002").replace(
+  "catalog: order-flow",
+  "catalog: self-service",
+);
+
+const UC_TWO_SCENARIOS = LEGAL_UC.replace(
+  "appearsIn:\n  - SC-001",
+  "appearsIn:\n  - SC-001\n  - SC-002",
+);
+
+/** 铺一条六层齐全且无陈旧的链：IR → SR → AR，SR → SC → UC → FN → FP。 */
+function writeFullChain(cwd: string): void {
+  write(cwd, "baize/ir/IR-001.md", LEGAL_IR);
+  write(cwd, "baize/sr/SR-001.md", LEGAL_SR_FULL);
+  write(cwd, "baize/architecture.yaml", ARCHITECTURE_YAML);
+  write(cwd, "baize/scenario-catalogs.yaml", SCENARIO_CATALOGS_YAML);
+  write(cwd, "baize/ar/AR-001.md", LEGAL_AR);
+  write(cwd, "baize/scenarios/SC-001.md", LEGAL_SC);
+  write(cwd, "baize/usecases/UC-001.md", LEGAL_UC);
+  write(cwd, "baize/function-items/FN-001.md", LEGAL_FN);
+  write(cwd, "baize/function-points/FP-001.md", LEGAL_FP);
+}
+
+test("status 无参总览：每条链一行，带条目数 / 覆盖率进度 / 陈旧两档计数", async (t) => {
+  const cwd = mkdtempSync(join(tmpdir(), "baize-"));
+  t.after(() => rmSync(cwd, { recursive: true, force: true }));
+  writeFullChain(cwd);
+  const ir2 = LEGAL_IR.replace("id: IR-001", "id: IR-002").replace(
+    "title: 支持用户数据导出",
+    "title: 审计日志留存",
+  );
+  write(cwd, "baize/ir/IR-002.md", ir2);
+
+  const machine = await run(["status", "--json"], { cwd });
+  assert.equal(machine.exitCode, 0, machine.stdout);
+  const chains = parseJson<StatusChainsOverviewOutput>(machine.stdout).chains;
+  assert.equal(chains.length, 2);
+  const first = chains.find((c) => c.id === "IR-001");
+  assert.ok(first, machine.stdout);
+  assert.equal(first.title, "支持用户数据导出");
+  assert.equal(first.items, 7, "IR/SR/AR/SC/UC/FN/FP 共 7 个条目");
+  assert.deepEqual(first.coverage, { covered: 2, total: 2 });
+  assert.deepEqual(first.stale, { direct: 0, transitive: 0 });
+  const second = chains.find((c) => c.id === "IR-002");
+  assert.ok(second, machine.stdout);
+  assert.equal(second.items, 1);
+  assert.deepEqual(second.coverage, { covered: 0, total: 2 });
+
+  const human = await run(["status"], { cwd });
+  assert.equal(human.exitCode, 0, human.stdout);
+  const lines = human.stdout.trim().split("\n").slice(1);
+  assert.equal(lines.length, 2, "每条链一行");
+  assert.match(lines[0]!, /IR-001.*支持用户数据导出.*7 个条目.*覆盖 2\/2/);
+  assert.match(lines[0]!, /陈旧 直接 0 \/ 传递 0/);
+  assert.match(lines[1]!, /IR-002.*覆盖 0\/2/);
+});
+
+test("status --chain：三处门禁带 kind 与原样 criterion；IR 录入未确认 → pending，accept 后 → passed", async (t) => {
+  const cwd = mkdtempSync(join(tmpdir(), "baize-"));
+  t.after(() => rmSync(cwd, { recursive: true, force: true }));
+  injectUser(t, "alice");
+  writeFullChain(cwd);
+
+  const before = parseJson<ChainGatesOutput>(
+    (await run(["status", "--chain", "IR-001", "--json"], { cwd })).stdout,
+  ).chain;
+  assert.deepEqual(
+    before.gates.map((g) => g.gate),
+    ["ir-entry", "sr-ar", "function-split"],
+  );
+  const irEntry = before.gates[0]!;
+  assert.equal(irEntry.kind, "auto");
+  assert.equal(irEntry.blocking, true);
+  assert.equal(irEntry.state, "pending", "IR 未确认 → 门禁未过");
+  assert.equal(irEntry.criterion, "父 IR 的 statement 与 acceptance 已人工确认");
+  assert.equal(irEntry.by, null);
+  assert.equal(irEntry.at, null);
+  const srAr = before.gates[1]!;
+  assert.equal(srAr.kind, "auto");
+  assert.equal(srAr.blocking, false, "sr-ar 是提醒，不阻止推进");
+  assert.equal(srAr.state, "passed", "SR-001 已有 AR 承接");
+  assert.equal(srAr.criterion, "每条 SR 已 allocates");
+  const fnSplit = before.gates[2]!;
+  assert.equal(fnSplit.kind, "signed");
+  assert.equal(fnSplit.blocking, true);
+  assert.equal(fnSplit.state, "pending", "没有人签字就没有通过记录");
+  assert.equal(fnSplit.criterion, FUNCTION_SPLIT_CRITERION, "判据原样可取");
+  assert.equal(fnSplit.by, null);
+  assert.equal(fnSplit.at, null);
+
+  // 链视图仍带覆盖率进度与陈旧两档计数（#156 验收：链视图含两者）
+  assert.deepEqual(before.coverage.map((c) => [c.id, c.covered, c.total]), [
+    ["IR-001", 2, 2],
+  ]);
+  assert.deepEqual(before.stale, { direct: [], transitive: 0 });
+
+  const human = await run(["status", "--chain", "IR-001"], { cwd });
+  assert.equal(human.exitCode, 0, human.stdout);
+  assert.match(human.stdout, /门禁/);
+  assert.match(human.stdout, /提醒/, "sr-ar 门禁要能让人看出只是提醒");
+  assert.ok(human.stdout.includes(FUNCTION_SPLIT_CRITERION));
+
+  // accept 之后 IR 录入门禁由 confirmationOf 现算转 passed（不落盘门禁状态）
+  await acceptAndRead(cwd, "IR-001");
+  const after = parseJson<ChainGatesOutput>(
+    (await run(["status", "--chain", "IR-001", "--json"], { cwd })).stdout,
+  ).chain;
+  assert.equal(after.gates[0]!.state, "passed");
+});
+
+test("sr-ar 门禁是提醒：没有 AR 时 pending 但 blocking=false，补上 AR 后 passed", async (t) => {
+  const cwd = mkdtempSync(join(tmpdir(), "baize-"));
+  t.after(() => rmSync(cwd, { recursive: true, force: true }));
+  write(cwd, "baize/ir/IR-001.md", LEGAL_IR);
+  write(cwd, "baize/sr/SR-001.md", LEGAL_SR_FULL);
+  write(cwd, "baize/architecture.yaml", ARCHITECTURE_YAML);
+
+  const pending = parseJson<ChainGatesOutput>(
+    (await run(["status", "--chain", "IR-001", "--json"], { cwd })).stdout,
+  ).chain.gates[1]!;
+  assert.equal(pending.state, "pending");
+  assert.equal(pending.blocking, false);
+  assert.equal(pending.kind, "auto");
+
+  write(cwd, "baize/ar/AR-001.md", LEGAL_AR);
+  const passed = parseJson<ChainGatesOutput>(
+    (await run(["status", "--chain", "IR-001", "--json"], { cwd })).stdout,
+  ).chain.gates[1]!;
+  assert.equal(passed.state, "passed");
+});
+
+test("function-split 门禁读链状态文件的 gates 记录：有签字 → passed 带出 by/at；无记录或缺 by → pending", async (t) => {
+  const cwd = mkdtempSync(join(tmpdir(), "baize-"));
+  t.after(() => rmSync(cwd, { recursive: true, force: true }));
+  writeFullChain(cwd);
+
+  const unsigned = parseJson<ChainGatesOutput>(
+    (await run(["status", "--chain", "IR-001", "--json"], { cwd })).stdout,
+  ).chain.gates[2]!;
+  assert.equal(unsigned.state, "pending");
+  assert.equal(unsigned.by, null);
+  assert.equal(unsigned.at, null);
+
+  write(
+    cwd,
+    "baize/chains/IR-001.yaml",
+    `skipped: {}
+gates:
+  function-split:
+    by: alice
+    at: 2026-10-12
+    criterion: ${FUNCTION_SPLIT_CRITERION}
+`,
+  );
+  const signed = parseJson<ChainGatesOutput>(
+    (await run(["status", "--chain", "IR-001", "--json"], { cwd })).stdout,
+  ).chain.gates[2]!;
+  assert.equal(signed.state, "passed");
+  assert.equal(signed.by, "alice");
+  assert.equal(signed.at, "2026-10-12");
+  assert.equal(signed.criterion, FUNCTION_SPLIT_CRITERION);
+
+  const human = await run(["status", "--chain", "IR-001"], { cwd });
+  assert.equal(human.exitCode, 0, human.stdout);
+  assert.match(human.stdout, /alice @ 2026-10-12/);
+
+  // 记录缺 by = 不是一条签字（无从追问谁签的）
+  write(
+    cwd,
+    "baize/chains/IR-001.yaml",
+    `skipped: {}
+gates:
+  function-split:
+    at: 2026-10-12
+    criterion: ${FUNCTION_SPLIT_CRITERION}
+`,
+  );
+  const broken = parseJson<ChainGatesOutput>(
+    (await run(["status", "--chain", "IR-001", "--json"], { cwd })).stdout,
+  ).chain.gates[2]!;
+  assert.equal(broken.state, "pending");
+  assert.equal(broken.by, null);
+});
+
+test("function-split 三项自动挡：未覆盖用例 / 功能点缺字段 / 直接下游陈旧各自可算、各自可修", async (t) => {
+  const cwd = mkdtempSync(join(tmpdir(), "baize-"));
+  t.after(() => rmSync(cwd, { recursive: true, force: true }));
+  injectUser(t, "alice");
+  writeFullChain(cwd);
+
+  const allClear = parseJson<ChainGatesOutput>(
+    (await run(["status", "--chain", "IR-001", "--json"], { cwd })).stdout,
+  ).chain.gates[2]!;
+  assert.deepEqual(
+    allClear.checks!.map((c) => [c.check, c.passed]),
+    [
+      ["每条用例都有功能点 realizes 它", true],
+      ["每个功能点五项字段齐备", true],
+      ["无未复核的直接下游陈旧", true],
+    ],
+  );
+  assert.deepEqual(allClear.pending!.unrealizedUsecases, []);
+  assert.deepEqual(allClear.pending!.unreviewedStale, []);
+
+  // 三处各自制造一个缺陷
+  const uc2 = LEGAL_UC.replace("id: UC-001", "id: UC-002").replace(
+    "title: 提交订单",
+    "title: 取消订单",
+  );
+  write(cwd, "baize/usecases/UC-002.md", uc2); // 无人 realizes
+  write(
+    cwd,
+    "baize/function-points/FP-001.md",
+    LEGAL_FP.replace("acceptanceCriteria:\n  - 非法参数返回 400\n", ""),
+  ); // 缺第五项
+  await acceptAndRead(cwd, "SR-001"); // 复核上游 IR-001
+  changeIrStatement(cwd); // 上游再改 → SR-001 直接陈旧
+
+  const dirty = parseJson<ChainGatesOutput>(
+    (await run(["status", "--chain", "IR-001", "--json"], { cwd })).stdout,
+  ).chain.gates[2]!;
+  assert.deepEqual(
+    dirty.checks!.map((c) => c.passed),
+    [false, false, false],
+  );
+  assert.deepEqual(
+    dirty.pending!.unrealizedUsecases.map((u) => u.id),
+    ["UC-002"],
+  );
+  assert.deepEqual(
+    dirty.pending!.unreviewedStale.map((s) => [s.id, s.upstreams]),
+    [["SR-001", ["IR-001"]]],
+  );
+
+  // 人读输出把三张待处置清单渲染在同一份数据上
+  const human = await run(["status", "--chain", "IR-001"], { cwd });
+  assert.equal(human.exitCode, 0, human.stdout);
+  assert.match(human.stdout, /未覆盖的用例：UC-002/);
+  assert.match(human.stdout, /未复核的陈旧：SR-001（上游 IR-001）/);
+
+  // 各自修复后三样复归全过
+  write(
+    cwd,
+    "baize/function-items/FN-001.md",
+    LEGAL_FN.replace("realizes:\n  - UC-001", "realizes:\n  - UC-001\n  - UC-002"),
+  );
+  write(cwd, "baize/function-points/FP-001.md", LEGAL_FP);
+  await acceptAndRead(cwd, "SR-001"); // 按现版复核
+  const fixed = parseJson<ChainGatesOutput>(
+    (await run(["status", "--chain", "IR-001", "--json"], { cwd })).stdout,
+  ).chain.gates[2]!;
+  assert.deepEqual(
+    fixed.checks!.map((c) => c.passed),
+    [true, true, true],
+  );
+  assert.deepEqual(fixed.pending!.unrealizedUsecases, []);
+  assert.deepEqual(fixed.pending!.unreviewedStale, []);
+});
+
+test("签字要看的两张清单与 validate 同源：pending == coverage.unrealized-usecase 与 stale.direct-downstream 的 issue 集合", async (t) => {
+  const cwd = mkdtempSync(join(tmpdir(), "baize-"));
+  t.after(() => rmSync(cwd, { recursive: true, force: true }));
+  injectUser(t, "alice");
+  writeFullChain(cwd);
+  const uc2 = LEGAL_UC.replace("id: UC-001", "id: UC-002").replace(
+    "title: 提交订单",
+    "title: 取消订单",
+  );
+  write(cwd, "baize/usecases/UC-002.md", uc2);
+  await acceptAndRead(cwd, "SR-001");
+  changeIrStatement(cwd);
+
+  const validated = parseJson<ValidateOutput>(
+    (await run(["validate", "--chain", "IR-001", "--json"], { cwd })).stdout,
+  );
+  const unrealizedIds = validated.issues
+    .filter((i) => i.rule === "coverage.unrealized-usecase")
+    .map((i) => i.path)
+    .sort();
+  const staleIds = validated.issues
+    .filter((i) => i.rule === "stale.direct-downstream")
+    .map((i) => i.path)
+    .sort();
+
+  const gate = parseJson<ChainGatesOutput>(
+    (await run(["status", "--chain", "IR-001", "--json"], { cwd })).stdout,
+  ).chain.gates[2]!;
+  const pendingUcPaths = gate.pending!.unrealizedUsecases.map((u) => u.path).sort();
+  const pendingStalePaths = gate.pending!.unreviewedStale.map((s) => s.path).sort();
+  assert.deepEqual(pendingUcPaths, unrealizedIds, "未覆盖用例清单与 validate 同一份数据");
+  assert.deepEqual(pendingStalePaths, staleIds, "未复核陈旧清单与 validate 同一份数据");
+});
+
+test("status --item IR-001：反向视图给出每条线索被哪几条 SR 覆盖（线索级）", async (t) => {
+  const cwd = mkdtempSync(join(tmpdir(), "baize-"));
+  t.after(() => rmSync(cwd, { recursive: true, force: true }));
+  write(cwd, "baize/ir/IR-001.md", IR_THREE_CLUES);
+  write(cwd, "baize/sr/SR-001.md", srWithCovers("SR-001", "IR-001#a1"));
+  write(cwd, "baize/sr/SR-002.md", srWithCovers("SR-002", "IR-001#a1"));
+
+  const item = parseJson<StatusFullItemOutput>(
+    (await run(["status", "--item", "IR-001", "--json"], { cwd })).stdout,
+  ).item;
+  assert.deepEqual(item.clueCoverage, [
+    { clueId: "a1", text: "能导出 CSV", covered: true, coveredBy: ["SR-001", "SR-002"] },
+    { clueId: "a2", text: "能导出 Excel", covered: false, coveredBy: [] },
+    { clueId: "a3", text: "能设置导出范围", covered: false, coveredBy: [] },
+  ]);
+
+  const human = await run(["status", "--item", "IR-001"], { cwd });
+  assert.equal(human.exitCode, 0, human.stdout);
+  assert.match(human.stdout, /被 SR-001、SR-002 覆盖/);
+  assert.match(human.stdout, /未覆盖/);
+});
+
+test("status --item UC-001：反向视图给出继承自哪些场景目录（一条用例可属多个目录）与谁 realizes 了它", async (t) => {
+  const cwd = mkdtempSync(join(tmpdir(), "baize-"));
+  t.after(() => rmSync(cwd, { recursive: true, force: true }));
+  writeFullChain(cwd);
+  write(cwd, "baize/scenarios/SC-002.md", SC_SELF_SERVICE);
+  write(cwd, "baize/usecases/UC-001.md", UC_TWO_SCENARIOS);
+
+  const item = parseJson<StatusFullItemOutput>(
+    (await run(["status", "--item", "UC-001", "--json"], { cwd })).stdout,
+  ).item;
+  assert.deepEqual(item.catalogs, [
+    { scenario: "SC-001", catalog: "order-flow" },
+    { scenario: "SC-002", catalog: "self-service" },
+  ]);
+  assert.deepEqual(item.realizedBy, ["FN-001"]);
+
+  const human = await run(["status", "--item", "UC-001"], { cwd });
+  assert.equal(human.exitCode, 0, human.stdout);
+  assert.match(human.stdout, /SC-001 → order-flow/);
+  assert.match(human.stdout, /SC-002 → self-service/);
+  assert.match(human.stdout, /FN-001/);
+});
+
+test("status --item：任意条目都看得到自己属于哪条链（沿 parent 边到根的反向信息）", async (t) => {
+  const cwd = mkdtempSync(join(tmpdir(), "baize-"));
+  t.after(() => rmSync(cwd, { recursive: true, force: true }));
+  writeFullChain(cwd);
+
+  for (const id of ["IR-001", "SR-001", "FP-001"]) {
+    const item = parseJson<StatusFullItemOutput>(
+      (await run(["status", "--item", id, "--json"], { cwd })).stdout,
+    ).item;
+    assert.equal(item.chain, "IR-001", `${id} 属于链 IR-001`);
+  }
+
+  const human = await run(["status", "--item", "FP-001"], { cwd });
+  assert.equal(human.exitCode, 0, human.stdout);
+  assert.match(human.stdout, /chain: IR-001/);
 });
