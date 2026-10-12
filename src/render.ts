@@ -50,6 +50,9 @@ export function renderChain(chain: ChainDetail): string {
   for (const item of chain.items) {
     lines.push(`  ${item.id} [${item.layer}] ${item.title}`);
   }
+  for (const coverage of chain.coverage) {
+    lines.push(`  ${coverage.id} ${coverage.covered}/${coverage.total} 已覆盖`);
+  }
   return `${lines.join("\n")}\n`;
 }
 

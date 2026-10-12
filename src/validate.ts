@@ -2,6 +2,7 @@ import type { Entry } from "./entry.ts";
 import { idOf, parentIdOf } from "./entry.ts";
 import { BaizeError } from "./errors.ts";
 import { chainMembers } from "./chain.ts";
+import { computeCoverage, parseClueRef } from "./coverage.ts";
 import { isPlainObject } from "./guards.ts";
 import type { FieldKind } from "./layers.ts";
 import { readEntries } from "./store.ts";
@@ -75,14 +76,6 @@ function idIssue(entry: Entry): Issue[] {
   ];
 }
 
-/** 解析 covers 项 `<条目id>#<线索id>`；不是这个形状返回 null。 */
-function parseClueRef(item: unknown): { entryId: string; clueId: string } | null {
-  if (typeof item !== "string") return null;
-  const hash = item.indexOf("#");
-  if (hash <= 0 || hash === item.length - 1) return null;
-  return { entryId: item.slice(0, hash), clueId: item.slice(hash + 1) };
-}
-
 function refIssues(entry: Entry, byId: Record<string, Entry>): Issue[] {
   const issues: Issue[] = [];
   const parentId = parentIdOf(entry);
@@ -145,7 +138,21 @@ function issuesFor(entry: Entry, byId: Record<string, Entry>): Issue[] {
   return [...idIssue(entry), ...fieldIssues(entry), ...refIssues(entry, byId)];
 }
 
-/** 全仓（或限定一条链）跑 field / id / ref 规则，返回按 path、rule 排序的问题。 */
+/** coverage.missing-clue：IR 的每条验收线索都要至少一个 SR 的 covers 指向它。
+ * 覆盖率数据与 status 共用 src/coverage.ts（不各算一套）。 */
+function coverageIssues(scoped: Entry[]): Issue[] {
+  return computeCoverage(scoped).flatMap((coverage) =>
+    coverage.missing.map((clue) => ({
+      level: "ERROR" as const,
+      rule: "coverage.missing-clue",
+      path: coverage.path,
+      message: `验收线索未覆盖：${coverage.id}#${clue.clueId}「${clue.text}」没有任何 SR 的 covers 指向它`,
+      fix: `新建或修改 SR，把 ${coverage.id}#${clue.clueId} 写进其 covers；若线索已废弃，从 ${coverage.path} 的 acceptance 删掉它`,
+    })),
+  );
+}
+
+/** 全仓（或限定一条链）跑 field / id / ref / coverage 规则，返回按 path、rule 排序的问题。 */
 export async function validate(
   cwd: string,
   options: { chain?: string } = {},
@@ -165,7 +172,10 @@ export async function validate(
     scoped = chainMembers(entries, options.chain);
   }
 
-  const issues = scoped.flatMap((entry) => issuesFor(entry, byId));
+  const issues = [
+    ...scoped.flatMap((entry) => issuesFor(entry, byId)),
+    ...coverageIssues(scoped),
+  ];
   issues.sort((a, b) =>
     a.path === b.path
       ? a.rule.localeCompare(b.rule)
