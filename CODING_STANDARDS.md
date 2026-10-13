@@ -49,10 +49,11 @@
 
 ## 已经机械化的（评审别再报）
 
-`npm run check` = 类型检查 → 测试 → 构建 → skill 结构 → 装包冒烟：
+`npm run check` = 类型检查 → 测试 → 构建 → skill 结构 → fixture 严格校验 → 装包冒烟：
 
 - `tsc --noEmit`：类型
 - `test/cli.test.ts`：exit code 语义（0/1/2）、`--json` 与人读同源、rule id 形状、各规则的报与不报
 - `scripts/check-skills.mjs`：十个 skill 齐全、`name` 与目录一致、`description` 以 `Use when` 开头、正文非空且中文
+- `scripts/check-fixture.mjs`：拿 `test/fixtures/chain-sample`（最小七层链）跑 `validate --strict`，零问题；并断言那条链确实覆盖七层
 - `scripts/check-pack.mjs`：`npm pack` 出来的包装进干净项目后 `baize new ir` 真能跑
 - `.githooks/pre-commit` 与 `.github/workflows/check.yml`：上面这套在提交前与 CI 各跑一次

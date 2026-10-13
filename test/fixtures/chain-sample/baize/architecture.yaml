@@ -1,0 +1,3 @@
+# 架构元素是外部输入（ADR-0004）：本套件只读、不生产。
+components:
+  export-service: { name: 导出服务, description: 产出可下载的数据文件 }
