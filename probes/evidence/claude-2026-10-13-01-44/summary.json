@@ -1,0 +1,881 @@
+{
+  "harness": "claude",
+  "stamp": "2026-10-13-01-44-",
+  "repo": "/Volumes/work/Project/BaiZeArchitect",
+  "counts": {
+    "PASS": 28,
+    "FAIL": 2,
+    "ERROR": 0
+  },
+  "rows": [
+    {
+      "id": "ub-trigger",
+      "skill": "using-baize",
+      "scenario": "trigger",
+      "fixture": "sr-written",
+      "durationMs": 52814,
+      "exitCode": 0,
+      "projectDir": "/Volumes/work/Project/BaiZeArchitect/probes/results/claude-2026-10-13-01-44-/projects/ub-trigger-gyHQDm",
+      "modelUsed": null,
+      "replyChars": 1882,
+      "verdict": "PASS",
+      "expect": {
+        "present": true,
+        "any": [
+          {
+            "reply": "baize|六段|设计条目|链条"
+          }
+        ]
+      },
+      "hits": [
+        {
+          "reply": "baize|六段|设计条目|链条"
+        }
+      ],
+      "fired": [
+        "using-baize"
+      ],
+      "prompt": "这个仓库里的需求设计是怎么管的？给我讲讲。"
+    },
+    {
+      "id": "ub-miss",
+      "skill": "using-baize",
+      "scenario": "miss",
+      "fixture": "sr-written",
+      "durationMs": 27595,
+      "exitCode": 0,
+      "projectDir": "/Volumes/work/Project/BaiZeArchitect/probes/results/claude-2026-10-13-01-44-/projects/ub-miss-HYM9v5",
+      "modelUsed": null,
+      "replyChars": 860,
+      "verdict": "PASS",
+      "expect": {
+        "present": true,
+        "any": [
+          {
+            "reply": "baize|六段|设计条目|链条"
+          }
+        ]
+      },
+      "hits": [
+        {
+          "reply": "baize|六段|设计条目|链条"
+        }
+      ],
+      "fired": [
+        "using-baize"
+      ],
+      "prompt": "我刚接手这个仓库，IR、SR、场景这些条目都是什么关系，我先从哪看起？"
+    },
+    {
+      "id": "ub-trap",
+      "skill": "using-baize",
+      "scenario": "trap",
+      "fixture": "plain-project",
+      "durationMs": 32882,
+      "exitCode": 0,
+      "projectDir": "/Volumes/work/Project/BaiZeArchitect/probes/results/claude-2026-10-13-01-44-/projects/ub-trap-8gZW7h",
+      "modelUsed": null,
+      "replyChars": 285,
+      "verdict": "PASS",
+      "expect": {
+        "present": false,
+        "any": [
+          {
+            "reply": "六段|设计条目|IR 录入|baize status|baize-(ir|sr|ar)"
+          }
+        ]
+      },
+      "hits": [],
+      "fired": [
+        "using-baize"
+      ],
+      "prompt": "这个脚本跑起来怎么什么都不输出，帮我看看是哪的问题。"
+    },
+    {
+      "id": "ir-trigger",
+      "skill": "baize-ir",
+      "scenario": "trigger",
+      "fixture": "baize-init",
+      "durationMs": 78439,
+      "exitCode": 0,
+      "projectDir": "/Volumes/work/Project/BaiZeArchitect/probes/results/claude-2026-10-13-01-44-/projects/ir-trigger-Ubsqri",
+      "modelUsed": null,
+      "replyChars": 403,
+      "verdict": "PASS",
+      "expect": {
+        "present": true,
+        "any": [
+          {
+            "skill": "baize-ir"
+          }
+        ]
+      },
+      "hits": [
+        {
+          "skill": "baize-ir"
+        }
+      ],
+      "fired": [
+        "baize-ir",
+        "using-baize"
+      ],
+      "prompt": "老板刚提了个诉求：用户得能把自己的数据带走，不能锁死在咱们系统里，你先把它记下来。"
+    },
+    {
+      "id": "ir-miss",
+      "skill": "baize-ir",
+      "scenario": "miss",
+      "fixture": "baize-init",
+      "durationMs": 169973,
+      "exitCode": 0,
+      "projectDir": "/Volumes/work/Project/BaiZeArchitect/probes/results/claude-2026-10-13-01-44-/projects/ir-miss-sohX6E",
+      "modelUsed": null,
+      "replyChars": 390,
+      "verdict": "PASS",
+      "expect": {
+        "present": true,
+        "any": [
+          {
+            "skill": "baize-ir"
+          }
+        ]
+      },
+      "hits": [
+        {
+          "skill": "baize-ir"
+        }
+      ],
+      "fired": [
+        "baize-ir",
+        "using-baize"
+      ],
+      "prompt": "客户投诉说他们的数据被锁在咱们系统里带不走，这事得立项跟进一下。"
+    },
+    {
+      "id": "ir-trap",
+      "skill": "baize-ir",
+      "scenario": "trap",
+      "fixture": "ir-confirmed",
+      "durationMs": 145023,
+      "exitCode": 0,
+      "projectDir": "/Volumes/work/Project/BaiZeArchitect/probes/results/claude-2026-10-13-01-44-/projects/ir-trap-PAJ2BZ",
+      "modelUsed": null,
+      "replyChars": 317,
+      "verdict": "PASS",
+      "expect": {
+        "present": false,
+        "any": [
+          {
+            "skill": "baize-ir"
+          }
+        ]
+      },
+      "hits": [],
+      "fired": [
+        "baize-sr",
+        "using-baize"
+      ],
+      "prompt": "IR-001 已经确认完了，你往下拆吧。"
+    },
+    {
+      "id": "sr-trigger",
+      "skill": "baize-sr",
+      "scenario": "trigger",
+      "fixture": "ir-confirmed",
+      "durationMs": 99016,
+      "exitCode": 0,
+      "projectDir": "/Volumes/work/Project/BaiZeArchitect/probes/results/claude-2026-10-13-01-44-/projects/sr-trigger-b6rIkp",
+      "modelUsed": null,
+      "replyChars": 258,
+      "verdict": "PASS",
+      "expect": {
+        "present": true,
+        "any": [
+          {
+            "skill": "baize-sr"
+          }
+        ]
+      },
+      "hits": [
+        {
+          "skill": "baize-sr"
+        }
+      ],
+      "fired": [
+        "baize-sr",
+        "using-baize"
+      ],
+      "prompt": "IR-001 的验收都确认过了，把它拆成系统层面的要求吧。"
+    },
+    {
+      "id": "sr-miss",
+      "skill": "baize-sr",
+      "scenario": "miss",
+      "fixture": "ir-confirmed",
+      "durationMs": 40416,
+      "exitCode": 0,
+      "projectDir": "/Volumes/work/Project/BaiZeArchitect/probes/results/claude-2026-10-13-01-44-/projects/sr-miss-dmDrAm",
+      "modelUsed": null,
+      "replyChars": 479,
+      "verdict": "PASS",
+      "expect": {
+        "present": true,
+        "any": [
+          {
+            "skill": "baize-sr"
+          }
+        ]
+      },
+      "hits": [
+        {
+          "skill": "baize-sr"
+        }
+      ],
+      "fired": [
+        "baize-sr",
+        "using-baize"
+      ],
+      "prompt": "IR-001 定稿了，系统上要兑现哪些能力，你盘一下。"
+    },
+    {
+      "id": "sr-trap",
+      "skill": "baize-sr",
+      "scenario": "trap",
+      "fixture": "ir-unconfirmed",
+      "durationMs": 128666,
+      "exitCode": 0,
+      "projectDir": "/Volumes/work/Project/BaiZeArchitect/probes/results/claude-2026-10-13-01-44-/projects/sr-trap-rf0Mzo",
+      "modelUsed": null,
+      "replyChars": 495,
+      "verdict": "FAIL",
+      "expect": {
+        "present": false,
+        "any": [
+          {
+            "skill": "baize-sr"
+          }
+        ]
+      },
+      "hits": [
+        {
+          "skill": "baize-sr"
+        }
+      ],
+      "fired": [
+        "baize-sr",
+        "using-baize"
+      ],
+      "prompt": "IR-001 你直接往下拆吧，确认的事回头再说。"
+    },
+    {
+      "id": "ar-trigger",
+      "skill": "baize-ar",
+      "scenario": "trigger",
+      "fixture": "sr-written",
+      "durationMs": 54011,
+      "exitCode": 0,
+      "projectDir": "/Volumes/work/Project/BaiZeArchitect/probes/results/claude-2026-10-13-01-44-/projects/ar-trigger-S49PkD",
+      "modelUsed": null,
+      "replyChars": 198,
+      "verdict": "PASS",
+      "expect": {
+        "present": true,
+        "any": [
+          {
+            "skill": "baize-ar"
+          }
+        ]
+      },
+      "hits": [
+        {
+          "skill": "baize-ar"
+        }
+      ],
+      "fired": [
+        "baize-ar",
+        "using-baize"
+      ],
+      "prompt": "SR-001 写好了，把它落到架构组件上吧。"
+    },
+    {
+      "id": "ar-miss",
+      "skill": "baize-ar",
+      "scenario": "miss",
+      "fixture": "sr-written",
+      "durationMs": 148062,
+      "exitCode": 0,
+      "projectDir": "/Volumes/work/Project/BaiZeArchitect/probes/results/claude-2026-10-13-01-44-/projects/ar-miss-OkpLij",
+      "modelUsed": null,
+      "replyChars": 221,
+      "verdict": "PASS",
+      "expect": {
+        "present": true,
+        "any": [
+          {
+            "skill": "baize-ar"
+          }
+        ]
+      },
+      "hits": [
+        {
+          "skill": "baize-ar"
+        }
+      ],
+      "fired": [
+        "baize-ar",
+        "using-baize"
+      ],
+      "prompt": "SR-001 这块活儿该派给哪个组件，你定一下。"
+    },
+    {
+      "id": "ar-trap",
+      "skill": "baize-ar",
+      "scenario": "trap",
+      "fixture": "ar-written",
+      "durationMs": 60058,
+      "exitCode": 0,
+      "projectDir": "/Volumes/work/Project/BaiZeArchitect/probes/results/claude-2026-10-13-01-44-/projects/ar-trap-PGbGLg",
+      "modelUsed": null,
+      "replyChars": 862,
+      "verdict": "PASS",
+      "expect": {
+        "present": false,
+        "any": [
+          {
+            "skill": "baize-ar"
+          }
+        ]
+      },
+      "hits": [],
+      "fired": [
+        "baize-scenario",
+        "using-baize"
+      ],
+      "prompt": "SR-001 接下来会被怎么用，先过一遍场景。"
+    },
+    {
+      "id": "sc-trigger",
+      "skill": "baize-scenario",
+      "scenario": "trigger",
+      "fixture": "sr-written",
+      "durationMs": 65127,
+      "exitCode": 0,
+      "projectDir": "/Volumes/work/Project/BaiZeArchitect/probes/results/claude-2026-10-13-01-44-/projects/sc-trigger-Z2e9zZ",
+      "modelUsed": null,
+      "replyChars": 636,
+      "verdict": "PASS",
+      "expect": {
+        "present": true,
+        "any": [
+          {
+            "skill": "baize-scenario"
+          }
+        ]
+      },
+      "hits": [
+        {
+          "skill": "baize-scenario"
+        }
+      ],
+      "fired": [
+        "baize-scenario",
+        "using-baize"
+      ],
+      "prompt": "SR-001 还没有场景，把它会被怎么用先梳理出来。"
+    },
+    {
+      "id": "sc-miss",
+      "skill": "baize-scenario",
+      "scenario": "miss",
+      "fixture": "sr-written",
+      "durationMs": 100973,
+      "exitCode": 0,
+      "projectDir": "/Volumes/work/Project/BaiZeArchitect/probes/results/claude-2026-10-13-01-44-/projects/sc-miss-d1aQn5",
+      "modelUsed": null,
+      "replyChars": 319,
+      "verdict": "PASS",
+      "expect": {
+        "present": true,
+        "any": [
+          {
+            "skill": "baize-scenario"
+          }
+        ]
+      },
+      "hits": [
+        {
+          "skill": "baize-scenario"
+        }
+      ],
+      "fired": [
+        "baize-scenario",
+        "using-baize"
+      ],
+      "prompt": "运营说每月初要把上月的账目导出来归档，这算一种用它的情形，先记下来。"
+    },
+    {
+      "id": "sc-trap",
+      "skill": "baize-scenario",
+      "scenario": "trap",
+      "fixture": "scenario-written",
+      "durationMs": 123581,
+      "exitCode": 0,
+      "projectDir": "/Volumes/work/Project/BaiZeArchitect/probes/results/claude-2026-10-13-01-44-/projects/sc-trap-ePNN1l",
+      "modelUsed": null,
+      "replyChars": 546,
+      "verdict": "PASS",
+      "expect": {
+        "present": false,
+        "any": [
+          {
+            "skill": "baize-scenario"
+          }
+        ]
+      },
+      "hits": [],
+      "fired": [
+        "baize-usecase",
+        "using-baize"
+      ],
+      "prompt": "场景有了，把里面用户和系统一步步的交互整理成用例。"
+    },
+    {
+      "id": "uc-trigger",
+      "skill": "baize-usecase",
+      "scenario": "trigger",
+      "fixture": "scenario-written",
+      "durationMs": 149493,
+      "exitCode": 0,
+      "projectDir": "/Volumes/work/Project/BaiZeArchitect/probes/results/claude-2026-10-13-01-44-/projects/uc-trigger-ANDPwe",
+      "modelUsed": null,
+      "replyChars": 662,
+      "verdict": "PASS",
+      "expect": {
+        "present": true,
+        "any": [
+          {
+            "skill": "baize-usecase"
+          }
+        ]
+      },
+      "hits": [
+        {
+          "skill": "baize-usecase"
+        }
+      ],
+      "fired": [
+        "baize-usecase",
+        "using-baize"
+      ],
+      "prompt": "SC-001 定稿了，把里面的交互整理成用例。"
+    },
+    {
+      "id": "uc-miss",
+      "skill": "baize-usecase",
+      "scenario": "miss",
+      "fixture": "scenario-written",
+      "durationMs": 100879,
+      "exitCode": 0,
+      "projectDir": "/Volumes/work/Project/BaiZeArchitect/probes/results/claude-2026-10-13-01-44-/projects/uc-miss-O1kdLy",
+      "modelUsed": null,
+      "replyChars": 325,
+      "verdict": "FAIL",
+      "expect": {
+        "present": true,
+        "any": [
+          {
+            "skill": "baize-usecase"
+          }
+        ]
+      },
+      "hits": [],
+      "fired": [
+        "baize-scenario",
+        "using-baize"
+      ],
+      "prompt": "光说财务每月导一次太粗了，用户具体在里面一步步干什么，得写清楚。"
+    },
+    {
+      "id": "uc-trap",
+      "skill": "baize-usecase",
+      "scenario": "trap",
+      "fixture": "usecase-written",
+      "durationMs": 210543,
+      "exitCode": 0,
+      "projectDir": "/Volumes/work/Project/BaiZeArchitect/probes/results/claude-2026-10-13-01-44-/projects/uc-trap-mUTotJ",
+      "modelUsed": null,
+      "replyChars": 525,
+      "verdict": "PASS",
+      "expect": {
+        "present": false,
+        "any": [
+          {
+            "skill": "baize-usecase"
+          }
+        ]
+      },
+      "hits": [],
+      "fired": [
+        "baize-function",
+        "using-baize"
+      ],
+      "prompt": "用例都有了，往功能上落吧。"
+    },
+    {
+      "id": "fn-trigger",
+      "skill": "baize-function",
+      "scenario": "trigger",
+      "fixture": "usecase-written",
+      "durationMs": 182061,
+      "exitCode": 0,
+      "projectDir": "/Volumes/work/Project/BaiZeArchitect/probes/results/claude-2026-10-13-01-44-/projects/fn-trigger-Dmvc0K",
+      "modelUsed": null,
+      "replyChars": 549,
+      "verdict": "PASS",
+      "expect": {
+        "present": true,
+        "any": [
+          {
+            "skill": "baize-function"
+          }
+        ]
+      },
+      "hits": [
+        {
+          "skill": "baize-function"
+        }
+      ],
+      "fired": [
+        "baize-function",
+        "using-baize"
+      ],
+      "prompt": "UC-001 有了，把它要做的功能拆出来。"
+    },
+    {
+      "id": "fn-miss",
+      "skill": "baize-function",
+      "scenario": "miss",
+      "fixture": "usecase-written",
+      "durationMs": 202630,
+      "exitCode": 0,
+      "projectDir": "/Volumes/work/Project/BaiZeArchitect/probes/results/claude-2026-10-13-01-44-/projects/fn-miss-OXq1iW",
+      "modelUsed": null,
+      "replyChars": 915,
+      "verdict": "PASS",
+      "expect": {
+        "present": true,
+        "any": [
+          {
+            "skill": "baize-function"
+          }
+        ]
+      },
+      "hits": [
+        {
+          "skill": "baize-function"
+        }
+      ],
+      "fired": [
+        "baize-function",
+        "using-baize"
+      ],
+      "prompt": "开发要排期了，UC-001 具体要做哪些东西，你列出来。"
+    },
+    {
+      "id": "fn-trap",
+      "skill": "baize-function",
+      "scenario": "trap",
+      "fixture": "baize-init",
+      "durationMs": 97671,
+      "exitCode": 0,
+      "projectDir": "/Volumes/work/Project/BaiZeArchitect/probes/results/claude-2026-10-13-01-44-/projects/fn-trap-6V6TPO",
+      "modelUsed": null,
+      "replyChars": 423,
+      "verdict": "PASS",
+      "expect": {
+        "present": false,
+        "any": [
+          {
+            "skill": "baize-function"
+          }
+        ]
+      },
+      "hits": [],
+      "fired": [
+        "baize-ir",
+        "using-baize"
+      ],
+      "prompt": "市场部要一个数据大屏功能，你先记下来。"
+    },
+    {
+      "id": "va-trigger",
+      "skill": "baize-validate",
+      "scenario": "trigger",
+      "fixture": "ir-unconfirmed",
+      "durationMs": 69277,
+      "exitCode": 0,
+      "projectDir": "/Volumes/work/Project/BaiZeArchitect/probes/results/claude-2026-10-13-01-44-/projects/va-trigger-dcEPZd",
+      "modelUsed": null,
+      "replyChars": 550,
+      "verdict": "PASS",
+      "expect": {
+        "present": true,
+        "any": [
+          {
+            "skill": "baize-validate"
+          },
+          {
+            "tool": "baize(?!-)[^\"]{0,80}validate"
+          }
+        ]
+      },
+      "hits": [
+        {
+          "skill": "baize-validate"
+        },
+        {
+          "tool": "baize(?!-)[^\"]{0,80}validate"
+        }
+      ],
+      "fired": [
+        "baize-validate",
+        "using-baize"
+      ],
+      "prompt": "我刚把 IR-001 的验收线索补了两条，你看看有没有写歪的地方。"
+    },
+    {
+      "id": "va-miss",
+      "skill": "baize-validate",
+      "scenario": "miss",
+      "fixture": "ir-unconfirmed",
+      "durationMs": 43247,
+      "exitCode": 0,
+      "projectDir": "/Volumes/work/Project/BaiZeArchitect/probes/results/claude-2026-10-13-01-44-/projects/va-miss-KIaDvS",
+      "modelUsed": null,
+      "replyChars": 263,
+      "verdict": "PASS",
+      "expect": {
+        "present": true,
+        "any": [
+          {
+            "skill": "baize-validate"
+          },
+          {
+            "tool": "baize(?!-)[^\"]{0,80}validate"
+          }
+        ]
+      },
+      "hits": [
+        {
+          "skill": "baize-validate"
+        },
+        {
+          "tool": "baize(?!-)[^\"]{0,80}validate"
+        }
+      ],
+      "fired": [
+        "baize-validate",
+        "using-baize"
+      ],
+      "prompt": "IR-001 我就改了标题里的一个词，小改动，应该不用正式走一遍校验吧？"
+    },
+    {
+      "id": "va-trap",
+      "skill": "baize-validate",
+      "scenario": "trap",
+      "fixture": "ir-unconfirmed",
+      "durationMs": 89416,
+      "exitCode": 0,
+      "projectDir": "/Volumes/work/Project/BaiZeArchitect/probes/results/claude-2026-10-13-01-44-/projects/va-trap-Ex48kM",
+      "modelUsed": null,
+      "replyChars": 735,
+      "verdict": "PASS",
+      "expect": {
+        "present": false,
+        "any": [
+          {
+            "skill": "baize-validate"
+          }
+        ]
+      },
+      "hits": [],
+      "fired": [
+        "baize-ir",
+        "baize-review",
+        "using-baize"
+      ],
+      "prompt": "IR-001 我准备提交确认了，你站在审阅的角度帮我把把关。"
+    },
+    {
+      "id": "rw-trigger",
+      "skill": "baize-review",
+      "scenario": "trigger",
+      "fixture": "sr-written",
+      "durationMs": 114250,
+      "exitCode": 0,
+      "projectDir": "/Volumes/work/Project/BaiZeArchitect/probes/results/claude-2026-10-13-01-44-/projects/rw-trigger-VQsRx5",
+      "modelUsed": null,
+      "replyChars": 713,
+      "verdict": "PASS",
+      "expect": {
+        "present": true,
+        "any": [
+          {
+            "skill": "baize-review"
+          }
+        ]
+      },
+      "hits": [
+        {
+          "skill": "baize-review"
+        }
+      ],
+      "fired": [
+        "baize-review",
+        "using-baize"
+      ],
+      "prompt": "SR 都拆完了，提交确认前给我一份能看的汇总。"
+    },
+    {
+      "id": "rw-miss",
+      "skill": "baize-review",
+      "scenario": "miss",
+      "fixture": "sr-written",
+      "durationMs": 94232,
+      "exitCode": 0,
+      "projectDir": "/Volumes/work/Project/BaiZeArchitect/probes/results/claude-2026-10-13-01-44-/projects/rw-miss-YKD3iU",
+      "modelUsed": null,
+      "replyChars": 809,
+      "verdict": "PASS",
+      "expect": {
+        "present": true,
+        "any": [
+          {
+            "skill": "baize-review"
+          }
+        ]
+      },
+      "hits": [
+        {
+          "skill": "baize-review"
+        }
+      ],
+      "fired": [
+        "baize-review",
+        "using-baize"
+      ],
+      "prompt": "拆完的这些产出我要给老板过一遍，帮我整理成人能看的东西。"
+    },
+    {
+      "id": "rw-trap",
+      "skill": "baize-review",
+      "scenario": "trap",
+      "fixture": "sr-written",
+      "durationMs": 40693,
+      "exitCode": 0,
+      "projectDir": "/Volumes/work/Project/BaiZeArchitect/probes/results/claude-2026-10-13-01-44-/projects/rw-trap-gzGDwP",
+      "modelUsed": null,
+      "replyChars": 313,
+      "verdict": "PASS",
+      "expect": {
+        "present": false,
+        "any": [
+          {
+            "skill": "baize-review"
+          }
+        ]
+      },
+      "hits": [],
+      "fired": [
+        "using-baize"
+      ],
+      "prompt": "我刚补了 SR-001 的 covers 指向，先帮我查一下有没有引错。"
+    },
+    {
+      "id": "rv-trigger",
+      "skill": "baize-revise",
+      "scenario": "trigger",
+      "fixture": "stale-downstream",
+      "durationMs": 149127,
+      "exitCode": 0,
+      "projectDir": "/Volumes/work/Project/BaiZeArchitect/probes/results/claude-2026-10-13-01-44-/projects/rv-trigger-N8r9oP",
+      "modelUsed": null,
+      "replyChars": 543,
+      "verdict": "PASS",
+      "expect": {
+        "present": true,
+        "any": [
+          {
+            "skill": "baize-revise"
+          }
+        ]
+      },
+      "hits": [
+        {
+          "skill": "baize-revise"
+        }
+      ],
+      "fired": [
+        "baize-revise",
+        "using-baize"
+      ],
+      "prompt": "IR-001 的验收线索我改了，下游那几条还作数吗？要动哪些你排一下。"
+    },
+    {
+      "id": "rv-miss",
+      "skill": "baize-revise",
+      "scenario": "miss",
+      "fixture": "stale-downstream",
+      "durationMs": 137833,
+      "exitCode": 0,
+      "projectDir": "/Volumes/work/Project/BaiZeArchitect/probes/results/claude-2026-10-13-01-44-/projects/rv-miss-HwRI9z",
+      "modelUsed": null,
+      "replyChars": 199,
+      "verdict": "PASS",
+      "expect": {
+        "present": true,
+        "any": [
+          {
+            "skill": "baize-revise"
+          }
+        ]
+      },
+      "hits": [
+        {
+          "skill": "baize-revise"
+        }
+      ],
+      "fired": [
+        "baize-revise",
+        "using-baize"
+      ],
+      "prompt": "上游那条改了个词，下游要不要跟着改，你看着办。"
+    },
+    {
+      "id": "rv-trap",
+      "skill": "baize-revise",
+      "scenario": "trap",
+      "fixture": "sr-written",
+      "durationMs": 61646,
+      "exitCode": 0,
+      "projectDir": "/Volumes/work/Project/BaiZeArchitect/probes/results/claude-2026-10-13-01-44-/projects/rv-trap-vnoTE9",
+      "modelUsed": null,
+      "replyChars": 232,
+      "verdict": "PASS",
+      "expect": {
+        "present": false,
+        "any": [
+          {
+            "skill": "baize-revise"
+          }
+        ]
+      },
+      "hits": [],
+      "fired": [
+        "baize-ar",
+        "using-baize"
+      ],
+      "prompt": "SR-001 刚写好，接下来 AR 怎么分你接手吧。"
+    }
+  ]
+}

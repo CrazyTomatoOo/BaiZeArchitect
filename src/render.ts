@@ -1,3 +1,5 @@
+import type { Accepted, ConfirmationView } from "./confirm.ts";
+import type { SkipRecord } from "./chainstate.ts";
 import type { ChainDetail, ChainSummary, ItemView } from "./status.ts";
 import type { Issue } from "./types.ts";
 
@@ -36,13 +38,80 @@ export function renderCreated(created: Created): string {
   return `已创建 ${created.path}（${created.id}）\n`;
 }
 
+export function renderAccepted(accepted: Accepted): string {
+  // 与 --json 同源：IR 是「已确认」，其余层是「已复核」（对上游）。
+  if (accepted.kind === "reviewed") {
+    const upstreams = Object.keys(accepted.reviewed).sort();
+    return `已复核 ${accepted.id}：${accepted.by} @ ${accepted.at}（上游：${upstreams.join("、")}）\n`;
+  }
+  return `已确认 ${accepted.id}：${accepted.by} @ ${accepted.at}\n`;
+}
+
+/** 确认状态的人读渲染（与 --json 的 state/by/at 同源）。 */
+function renderConfirmation(confirmation: ConfirmationView): string {
+  if (confirmation.state === "confirmed") {
+    return `已确认（${confirmation.by} @ ${confirmation.at}）`;
+  }
+  if (confirmation.state === "stale") {
+    return `已失效（${confirmation.by} @ ${confirmation.at} 确认后实质内容已改）`;
+  }
+  return "未确认";
+}
+
 export function renderChains(chains: ChainSummary[]): string {
   if (chains.length === 0) return "没有链。\n";
   const lines = [`链：${chains.length} 条`];
   for (const chain of chains) {
-    lines.push(`  ${chain.id}  ${chain.title}  ${chain.path}`);
+    lines.push(
+      `  ${chain.id}  ${chain.title}  ${chain.items} 个条目  覆盖 ${chain.coverage.covered}/${chain.coverage.total}  陈旧 直接 ${chain.stale.direct} / 传递 ${chain.stale.transitive}`,
+    );
   }
   return `${lines.join("\n")}\n`;
+}
+
+const GATE_LABEL: Record<string, string> = {
+  "ir-entry": "IR 录入",
+  "sr-ar": "SR→AR 分配",
+  "function-split": "功能拆分",
+};
+
+/** 门禁的人读渲染：kind（auto/signed）、阻塞还是提醒、判据原文、签字人与两项清单。 */
+function renderGates(gates: ChainDetail["gates"]): string[] {
+  const lines = ["门禁："];
+  for (const gate of gates) {
+    const label = GATE_LABEL[gate.gate] ?? gate.gate;
+    const kind = gate.kind === "auto" ? "自动" : "需签字";
+    const role = gate.blocking ? "阻塞" : "提醒";
+    const signer =
+      gate.by !== null && gate.at !== null ? ` — ${gate.by} @ ${gate.at} 签字` : "";
+    const state = gate.state === "passed" ? "已通过" : "未过";
+    lines.push(`  ${label} [${kind}·${role}] ${state}${signer}`);
+    lines.push(`    判据：${gate.criterion}`);
+    for (const check of gate.checks ?? []) {
+      lines.push(`    ${check.passed ? "✓" : "✗"} ${check.check}`);
+    }
+    // B2：签字记录里的判据与当前判据不一致时原样亮出（签字人对照着重签）
+    if (
+      gate.signedCriterion !== undefined &&
+      gate.signedCriterion !== null &&
+      gate.signedCriterion !== gate.criterion
+    ) {
+      lines.push(`    签字判据：${gate.signedCriterion}`);
+    }
+    if (gate.missing !== undefined && gate.missing.length > 0) {
+      lines.push(`    缺：${gate.missing.join("；")}`);
+    }
+    const pending = gate.pending;
+    if (pending !== undefined) {
+      const unrealized = pending.unrealizedUsecases.map((u) => u.id).join("、");
+      if (unrealized !== "") lines.push(`    未覆盖的用例：${unrealized}`);
+      const stale = pending.unreviewedStale
+        .map((s) => `${s.id}（上游 ${s.upstreams.join("、")}）`)
+        .join("、");
+      if (stale !== "") lines.push(`    未复核的陈旧：${stale}`);
+    }
+  }
+  return lines;
 }
 
 export function renderChain(chain: ChainDetail): string {
@@ -50,7 +119,43 @@ export function renderChain(chain: ChainDetail): string {
   for (const item of chain.items) {
     lines.push(`  ${item.id} [${item.layer}] ${item.title}`);
   }
+  lines.push("阶段：");
+  for (const stage of chain.stages) {
+    const own =
+      stage.skipped === null
+        ? "未跳过"
+        : `已跳过 — ${stage.skipped.by} @ ${stage.skipped.at}：${stage.skipped.why}`;
+    if (stage.subStages !== undefined) {
+      const sub = (record: SkipRecord | null): string =>
+        record === null
+          ? "未跳过"
+          : `已跳过 — ${record.by} @ ${record.at}：${record.why}`;
+      lines.push(
+        `  ${stage.stage}: ${own}（items ${sub(stage.subStages.items)} / points ${sub(stage.subStages.points)}）`,
+      );
+    } else {
+      lines.push(`  ${stage.stage}: ${own}`);
+    }
+  }
+  for (const coverage of chain.coverage) {
+    lines.push(`  ${coverage.id} ${coverage.covered}/${coverage.total} 已覆盖`);
+  }
+  lines.push(renderChainStale(chain.stale));
+  lines.push(...renderGates(chain.gates));
   return `${lines.join("\n")}\n`;
+}
+
+/** 链级陈旧汇总：「直接下游 N 条待复核（…）；另有 M 条下游受影响」。 */
+function renderChainStale(stale: ChainDetail["stale"]): string {
+  if (stale.direct.length === 0 && stale.transitive === 0) return "  陈旧：无";
+  const parts: string[] = [];
+  if (stale.direct.length > 0) {
+    parts.push(`直接下游 ${stale.direct.length} 条待复核（${stale.direct.join("、")}）`);
+  }
+  if (stale.transitive > 0) {
+    parts.push(`另有 ${stale.transitive} 条下游受影响`);
+  }
+  return `  陈旧：${parts.join("；")}`;
 }
 
 export function renderItem(item: ItemView): string {
@@ -59,6 +164,8 @@ export function renderItem(item: ItemView): string {
     `  title: ${item.title}`,
     `  path: ${item.path}`,
     `  parent: ${item.parent ?? "—"}`,
+    `  chain: ${item.chain ?? "—"}`,
+    `  confirmation: ${renderConfirmation(item.confirmation)}`,
     `  statement: ${item.statement}`,
   ];
   const clues = Object.keys(item.acceptance);
@@ -67,6 +174,25 @@ export function renderItem(item: ItemView): string {
     for (const clue of clues) {
       lines.push(`    ${clue}: ${item.acceptance[clue] ?? ""}`);
     }
+  }
+  if (item.clueCoverage !== undefined && item.clueCoverage.length > 0) {
+    lines.push("  线索覆盖（被哪些 SR 覆盖）：");
+    for (const clue of item.clueCoverage) {
+      const by =
+        clue.coveredBy.length > 0
+          ? `被 ${clue.coveredBy.join("、")} 覆盖`
+          : "未覆盖";
+      lines.push(`    ${clue.clueId}: ${clue.text} — ${by}`);
+    }
+  }
+  if (item.catalogs !== undefined && item.catalogs.length > 0) {
+    const sources = item.catalogs
+      .map((source) => `${source.scenario} → ${source.catalog}`)
+      .join("、");
+    lines.push(`  继承自场景目录：${sources}`);
+  }
+  if (item.realizedBy !== undefined && item.realizedBy.length > 0) {
+    lines.push(`  realizedBy: ${item.realizedBy.join("、")}`);
   }
   return `${lines.join("\n")}\n`;
 }

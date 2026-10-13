@@ -1,4 +1,5 @@
 import path from "node:path";
+import { accept, DEFAULT_USER } from "./confirm.ts";
 import { BaizeError } from "./errors.ts";
 import { LAYERS } from "./layers.ts";
 import { BAIZE_DIR, nextId, scaffold, writeFileAtomic } from "./store.ts";
@@ -6,6 +7,7 @@ import { chainStatus, chainSummaries, itemStatus } from "./status.ts";
 import { validate } from "./validate.ts";
 import {
   SCHEMA_VERSION,
+  renderAccepted,
   renderChain,
   renderChains,
   renderCreated,
@@ -22,6 +24,8 @@ export interface RunResult {
 }
 export interface RunOptions {
   cwd?: string;
+  /** 注入时钟（本仓唯一的测试替身）：accept 的 `at` 从这里取 ISO 时间戳。 */
+  now?: Date | string | number;
 }
 
 interface ParsedArgs {
@@ -31,6 +35,12 @@ interface ParsedArgs {
   strict: boolean;
   chain: string | undefined;
   item: string | undefined;
+  parent: string | undefined;
+  covers: string | undefined;
+  appearsIn: string | undefined;
+  realizes: string | undefined;
+  catalog: string | undefined;
+  allocates: string | undefined;
 }
 
 interface CommandOutput {
@@ -45,6 +55,12 @@ function parseArgs(argv: string[]): ParsedArgs {
   let strict = false;
   let chain: string | undefined;
   let item: string | undefined;
+  let parent: string | undefined;
+  let covers: string | undefined;
+  let appearsIn: string | undefined;
+  let realizes: string | undefined;
+  let catalog: string | undefined;
+  let allocates: string | undefined;
 
   for (let i = 0; i < argv.length; i++) {
     const token = argv[i];
@@ -67,6 +83,27 @@ function parseArgs(argv: string[]): ParsedArgs {
       i++;
       continue;
     }
+    if (
+      token === "--parent" ||
+      token === "--covers" ||
+      token === "--appears-in" ||
+      token === "--realizes" ||
+      token === "--catalog" ||
+      token === "--allocates"
+    ) {
+      const value = argv[i + 1];
+      if (value === undefined || value.startsWith("--")) {
+        throw new BaizeError("cli.usage", `${token} 需要一个取值`);
+      }
+      if (token === "--parent") parent = value;
+      else if (token === "--covers") covers = value;
+      else if (token === "--appears-in") appearsIn = value;
+      else if (token === "--realizes") realizes = value;
+      else if (token === "--catalog") catalog = value;
+      else allocates = value;
+      i++;
+      continue;
+    }
     if (token.startsWith("--")) {
       throw new BaizeError("cli.usage", `未知选项：${token}`);
     }
@@ -80,11 +117,18 @@ function parseArgs(argv: string[]): ParsedArgs {
     strict,
     chain,
     item,
+    parent,
+    covers,
+    appearsIn,
+    realizes,
+    catalog,
+    allocates,
   };
 }
 
 async function runNew(args: ParsedArgs, cwd: string): Promise<CommandOutput> {
-  const layerKey = args.positionals[0];
+  // `baize new scenario` 是场景层的口头层名（注册键为复数 scenarios）。
+  const layerKey = args.positionals[0] === "scenario" ? "scenarios" : args.positionals[0];
   if (layerKey === undefined) {
     throw new BaizeError("cli.usage", "用法：baize new <layer>（如 baize new ir）");
   }
@@ -94,7 +138,15 @@ async function runNew(args: ParsedArgs, cwd: string): Promise<CommandOutput> {
   if (args.chain !== undefined || args.item !== undefined || args.strict) {
     throw new BaizeError("cli.usage", "new 只接受 --json（不支持 --chain / --item / --strict）");
   }
-  const layer = LAYERS.find((candidate) => candidate.key === layerKey);
+  // 分析层的常用单数叫法（票面与验收均写 baize new scenario|usecase|function-item|function-point）。
+  const NEW_ALIASES: Record<string, string> = {
+    scenario: "scenarios",
+    usecase: "usecases",
+    "function-item": "function-items",
+    "function-point": "function-points",
+  };
+  const resolvedKey = NEW_ALIASES[layerKey] ?? layerKey;
+  const layer = LAYERS.find((candidate) => candidate.key === resolvedKey);
   if (!layer) {
     throw new BaizeError(
       "layer.unknown",
@@ -105,9 +157,49 @@ async function runNew(args: ParsedArgs, cwd: string): Promise<CommandOutput> {
     throw new BaizeError("cli.usage", `暂不支持新建该层：${layerKey}`);
   }
 
+  // 父边：IR 是链顶端（parent 恒为 null），其余各层（SR/AR 与分析四层）必须有 --parent。
+  // 引用是否存在不在这里挡——由 validate 的 ref.* 规则报（new 只负责把声明写对形状）。
+  if (layer.key === "ir" && args.parent !== undefined) {
+    throw new BaizeError("cli.usage", "ir 是链顶端，不接受 --parent（parent 恒为 null）");
+  }
+  if (layer.key !== "ir" && args.parent === undefined) {
+    throw new BaizeError(
+      "cli.usage",
+      `新建 ${layer.key} 必须指定 --parent <条目id>（必由上层条目分解而来）`,
+    );
+  }
+  if (args.covers !== undefined && layer.key !== "sr") {
+    throw new BaizeError("cli.usage", "--covers 只适用于 sr（SR → IR 验收线索）");
+  }
+  if (args.appearsIn !== undefined && layer.key !== "usecases") {
+    throw new BaizeError("cli.usage", "--appears-in 只适用于 usecase（用例 → 场景）");
+  }
+  if (args.realizes !== undefined && layer.key !== "function-items") {
+    throw new BaizeError("cli.usage", "--realizes 只适用于 function-item（功能项 → 用例）");
+  }
+  if (args.catalog !== undefined && layer.key !== "scenarios") {
+    throw new BaizeError("cli.usage", "--catalog 只适用于 scenario（场景挂场景目录）");
+  }
+  if (args.allocates !== undefined && layer.key !== "ar") {
+    throw new BaizeError("cli.usage", "--allocates 只适用于 ar（AR 分配架构组件）");
+  }
+
+  const splitList = (raw: string): string[] =>
+    raw
+      .split(",")
+      .map((item) => item.trim())
+      .filter((item) => item !== "");
+  const overrides: Record<string, unknown> = {};
+  if (args.parent !== undefined) overrides["parent"] = args.parent;
+  if (args.covers !== undefined) overrides["covers"] = splitList(args.covers);
+  if (args.appearsIn !== undefined) overrides["appearsIn"] = splitList(args.appearsIn);
+  if (args.realizes !== undefined) overrides["realizes"] = splitList(args.realizes);
+  if (args.catalog !== undefined) overrides["catalog"] = args.catalog;
+  if (args.allocates !== undefined) overrides["allocates"] = args.allocates;
+
   const id = await nextId(cwd, layer);
   const relPath = path.posix.join(BAIZE_DIR, layer.dir, `${id}.md`);
-  await writeFileAtomic(path.join(cwd, relPath), scaffold(layer, id));
+  await writeFileAtomic(path.join(cwd, relPath), scaffold(layer, id, overrides));
   const created: Created = { id, path: relPath };
   return {
     data: { schemaVersion: SCHEMA_VERSION, created },
@@ -173,7 +265,40 @@ async function runStatus(args: ParsedArgs, cwd: string): Promise<CommandOutput> 
   };
 }
 
-async function dispatch(args: ParsedArgs, cwd: string): Promise<CommandOutput> {
+async function runAccept(
+  args: ParsedArgs,
+  cwd: string,
+  now: Date,
+): Promise<CommandOutput> {
+  const id = args.positionals[0];
+  if (id === undefined) {
+    throw new BaizeError("cli.usage", "用法：baize accept <id>（如 baize accept IR-001）");
+  }
+  if (args.positionals.length > 1) {
+    throw new BaizeError("cli.usage", `多余参数：${args.positionals.slice(1).join(" ")}`);
+  }
+  if (args.chain !== undefined || args.item !== undefined || args.strict) {
+    throw new BaizeError("cli.usage", "accept 只接受 --json（不支持 --chain / --item / --strict）");
+  }
+  const by = process.env.BAIZE_USER ?? DEFAULT_USER;
+  const accepted = await accept(cwd, id, { by, now });
+  // B1：同一动作的两个方向用域模型的两个词——IR 是 confirmed，其余层是 reviewed。
+  const data =
+    accepted.kind === "confirmed"
+      ? { schemaVersion: SCHEMA_VERSION, confirmed: accepted }
+      : { schemaVersion: SCHEMA_VERSION, reviewed: accepted };
+  return {
+    data,
+    human: renderAccepted(accepted),
+    exitCode: 0,
+  };
+}
+
+async function dispatch(
+  args: ParsedArgs,
+  cwd: string,
+  now: Date,
+): Promise<CommandOutput> {
   switch (args.command) {
     case "new":
       return runNew(args, cwd);
@@ -181,8 +306,10 @@ async function dispatch(args: ParsedArgs, cwd: string): Promise<CommandOutput> {
       return runValidate(args, cwd);
     case "status":
       return runStatus(args, cwd);
+    case "accept":
+      return runAccept(args, cwd, now);
     case undefined:
-      throw new BaizeError("cli.usage", "用法：baize <new|validate|status> [选项]");
+      throw new BaizeError("cli.usage", "用法：baize <new|validate|status|accept> [选项]");
     default:
       throw new BaizeError("cli.usage", `未知命令：${args.command}`);
   }
@@ -197,11 +324,12 @@ export async function run(
   options: RunOptions = {},
 ): Promise<RunResult> {
   const cwd = options.cwd ?? process.cwd();
+  const now = options.now !== undefined ? new Date(options.now) : new Date();
   const wantsJson = argv.includes("--json");
 
   try {
     const args = parseArgs(argv);
-    const output = await dispatch(args, cwd);
+    const output = await dispatch(args, cwd, now);
     return {
       exitCode: output.exitCode,
       stdout: args.json ? toJson(output.data) : output.human,

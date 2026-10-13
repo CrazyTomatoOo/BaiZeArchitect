@@ -1,6 +1,6 @@
 # 架构元素是外部输入，不是本套件的产物
 
-本套件**不生产**架构元素，也不回答「组件该怎么分」。`AR.allocates` 指向一份受外部维护的**受控清单** `baize/architecture.yaml`（`components: [{componentId, name, responsibility, layer?, boundary?}]`），**标量、恰好一个**；`validate` 校验引用的 `componentId` 存在于清单，否则 **ERROR**。
+本套件**不生产**架构元素，也不回答「组件该怎么分」。`AR.allocates` 指向一份受外部维护的**受控清单** `baize/architecture.yaml`（`components: { <slug>: { name, description? } }`，形状于 #142 统一为受控清单统一约定），**标量、恰好一个**；`validate` 校验引用的 slug 存在于清单，否则 **ERROR**。
 
 理由是**它是输入约束，不是产物**：本套件的手艺是「把一条需求逐层拆到功能点」——**按需求分解**；而组件划分是**按职责分解**，是另一门手艺，且是 AR 拆分的前提。把架构设计拉进来，等于把一张正交的图塞进这条链。
 

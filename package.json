@@ -4,16 +4,45 @@
   "private": true,
   "type": "module",
   "description": "极薄的设计校验 CLI：发号、校验、查询 baize/ 下的设计条目",
-  "bin": {
-    "baize": "./bin/baize.ts"
+  "keywords": [
+    "pi-package"
+  ],
+  "pi": {
+    "extensions": [
+      "./extensions/baize-context.ts"
+    ],
+    "skills": [
+      "./skills"
+    ]
   },
+  "bin": {
+    "baize": "./dist/bin/baize.js"
+  },
+  "files": [
+    "dist",
+    "skills",
+    "extensions",
+    "scripts",
+    "hooks",
+    ".claude-plugin"
+  ],
   "scripts": {
+    "build": "tsc -p tsconfig.build.json && node -e \"require('fs').chmodSync('dist/bin/baize.js', 0o755)\"",
+    "prepack": "npm run build",
     "typecheck": "tsc --noEmit",
     "test": "node --import tsx --test test/*.test.ts",
     "baize": "node --import tsx bin/baize.ts"
   },
   "dependencies": {
     "yaml": "^2.9.1"
+  },
+  "peerDependencies": {
+    "@earendil-works/pi-coding-agent": "*"
+  },
+  "peerDependenciesMeta": {
+    "@earendil-works/pi-coding-agent": {
+      "optional": true
+    }
   },
   "devDependencies": {
     "@types/node": "^22",

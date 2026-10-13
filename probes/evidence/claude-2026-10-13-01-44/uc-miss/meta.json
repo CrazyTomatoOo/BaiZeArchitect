@@ -1,0 +1,25 @@
+{
+  "id": "uc-miss",
+  "skill": "baize-usecase",
+  "scenario": "miss",
+  "fixture": "scenario-written",
+  "durationMs": 100879,
+  "exitCode": 0,
+  "projectDir": "/Volumes/work/Project/BaiZeArchitect/probes/results/claude-2026-10-13-01-44-/projects/uc-miss-O1kdLy",
+  "modelUsed": null,
+  "replyChars": 325,
+  "verdict": "FAIL",
+  "expect": {
+    "present": true,
+    "any": [
+      {
+        "skill": "baize-usecase"
+      }
+    ]
+  },
+  "hits": [],
+  "fired": [
+    "baize-scenario",
+    "using-baize"
+  ]
+}

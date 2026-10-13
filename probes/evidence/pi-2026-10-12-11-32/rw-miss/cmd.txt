@@ -1,0 +1,2 @@
+pi -p --approve --model volcengine-apigw/glm-5.2 --session-dir /Volumes/work/Project/BaiZeArchitect/probes/results/pi-2026-10-12-11-32-/projects/rw-miss-Ahem9I/sessions 拆完的这些产出我要给老板过一遍，帮我整理成人能看的东西。
+cwd: /Volumes/work/Project/BaiZeArchitect/probes/results/pi-2026-10-12-11-32-/projects/rw-miss-Ahem9I

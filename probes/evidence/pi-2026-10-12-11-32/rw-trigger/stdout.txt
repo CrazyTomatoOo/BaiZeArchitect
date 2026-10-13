@@ -1,0 +1,28 @@
+## SR 拆分汇总 — 链 IR-001
+
+**1 条链，2 个条目，覆盖率 2/2，无陈旧。**
+
+| 条目 | 标题 | 关系 | covers |
+|---|---|---|---|
+| IR-001 | 支持用户数据导出 | 根需求 | — |
+| SR-001 | 统一导出服务 | parent: IR-001 | a1（CSV导出）、a2（30秒内完成）|
+
+**验收线索全部落到 SR：** 两条 acceptance 都被 SR-001 covers，机械覆盖通过。
+
+**门禁状态：**
+- ✓ IR 录入（自动·阻塞）— 已通过。IR-001 statement 与 acceptance 已人工确认（`by: unknown`，`at: 2026-10-12T11:33:51Z`，指纹已记）。
+- ✗ SR→AR 分配（自动·提醒）— **未过**。SR-001 没有任何 AR 承接。
+- ✗ 功能拆分（需签字·阻塞）— 未过。下游 AR/场景/用例/功能点尚未产出，缺签字。
+
+**校验：1 WARNING**
+- `sr.unallocated` `baize/sr/SR-001.md` — SR 没有任何 AR 承接：SR-001（需求拆到 AR 才算落到了架构组件上）。
+
+### 提交前要决定的一件事
+
+SR 本身的拆分（covers、覆盖、无陈旧）是干净的，可以提交。但 `architecture.yaml` 里已有两个组件（`export-service` 导出服务、`audit-log` 审计日志）却还没建 AR 条目去承接 SR-001，所以 SR→AR 门禁未过。
+
+两个走法：
+1. **先提交 SR，AR 下一步再做** — SR 独立成段，提交不依赖 AR。提醒类门禁不挡路，但 `sr.unallocated` 这个 WARNING 会留在仓库里。
+2. **先补 AR 再一起提交** — 进 `baize-ar` 给 SR-001 建 AR，让 SR→AR 门禁一起过，再提交。
+
+要哪个？如果选 1，我现在帮你 `git add baize/sr/SR-001.md` 并说明留的 WARNING。

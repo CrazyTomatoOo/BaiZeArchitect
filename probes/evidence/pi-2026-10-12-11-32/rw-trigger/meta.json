@@ -1,0 +1,28 @@
+{
+  "id": "rw-trigger",
+  "skill": "baize-review",
+  "scenario": "trigger",
+  "fixture": "sr-written",
+  "durationMs": 42349,
+  "exitCode": 0,
+  "projectDir": "/Volumes/work/Project/BaiZeArchitect/probes/results/pi-2026-10-12-11-32-/projects/rw-trigger-avh2Mu",
+  "modelUsed": "volcengine-apigw/glm-5.2",
+  "replyChars": 934,
+  "verdict": "PASS",
+  "expect": {
+    "present": true,
+    "any": [
+      {
+        "skill": "baize-review"
+      }
+    ]
+  },
+  "hits": [
+    {
+      "skill": "baize-review"
+    }
+  ],
+  "fired": [
+    "baize-review"
+  ]
+}
