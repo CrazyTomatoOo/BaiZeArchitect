@@ -25,7 +25,10 @@ node probes/run.mjs --only ub-trap --only va-miss   # 可重复
 `projects/` 下备查）→ 按期望机械判定 → 打表并写 `summary.md`。
 
 结果目录不入库（`.gitignore` 的 `probes/results/`）；一次真实全量的汇总与
-代表性完整记录见同目录 `RESULTS-<日期>.md`。
+代表性完整记录见同目录 `RESULTS-<日期>.md`。**被 `RESULTS` 引用的那几条探针
+记录另拷一份进 `probes/evidence/`，那一份入库**——盘上的原始批次会随
+worktree 清理/换机器消失（已经发生过一次），精选的那几份才带得走。
+规则与拷贝命令见 `probes/evidence/README.md`。
 
 ## 三个场景各挡什么（#134）
 
@@ -79,4 +82,5 @@ skill 的退化恰好是感觉不到的——表现为「某类请求不再触�
 - `fixtures.mjs` —— 初始项目状态（含用真 CLI 的状态断言）；
   项目装的是本地 checkout 的 baize 包（`file:<repo>`），agent 跑的是真 CLI
 - `run.mjs` —— runner（本文开头那几条命令）
+- `evidence/` —— 入库的精选记录（被 `RESULTS` 引用的那几条；见它自己的 README）
 - `RESULTS-*.md` —— 一次真实全量的汇总表与代表性完整记录

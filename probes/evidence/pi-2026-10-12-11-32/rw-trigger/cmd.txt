@@ -1,0 +1,2 @@
+pi -p --approve --model volcengine-apigw/glm-5.2 --session-dir /Volumes/work/Project/BaiZeArchitect/probes/results/pi-2026-10-12-11-32-/projects/rw-trigger-avh2Mu/sessions SR 都拆完了，提交确认前给我一份能看的汇总。
+cwd: /Volumes/work/Project/BaiZeArchitect/probes/results/pi-2026-10-12-11-32-/projects/rw-trigger-avh2Mu

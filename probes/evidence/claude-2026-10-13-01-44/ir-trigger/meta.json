@@ -1,0 +1,29 @@
+{
+  "id": "ir-trigger",
+  "skill": "baize-ir",
+  "scenario": "trigger",
+  "fixture": "baize-init",
+  "durationMs": 78439,
+  "exitCode": 0,
+  "projectDir": "/Volumes/work/Project/BaiZeArchitect/probes/results/claude-2026-10-13-01-44-/projects/ir-trigger-Ubsqri",
+  "modelUsed": null,
+  "replyChars": 403,
+  "verdict": "PASS",
+  "expect": {
+    "present": true,
+    "any": [
+      {
+        "skill": "baize-ir"
+      }
+    ]
+  },
+  "hits": [
+    {
+      "skill": "baize-ir"
+    }
+  ],
+  "fired": [
+    "baize-ir",
+    "using-baize"
+  ]
+}

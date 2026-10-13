@@ -1,0 +1,137 @@
+{
+  "harness": "pi",
+  "stamp": "2026-10-12-11-32-",
+  "repo": "/Volumes/work/Project/BaiZeArchitect",
+  "counts": {
+    "PASS": 4,
+    "FAIL": 0,
+    "ERROR": 0
+  },
+  "rows": [
+    {
+      "id": "va-trigger",
+      "skill": "baize-validate",
+      "scenario": "trigger",
+      "fixture": "ir-unconfirmed",
+      "durationMs": 84859,
+      "exitCode": 0,
+      "projectDir": "/Volumes/work/Project/BaiZeArchitect/probes/results/pi-2026-10-12-11-32-/projects/va-trigger-jDElb9",
+      "modelUsed": "volcengine-apigw/glm-5.2",
+      "replyChars": 462,
+      "verdict": "PASS",
+      "expect": {
+        "present": true,
+        "any": [
+          {
+            "skill": "baize-validate"
+          },
+          {
+            "tool": "baize(?!-)[^\"]{0,80}validate"
+          }
+        ]
+      },
+      "hits": [
+        {
+          "skill": "baize-validate"
+        },
+        {
+          "tool": "baize(?!-)[^\"]{0,80}validate"
+        }
+      ],
+      "fired": [
+        "baize-validate"
+      ],
+      "prompt": "我刚把 IR-001 的验收线索补了两条，你看看有没有写歪的地方。"
+    },
+    {
+      "id": "va-miss",
+      "skill": "baize-validate",
+      "scenario": "miss",
+      "fixture": "ir-unconfirmed",
+      "durationMs": 13173,
+      "exitCode": 0,
+      "projectDir": "/Volumes/work/Project/BaiZeArchitect/probes/results/pi-2026-10-12-11-32-/projects/va-miss-tEjC7u",
+      "modelUsed": "volcengine-apigw/glm-5.2",
+      "replyChars": 302,
+      "verdict": "PASS",
+      "expect": {
+        "present": true,
+        "any": [
+          {
+            "skill": "baize-validate"
+          },
+          {
+            "tool": "baize(?!-)[^\"]{0,80}validate"
+          }
+        ]
+      },
+      "hits": [
+        {
+          "skill": "baize-validate"
+        }
+      ],
+      "fired": [
+        "baize-validate"
+      ],
+      "prompt": "IR-001 我就改了标题里的一个词，小改动，应该不用正式走一遍校验吧？"
+    },
+    {
+      "id": "rw-trigger",
+      "skill": "baize-review",
+      "scenario": "trigger",
+      "fixture": "sr-written",
+      "durationMs": 42349,
+      "exitCode": 0,
+      "projectDir": "/Volumes/work/Project/BaiZeArchitect/probes/results/pi-2026-10-12-11-32-/projects/rw-trigger-avh2Mu",
+      "modelUsed": "volcengine-apigw/glm-5.2",
+      "replyChars": 934,
+      "verdict": "PASS",
+      "expect": {
+        "present": true,
+        "any": [
+          {
+            "skill": "baize-review"
+          }
+        ]
+      },
+      "hits": [
+        {
+          "skill": "baize-review"
+        }
+      ],
+      "fired": [
+        "baize-review"
+      ],
+      "prompt": "SR 都拆完了，提交确认前给我一份能看的汇总。"
+    },
+    {
+      "id": "rw-miss",
+      "skill": "baize-review",
+      "scenario": "miss",
+      "fixture": "sr-written",
+      "durationMs": 244484,
+      "exitCode": 0,
+      "projectDir": "/Volumes/work/Project/BaiZeArchitect/probes/results/pi-2026-10-12-11-32-/projects/rw-miss-Ahem9I",
+      "modelUsed": "volcengine-apigw/glm-5.2",
+      "replyChars": 417,
+      "verdict": "PASS",
+      "expect": {
+        "present": true,
+        "any": [
+          {
+            "skill": "baize-review"
+          }
+        ]
+      },
+      "hits": [
+        {
+          "skill": "baize-review"
+        }
+      ],
+      "fired": [
+        "baize-review"
+      ],
+      "prompt": "拆完的这些产出我要给老板过一遍，帮我整理成人能看的东西。"
+    }
+  ]
+}

@@ -1,0 +1,28 @@
+{
+  "id": "rw-miss",
+  "skill": "baize-review",
+  "scenario": "miss",
+  "fixture": "sr-written",
+  "durationMs": 244484,
+  "exitCode": 0,
+  "projectDir": "/Volumes/work/Project/BaiZeArchitect/probes/results/pi-2026-10-12-11-32-/projects/rw-miss-Ahem9I",
+  "modelUsed": "volcengine-apigw/glm-5.2",
+  "replyChars": 417,
+  "verdict": "PASS",
+  "expect": {
+    "present": true,
+    "any": [
+      {
+        "skill": "baize-review"
+      }
+    ]
+  },
+  "hits": [
+    {
+      "skill": "baize-review"
+    }
+  ],
+  "fired": [
+    "baize-review"
+  ]
+}

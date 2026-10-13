@@ -1,0 +1,350 @@
+[baize-bootstrap]
+
+
+# using-baize
+
+## 这套东西是什么
+
+BaiZe 软件全量设计：把一条需求从录入开始，逐层拆成可追溯、可校验的设计条目。链条固定六段，有序但可跳段：
+
+**IR 录入 → SR 拆分 → AR 拆分 → 场景分析 → 用例分析 → 功能拆分**
+
+数据是 `baize/` 下的 markdown 条目，与代码同仓、进 git。分工：机械规则（结构、引用、覆盖率、陈旧）由 CLI 保证；判断（什么算一条好需求、拆到什么粒度、怎么算覆盖够了）由 skill 承载——CLI 管「写没写歪」，skill 管「写得对不对」。
+
+## 入口在哪
+
+- 六段各有一个段 skill：`baize-ir` / `baize-sr` / `baize-ar` / `baize-scenario` / `baize-usecase` / `baize-function`。按你正处在哪一段，触发对应的那一个。
+- 三个纪律 skill：`baize-validate`（随时）/ `baize-review`（门禁前）/ `baize-revise`（上游变更后）。
+
+## 第一步跑什么
+
+- 新需求进来、还没有 IR → 进 `baize-ir`。
+- 写完或改完任何条目 → 先 `baize validate`，怎么读结果见 `baize-validate`。
+- 过任何门禁前 → `baize-review`；上游改过、链上有陈旧 → `baize-revise`。
+- 随时可用 `baize status` 查链的全貌（全仓 / 单链 / 单条目三个入口）。
+
+[baize-bootstrap]
+
+
+# using-baize
+
+## 这套东西是什么
+
+BaiZe 软件全量设计：把一条需求从录入开始，逐层拆成可追溯、可校验的设计条目。链条固定六段，有序但可跳段：
+
+**IR 录入 → SR 拆分 → AR 拆分 → 场景分析 → 用例分析 → 功能拆分**
+
+数据是 `baize/` 下的 markdown 条目，与代码同仓、进 git。分工：机械规则（结构、引用、覆盖率、陈旧）由 CLI 保证；判断（什么算一条好需求、拆到什么粒度、怎么算覆盖够了）由 skill 承载——CLI 管「写没写歪」，skill 管「写得对不对」。
+
+## 入口在哪
+
+- 六段各有一个段 skill：`baize-ir` / `baize-sr` / `baize-ar` / `baize-scenario` / `baize-usecase` / `baize-function`。按你正处在哪一段，触发对应的那一个。
+- 三个纪律 skill：`baize-validate`（随时）/ `baize-review`（门禁前）/ `baize-revise`（上游变更后）。
+
+## 第一步跑什么
+
+- 新需求进来、还没有 IR → 进 `baize-ir`。
+- 写完或改完任何条目 → 先 `baize validate`，怎么读结果见 `baize-validate`。
+- 过任何门禁前 → `baize-review`；上游改过、链上有陈旧 → `baize-revise`。
+- 随时可用 `baize status` 查链的全貌（全仓 / 单链 / 单条目三个入口）。
+
+[baize-bootstrap]
+
+
+# using-baize
+
+## 这套东西是什么
+
+BaiZe 软件全量设计：把一条需求从录入开始，逐层拆成可追溯、可校验的设计条目。链条固定六段，有序但可跳段：
+
+**IR 录入 → SR 拆分 → AR 拆分 → 场景分析 → 用例分析 → 功能拆分**
+
+数据是 `baize/` 下的 markdown 条目，与代码同仓、进 git。分工：机械规则（结构、引用、覆盖率、陈旧）由 CLI 保证；判断（什么算一条好需求、拆到什么粒度、怎么算覆盖够了）由 skill 承载——CLI 管「写没写歪」，skill 管「写得对不对」。
+
+## 入口在哪
+
+- 六段各有一个段 skill：`baize-ir` / `baize-sr` / `baize-ar` / `baize-scenario` / `baize-usecase` / `baize-function`。按你正处在哪一段，触发对应的那一个。
+- 三个纪律 skill：`baize-validate`（随时）/ `baize-review`（门禁前）/ `baize-revise`（上游变更后）。
+
+## 第一步跑什么
+
+- 新需求进来、还没有 IR → 进 `baize-ir`。
+- 写完或改完任何条目 → 先 `baize validate`，怎么读结果见 `baize-validate`。
+- 过任何门禁前 → `baize-review`；上游改过、链上有陈旧 → `baize-revise`。
+- 随时可用 `baize status` 查链的全貌（全仓 / 单链 / 单条目三个入口）。
+
+[baize-bootstrap]
+
+
+# using-baize
+
+## 这套东西是什么
+
+BaiZe 软件全量设计：把一条需求从录入开始，逐层拆成可追溯、可校验的设计条目。链条固定六段，有序但可跳段：
+
+**IR 录入 → SR 拆分 → AR 拆分 → 场景分析 → 用例分析 → 功能拆分**
+
+数据是 `baize/` 下的 markdown 条目，与代码同仓、进 git。分工：机械规则（结构、引用、覆盖率、陈旧）由 CLI 保证；判断（什么算一条好需求、拆到什么粒度、怎么算覆盖够了）由 skill 承载——CLI 管「写没写歪」，skill 管「写得对不对」。
+
+## 入口在哪
+
+- 六段各有一个段 skill：`baize-ir` / `baize-sr` / `baize-ar` / `baize-scenario` / `baize-usecase` / `baize-function`。按你正处在哪一段，触发对应的那一个。
+- 三个纪律 skill：`baize-validate`（随时）/ `baize-review`（门禁前）/ `baize-revise`（上游变更后）。
+
+## 第一步跑什么
+
+- 新需求进来、还没有 IR → 进 `baize-ir`。
+- 写完或改完任何条目 → 先 `baize validate`，怎么读结果见 `baize-validate`。
+- 过任何门禁前 → `baize-review`；上游改过、链上有陈旧 → `baize-revise`。
+- 随时可用 `baize status` 查链的全貌（全仓 / 单链 / 单条目三个入口）。
+
+[baize-bootstrap]
+
+
+# using-baize
+
+## 这套东西是什么
+
+BaiZe 软件全量设计：把一条需求从录入开始，逐层拆成可追溯、可校验的设计条目。链条固定六段，有序但可跳段：
+
+**IR 录入 → SR 拆分 → AR 拆分 → 场景分析 → 用例分析 → 功能拆分**
+
+数据是 `baize/` 下的 markdown 条目，与代码同仓、进 git。分工：机械规则（结构、引用、覆盖率、陈旧）由 CLI 保证；判断（什么算一条好需求、拆到什么粒度、怎么算覆盖够了）由 skill 承载——CLI 管「写没写歪」，skill 管「写得对不对」。
+
+## 入口在哪
+
+- 六段各有一个段 skill：`baize-ir` / `baize-sr` / `baize-ar` / `baize-scenario` / `baize-usecase` / `baize-function`。按你正处在哪一段，触发对应的那一个。
+- 三个纪律 skill：`baize-validate`（随时）/ `baize-review`（门禁前）/ `baize-revise`（上游变更后）。
+
+## 第一步跑什么
+
+- 新需求进来、还没有 IR → 进 `baize-ir`。
+- 写完或改完任何条目 → 先 `baize validate`，怎么读结果见 `baize-validate`。
+- 过任何门禁前 → `baize-review`；上游改过、链上有陈旧 → `baize-revise`。
+- 随时可用 `baize status` 查链的全貌（全仓 / 单链 / 单条目三个入口）。
+
+[baize-bootstrap]
+
+
+# using-baize
+
+## 这套东西是什么
+
+BaiZe 软件全量设计：把一条需求从录入开始，逐层拆成可追溯、可校验的设计条目。链条固定六段，有序但可跳段：
+
+**IR 录入 → SR 拆分 → AR 拆分 → 场景分析 → 用例分析 → 功能拆分**
+
+数据是 `baize/` 下的 markdown 条目，与代码同仓、进 git。分工：机械规则（结构、引用、覆盖率、陈旧）由 CLI 保证；判断（什么算一条好需求、拆到什么粒度、怎么算覆盖够了）由 skill 承载——CLI 管「写没写歪」，skill 管「写得对不对」。
+
+## 入口在哪
+
+- 六段各有一个段 skill：`baize-ir` / `baize-sr` / `baize-ar` / `baize-scenario` / `baize-usecase` / `baize-function`。按你正处在哪一段，触发对应的那一个。
+- 三个纪律 skill：`baize-validate`（随时）/ `baize-review`（门禁前）/ `baize-revise`（上游变更后）。
+
+## 第一步跑什么
+
+- 新需求进来、还没有 IR → 进 `baize-ir`。
+- 写完或改完任何条目 → 先 `baize validate`，怎么读结果见 `baize-validate`。
+- 过任何门禁前 → `baize-review`；上游改过、链上有陈旧 → `baize-revise`。
+- 随时可用 `baize status` 查链的全貌（全仓 / 单链 / 单条目三个入口）。
+
+[baize-bootstrap]
+
+
+# using-baize
+
+## 这套东西是什么
+
+BaiZe 软件全量设计：把一条需求从录入开始，逐层拆成可追溯、可校验的设计条目。链条固定六段，有序但可跳段：
+
+**IR 录入 → SR 拆分 → AR 拆分 → 场景分析 → 用例分析 → 功能拆分**
+
+数据是 `baize/` 下的 markdown 条目，与代码同仓、进 git。分工：机械规则（结构、引用、覆盖率、陈旧）由 CLI 保证；判断（什么算一条好需求、拆到什么粒度、怎么算覆盖够了）由 skill 承载——CLI 管「写没写歪」，skill 管「写得对不对」。
+
+## 入口在哪
+
+- 六段各有一个段 skill：`baize-ir` / `baize-sr` / `baize-ar` / `baize-scenario` / `baize-usecase` / `baize-function`。按你正处在哪一段，触发对应的那一个。
+- 三个纪律 skill：`baize-validate`（随时）/ `baize-review`（门禁前）/ `baize-revise`（上游变更后）。
+
+## 第一步跑什么
+
+- 新需求进来、还没有 IR → 进 `baize-ir`。
+- 写完或改完任何条目 → 先 `baize validate`，怎么读结果见 `baize-validate`。
+- 过任何门禁前 → `baize-review`；上游改过、链上有陈旧 → `baize-revise`。
+- 随时可用 `baize status` 查链的全貌（全仓 / 单链 / 单条目三个入口）。
+
+[baize-bootstrap]
+
+
+# using-baize
+
+## 这套东西是什么
+
+BaiZe 软件全量设计：把一条需求从录入开始，逐层拆成可追溯、可校验的设计条目。链条固定六段，有序但可跳段：
+
+**IR 录入 → SR 拆分 → AR 拆分 → 场景分析 → 用例分析 → 功能拆分**
+
+数据是 `baize/` 下的 markdown 条目，与代码同仓、进 git。分工：机械规则（结构、引用、覆盖率、陈旧）由 CLI 保证；判断（什么算一条好需求、拆到什么粒度、怎么算覆盖够了）由 skill 承载——CLI 管「写没写歪」，skill 管「写得对不对」。
+
+## 入口在哪
+
+- 六段各有一个段 skill：`baize-ir` / `baize-sr` / `baize-ar` / `baize-scenario` / `baize-usecase` / `baize-function`。按你正处在哪一段，触发对应的那一个。
+- 三个纪律 skill：`baize-validate`（随时）/ `baize-review`（门禁前）/ `baize-revise`（上游变更后）。
+
+## 第一步跑什么
+
+- 新需求进来、还没有 IR → 进 `baize-ir`。
+- 写完或改完任何条目 → 先 `baize validate`，怎么读结果见 `baize-validate`。
+- 过任何门禁前 → `baize-review`；上游改过、链上有陈旧 → `baize-revise`。
+- 随时可用 `baize status` 查链的全貌（全仓 / 单链 / 单条目三个入口）。
+
+[baize-bootstrap]
+
+
+# using-baize
+
+## 这套东西是什么
+
+BaiZe 软件全量设计：把一条需求从录入开始，逐层拆成可追溯、可校验的设计条目。链条固定六段，有序但可跳段：
+
+**IR 录入 → SR 拆分 → AR 拆分 → 场景分析 → 用例分析 → 功能拆分**
+
+数据是 `baize/` 下的 markdown 条目，与代码同仓、进 git。分工：机械规则（结构、引用、覆盖率、陈旧）由 CLI 保证；判断（什么算一条好需求、拆到什么粒度、怎么算覆盖够了）由 skill 承载——CLI 管「写没写歪」，skill 管「写得对不对」。
+
+## 入口在哪
+
+- 六段各有一个段 skill：`baize-ir` / `baize-sr` / `baize-ar` / `baize-scenario` / `baize-usecase` / `baize-function`。按你正处在哪一段，触发对应的那一个。
+- 三个纪律 skill：`baize-validate`（随时）/ `baize-review`（门禁前）/ `baize-revise`（上游变更后）。
+
+## 第一步跑什么
+
+- 新需求进来、还没有 IR → 进 `baize-ir`。
+- 写完或改完任何条目 → 先 `baize validate`，怎么读结果见 `baize-validate`。
+- 过任何门禁前 → `baize-review`；上游改过、链上有陈旧 → `baize-revise`。
+- 随时可用 `baize status` 查链的全貌（全仓 / 单链 / 单条目三个入口）。
+
+[baize-bootstrap]
+
+
+# using-baize
+
+## 这套东西是什么
+
+BaiZe 软件全量设计：把一条需求从录入开始，逐层拆成可追溯、可校验的设计条目。链条固定六段，有序但可跳段：
+
+**IR 录入 → SR 拆分 → AR 拆分 → 场景分析 → 用例分析 → 功能拆分**
+
+数据是 `baize/` 下的 markdown 条目，与代码同仓、进 git。分工：机械规则（结构、引用、覆盖率、陈旧）由 CLI 保证；判断（什么算一条好需求、拆到什么粒度、怎么算覆盖够了）由 skill 承载——CLI 管「写没写歪」，skill 管「写得对不对」。
+
+## 入口在哪
+
+- 六段各有一个段 skill：`baize-ir` / `baize-sr` / `baize-ar` / `baize-scenario` / `baize-usecase` / `baize-function`。按你正处在哪一段，触发对应的那一个。
+- 三个纪律 skill：`baize-validate`（随时）/ `baize-review`（门禁前）/ `baize-revise`（上游变更后）。
+
+## 第一步跑什么
+
+- 新需求进来、还没有 IR → 进 `baize-ir`。
+- 写完或改完任何条目 → 先 `baize validate`，怎么读结果见 `baize-validate`。
+- 过任何门禁前 → `baize-review`；上游改过、链上有陈旧 → `baize-revise`。
+- 随时可用 `baize status` 查链的全貌（全仓 / 单链 / 单条目三个入口）。
+
+[baize-bootstrap]
+
+
+# using-baize
+
+## 这套东西是什么
+
+BaiZe 软件全量设计：把一条需求从录入开始，逐层拆成可追溯、可校验的设计条目。链条固定六段，有序但可跳段：
+
+**IR 录入 → SR 拆分 → AR 拆分 → 场景分析 → 用例分析 → 功能拆分**
+
+数据是 `baize/` 下的 markdown 条目，与代码同仓、进 git。分工：机械规则（结构、引用、覆盖率、陈旧）由 CLI 保证；判断（什么算一条好需求、拆到什么粒度、怎么算覆盖够了）由 skill 承载——CLI 管「写没写歪」，skill 管「写得对不对」。
+
+## 入口在哪
+
+- 六段各有一个段 skill：`baize-ir` / `baize-sr` / `baize-ar` / `baize-scenario` / `baize-usecase` / `baize-function`。按你正处在哪一段，触发对应的那一个。
+- 三个纪律 skill：`baize-validate`（随时）/ `baize-review`（门禁前）/ `baize-revise`（上游变更后）。
+
+## 第一步跑什么
+
+- 新需求进来、还没有 IR → 进 `baize-ir`。
+- 写完或改完任何条目 → 先 `baize validate`，怎么读结果见 `baize-validate`。
+- 过任何门禁前 → `baize-review`；上游改过、链上有陈旧 → `baize-revise`。
+- 随时可用 `baize status` 查链的全貌（全仓 / 单链 / 单条目三个入口）。
+
+[baize-bootstrap]
+
+
+# using-baize
+
+## 这套东西是什么
+
+BaiZe 软件全量设计：把一条需求从录入开始，逐层拆成可追溯、可校验的设计条目。链条固定六段，有序但可跳段：
+
+**IR 录入 → SR 拆分 → AR 拆分 → 场景分析 → 用例分析 → 功能拆分**
+
+数据是 `baize/` 下的 markdown 条目，与代码同仓、进 git。分工：机械规则（结构、引用、覆盖率、陈旧）由 CLI 保证；判断（什么算一条好需求、拆到什么粒度、怎么算覆盖够了）由 skill 承载——CLI 管「写没写歪」，skill 管「写得对不对」。
+
+## 入口在哪
+
+- 六段各有一个段 skill：`baize-ir` / `baize-sr` / `baize-ar` / `baize-scenario` / `baize-usecase` / `baize-function`。按你正处在哪一段，触发对应的那一个。
+- 三个纪律 skill：`baize-validate`（随时）/ `baize-review`（门禁前）/ `baize-revise`（上游变更后）。
+
+## 第一步跑什么
+
+- 新需求进来、还没有 IR → 进 `baize-ir`。
+- 写完或改完任何条目 → 先 `baize validate`，怎么读结果见 `baize-validate`。
+- 过任何门禁前 → `baize-review`；上游改过、链上有陈旧 → `baize-revise`。
+- 随时可用 `baize status` 查链的全貌（全仓 / 单链 / 单条目三个入口）。
+
+[baize-bootstrap]
+
+
+# using-baize
+
+## 这套东西是什么
+
+BaiZe 软件全量设计：把一条需求从录入开始，逐层拆成可追溯、可校验的设计条目。链条固定六段，有序但可跳段：
+
+**IR 录入 → SR 拆分 → AR 拆分 → 场景分析 → 用例分析 → 功能拆分**
+
+数据是 `baize/` 下的 markdown 条目，与代码同仓、进 git。分工：机械规则（结构、引用、覆盖率、陈旧）由 CLI 保证；判断（什么算一条好需求、拆到什么粒度、怎么算覆盖够了）由 skill 承载——CLI 管「写没写歪」，skill 管「写得对不对」。
+
+## 入口在哪
+
+- 六段各有一个段 skill：`baize-ir` / `baize-sr` / `baize-ar` / `baize-scenario` / `baize-usecase` / `baize-function`。按你正处在哪一段，触发对应的那一个。
+- 三个纪律 skill：`baize-validate`（随时）/ `baize-review`（门禁前）/ `baize-revise`（上游变更后）。
+
+## 第一步跑什么
+
+- 新需求进来、还没有 IR → 进 `baize-ir`。
+- 写完或改完任何条目 → 先 `baize validate`，怎么读结果见 `baize-validate`。
+- 过任何门禁前 → `baize-review`；上游改过、链上有陈旧 → `baize-revise`。
+- 随时可用 `baize status` 查链的全貌（全仓 / 单链 / 单条目三个入口）。
+
+[baize-bootstrap]
+
+
+# using-baize
+
+## 这套东西是什么
+
+BaiZe 软件全量设计：把一条需求从录入开始，逐层拆成可追溯、可校验的设计条目。链条固定六段，有序但可跳段：
+
+**IR 录入 → SR 拆分 → AR 拆分 → 场景分析 → 用例分析 → 功能拆分**
+
+数据是 `baize/` 下的 markdown 条目，与代码同仓、进 git。分工：机械规则（结构、引用、覆盖率、陈旧）由 CLI 保证；判断（什么算一条好需求、拆到什么粒度、怎么算覆盖够了）由 skill 承载——CLI 管「写没写歪」，skill 管「写得对不对」。
+
+## 入口在哪
+
+- 六段各有一个段 skill：`baize-ir` / `baize-sr` / `baize-ar` / `baize-scenario` / `baize-usecase` / `baize-function`。按你正处在哪一段，触发对应的那一个。
+- 三个纪律 skill：`baize-validate`（随时）/ `baize-review`（门禁前）/ `baize-revise`（上游变更后）。
+
+## 第一步跑什么
+
+- 新需求进来、还没有 IR → 进 `baize-ir`。
+- 写完或改完任何条目 → 先 `baize validate`，怎么读结果见 `baize-validate`。
+- 过任何门禁前 → `baize-review`；上游改过、链上有陈旧 → `baize-revise`。
+- 随时可用 `baize status` 查链的全貌（全仓 / 单链 / 单条目三个入口）。
+

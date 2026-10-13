@@ -1,0 +1,2 @@
+pi -p --approve --model volcengine-apigw/glm-5.2 --session-dir /Volumes/work/Project/BaiZeArchitect/probes/results/pi-2026-10-12-11-32-/projects/va-trigger-jDElb9/sessions 我刚把 IR-001 的验收线索补了两条，你看看有没有写歪的地方。
+cwd: /Volumes/work/Project/BaiZeArchitect/probes/results/pi-2026-10-12-11-32-/projects/va-trigger-jDElb9

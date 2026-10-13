@@ -1,0 +1,2 @@
+pi -p --approve --model volcengine-apigw/glm-5.2 --session-dir /Volumes/work/Project/BaiZeArchitect/probes/results/pi-2026-10-12-11-32-/projects/va-miss-tEjC7u/sessions IR-001 我就改了标题里的一个词，小改动，应该不用正式走一遍校验吧？
+cwd: /Volumes/work/Project/BaiZeArchitect/probes/results/pi-2026-10-12-11-32-/projects/va-miss-tEjC7u

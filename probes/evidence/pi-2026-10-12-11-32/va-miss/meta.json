@@ -1,0 +1,31 @@
+{
+  "id": "va-miss",
+  "skill": "baize-validate",
+  "scenario": "miss",
+  "fixture": "ir-unconfirmed",
+  "durationMs": 13173,
+  "exitCode": 0,
+  "projectDir": "/Volumes/work/Project/BaiZeArchitect/probes/results/pi-2026-10-12-11-32-/projects/va-miss-tEjC7u",
+  "modelUsed": "volcengine-apigw/glm-5.2",
+  "replyChars": 302,
+  "verdict": "PASS",
+  "expect": {
+    "present": true,
+    "any": [
+      {
+        "skill": "baize-validate"
+      },
+      {
+        "tool": "baize(?!-)[^\"]{0,80}validate"
+      }
+    ]
+  },
+  "hits": [
+    {
+      "skill": "baize-validate"
+    }
+  ],
+  "fired": [
+    "baize-validate"
+  ]
+}
