@@ -8,6 +8,8 @@ on:
 jobs:
   check:
     runs-on: ubuntu-latest
+    # TODO(2026-10-13)：checkout@v4 / setup-node@v4 打的是 Node 20，GitHub 已发弃用通告
+    # （现被强制跑在 Node 24 上，只是警告）。等 @v5 稳定、或警告变失败时再升。
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4

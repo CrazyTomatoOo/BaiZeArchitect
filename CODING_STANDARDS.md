@@ -57,3 +57,5 @@
 - `scripts/check-fixture.mjs`：拿 `test/fixtures/chain-sample`（最小七层链）跑 `validate --strict`，零问题；并断言那条链确实覆盖七层
 - `scripts/check-pack.mjs`：`npm pack` 出来的包装进干净项目后 `baize new ir` 真能跑
 - `.githooks/pre-commit` 与 `.github/workflows/check.yml`：上面这套在提交前与 CI 各跑一次
+
+**故意不在 `npm run check` 里的**：探针门槛集（`node probes/run.mjs --gate`）。它要**真实模型调用**（花钱、要密钥、结果本身带方差），干的是另一件事——`npm run check` 拦「结构错了」，探针让「行为退化了」有人看得见。改了 `skills/` 下任何文件就跑它（何时跑见 `AGENTS.md`，怎么跑与观察项见 `probes/README.md`）。

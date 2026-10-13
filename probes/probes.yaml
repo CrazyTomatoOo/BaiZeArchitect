@@ -18,11 +18,17 @@
 #   miss    —— 该触发没触发：description 写偏了最容易漏的那类措辞
 #   trap    —— 不该触发却触发：跨段误触发会让 agent 用错标准
 #
+# 两条可选字段（README「门槛集」「观察项」）：
+#   gate: true    —— 属于门槛集：改了 skills/ 下任何文件后跑 `--gate` 的那一批（每个 skill 一条 trigger）
+#   observe: true —— 观察项：照跑照记录，但不判定、不进 PASS/FAIL 计数（目前只有 va-trap：
+#                    它在两个模型上分叉，且修它会挤掉必过的那几条）
+#
 # 判定只管「触没触发」；触发后干得对不对由人看记录（README「判定口径」）。
 
 - id: ub-trigger
   skill: using-baize
   scenario: trigger
+  gate: true
   fixture: sr-written
   prompt: 这个仓库里的需求设计是怎么管的？给我讲讲。
   expect:
@@ -56,6 +62,7 @@
 - id: ir-trigger
   skill: baize-ir
   scenario: trigger
+  gate: true
   fixture: baize-init
   prompt: 老板刚提了个诉求：用户得能把自己的数据带走，不能锁死在咱们系统里，你先把它记下来。
   why: 散文诉求到达、尚无 IR——「记下来」就是要录一条 IR。
@@ -89,6 +96,7 @@
 - id: sr-trigger
   skill: baize-sr
   scenario: trigger
+  gate: true
   fixture: ir-confirmed
   prompt: IR-001 的验收都确认过了，把它拆成系统层面的要求吧。
   why: 验收已确认、SR 尚不存在——description 的主句。
@@ -113,15 +121,19 @@
   scenario: trap
   fixture: ir-unconfirmed
   prompt: IR-001 你直接往下拆吧，确认的事回头再说。
-  why: IR 未确认就催拆——SR→IR 门禁前置不满足，baize-sr 不该接这活（正确走向是回 baize-ir 补确认）。这也是 #133 ④ 的压力措辞。
+  why: IR 未确认就催拆——SR→IR 门禁前置不满足，**正确结果是拒绝拆、把人推回确认**（读 baize-sr 查前置条件是这个正确结果的一部分，故不判路径）。这也是 #133 ④ 的压力措辞。
   expect:
     present: false
     any:
-      - skill: baize-sr
+      # 判的是「有没有真的建出 SR 条目」，不是「有没有打开 baize-sr」——
+      # 前置条件（上游 IR 未确认不拆）就写在它的正文里，**读它不算误触发**。
+      # 跑 CLI（new sr）与直接写文件（sr/SR-xxx.md）都算；ls/读目录不算。
+      - tool: 'new sr|sr/SR-\d{3}\.md'
 
 - id: ar-trigger
   skill: baize-ar
   scenario: trigger
+  gate: true
   fixture: sr-written
   prompt: SR-001 写好了，把它落到架构组件上吧。
   why: SR 存在、无人负责——description 的主句。
@@ -155,6 +167,7 @@
 - id: sc-trigger
   skill: baize-scenario
   scenario: trigger
+  gate: true
   fixture: sr-written
   prompt: SR-001 还没有场景，把它会被怎么用先梳理出来。
   why: SR 无场景——description 的主句。
@@ -188,6 +201,7 @@
 - id: uc-trigger
   skill: baize-usecase
   scenario: trigger
+  gate: true
   fixture: scenario-written
   prompt: SC-001 定稿了，把里面的交互整理成用例。
   why: 场景已在、目标导向交互未写——description 的主句。
@@ -221,6 +235,7 @@
 - id: fn-trigger
   skill: baize-function
   scenario: trigger
+  gate: true
   fixture: usecase-written
   prompt: UC-001 有了，把它要做的功能拆出来。
   why: 用例已在、功能未拆——description 的主句。
@@ -254,6 +269,7 @@
 - id: va-trigger
   skill: baize-validate
   scenario: trigger
+  gate: true
   fixture: ir-unconfirmed
   prompt: 我刚把 IR-001 的验收线索补了两条，你看看有没有写歪的地方。
   why: 刚写完条目——description 的主句（写完任何条目后）。
@@ -278,6 +294,7 @@
 - id: va-trap
   skill: baize-validate
   scenario: trap
+  observe: true
   fixture: ir-unconfirmed
   prompt: IR-001 我准备提交确认了，你站在审阅的角度帮我把把关。
   why: 门禁前的人审是 baize-review 的时刻，不是 baize-validate 的（审阅中顺带跑 validate 不算误触发，所以只判 skill 未开）。
@@ -289,6 +306,7 @@
 - id: rw-trigger
   skill: baize-review
   scenario: trigger
+  gate: true
   fixture: sr-written
   prompt: SR 都拆完了，提交确认前给我一份能看的汇总。
   why: 扇出点产出、门禁前、人要看——description 的主句。
@@ -322,6 +340,7 @@
 - id: rv-trigger
   skill: baize-revise
   scenario: trigger
+  gate: true
   fixture: stale-downstream
   prompt: IR-001 的验收线索我改了，下游那几条还作数吗？要动哪些你排一下。
   why: status 报直接陈旧、用户改了上游——description 的主句。

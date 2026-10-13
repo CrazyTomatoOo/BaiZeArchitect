@@ -15,4 +15,5 @@ triage 的五个角色沿用默认标签词（`needs-triage` / `needs-info` / `r
 ## 开发约定
 
 - 提交前与 CI 都跑 `npm run check`（类型检查 + 测试 + 构建 + skill 结构 + fixture 严格校验 + 装包冒烟）。启用提交前钩子（每个 clone 一次）：`git config core.hooksPath .githooks`。
+- 改了 `skills/` 下**任何**文件（description 或正文）→ 跑门槛集：`node probes/run.mjs --gate`（10 条 ×3 次 = 30 次运行，实测约 1 小时；取多数决）。它**不在 `npm run check` 里**，因为要真实模型调用——为什么这么分见 `CODING_STANDARDS.md`，怎么跑见 `probes/README.md`。
 - 写代码与写测试的规矩见 `CODING_STANDARDS.md`。
