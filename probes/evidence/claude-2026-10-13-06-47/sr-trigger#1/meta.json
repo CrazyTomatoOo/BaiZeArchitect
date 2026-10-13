@@ -1,0 +1,31 @@
+{
+  "id": "sr-trigger",
+  "skill": "baize-sr",
+  "scenario": "trigger",
+  "fixture": "ir-confirmed",
+  "attempt": 1,
+  "attempts": 3,
+  "durationMs": 179413,
+  "exitCode": 0,
+  "projectDir": "/Volumes/work/Project/BaiZeArchitect/probes/results/claude-2026-10-13-06-47-/projects/sr-trigger-2wIWnJ",
+  "modelUsed": null,
+  "replyChars": 295,
+  "verdict": "PASS",
+  "expect": {
+    "present": true,
+    "any": [
+      {
+        "skill": "baize-sr"
+      }
+    ]
+  },
+  "hits": [
+    {
+      "skill": "baize-sr"
+    }
+  ],
+  "fired": [
+    "baize-sr",
+    "using-baize"
+  ]
+}

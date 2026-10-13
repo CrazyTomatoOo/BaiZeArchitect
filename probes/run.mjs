@@ -192,13 +192,19 @@ function analyzeTranscript(raw, kind) {
   };
 }
 
-/** 「真跑了」的证据：命令参数命中，且配对结果不是 command not found 这类失败。
- *  只看参数会把失败尝试也当命中——va-miss 那种「跑了但没跑成」必须区分出来。 */
+/** 「真跑了」的证据：命令参数命中，且**没有空手而回**。
+ *  空手而回 = 结果里的非空行**全是**「command not found」——那是「命令根本没跑成」，
+ *  只看参数会把失败尝试也当命中（va-miss 首轮的假 PASS 就是这么来的）。
+ *  反过来，`A || B` 这种回落命令里 A 没找到、B 跑成了：结果里有真输出，就不算空手
+ *  （`va-trigger#2` 的假 FAIL 就是旧规则整条丢掉它造成的）。 */
 function toolRan(analysis, re) {
   const regex = new RegExp(re);
-  return analysis.calls.some(
-    (call) => regex.test(call.argsText) && !/command not found/i.test(call.resultText),
-  );
+  return analysis.calls.some((call) => {
+    if (!regex.test(call.argsText)) return false;
+    const lines = call.resultText.split("\n").map((line) => line.trim()).filter(Boolean);
+    if (lines.length === 0) return true; // 结果没抓到，不据此否决（与旧行为一致）
+    return !lines.every((line) => /command not found/i.test(line));
+  });
 }
 
 function judge(probe, analysis, reply, markers) {

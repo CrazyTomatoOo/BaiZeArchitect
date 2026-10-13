@@ -1,0 +1,2 @@
+claude --plugin-dir /Volumes/work/Project/BaiZeArchitect --dangerously-skip-permissions -p 我刚把 IR-001 的验收线索补了两条，你看看有没有写歪的地方。
+cwd: /Volumes/work/Project/BaiZeArchitect/probes/results/claude-2026-10-13-06-47-/projects/va-trigger-rCZG92

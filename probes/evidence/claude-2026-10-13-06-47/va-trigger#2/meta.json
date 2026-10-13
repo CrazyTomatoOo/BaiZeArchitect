@@ -1,0 +1,30 @@
+{
+  "id": "va-trigger",
+  "skill": "baize-validate",
+  "scenario": "trigger",
+  "fixture": "ir-unconfirmed",
+  "attempt": 2,
+  "attempts": 3,
+  "durationMs": 80556,
+  "exitCode": 0,
+  "projectDir": "/Volumes/work/Project/BaiZeArchitect/probes/results/claude-2026-10-13-06-47-/projects/va-trigger-rCZG92",
+  "modelUsed": null,
+  "replyChars": 494,
+  "verdict": "FAIL",
+  "expect": {
+    "present": true,
+    "any": [
+      {
+        "skill": "baize-validate"
+      },
+      {
+        "tool": "baize(?!-)[^\"]{0,80}validate"
+      }
+    ]
+  },
+  "hits": [],
+  "fired": [
+    "baize-ir",
+    "using-baize"
+  ]
+}

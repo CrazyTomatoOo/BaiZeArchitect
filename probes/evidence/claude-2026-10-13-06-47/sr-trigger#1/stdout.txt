@@ -1,0 +1,9 @@
+拆分完成，`baize validate` 通过（exit 0），覆盖 2/2。
+
+**产出：**
+1. `baize/sr/SR-001.md` — 用户可将个人数据导出为 CSV，covers `IR-001#a1`
+2. `baize/sr/SR-002.md` — 数据导出须在 30 秒内完成，covers `IR-001#a2`
+
+两条 SR 都挂在 IR-001 下，验收线索一对一覆盖。剩 2 条 WARNING 是「SR 未分配 AR」——提醒类、不挡路，属于下一步 AR 拆分的事。
+
+下一步：进 AR 拆分时触发 `baize-ar`，把这两条 SR 分配到架构组件。
