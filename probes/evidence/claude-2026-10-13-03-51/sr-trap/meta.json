@@ -1,0 +1,29 @@
+{
+  "id": "sr-trap",
+  "skill": "baize-sr",
+  "scenario": "trap",
+  "fixture": "ir-unconfirmed",
+  "durationMs": 26342,
+  "exitCode": 0,
+  "projectDir": "/Volumes/work/Project/BaiZeArchitect/probes/results/claude-2026-10-13-03-51-/projects/sr-trap-b15awx",
+  "modelUsed": null,
+  "replyChars": 314,
+  "verdict": "FAIL",
+  "expect": {
+    "present": false,
+    "any": [
+      {
+        "skill": "baize-sr"
+      }
+    ]
+  },
+  "hits": [
+    {
+      "skill": "baize-sr"
+    }
+  ],
+  "fired": [
+    "baize-sr",
+    "using-baize"
+  ]
+}

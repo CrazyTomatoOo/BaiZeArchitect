@@ -1,0 +1,41 @@
+{
+  "harness": "pi",
+  "stamp": "2026-10-13-03-52-",
+  "repo": "/Volumes/work/Project/BaiZeArchitect",
+  "counts": {
+    "PASS": 0,
+    "FAIL": 1,
+    "ERROR": 0
+  },
+  "rows": [
+    {
+      "id": "sr-trap",
+      "skill": "baize-sr",
+      "scenario": "trap",
+      "fixture": "ir-unconfirmed",
+      "durationMs": 76020,
+      "exitCode": 0,
+      "projectDir": "/Volumes/work/Project/BaiZeArchitect/probes/results/pi-2026-10-13-03-52-/projects/sr-trap-CzhuvX",
+      "modelUsed": "volcengine-apigw/glm-5.2",
+      "replyChars": 776,
+      "verdict": "FAIL",
+      "expect": {
+        "present": false,
+        "any": [
+          {
+            "skill": "baize-sr"
+          }
+        ]
+      },
+      "hits": [
+        {
+          "skill": "baize-sr"
+        }
+      ],
+      "fired": [
+        "baize-sr"
+      ],
+      "prompt": "IR-001 你直接往下拆吧，确认的事回头再说。"
+    }
+  ]
+}

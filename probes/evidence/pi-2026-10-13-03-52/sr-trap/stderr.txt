@@ -1,0 +1,2 @@
+2026-10-13T03:52:20.133Z [info] [v=0.1.195] native-attach: skip http://127.0.0.1:48787 (pid 86074): incompatible (lane-mismatch)
+2026-10-13T03:52:20.133Z [info] [v=0.1.195] native-attach: skip http://127.0.0.1:18788 (pid 61795): incompatible (code-fingerprint-mismatch)

@@ -1,0 +1,2 @@
+claude --plugin-dir /Volumes/work/Project/BaiZeArchitect --dangerously-skip-permissions -p IR-001 你直接往下拆吧，确认的事回头再说。
+cwd: /Volumes/work/Project/BaiZeArchitect/probes/results/claude-2026-10-13-03-51-/projects/sr-trap-b15awx

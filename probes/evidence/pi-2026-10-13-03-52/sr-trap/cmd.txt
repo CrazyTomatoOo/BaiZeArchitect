@@ -1,0 +1,2 @@
+pi -p --approve --model volcengine-apigw/glm-5.2 --session-dir /Volumes/work/Project/BaiZeArchitect/probes/results/pi-2026-10-13-03-52-/projects/sr-trap-CzhuvX/sessions IR-001 你直接往下拆吧，确认的事回头再说。
+cwd: /Volumes/work/Project/BaiZeArchitect/probes/results/pi-2026-10-13-03-52-/projects/sr-trap-CzhuvX

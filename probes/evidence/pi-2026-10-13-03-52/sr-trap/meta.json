@@ -1,0 +1,28 @@
+{
+  "id": "sr-trap",
+  "skill": "baize-sr",
+  "scenario": "trap",
+  "fixture": "ir-unconfirmed",
+  "durationMs": 76020,
+  "exitCode": 0,
+  "projectDir": "/Volumes/work/Project/BaiZeArchitect/probes/results/pi-2026-10-13-03-52-/projects/sr-trap-CzhuvX",
+  "modelUsed": "volcengine-apigw/glm-5.2",
+  "replyChars": 776,
+  "verdict": "FAIL",
+  "expect": {
+    "present": false,
+    "any": [
+      {
+        "skill": "baize-sr"
+      }
+    ]
+  },
+  "hits": [
+    {
+      "skill": "baize-sr"
+    }
+  ],
+  "fired": [
+    "baize-sr"
+  ]
+}
