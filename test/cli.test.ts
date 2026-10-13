@@ -206,6 +206,9 @@ test("validate：合法条目 exit 0 且 issues 为空", async (t) => {
   write(cwd, "baize/architecture.yaml", ARCHITECTURE_YAML);
   write(cwd, "baize/ar/AR-001.md", LEGAL_AR);
 
+  // IR 录入门禁（#147）：未确认的链根会让下游条目报 stage.upstream-unconfirmed，先把根认下来
+  await acceptAndRead(cwd, "IR-001");
+
   const result = await run(["validate", "--json"], { cwd });
   assert.equal(result.exitCode, 0, result.stdout);
   const data = parseJson<ValidateOutput>(result.stdout);
@@ -383,6 +386,9 @@ test("默认全仓、--chain 限定作用域", async (t) => {
     "baize/ir/IR-002.md",
     LEGAL_IR.replace("id: IR-001", "id: IR-2"),
   );
+
+  // IR 录入门禁（#147）：未确认的链根会让下游条目报 stage.upstream-unconfirmed，先把根认下来
+  await acceptAndRead(cwd, "IR-001");
 
   const whole = await run(["validate", "--json"], { cwd });
   assert.equal(whole.exitCode, 1, whole.stdout);
@@ -1028,6 +1034,9 @@ test("status --chain：状态文件缺失不是错误——六段全部未跳过
   write(cwd, "baize/architecture.yaml", ARCHITECTURE_YAML);
   write(cwd, "baize/ar/AR-001.md", LEGAL_AR);
 
+  // IR 录入门禁（#147）：未确认的链根会让下游条目报 stage.upstream-unconfirmed，先把根认下来
+  await acceptAndRead(cwd, "IR-001");
+
   const machine = await run(["status", "--chain", "IR-001", "--json"], { cwd });
   assert.equal(machine.exitCode, 0, machine.stdout);
   const chain = parseJson<ChainOutput>(machine.stdout).chain;
@@ -1079,6 +1088,9 @@ test("validate：stage.skip-missing-reason —— 跳过记录缺 by / at / why 
     write(cwd, "baize/ar/AR-001.md", LEGAL_AR);
     write(cwd, "baize/chains/IR-001.yaml", `skipped:\n  sr:\n${body.split("\n").map((l) => `    ${l}`).join("\n")}`);
 
+    // IR 录入门禁（#147）：未确认的链根会让下游条目报 stage.upstream-unconfirmed，先把根认下来
+    await acceptAndRead(cwd, "IR-001");
+
     const result = await run(["validate", "--json"], { cwd });
     assert.equal(result.exitCode, 1, result.stdout);
     const issues = parseJson<ValidateOutput>(result.stdout).issues;
@@ -1105,10 +1117,12 @@ test("validate：stage.skip-missing-reason —— 跳过记录缺 by / at / why 
     "baize/chains/IR-001.yaml",
     `skipped:\n  sr:\n${COMPLETE_SKIP.split("\n").map((l) => `    ${l}`).join("\n")}`,
   );
+  // IR 录入门禁（#147）：未确认的链根会让下游条目报 stage.upstream-unconfirmed，先把根认下来
+  await acceptAndRead(cwd, "IR-001");
+
   const ok = await run(["validate", "--json"], { cwd });
   assert.equal(ok.exitCode, 0, ok.stdout);
   assert.deepEqual(parseJson<ValidateOutput>(ok.stdout).issues, []);
-
   // --chain 限定作用域同样生效
   const scoped = await run(["validate", "--chain", "IR-001", "--json"], { cwd });
   assert.equal(scoped.exitCode, 0, scoped.stdout);
@@ -1471,6 +1485,9 @@ test("validate：ref.unknown-element —— AR 的 allocates 指向清单里没�
   );
   write(cwd, "baize/architecture.yaml", ARCHITECTURE_YAML);
 
+  // IR 录入门禁（#147）：未确认的链根会让下游条目报 stage.upstream-unconfirmed，先把根认下来
+  await acceptAndRead(cwd, "IR-001");
+
   const bad = await run(["validate", "--json"], { cwd });
   assert.equal(bad.exitCode, 1, bad.stdout);
   const badIssues = parseJson<ValidateOutput>(bad.stdout).issues;
@@ -1673,6 +1690,9 @@ test("validate：sr.unallocated —— 没有 AR 挂上的 SR 报 WARNING；有 
   write(cwd, "baize/ir/IR-001.md", LEGAL_IR);
   write(cwd, "baize/sr/SR-001.md", LEGAL_SR_FULL);
 
+  // IR 录入门禁（#147）：未确认的链根会让下游条目报 stage.upstream-unconfirmed，先把根认下来
+  await acceptAndRead(cwd, "IR-001");
+
   const unallocated = await run(["validate", "--json"], { cwd });
   assert.equal(unallocated.exitCode, 0, "WARNING 不挡 exit code");
   const issues = parseJson<ValidateOutput>(unallocated.stdout).issues;
@@ -1711,6 +1731,9 @@ test("受控清单不是条目：清单项不会被报成孤儿（回归）", as
   write(cwd, "baize/scenarios/SC-001.md", LEGAL_SCENARIO);
   write(cwd, "baize/architecture.yaml", ARCHITECTURE_YAML);
   write(cwd, "baize/scenario-catalogs.yaml", SCENARIO_CATALOGS_YAML);
+
+  // IR 录入门禁（#147）：未确认的链根会让下游条目报 stage.upstream-unconfirmed，先把根认下来
+  await acceptAndRead(cwd, "IR-001");
 
   const result = await run(["validate", "--json"], { cwd });
   assert.equal(result.exitCode, 0, result.stdout);
@@ -1929,6 +1952,9 @@ test("缺清单文件 = 空清单，不是错误：不引用清单的仓 exit 0�
 
   // 没有 baize/architecture.yaml 且仓里没有引用：清单缺失本身不是错误
   // （唯一的 sr.unallocated 是 WARNING，不挡 exit code）。
+  // IR 录入门禁（#147）：未确认的链根会让下游条目报 stage.upstream-unconfirmed，先把根认下来
+  await acceptAndRead(cwd, "IR-001");
+
   const plain = await run(["validate", "--json"], { cwd });
   assert.equal(plain.exitCode, 0, plain.stdout);
 
@@ -2043,6 +2069,9 @@ test("validate：covers: [] 合法（不报 field/ref），缺 covers 字段走 
   write(cwd, "baize/ar/AR-001.md", LEGAL_AR);
 
   // covers: [] —— SR 自身没有任何 field/ref 问题；覆盖率另算（两条线索都没人覆盖）
+  // IR 录入门禁（#147）：未确认的链根会让下游条目报 stage.upstream-unconfirmed，先把根认下来
+  await acceptAndRead(cwd, "IR-001");
+
   const empty = await run(["validate", "--json"], { cwd });
   assert.equal(empty.exitCode, 1, empty.stdout);
   const emptyIssues = parseJson<ValidateOutput>(empty.stdout).issues;
@@ -2212,6 +2241,9 @@ test("validate：coverage.unrealized-usecase —— 未被任何功能项 realiz
   // FN-001 只 realizes UC-001；UC-002 无人承载
   write(cwd, "baize/function-items/FN-001.md", LEGAL_FN);
 
+  // IR 录入门禁（#147）：未确认的链根会让下游条目报 stage.upstream-unconfirmed，先把根认下来
+  await acceptAndRead(cwd, "IR-001");
+
   const result = await run(["validate", "--json"], { cwd });
   assert.equal(result.exitCode, 1, result.stdout);
   const issues = parseJson<ValidateOutput>(result.stdout).issues;
@@ -2299,6 +2331,9 @@ test("validate：场景/用例的正文 statement 不必填——必填只到六
     LEGAL_UC.replace("用例陈述：买家提交购物车，系统生成订单。", ""),
   );
 
+  // IR 录入门禁（#147）：未确认的链根会让下游条目报 stage.upstream-unconfirmed，先把根认下来
+  await acceptAndRead(cwd, "IR-001");
+
   const result = await run(["validate", "--json"], { cwd });
   assert.equal(result.exitCode, 0, result.stdout);
   assert.deepEqual(
@@ -2381,6 +2416,9 @@ test("stale.transitive：陈旧条目的严格后代报 INFO，陈旧条目自�
   writeChain(cwd);
   await acceptAll(cwd, ["SR-001", "AR-001", "SR-002"]);
   changeIrStatement(cwd);
+
+  // IR 录入门禁（#147）：未确认的链根会让下游条目报 stage.upstream-unconfirmed，先把根认下来
+  await acceptAndRead(cwd, "IR-001");
 
   const loose = await run(["validate", "--json"], { cwd });
   assert.equal(loose.exitCode, 0, loose.stdout); // 不传 --strict 时两条都不影响 exit code
@@ -3000,4 +3038,52 @@ test("status --item：任意条目都看得到自己属于哪条链（沿 parent
   const human = await run(["status", "--item", "FP-001"], { cwd });
   assert.equal(human.exitCode, 0, human.stdout);
   assert.match(human.stdout, /chain: IR-001/);
+});
+
+// —— IR 录入门禁的机械落地（#147：门禁的强度）——
+
+test("validate：stage.upstream-unconfirmed —— 上游 IR 未确认时下游报 WARNING、--strict 升级；确认后不再报，确认失效后重新报", async (t) => {
+  const cwd = mkdtempSync(join(tmpdir(), "baize-"));
+  t.after(() => rmSync(cwd, { recursive: true, force: true }));
+  write(cwd, "baize/ir/IR-001.md", LEGAL_IR);
+  write(cwd, "baize/sr/SR-001.md", srWithCovers("SR-001", "IR-001#a1, IR-001#a2"));
+  write(cwd, "baize/architecture.yaml", ARCHITECTURE_YAML);
+  write(cwd, "baize/ar/AR-001.md", LEGAL_AR);
+
+  // 未确认：下游条目报 WARNING，IR 自己不报；WARNING 不挡 exit code
+  const unconfirmed = await run(["validate", "--json"], { cwd });
+  assert.equal(unconfirmed.exitCode, 0, "WARNING 不挡 exit code");
+  const issues = parseJson<ValidateOutput>(unconfirmed.stdout).issues;
+  assert.deepEqual(
+    issues.map((issue) => `${issue.rule} ${issue.path}`).sort(),
+    [
+      "stage.upstream-unconfirmed baize/ar/AR-001.md",
+      "stage.upstream-unconfirmed baize/sr/SR-001.md",
+    ],
+    unconfirmed.stdout,
+  );
+  const warning = issues[0];
+  assert.ok(warning);
+  assert.equal(warning.level, "WARNING");
+  assert.ok(warning.message.includes("IR-001"), warning.message);
+  assert.ok(warning.message.includes("尚未人工确认"), warning.message);
+
+  // --strict 把它升级为失败
+  const strict = await run(["validate", "--strict", "--json"], { cwd });
+  assert.equal(strict.exitCode, 1, strict.stdout);
+
+  // 确认链根后不再报
+  await acceptAndRead(cwd, "IR-001");
+  const confirmed = await run(["validate", "--strict", "--json"], { cwd });
+  assert.equal(confirmed.exitCode, 0, confirmed.stdout);
+  assert.deepEqual(parseJson<ValidateOutput>(confirmed.stdout).issues, []);
+
+  // 改掉实质内容 → 确认失效 → 重新报（陈旧不会自己消失）
+  const irPath = join(cwd, "baize/ir/IR-001.md");
+  writeFileSync(irPath, readFileSync(irPath, "utf8").replace("不能锁死在系统里", "改了口径"), "utf8");
+  const stale = await run(["validate", "--json"], { cwd });
+  const staleIssues = parseJson<ValidateOutput>(stale.stdout).issues;
+  const reappeared = staleIssues.find((issue) => issue.rule === "stage.upstream-unconfirmed");
+  assert.ok(reappeared, "确认失效后应重新报：" + stale.stdout);
+  assert.ok(reappeared.message.includes("确认已失效"), reappeared.message);
 });

@@ -10,7 +10,9 @@ import {
   readChainState,
 } from "./chainstate.ts";
 import { computeCoverage, parseClueRef, unrealizedUsecases } from "./coverage.ts";
+import { confirmationOf } from "./confirm.ts";
 import { fieldDefectsOf } from "./fieldcheck.ts";
+import { chainRootOf } from "./gate.ts";
 import type { Catalogs } from "./catalogs.ts";
 import { readCatalogs } from "./catalogs.ts";
 import { isPlainObject } from "./guards.ts";
@@ -272,6 +274,36 @@ function issuesFor(entry: Entry, byId: Record<string, Entry>, catalogs: Catalogs
     ...fieldIssues(entry),
     ...refIssues(entry, byId, catalogs),
     ...allocationIssues(entry, byId),
+    ...upstreamGateIssues(entry, byId),
+  ];
+}
+
+/**
+ * stage.upstream-unconfirmed：上游 IR 未人工确认（或确认已失效）时，下游条目是建在
+ * 一个还没被认领的基准上的。这是 **IR 录入门禁的机械落地**——门禁在规格里是「阻塞」，
+ * 而 `status` 把它的状态报出来（`kind: auto`）只能让人看见，拦不住手写与压力下的推进。
+ *
+ * 提醒级（`--strict` 升级）：它说的是「不该推进」，不是「文件写坏了」——
+ * 与 `sr.unallocated` 同级（#129：默认 WARNING 不算失败，#126 否掉「渐进拆分一路红灯」）。
+ * IR 自己不受这条管：它就是被确认的那一个。
+ */
+function upstreamGateIssues(entry: Entry, byId: Record<string, Entry>): Issue[] {
+  if (entry.layer.key === "ir") return [];
+  const root = chainRootOf(byId, entry);
+  if (root.layer.key !== "ir") return []; // 链根不是 IR（例如孤儿 SR）另有 ref.* 报
+  const confirmation = confirmationOf(root);
+  if (confirmation.state === "confirmed") return [];
+  const rootId = idOf(root) ?? "";
+  return [
+    {
+      level: "WARNING",
+      rule: "stage.upstream-unconfirmed",
+      path: entry.path,
+      message: `上游 IR 未确认：${rootId}（${
+        confirmation.state === "stale" ? "确认已失效——实质内容改过" : "尚未人工确认"
+      }）——下游条目建在未确认的基准上`,
+      fix: `先让 ${rootId} 的 statement 与 acceptance 得到人工确认，再往下拆`,
+    },
   ];
 }
 

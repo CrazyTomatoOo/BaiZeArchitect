@@ -14,6 +14,7 @@ import {
 } from "./chainstate.ts";
 import { computeCoverage, parseClueRef, unrealizedUsecases, type EntryCoverage } from "./coverage.ts";
 import { fieldDefectsOf } from "./fieldcheck.ts";
+import { chainRootOf } from "./gate.ts";
 import { isPlainObject } from "./guards.ts";
 import { readEntries } from "./store.ts";
 import { directStaleViews, staleFindings, type DirectStaleView } from "./stale.ts";
@@ -194,10 +195,13 @@ function gatesOf(
   state: ChainState | undefined,
   unreviewedStale: DirectStaleView[],
 ): GateView[] {
-  const irs = members.filter((entry) => entry.layer.key === "ir");
-  const irEntryPassed = irs.every(
-    (entry) => confirmationOf(entry).state === "confirmed",
-  );
+  // IR 录入门禁的判据：链根是 IR，且它已人工确认（且未失效）。与 validate 的
+  // stage.upstream-unconfirmed 是同一条判据（都是「认链根 + confirmationOf」）。
+  const root = members.find((entry) => parentIdOf(entry) === undefined);
+  const irEntryPassed =
+    root !== undefined &&
+    root.layer.key === "ir" &&
+    confirmationOf(root).state === "confirmed";
 
   const srs = members.filter((entry) => entry.layer.key === "sr");
   const srArPassed = srs.every((sr) => {
@@ -303,15 +307,7 @@ export async function chainStatus(cwd: string, id: string): Promise<ChainDetail>
 
 /** 沿 parent 边走到根，返回链起始条目 id；父边断裂时停在可达的最高条目。 */
 function chainRootIdOf(entry: Entry, byId: Record<string, Entry>): string | null {
-  let current = entry;
-  for (let depth = 0; depth < 10_000; depth++) {
-    const parentId = parentIdOf(current);
-    if (parentId === undefined) return idOf(current) ?? null;
-    const parent = byId[parentId];
-    if (parent === undefined) return idOf(current) ?? null;
-    current = parent;
-  }
-  return idOf(current) ?? null;
+  return idOf(chainRootOf(byId, entry)) ?? null;
 }
 
 /** IR 的线索级反向覆盖：每条 acceptance 线索被哪几条 SR 的 covers 指向（升序）。 */
