@@ -31,6 +31,9 @@
     "prepack": "npm run build",
     "typecheck": "tsc --noEmit",
     "test": "node --import tsx --test test/*.test.ts",
+    "check:skills": "node scripts/check-skills.mjs",
+    "check:pack": "node scripts/check-pack.mjs",
+    "check": "npm run typecheck && npm test && npm run build && npm run check:skills && npm run check:pack",
     "baize": "node --import tsx bin/baize.ts"
   },
   "dependencies": {

@@ -1,0 +1,15 @@
+#!/bin/sh
+# 提交前跑一遍全套检查。绕过它：git commit --no-verify
+# 每个 clone 启用一次：git config core.hooksPath .githooks
+set -e
+
+if ! command -v npm >/dev/null 2>&1; then
+  echo "pre-commit: 找不到 npm，跳过检查（先装 Node ≥ 24）" >&2
+  exit 0
+fi
+
+if ! npm run --silent check; then
+  echo "" >&2
+  echo "pre-commit: 检查没过，提交已拦下。确实要跳过：git commit --no-verify" >&2
+  exit 1
+fi
