@@ -166,12 +166,21 @@ async function runNew(args: ParsedArgs, cwd: string): Promise<CommandOutput> {
     throw new BaizeError("cli.usage", `暂不支持新建该层：${layerKey}`);
   }
 
-  // 父边：IR 是链顶端（parent 恒为 null），其余各层（SR/AR 与分析四层）必须有 --parent。
+  // 父边（#190 新模型）：IR 是链顶端（parent 恒为 null）；SR / AR / 功能点必须有
+  // --parent（分解树：IR → SR → AR、功能项 → 功能点）；场景可选 --parent（只挂场景，
+  // 表达子场景）；用例 / 功能项没有父边——它们用 refines / satisfies 认领 SR。
   // 引用是否存在不在这里挡——由 validate 的 ref.* 规则报（new 只负责把声明写对形状）。
-  if (layer.key === "ir" && args.parent !== undefined) {
-    throw new BaizeError("cli.usage", "ir 是链顶端，不接受 --parent（parent 恒为 null）");
+  const PARENT_REQUIRED = new Set(["sr", "ar", "function-points"]);
+  const PARENT_FORBIDDEN = new Set(["ir", "usecases", "function-items"]);
+  if (PARENT_FORBIDDEN.has(layer.key) && args.parent !== undefined) {
+    throw new BaizeError(
+      "cli.usage",
+      layer.key === "ir"
+        ? "ir 是链顶端，不接受 --parent（parent 恒为 null）"
+        : `${layer.key} 没有父边：它用 ${layer.key === "usecases" ? "refines" : "satisfies"} 认领 SR（不要传 --parent）`,
+    );
   }
-  if (layer.key !== "ir" && args.parent === undefined) {
+  if (PARENT_REQUIRED.has(layer.key) && args.parent === undefined) {
     throw new BaizeError(
       "cli.usage",
       `新建 ${layer.key} 必须指定 --parent <条目id>（必由上层条目分解而来）`,

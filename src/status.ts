@@ -1,5 +1,5 @@
 import type { Entry } from "./entry.ts";
-import { idOf, parentIdOf } from "./entry.ts";
+import { claimIdsOf, idOf, parentIdOf } from "./entry.ts";
 import { BaizeError } from "./errors.ts";
 import { chainMembers } from "./chain.ts";
 import { confirmationOf, type ConfirmationView } from "./confirm.ts";
@@ -153,10 +153,14 @@ function chainItemOf(entry: Entry): ChainItem {
   };
 }
 
-/** 全仓总览：每条链（无父的起始条目）一行，带进度（条目数 / 覆盖率）与陈旧两档计数。 */
+/** 全仓总览：每条链（链根一行）。链根 = 无父且无任何认领边的条目（#190：
+ * 方案层条目无父边，顶层场景 / 用例 / 功能项靠认领边挂在链上，不是链根），
+ * 带进度（条目数 / 覆盖率）与陈旧两档计数。共享计数视图另票（#182）细化。 */
 export async function chainSummaries(cwd: string): Promise<ChainSummary[]> {
   const entries = await readEntries(cwd);
-  const roots = entries.filter((entry) => parentIdOf(entry) === undefined);
+  const roots = entries.filter(
+    (entry) => parentIdOf(entry) === undefined && claimIdsOf(entry).length === 0,
+  );
   const summaries: ChainSummary[] = [];
   for (const root of roots) {
     const members = chainMembers(entries, idOf(root) ?? root.path);
@@ -197,7 +201,10 @@ function gatesOf(
 ): GateView[] {
   // IR 录入门禁的判据：链根是 IR，且它已人工确认（且未失效）。与 validate 的
   // stage.upstream-unconfirmed 是同一条判据（都是「认链根 + confirmationOf」）。
-  const root = members.find((entry) => parentIdOf(entry) === undefined);
+  // #190：链成员含认领边进来的方案层条目（它们无父），链根优先取无父的 IR。
+  const root =
+    members.find((entry) => parentIdOf(entry) === undefined && entry.layer.key === "ir") ??
+    members[0];
   const irEntryPassed =
     root !== undefined &&
     root.layer.key === "ir" &&
