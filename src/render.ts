@@ -1,5 +1,6 @@
 import type { Accepted, ConfirmationView } from "./confirm.ts";
 import type { SkipRecord } from "./chainstate.ts";
+import type { RenamePlan } from "./rename.ts";
 import type { ChainDetail, ChainSummary, ItemView } from "./status.ts";
 import type { Issue } from "./types.ts";
 
@@ -199,4 +200,24 @@ export function renderItem(item: ItemView): string {
 
 export function renderError(error: ErrorPayload): string {
   return `错误 [${error.rule}]：${error.message}\n`;
+}
+
+/** rename 的人读渲染：文件 + 行 + 旧值 → 新值；dry-run 额外给「建议先提交」。 */
+export function renderRename(plan: RenamePlan, options: { write: boolean }): string {
+  if (plan.changes.length === 0) {
+    return `0 处引用（${plan.field}: ${plan.old}）\n`;
+  }
+  const verb = options.write ? "已改写" : "发现";
+  const lines = [
+    `${verb} ${plan.changes.length} 处引用（${plan.field}: ${plan.old} → ${plan.new}）：`,
+  ];
+  for (const change of plan.changes) {
+    lines.push(
+      `  ${change.path}:${change.line}: ${change.field}: ${change.old} → ${change.new}`,
+    );
+  }
+  if (!options.write) {
+    lines.push("未写盘（dry-run）。建议先提交，确认无误后加 --write 落盘。");
+  }
+  return `${lines.join("\n")}\n`;
 }

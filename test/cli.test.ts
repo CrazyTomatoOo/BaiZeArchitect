@@ -7,6 +7,8 @@ import {
   readFileSync,
   existsSync,
   rmSync,
+  readdirSync,
+  statSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, dirname } from "node:path";
@@ -3086,4 +3088,202 @@ test("validate：stage.upstream-unconfirmed —— 上游 IR 未确认时下游�
   const reappeared = staleIssues.find((issue) => issue.rule === "stage.upstream-unconfirmed");
   assert.ok(reappeared, "确认失效后应重新报：" + stale.stdout);
   assert.ok(reappeared.message.includes("确认已失效"), reappeared.message);
+});
+
+// ---- baize rename（#184）：把条目里的清单引用跟到新 slug ----
+// 共同契约（与 #185 migrate 同族，纪律见 ADR-0006）：默认 dry-run、--write 才落盘、
+// 只改条目绝不写清单、拒绝条件先于改写、原子性只到单文件。
+
+/** 递归快照目录内所有文件的文本内容，用于「目录零变化」协议级断言。 */
+function snapshotDir(cwd: string, rel: string): Map<string, string> {
+  const out = new Map<string, string>();
+  const walk = (abs: string, prefix: string): void => {
+    for (const name of readdirSync(abs)) {
+      const childAbs = join(abs, name);
+      const childRel = prefix === "" ? name : `${prefix}/${name}`;
+      if (statSync(childAbs).isDirectory()) walk(childAbs, childRel);
+      else out.set(childRel, readFileSync(childAbs, "utf8"));
+    }
+  };
+  walk(join(cwd, rel), "");
+  return out;
+}
+
+function snapshotEqual(
+  before: Map<string, string>,
+  after: Map<string, string>,
+): boolean {
+  if (before.size !== after.size) return false;
+  for (const [key, value] of before) {
+    if (after.get(key) !== value) return false;
+  }
+  return true;
+}
+
+// 两条场景引用 order-flow，一条引用 self-service；清单里两个 slug 都在。
+function writeRenameRepo(cwd: string): void {
+  write(cwd, "baize/scenario-catalogs.yaml", SCENARIO_CATALOGS_YAML);
+  write(cwd, "baize/scenarios/SC-001.md", LEGAL_SCENARIO);
+  write(
+    cwd,
+    "baize/scenarios/SC-002.md",
+    LEGAL_SCENARIO.replace("id: SC-001", "id: SC-002"),
+  );
+  write(
+    cwd,
+    "baize/scenarios/SC-003.md",
+    LEGAL_SCENARIO.replace("id: SC-001", "id: SC-003").replace(
+      "catalog: order-flow",
+      "catalog: self-service",
+    ),
+  );
+}
+
+test("rename catalog dry-run：打印文件 + 行 + 旧值 → 新值与「建议先提交」，文件字节不变", async (t) => {
+  const cwd = mkdtempSync(join(tmpdir(), "baize-"));
+  t.after(() => rmSync(cwd, { recursive: true, force: true }));
+  writeRenameRepo(cwd);
+
+  const before = snapshotDir(cwd, "baize");
+  const result = await run(["rename", "catalog", "order-flow", "self-service"], {
+    cwd,
+  });
+  assert.equal(result.exitCode, 0, result.stdout);
+  // 文件 + 行 + 旧值 → 新值：LEGAL_SCENARIO 的 catalog 在第 5 行
+  assert.match(result.stdout, /baize\/scenarios\/SC-001\.md:5: catalog: order-flow → self-service/);
+  assert.match(result.stdout, /baize\/scenarios\/SC-002\.md:5: catalog: order-flow → self-service/);
+  assert.match(result.stdout, /2 处引用/);
+  assert.match(result.stdout, /建议先提交/);
+  assert.doesNotMatch(result.stdout, /SC-003/, "未引用的条目不得出现在清单里");
+  // 协议级断言：dry-run 前后文件字节不变（含清单文件）
+  assert.ok(snapshotEqual(before, snapshotDir(cwd, "baize")), "dry-run 不得写盘");
+});
+
+test("rename catalog --write 落盘：只改引用了旧 slug 的条目，清单文件与其余条目字节不变", async (t) => {
+  const cwd = mkdtempSync(join(tmpdir(), "baize-"));
+  t.after(() => rmSync(cwd, { recursive: true, force: true }));
+  writeRenameRepo(cwd);
+  const sc3Before = readFileSync(join(cwd, "baize/scenarios/SC-003.md"), "utf8");
+  const catalogsBefore = readFileSync(
+    join(cwd, "baize/scenario-catalogs.yaml"),
+    "utf8",
+  );
+
+  const result = await run(
+    ["rename", "catalog", "order-flow", "self-service", "--write"],
+    { cwd },
+  );
+  assert.equal(result.exitCode, 0, result.stdout);
+  assert.match(result.stdout, /已改写 2 处引用/);
+
+  const sc1 = readFileSync(join(cwd, "baize/scenarios/SC-001.md"), "utf8");
+  assert.match(sc1, /^catalog: self-service$/m);
+  assert.doesNotMatch(sc1, /^catalog: order-flow$/m);
+  const sc2 = readFileSync(join(cwd, "baize/scenarios/SC-002.md"), "utf8");
+  assert.match(sc2, /^catalog: self-service$/m);
+  // 只改条目、绝不写清单：其余文件一字未动
+  assert.equal(
+    readFileSync(join(cwd, "baize/scenarios/SC-003.md"), "utf8"),
+    sc3Before,
+  );
+  assert.equal(
+    readFileSync(join(cwd, "baize/scenario-catalogs.yaml"), "utf8"),
+    catalogsBefore,
+  );
+});
+
+test("rename：新 slug 不在清单里 → exit 2 且目录零变化（拒绝条件先于改写）", async (t) => {
+  const cwd = mkdtempSync(join(tmpdir(), "baize-"));
+  t.after(() => rmSync(cwd, { recursive: true, force: true }));
+  writeRenameRepo(cwd);
+
+  const before = snapshotDir(cwd, "baize");
+  const result = await run(
+    ["rename", "catalog", "order-flow", "no-such-catalog", "--write", "--json"],
+    { cwd },
+  );
+  assert.equal(result.exitCode, 2);
+  const error = parseJson<ErrorOutput>(result.stdout).error;
+  assert.equal(error.rule, "rename.unknown-slug");
+  assert.match(error.message, /no-such-catalog/);
+  assert.match(error.message, /scenario-catalogs\.yaml/);
+  // 协议级断言：被拒时目录零变化
+  assert.ok(snapshotEqual(before, snapshotDir(cwd, "baize")), "拒绝后不得动任何文件");
+});
+
+test("rename element 改 AR 的 allocates；清单文件（architecture.yaml）不被写", async (t) => {
+  const cwd = mkdtempSync(join(tmpdir(), "baize-"));
+  t.after(() => rmSync(cwd, { recursive: true, force: true }));
+  write(cwd, "baize/architecture.yaml", ARCHITECTURE_YAML);
+  write(cwd, "baize/ar/AR-001.md", LEGAL_AR);
+  const catalogsBefore = readFileSync(join(cwd, "baize/architecture.yaml"), "utf8");
+
+  // dry-run：LEGAL_AR 的 allocates 在第 5 行，字节不变
+  const dry = await run(["rename", "element", "export-service", "audit-log"], {
+    cwd,
+  });
+  assert.equal(dry.exitCode, 0, dry.stdout);
+  assert.match(dry.stdout, /baize\/ar\/AR-001\.md:5: allocates: export-service → audit-log/);
+  assert.equal(
+    readFileSync(join(cwd, "baize/ar/AR-001.md"), "utf8"),
+    LEGAL_AR,
+    "dry-run 不得写盘",
+  );
+
+  const written = await run(
+    ["rename", "element", "export-service", "audit-log", "--write"],
+    { cwd },
+  );
+  assert.equal(written.exitCode, 0, written.stdout);
+  const ar = readFileSync(join(cwd, "baize/ar/AR-001.md"), "utf8");
+  assert.match(ar, /^allocates: audit-log$/m);
+  assert.doesNotMatch(ar, /^allocates: export-service$/m);
+  // 只改条目：清单文件一字未动
+  assert.equal(readFileSync(join(cwd, "baize/architecture.yaml"), "utf8"), catalogsBefore);
+});
+
+test("rename：无任何引用时打印「0 处引用」并以成功退出（不是用法错）", async (t) => {
+  // 有清单但还没有任何条目：0 处引用，同样成功
+  const emptyCwd = mkdtempSync(join(tmpdir(), "baize-empty-"));
+  t.after(() => rmSync(emptyCwd, { recursive: true, force: true }));
+  write(emptyCwd, "baize/scenario-catalogs.yaml", SCENARIO_CATALOGS_YAML);
+  const result = await run(["rename", "catalog", "order-flow", "self-service"], {
+    cwd: emptyCwd,
+  });
+  assert.equal(result.exitCode, 0, result.stdout);
+  assert.match(result.stdout, /0 处引用/);
+
+  // 有仓库、有条目，但没人引用旧 slug：同样成功、不动文件
+  const noneCwd = mkdtempSync(join(tmpdir(), "baize-none-"));
+  t.after(() => rmSync(noneCwd, { recursive: true, force: true }));
+  write(noneCwd, "baize/scenario-catalogs.yaml", SCENARIO_CATALOGS_YAML);
+  write(
+    noneCwd,
+    "baize/scenarios/SC-001.md",
+    LEGAL_SCENARIO.replace("catalog: order-flow", "catalog: self-service"),
+  );
+  const before = snapshotDir(noneCwd, "baize");
+  const none = await run(["rename", "catalog", "order-flow", "self-service"], {
+    cwd: noneCwd,
+  });
+  assert.equal(none.exitCode, 0, none.stdout);
+  assert.match(none.stdout, /0 处引用/);
+  assert.ok(snapshotEqual(before, snapshotDir(noneCwd, "baize")));
+});
+
+test("rename：kind 不合法或参数缺失 → exit 2 用法错，不写文件", async (t) => {
+  const cwd = mkdtempSync(join(tmpdir(), "baize-"));
+  t.after(() => rmSync(cwd, { recursive: true, force: true }));
+  writeRenameRepo(cwd);
+
+  const badKind = await run(["rename", "widget", "a", "b"], { cwd });
+  assert.equal(badKind.exitCode, 2);
+  const missing = await run(["rename", "catalog", "order-flow"], { cwd });
+  assert.equal(missing.exitCode, 2);
+  const none = await run(["rename"], { cwd });
+  assert.equal(none.exitCode, 2);
+  const extra = await run(["rename", "catalog", "a", "b", "c"], { cwd });
+  assert.equal(extra.exitCode, 2);
+  const wrongOption = await run(["rename", "catalog", "a", "b", "--strict"], { cwd });
+  assert.equal(wrongOption.exitCode, 2);
 });

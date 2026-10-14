@@ -3,6 +3,7 @@ import { accept, DEFAULT_USER } from "./confirm.ts";
 import { BaizeError } from "./errors.ts";
 import { LAYERS } from "./layers.ts";
 import { BAIZE_DIR, nextId, scaffold, writeFileAtomic } from "./store.ts";
+import { applyRename, planRename } from "./rename.ts";
 import { chainStatus, chainSummaries, itemStatus } from "./status.ts";
 import { validate } from "./validate.ts";
 import {
@@ -14,6 +15,7 @@ import {
   renderError,
   renderIssues,
   renderItem,
+  renderRename,
   toJson,
   type Created,
 } from "./render.ts";
@@ -33,6 +35,7 @@ interface ParsedArgs {
   positionals: string[];
   json: boolean;
   strict: boolean;
+  write: boolean;
   chain: string | undefined;
   item: string | undefined;
   parent: string | undefined;
@@ -53,6 +56,7 @@ function parseArgs(argv: string[]): ParsedArgs {
   const positionals: string[] = [];
   let json = false;
   let strict = false;
+  let write = false;
   let chain: string | undefined;
   let item: string | undefined;
   let parent: string | undefined;
@@ -71,6 +75,10 @@ function parseArgs(argv: string[]): ParsedArgs {
     }
     if (token === "--strict") {
       strict = true;
+      continue;
+    }
+    if (token === "--write") {
+      write = true;
       continue;
     }
     if (token === "--chain" || token === "--item") {
@@ -115,6 +123,7 @@ function parseArgs(argv: string[]): ParsedArgs {
     positionals: positionals.slice(1),
     json,
     strict,
+    write,
     chain,
     item,
     parent,
@@ -294,6 +303,50 @@ async function runAccept(
   };
 }
 
+async function runRename(args: ParsedArgs, cwd: string): Promise<CommandOutput> {
+  const kindRaw = args.positionals[0];
+  const old = args.positionals[1];
+  const newSlug = args.positionals[2];
+  if (kindRaw === undefined || old === undefined || newSlug === undefined) {
+    throw new BaizeError(
+      "cli.usage",
+      "用法：baize rename <catalog|element> <old> <new> [--write]",
+    );
+  }
+  if (args.positionals.length > 3) {
+    throw new BaizeError("cli.usage", `多余参数：${args.positionals.slice(3).join(" ")}`);
+  }
+  if (kindRaw !== "catalog" && kindRaw !== "element") {
+    throw new BaizeError(
+      "cli.usage",
+      `未知 kind：${kindRaw}（可用：catalog | element）`,
+    );
+  }
+  if (args.chain !== undefined || args.item !== undefined || args.strict) {
+    throw new BaizeError(
+      "cli.usage",
+      "rename 只接受 --write / --json（不支持 --chain / --item / --strict）",
+    );
+  }
+  const kind = kindRaw;
+
+  // 计划先行：新 slug 不在清单会在 planRename 里被拒（exit 2，先于任何改写）。
+  const plan = await planRename(cwd, kind, old, newSlug);
+  if (args.write) await applyRename(cwd, plan);
+  return {
+    data: {
+      schemaVersion: SCHEMA_VERSION,
+      kind: plan.kind,
+      old: plan.old,
+      new: plan.new,
+      write: args.write,
+      changes: plan.changes,
+    },
+    human: renderRename(plan, { write: args.write }),
+    exitCode: 0,
+  };
+}
+
 async function dispatch(
   args: ParsedArgs,
   cwd: string,
@@ -308,6 +361,8 @@ async function dispatch(
       return runStatus(args, cwd);
     case "accept":
       return runAccept(args, cwd, now);
+    case "rename":
+      return runRename(args, cwd);
     case undefined:
       throw new BaizeError("cli.usage", "用法：baize <new|validate|status|accept> [选项]");
     default:
