@@ -6,7 +6,7 @@ BaiZe 软件全量设计套件：把需求从录入逐层拆成可追溯、可�
 
 ## 包里有什么
 
-- **CLI** —— `baize <new|validate|status|accept>`：`new <layer>` 发号建条目，`validate` 校验，`status` 查链的全貌，`accept` 认领一条 `statement` 与 `acceptance`。
+- **CLI** —— `baize <new|validate|status|accept|rename|migrate>`：`new <layer>` 发号建条目，`validate` 校验，`status` 查链的全貌，`accept` 认领一条 `statement` 与 `acceptance`，`rename` 把条目里的清单引用跟到新 slug，`migrate` 把旧模型的条目搬到新形状（两条改写命令都默认 dry-run，`--write` 才落盘）。
 - **十个 skill** —— 六个段 skill（`baize-ir` / `baize-sr` / `baize-ar` / `baize-scenario` / `baize-usecase` / `baize-function`）＋ 三个纪律 skill（`baize-validate` / `baize-review` / `baize-revise`）＋ 入口 `using-baize`。
 - **pi 扩展** —— `extensions/baize-context.ts`：会话启动时注入 `using-baize` 的正文。
 - **Claude Code plugin** —— `.claude-plugin/plugin.json` ＋ 一个 SessionStart hook，注入**同一份**正文。
@@ -30,15 +30,15 @@ graph TD
 
   IR --> SR
   SR --> AR
-  SR --> SC
-  SR --> UC
-  SR --> FN
   FN --> FP
+  SC -.->|refines| SR
+  UC -.->|refines| SR
+  FN -.->|satisfies| SR
   UC -.-> SC
   FN -.-> UC
 ```
 
-实线是 `parent`（分解），虚线是 `appearsIn` / `realizes`（关联）。
+实线是 `parent`（分解）；虚线都是多对多——带标签的是认领边（`refines` / `satisfies`：方案层条目接住哪条 SR），不带标签的是关联边（`appearsIn` / `realizes`）。
 
 挑它当例子不是为了好看：它是 `npm run check:fixture` **每次都会严格校验**的那条链，所以这张图不会烂。
 
@@ -49,6 +49,7 @@ graph TD
 > [!NOTE]
 > 本仓 `private: true`、版本 `0.0.0`，**尚未发布**：今天只有「从 checkout 装」这一条路。
 > 还有一件事容易误会：**本仓根目录没有 `baize/`**。它是工具，不是一份设计——设计资产长在**你自己项目**的 `baize/` 下。
+> 旧模型建的仓库（方案层条目用 `parent` 挂在 SR 下）：升级后跑一次 `baize migrate` 搬到新形状（默认 dry-run，确认后加 `--write` 落盘）。
 
 ### 装进你的 agent
 
@@ -97,6 +98,6 @@ $ npx baize validate
 | [`CONTEXT.md`](CONTEXT.md) | 想知道某个术语到底指什么——域模型的唯一来源 |
 | [`AGENTS.md`](AGENTS.md) | agent 在这个仓库里该怎么干活：issue、triage、领域文档的位置 |
 | [`CODING_STANDARDS.md`](CODING_STANDARDS.md) | 写代码与写测试的判断类规矩——`/code-review` 按它看 |
-| [`docs/adr/`](docs/adr/) | 想知道某个设计为什么长这样：五个已定的决策 |
+| [`docs/adr/`](docs/adr/) | 想知道某个设计为什么长这样：六个已定的决策 |
 | [`docs/agents/`](docs/agents/) | issue tracker、triage 标签、域文档的具体约定 |
 | [`probes/README.md`](probes/README.md) | 要跑探针，或想知道判定口径与观察项 |
