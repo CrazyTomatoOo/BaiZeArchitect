@@ -65,6 +65,22 @@ export const CLAIM_FIELD: Partial<Record<LayerKey, "refines" | "satisfies">> = {
   "function-items": "satisfies",
   "function-points": "satisfies",
 };
+
+/**
+ * 层的中文叫法（人读消息用）：键为 layer key。
+ * 一处定义，`validate` 的错误消息与 `migrate` 的点名清单共用——两处各抄一份，
+ * 层的增改就会让两边显示不同的名字。
+ */
+export const LAYER_LABEL: Record<string, string> = {
+  ir: "初始需求",
+  sr: "系统需求",
+  ar: "分配需求",
+  scenarios: "场景",
+  usecases: "用例",
+  "function-items": "功能项",
+  "function-points": "功能点",
+};
+
 export const LAYERS: readonly LayerDef[] = [
   {
     key: "ir",

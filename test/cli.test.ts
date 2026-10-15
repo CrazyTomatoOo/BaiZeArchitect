@@ -4577,7 +4577,6 @@ test("migrate 拿不准就不猜：指向不存在 / 指错层的 parent → 跳
   // 旧链 5 处 + 两个拿不准场景的备选流改名（改名独立于 parent 判断）= 7 处
   assert.match(written.stdout, /已改写 7 处改动/);
   assert.match(written.stdout, /跳过 6 处/);
-  const parentOf = (text: string): string => /^parent:.*$/m.exec(text)?.[0] ?? "";
   // snapshotDir 的键相对 baize/（与 rename 的用例同一份快照工具）
   for (const rel of [
     "scenarios/SC-002.md",
@@ -4589,8 +4588,8 @@ test("migrate 拿不准就不猜：指向不存在 / 指错层的 parent → 跳
   ]) {
     const after = readFileSync(join(cwd, "baize", rel), "utf8");
     assert.equal(
-      parentOf(after),
-      parentOf(before.get(rel) ?? ""),
+      frontmatterOf(after)["parent"],
+      frontmatterOf(before.get(rel) ?? "")["parent"],
       `${rel} 的 parent 一字不动`,
     );
     // 除场景的备选流键改名外，拿不准的条目整个文件不动
@@ -4598,10 +4597,11 @@ test("migrate 拿不准就不猜：指向不存在 / 指错层的 parent → 跳
       assert.equal(after, before.get(rel), `${rel} 拿不准就整个不动`);
     }
   }
-  // 子场景不代填认领边：refines 不会凭空出现
-  assert.doesNotMatch(
-    readFileSync(join(cwd, "baize/scenarios/SC-003.md"), "utf8"),
-    /^refines:/m,
+  // 子场景不代填认领边：解析后看，refines 确实没长出来
+  assert.equal(
+    frontmatterOf(readFileSync(join(cwd, "baize/scenarios/SC-003.md"), "utf8"))["refines"],
+    undefined,
+    "子场景的认领边由人决定，migrate 不代填",
   );
 });
 

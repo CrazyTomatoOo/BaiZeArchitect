@@ -5,7 +5,7 @@ import { parseEntry } from "./entry.ts";
 import { BaizeError } from "./errors.ts";
 import { escapeRegExp, fieldLineOf } from "./frontmatter.ts";
 import { LAYERS, type LayerKey } from "./layers.ts";
-import { BAIZE_DIR, writeFileAtomic } from "./store.ts";
+import { BAIZE_DIR, isEnoent, writeFileAtomic } from "./store.ts";
 
 /** `baize rename` 的改写对象：kind 决定改哪个层、哪个字段、对哪份清单验新 slug。 */
 export type RenameKind = "catalog" | "element";
@@ -44,15 +44,6 @@ const RENAME_TARGET: Record<RenameKind, RenameTarget> = {
   },
   element: { layer: "ar", field: "allocates", catalogFile: "architecture.yaml" },
 };
-
-function isEnoent(error: unknown): boolean {
-  return (
-    typeof error === "object" &&
-    error !== null &&
-    "code" in error &&
-    error.code === "ENOENT"
-  );
-}
 
 /**
  * 计划一次 rename：先验新 slug 已在清单（拒绝条件先于任何改写），

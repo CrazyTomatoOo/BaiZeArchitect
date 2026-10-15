@@ -16,21 +16,10 @@ import { chainRootsOf } from "./gate.ts";
 import type { Catalogs } from "./catalogs.ts";
 import { readCatalogs } from "./catalogs.ts";
 import { isPlainObject } from "./guards.ts";
-import { ALLOWED_PARENTS, CLAIM_FIELD } from "./layers.ts";
+import { ALLOWED_PARENTS, CLAIM_FIELD, LAYER_LABEL } from "./layers.ts";
 import { readEntries } from "./store.ts";
 import { staleIssues } from "./stale.ts";
 import type { Issue } from "./types.ts";
-
-/** 层的中文叫法（错误消息里人读用）：键为 layer key。 */
-const LAYER_LABEL: Record<string, string> = {
-  ir: "初始需求",
-  sr: "系统需求",
-  ar: "分配需求",
-  scenarios: "场景",
-  usecases: "用例",
-  "function-items": "功能项",
-  "function-points": "功能点",
-};
 
 function fieldIssues(entry: Entry): Issue[] {
   const issues: Issue[] = [];

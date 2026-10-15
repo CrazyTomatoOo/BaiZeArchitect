@@ -1,17 +1,8 @@
 import { promises as fs } from "node:fs";
 import path from "node:path";
 import { isMap, isNode, isScalar, LineCounter, parseDocument, type YAMLError, type YAMLMap } from "yaml";
-import { BAIZE_DIR } from "./store.ts";
+import { BAIZE_DIR, isEnoent } from "./store.ts";
 import type { Issue } from "./types.ts";
-
-function isEnoent(error: unknown): boolean {
-  return (
-    typeof error === "object" &&
-    error !== null &&
-    "code" in error &&
-    error.code === "ENOENT"
-  );
-}
 
 /** 受控清单：一份 YAML = 一个顶层键 + 稳定 slug → { name, description? }。
  * 清单不是条目：没有 parent、不进阶段状态、不参与陈旧传播；

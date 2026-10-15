@@ -2,7 +2,7 @@ import { promises as fs } from "node:fs";
 import path from "node:path";
 import { claimIdsOf, idOf, parentIdOf, type Entry } from "./entry.ts";
 import { escapeRegExp, fieldLineOf } from "./frontmatter.ts";
-import { CLAIM_FIELD } from "./layers.ts";
+import { CLAIM_FIELD, LAYER_LABEL } from "./layers.ts";
 import { readEntries, writeFileAtomic } from "./store.ts";
 
 /**
@@ -58,17 +58,6 @@ export interface MigrateChange {
   to: string;
   edit: MigrateEdit;
 }
-
-/** 层的中文叫法（点名消息里人读用）：键为 layer key。 */
-const LAYER_LABEL: Record<string, string> = {
-  ir: "初始需求",
-  sr: "系统需求",
-  ar: "分配需求",
-  scenarios: "场景",
-  usecases: "用例",
-  "function-items": "功能项",
-  "function-points": "功能点",
-};
 
 /** 一处「拿不准、没动」：点名给用户，剩余问题由 validate 报。 */
 export interface MigrateSkip {
