@@ -13,7 +13,7 @@ import { claimIdsOf, idOf, parentIdOf } from "./entry.ts";
  * 这里只回答「根是谁」，拓扑对不对由 `ref.*` 报。
  */
 export function chainRootsOf(byId: Record<string, Entry>, entry: Entry): Entry[] {
-  const roots = new Map<string, Entry>();
+  const roots = new Set<Entry>();
   const seen = new Set<string>();
   const walk = (current: Entry): void => {
     const id = idOf(current);
@@ -23,26 +23,20 @@ export function chainRootsOf(byId: Record<string, Entry>, entry: Entry): Entry[]
     }
     const parentId = parentIdOf(current);
     const parent = parentId === undefined ? undefined : byId[parentId];
-    if (parent !== undefined) {
-      walk(parent);
+    const claimed = claimIdsOf(current)
+      .map((claim) => byId[claim])
+      .filter((candidate): candidate is Entry => candidate !== undefined);
+
+    if (parent === undefined && claimed.length === 0) {
+      // 走到再无上游：自己就是可达的链根（含「认领边全断，`ref.orphan` 会报」的情形）
+      roots.add(current);
       return;
     }
-    const claims = claimIdsOf(current);
-    if (claims.length === 0) {
-      if (id !== undefined) roots.set(id, current);
-      return;
-    }
-    let advanced = false;
-    for (const claim of claims) {
-      const claimed = byId[claim];
-      if (claimed !== undefined) {
-        advanced = true;
-        walk(claimed);
-      }
-    }
-    // 认领边全断（`ref.orphan` 会报）时，这里自己是可达的最高点
-    if (!advanced && id !== undefined) roots.set(id, current);
+    // **两条边都走**：功能点（父是功能项）与子场景（父是场景）同时还有认领边时，
+    // 两条路各通一条链——只走父那一路会漏掉它认领的那条链的链根（评审发现 P1）。
+    if (parent !== undefined) walk(parent);
+    for (const candidate of claimed) walk(candidate);
   };
   walk(entry);
-  return [...roots.values()].sort((a, b) => (idOf(a) ?? "").localeCompare(idOf(b) ?? ""));
+  return [...roots].sort((a, b) => (idOf(a) ?? "").localeCompare(idOf(b) ?? ""));
 }

@@ -4760,3 +4760,38 @@ test("validate：stage.upstream-unconfirmed —— 一条用例认领两条 SR�
   assert.equal(gatePassed?.state, "passed");
   assert.deepEqual(gateLeft, [], both.stdout);
 });
+
+// 评审发现（`/code-review` Spec 轴，P1）：功能点**同时**有父（挂功能项）与认领边，
+// 向上走时只跟了父那一路——它认领的另一条链的链根就漏出链根集合，门禁随之漏报。
+test("stage.upstream-unconfirmed：功能点同时有父与认领边 → 两条链的链根都参与门禁（#190 评审修复）", async (t) => {
+  const cwd = mkdtempSync(join(tmpdir(), "baize-"));
+  t.after(() => rmSync(cwd, { recursive: true, force: true }));
+  injectUser(t, "alice");
+  writeSharedChains(cwd);
+  // FP-001 的父是 FN-001（认领 SR-001），但它自己认领 SR-002 —— 同属两条链
+  write(
+    cwd,
+    "baize/function-points/FP-001.md",
+    LEGAL_FP.replace("satisfies:\n  - SR-001", "satisfies:\n  - SR-002"),
+  );
+  await acceptAndRead(cwd, "IR-001"); // 只确认第一条链的链根
+
+  const result = await run(["validate", "--json"], { cwd });
+  const fp = parseJson<ValidateOutput>(result.stdout).issues.filter(
+    (issue) => issue.rule === "stage.upstream-unconfirmed" && issue.path.endsWith("FP-001.md"),
+  );
+  assert.equal(fp.length, 1, result.stdout);
+  assert.ok(
+    fp[0]?.message.includes("IR-002"),
+    "应点名它认领的那条链的链根 IR-002：" + fp[0]?.message,
+  );
+
+  // 第二条链根也确认后，这一条清空
+  await acceptAndRead(cwd, "IR-002");
+  const after = parseJson<ValidateOutput>(
+    (await run(["validate", "--json"], { cwd })).stdout,
+  ).issues.filter(
+    (issue) => issue.rule === "stage.upstream-unconfirmed" && issue.path.endsWith("FP-001.md"),
+  );
+  assert.deepEqual(after, []);
+});
