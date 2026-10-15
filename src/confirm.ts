@@ -1,7 +1,7 @@
 import path from "node:path";
 import { stringify as stringifyYaml } from "yaml";
 import type { Entry } from "./entry.ts";
-import { idOf, parentIdOf } from "./entry.ts";
+import { idOf, upstreamIdsOf } from "./entry.ts";
 import { BaizeError } from "./errors.ts";
 import { fingerprintOf } from "./fingerprint.ts";
 import { isPlainObject } from "./guards.ts";
@@ -26,7 +26,7 @@ export interface Accepted {
   at: string;
   /** 仅 `confirmed`：本条目实质字段的指纹。 */
   fingerprint?: string;
-  /** 对上游的复核（一条命令两个方向）：父条目 id → 父条目当前实质字段指纹。无父为空对象。 */
+  /** 对上游的复核（一条命令两个方向）：上游 id（parent ∪ 认领边）→ 该上游当前实质字段指纹。无上游为空对象。 */
   reviewed: Record<string, string>;
 }
 
@@ -69,9 +69,10 @@ export function confirmationOf(entry: Entry): ConfirmationView {
 /**
  * 认领一条目。一条命令两个方向（#147 / #155）：
  * - **IR** → 写 `confirmed: { by, at, fingerprint }`（对自己；恰好三项，见域模型「确认」词条）；
- * - **非 IR** → 只写 `reviewed: { <父 id>: <父条目实质字段摘要> }`（对上游），
+ * - **非 IR** → 只写 `reviewed: { <上游 id>: <上游实质字段摘要> }`（对上游），
  *   **不写 `confirmed`**——确认只用在 IR 上。
- * 上游集合 = `parent`（单亲分解树）；重复 accept 是「按现在这版再认一次」，覆盖旧记录。
+ * 上游集合 = `parent` ∪ 认领边 `refines` / `satisfies`（#183：方案层条目认领的 SR
+ * 也是被复核的上游）；重复 accept 是「按现在这版再认一次」，覆盖旧记录。
  */
 export async function accept(
   cwd: string,
@@ -82,12 +83,12 @@ export async function accept(
   const entry = entries.find((candidate) => idOf(candidate) === id);
   if (!entry) throw new BaizeError("item.not-found", `条目不存在：${id}`);
 
-  // 对上游的复核：摘要取父条目当前实质字段（与 #151 的陈旧比对共用 fingerprintOf）。
+  // 对上游的复核：上游集合 = parent ∪ 认领边（#183），摘要取上游当前实质字段
+  // （与 #151 的陈旧比对共用 fingerprintOf）；上游不存在的（断边）不记，由 ref.* 报。
   const reviewed: Record<string, string> = {};
-  const parentId = parentIdOf(entry);
-  if (parentId !== undefined) {
-    const upstream = entries.find((candidate) => idOf(candidate) === parentId);
-    if (upstream) reviewed[parentId] = fingerprintOf(upstream);
+  for (const upstreamId of upstreamIdsOf(entry)) {
+    const upstream = entries.find((candidate) => idOf(candidate) === upstreamId);
+    if (upstream) reviewed[upstreamId] = fingerprintOf(upstream);
   }
 
   const isIr = entry.layer.key === "ir";

@@ -55,3 +55,15 @@ export function claimIdsOf(entry: Entry): string[] {
   if (!Array.isArray(value)) return [];
   return value.filter((item): item is string => typeof item === "string" && item.trim() !== "");
 }
+
+/**
+ * 上游 id 集合（#183）：`parent`（分解树）∪ 认领边（`refines` / `satisfies`）。
+ * 升序去重。复核记录（confirm.ts 的 accept）与陈旧传播（stale.ts）共用这一份
+ * 上游定义，不各算一套。
+ */
+export function upstreamIdsOf(entry: Entry): string[] {
+  const ids = new Set<string>(claimIdsOf(entry));
+  const parent = parentIdOf(entry);
+  if (parent !== undefined) ids.add(parent);
+  return [...ids].sort();
+}

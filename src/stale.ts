@@ -1,5 +1,5 @@
 import type { Entry } from "./entry.ts";
-import { idOf, parentIdOf } from "./entry.ts";
+import { idOf, upstreamIdsOf } from "./entry.ts";
 import { fingerprintOf } from "./fingerprint.ts";
 import { isPlainObject } from "./guards.ts";
 import type { Issue } from "./types.ts";
@@ -70,14 +70,15 @@ export function staleFindings(scoped: Entry[]): StaleFinding {
   const direct = scoped.filter((entry) => staleUpstreamIdsOf(entry, byId).length > 0);
   const directIds = new Set(direct.map((entry) => idOf(entry) ?? entry.path));
 
-  // parent 边的子节点索引；从每条陈旧条目出发做 BFS，跳过自己（严格后代）。
-  const childrenByParent = new Map<string, Entry[]>();
+  // 下游索引：parent 边（分解树）∪ 认领边（#183：认领者是被认领条目的下游）；
+  // 从每条陈旧条目出发做 BFS，跳过自己（严格下游）。
+  const downstreamOf = new Map<string, Entry[]>();
   for (const entry of scoped) {
-    const parent = parentIdOf(entry);
-    if (parent === undefined) continue;
-    const siblings = childrenByParent.get(parent);
-    if (siblings) siblings.push(entry);
-    else childrenByParent.set(parent, [entry]);
+    for (const upstream of upstreamIdsOf(entry)) {
+      const downstream = downstreamOf.get(upstream);
+      if (downstream) downstream.push(entry);
+      else downstreamOf.set(upstream, [entry]);
+    }
   }
 
   const seen = new Set<string>();
@@ -88,7 +89,7 @@ export function staleFindings(scoped: Entry[]): StaleFinding {
     if (!current) break;
     const currentId = idOf(current);
     if (currentId === undefined) continue;
-    for (const child of childrenByParent.get(currentId) ?? []) {
+    for (const child of downstreamOf.get(currentId) ?? []) {
       const childId = idOf(child) ?? child.path;
       if (seen.has(childId)) continue;
       seen.add(childId);
@@ -127,20 +128,29 @@ export function directStaleViews(
   }));
 }
 
-/** 传递条目的消息里点出直接陈旧的祖先（沿 parent 链在作用域内回溯，升序去重）。 */
-function staleAncestorsOf(
+/**
+ * 传递条目的消息里点出直接陈旧的上游（沿 parent ∪ 认领边在作用域内回溯，升序去重）。
+ * 认领边让「上游」不再等于 parent 祖先——场景认领的 SR 变了，消息得点名那条 SR。
+ * seen 防环：坏数据（如 refines 互指）不该让 validate 挂死。
+ */
+function directlyStaleUpstreamsOf(
   entry: Entry,
   byId: Record<string, Entry>,
   directIds: Set<string>,
 ): string[] {
-  const ancestors = new Set<string>();
-  let cursor = parentIdOf(entry);
-  while (cursor !== undefined) {
-    if (directIds.has(cursor)) ancestors.add(cursor);
-    const parent = byId[cursor];
-    cursor = parent === undefined ? undefined : parentIdOf(parent);
+  const stale = new Set<string>();
+  const seen = new Set<string>();
+  const queue = upstreamIdsOf(entry);
+  while (queue.length > 0) {
+    const id = queue.pop();
+    if (id === undefined) break;
+    if (seen.has(id)) continue;
+    seen.add(id);
+    if (directIds.has(id)) stale.add(id);
+    const upstream = byId[id];
+    if (upstream !== undefined) queue.push(...upstreamIdsOf(upstream));
   }
-  return [...ancestors].sort();
+  return [...stale].sort();
 }
 
 /**
@@ -167,13 +177,13 @@ export function staleIssues(scoped: Entry[]): Issue[] {
   }
   for (const entry of transitive) {
     const id = idOf(entry) ?? entry.path;
-    const ancestors = staleAncestorsOf(entry, byId, directIds);
+    const upstreams = directlyStaleUpstreamsOf(entry, byId, directIds);
     issues.push({
       level: "INFO",
       rule: "stale.transitive",
       path: entry.path,
-      message: `传递影响：${id} 的陈旧祖先 ${ancestors.join("、")} 上游已改未复核，本条目可能需连带调整`,
-      fix: `复核祖先后按现版重新 accept 本条目`,
+      message: `传递影响：${id} 的陈旧上游 ${upstreams.join("、")} 已改未复核，本条目可能需连带调整`,
+      fix: `复核上游后按现版重新 accept 本条目`,
     });
   }
   return issues;

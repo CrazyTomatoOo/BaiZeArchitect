@@ -3515,3 +3515,226 @@ test("rename：kind 不合法或参数缺失 → exit 2 用法错，不写文件
   const wrongOption = await run(["rename", "catalog", "a", "b", "--strict"], { cwd });
   assert.equal(wrongOption.exitCode, 2);
 });
+
+// ---- #183 陈旧与复核沿认领边（refines / satisfies）传 ----
+
+/**
+ * 认领边陈旧的靶子仓：IR-001（两条线索）→ SR-001（两条线索都盖）+ AR 承接，
+ * 方案层四层各一条、全部认领 SR-001（场景/用例 refines，功能项/功能点 satisfies）。
+ * 覆盖与承接都齐：什么都没改时 validate 全绿。
+ */
+function writeClaimChain(cwd: string): void {
+  write(cwd, "baize/ir/IR-001.md", LEGAL_IR);
+  write(cwd, "baize/sr/SR-001.md", srWithCovers("SR-001", "IR-001#a1, IR-001#a2"));
+  write(cwd, "baize/architecture.yaml", ARCHITECTURE_YAML);
+  write(cwd, "baize/ar/AR-001.md", AR_UNDER_SR001);
+  write(cwd, "baize/scenario-catalogs.yaml", SCENARIO_CATALOGS_YAML);
+  write(cwd, "baize/scenarios/SC-001.md", LEGAL_SC);
+  write(cwd, "baize/usecases/UC-001.md", LEGAL_UC);
+  write(cwd, "baize/function-items/FN-001.md", LEGAL_FN);
+  write(cwd, "baize/function-points/FP-001.md", LEGAL_FP);
+}
+
+/** 只改 SR-001 的 statement（实质字段）。 */
+function changeSrStatement(cwd: string): void {
+  const text = readFileSync(join(cwd, "baize/sr/SR-001.md"), "utf8");
+  const changed = text.replace("导出能力。", "导出能力，含异步任务队列。");
+  assert.notEqual(changed, text, "本用例必须真的改掉 SR 的 statement");
+  write(cwd, "baize/sr/SR-001.md", changed);
+}
+
+test("认领边陈旧：accept 方案层条目把认领的 SR 记进 reviewed；改 SR 的 statement → 认领它的条目报 stale.direct-downstream（WARNING，门禁处阻塞）", async (t) => {
+  const cwd = mkdtempSync(join(tmpdir(), "baize-"));
+  t.after(() => rmSync(cwd, { recursive: true, force: true }));
+  injectUser(t, "alice");
+  writeClaimChain(cwd);
+  // 链根先确认，否则 stage.upstream-unconfirmed 会掺进本用例的断言
+  await acceptAndRead(cwd, "IR-001");
+  await acceptAll(cwd, ["SC-001", "UC-001", "FN-001", "FP-001"]);
+
+  // 复核记录：被复核的上游可以是 SR（场景/用例 refines、功能项/功能点 satisfies；
+  // 功能点还带 parent 功能项，两个上游都记）
+  const sc = frontmatterOf(readFileSync(join(cwd, "baize/scenarios/SC-001.md"), "utf8"));
+  assert.deepEqual(
+    Object.keys((sc["reviewed"] ?? {}) as object),
+    ["SR-001"],
+    "场景的认领边应记进 reviewed",
+  );
+  const fp = frontmatterOf(readFileSync(join(cwd, "baize/function-points/FP-001.md"), "utf8"));
+  assert.deepEqual(Object.keys((fp["reviewed"] ?? {}) as object), ["FN-001", "SR-001"]);
+
+  // 不触发（一反）：什么都没改时全绿
+  const before = await run(["validate", "--json"], { cwd });
+  assert.equal(before.exitCode, 0, before.stdout);
+  assert.deepEqual(parseJson<ValidateOutput>(before.stdout).issues, []);
+
+  // 触发（一正）：SR 的 statement 一改，认领它的四层条目都是直接下游
+  changeSrStatement(cwd);
+  const loose = await run(["validate", "--json"], { cwd });
+  assert.equal(loose.exitCode, 0, loose.stdout);
+  const direct = parseJson<ValidateOutput>(loose.stdout).issues.filter(
+    (issue) => issue.rule === "stale.direct-downstream",
+  );
+  assert.deepEqual(
+    direct.map((issue) => issue.path).sort(),
+    [
+      "baize/function-items/FN-001.md",
+      "baize/function-points/FP-001.md",
+      "baize/scenarios/SC-001.md",
+      "baize/usecases/UC-001.md",
+    ],
+  );
+  assert.ok(direct.every((issue) => issue.level === "WARNING"), loose.stdout);
+  assert.ok(direct.every((issue) => issue.message.includes("SR-001")), loose.stdout);
+
+  // 门禁处阻塞（WARNING）：--strict 升级为失败
+  const strict = await run(["validate", "--strict", "--json"], { cwd });
+  assert.equal(strict.exitCode, 1, strict.stdout);
+
+  // 复核仍走 baize accept：按现版 SR 再认一次 SC-001，它退出待复核清单
+  await acceptAndRead(cwd, "SC-001");
+  const after = await run(["validate", "--json"], { cwd });
+  const remaining = parseJson<ValidateOutput>(after.stdout).issues
+    .filter((issue) => issue.rule === "stale.direct-downstream")
+    .map((issue) => issue.path);
+  assert.ok(!remaining.includes("baize/scenarios/SC-001.md"), after.stdout);
+  assert.equal(remaining.length, 3, "其余三条认领者仍在待复核：" + after.stdout);
+});
+
+test("认领边闭包：SR 直接陈旧 → 认领它的方案层条目报 stale.transitive（INFO，消息点名该 SR）", async (t) => {
+  const cwd = mkdtempSync(join(tmpdir(), "baize-"));
+  t.after(() => rmSync(cwd, { recursive: true, force: true }));
+  injectUser(t, "alice");
+  writeClaimChain(cwd);
+  await acceptAll(cwd, ["IR-001", "SR-001", "SC-001", "UC-001", "FN-001", "FP-001"]);
+  changeIrStatement(cwd); // IR 改 → 只有复核过 IR 的 SR-001 是直接下游
+
+  const loose = await run(["validate", "--json"], { cwd });
+  assert.equal(loose.exitCode, 0, loose.stdout);
+  const issues = parseJson<ValidateOutput>(loose.stdout).issues;
+
+  const direct = issues.filter((issue) => issue.rule === "stale.direct-downstream");
+  assert.deepEqual(
+    direct.map((issue) => issue.path),
+    ["baize/sr/SR-001.md"],
+    "SR-001 自己没改，只有它复核过的 IR 失效",
+  );
+
+  // 闭包沿认领边传：认领 SR-001 的四层条目自己的复核未失效（SR-001 没改），
+  // 只算传递影响；AR-001 沿 parent 边照旧在闭包里（既有语义不变）
+  const transitive = issues.filter((issue) => issue.rule === "stale.transitive");
+  assert.deepEqual(
+    transitive.map((issue) => [issue.level, issue.path]),
+    [
+      ["INFO", "baize/ar/AR-001.md"],
+      ["INFO", "baize/function-items/FN-001.md"],
+      ["INFO", "baize/function-points/FP-001.md"],
+      ["INFO", "baize/scenarios/SC-001.md"],
+      ["INFO", "baize/usecases/UC-001.md"],
+    ],
+  );
+  // 消息点名陈旧的上游：认领边回溯到 SR-001（不是 parent 祖先）
+  assert.ok(
+    transitive.every((issue) => issue.message.includes("SR-001")),
+    loose.stdout,
+  );
+});
+
+test("认领边陈旧不级联：--strict 下方案层的 stale.transitive 仍 INFO 永不升级，exit 1 只由直接下游的 WARNING 造成", async (t) => {
+  const cwd = mkdtempSync(join(tmpdir(), "baize-"));
+  t.after(() => rmSync(cwd, { recursive: true, force: true }));
+  injectUser(t, "alice");
+  writeClaimChain(cwd);
+  await acceptAll(cwd, ["IR-001", "SR-001", "SC-001", "UC-001", "FN-001", "FP-001"]);
+  changeIrStatement(cwd);
+
+  const strict = await run(["validate", "--strict", "--json"], { cwd });
+  assert.equal(strict.exitCode, 1, strict.stdout);
+  const issues = parseJson<ValidateOutput>(strict.stdout).issues;
+
+  // 认领边进闭包的四条也在场（断言不是空转），且全部 INFO
+  const transitive = issues.filter((issue) => issue.rule === "stale.transitive");
+  assert.deepEqual(
+    transitive.map((issue) => issue.path).sort(),
+    [
+      "baize/ar/AR-001.md",
+      "baize/function-items/FN-001.md",
+      "baize/function-points/FP-001.md",
+      "baize/scenarios/SC-001.md",
+      "baize/usecases/UC-001.md",
+    ],
+  );
+  assert.ok(transitive.every((issue) => issue.level === "INFO"), strict.stdout);
+  const direct = issues.filter((issue) => issue.rule === "stale.direct-downstream");
+  assert.deepEqual(direct.map((issue) => issue.level), ["WARNING"]);
+});
+
+/** 子场景：挂在 SC-001 下（场景挂场景的例外），也认领 SR-001。 */
+const SC_002_UNDER_SC001 = `---
+id: SC-002
+title: 导出失败重试
+parent: SC-001
+refines:
+  - SR-001
+catalog: order-flow
+preconditions:
+  - 用户已登录
+trigger: 导出失败后用户点击重试
+mainFlow:
+  - 系统重新发起导出
+alternativeFlows: []
+expectedOutcome: 重试成功并下载
+stakeholders:
+  - 买家
+---
+
+子场景：主流程之外的重试分支。
+`;
+
+/** 给条目的认领边列表追加一条（出边变化，不动 statement）。 */
+function addClaim(cwd: string, rel: string, extra: string): void {
+  const text = readFileSync(join(cwd, rel), "utf8");
+  const changed = text.replace(/^(\s*)- SR-001$/m, `$1- SR-001
+$1- ${extra}`);
+  assert.notEqual(changed, text, "本用例必须真的改掉认领边");
+  write(cwd, rel, changed);
+}
+
+test("认领边是实质字段：改场景的 refines / 功能项的 satisfies 同样让复核过的下游失效", async (t) => {
+  const cwd = mkdtempSync(join(tmpdir(), "baize-"));
+  t.after(() => rmSync(cwd, { recursive: true, force: true }));
+  injectUser(t, "alice");
+  writeClaimChain(cwd);
+  // SR-002 供改边后认领（改边要指向存在的条目，否则 ref.unknown-target 盖过本用例）
+  write(cwd, "baize/sr/SR-002.md", srWithCovers("SR-002", "IR-001#a1"));
+  write(cwd, "baize/scenarios/SC-002.md", SC_002_UNDER_SC001);
+  // SC-002 复核 parent 场景 SC-001；FP-001 复核 parent 功能项 FN-001
+  await acceptAll(cwd, ["IR-001", "SC-001", "SC-002", "FP-001"]);
+
+  const before = await run(["validate", "--json"], { cwd });
+  const beforeIssues = parseJson<ValidateOutput>(before.stdout).issues;
+  assert.ok(
+    beforeIssues.every((issue) => !issue.rule.startsWith("stale.")),
+    `改边之前不应有陈旧：${JSON.stringify(beforeIssues)}`,
+  );
+
+  // 出边一改（SC-001 多认领 SR-002、FN-001 多认领 SR-002），statement 一字未动
+  addClaim(cwd, "baize/scenarios/SC-001.md", "SR-002");
+  addClaim(cwd, "baize/function-items/FN-001.md", "SR-002");
+
+  const result = await run(["validate", "--json"], { cwd });
+  assert.equal(result.exitCode, 0, result.stdout);
+  const direct = parseJson<ValidateOutput>(result.stdout).issues.filter(
+    (issue) => issue.rule === "stale.direct-downstream",
+  );
+  assert.deepEqual(
+    direct.map((issue) => issue.path).sort(),
+    ["baize/function-points/FP-001.md", "baize/scenarios/SC-002.md"],
+    "复核过 SC-001 / FN-001 的下游应失效",
+  );
+  assert.ok(direct.every((issue) => issue.level === "WARNING"), result.stdout);
+  const sc2 = direct.find((issue) => issue.path === "baize/scenarios/SC-002.md");
+  assert.ok(sc2?.message.includes("SC-001"), "消息应点名被改的上游 SC-001：" + sc2?.message);
+  const fp1 = direct.find((issue) => issue.path === "baize/function-points/FP-001.md");
+  assert.ok(fp1?.message.includes("FN-001"), "消息应点名被改的上游 FN-001：" + fp1?.message);
+});

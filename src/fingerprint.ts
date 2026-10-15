@@ -9,9 +9,19 @@ import { isPlainObject } from "./guards.ts";
  * 一份清单，两处消费者共用：
  * - 确认（#151）比对**自己**的实质字段——`baize accept` 记指纹，改动后重算不符即失效；
  * - 陈旧（#155）比对**上游**的实质字段——复核指纹对不上即待复核。
- * 关系边必须算进去：上游把 `covers` 从 a1 改成 a2，下游的覆盖率就变了。
+ * 关系边必须算进去：上游把 `covers` 从 a1 改成 a2，下游的覆盖率就变了；
+ * 认领边（`refines` / `satisfies`）同理——把一条场景改去认领另一条 SR，
+ * 复核过它的下游就不再是按那一版拆的（#183）。
  */
-const EDGE_FIELDS = ["parent", "covers", "allocates", "appearsIn", "realizes"] as const;
+const EDGE_FIELDS = [
+  "parent",
+  "covers",
+  "allocates",
+  "appearsIn",
+  "realizes",
+  "refines",
+  "satisfies",
+] as const;
 
 /** 该条目的实质字段清单（缺失的边取 null，键序固定，可直接比较）。 */
 export function substantiveFields(entry: Entry): Record<string, unknown> {
