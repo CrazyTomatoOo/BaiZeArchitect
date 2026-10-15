@@ -209,6 +209,8 @@ test("validate：合法条目 exit 0 且 issues 为空", async (t) => {
   // AR 分配（#152）：合法仓库要求每条 SR 都有 AR 承接
   write(cwd, "baize/architecture.yaml", ARCHITECTURE_YAML);
   write(cwd, "baize/ar/AR-001.md", LEGAL_AR);
+  // 方案层认领（#181），隔离 sr.unclaimed
+  write(cwd, "baize/function-items/FN-001.md", FN_CLAIMING_SR001);
 
   // IR 录入门禁（#147）：未确认的链根会让下游条目报 stage.upstream-unconfirmed，先把根认下来
   await acceptAndRead(cwd, "IR-001");
@@ -386,6 +388,8 @@ test("默认全仓、--chain 限定作用域", async (t) => {
   // AR 承接（#152），隔离 sr.unallocated
   write(cwd, "baize/architecture.yaml", ARCHITECTURE_YAML);
   write(cwd, "baize/ar/AR-001.md", LEGAL_AR);
+  // 方案层认领（#181），隔离 sr.unclaimed
+  write(cwd, "baize/function-items/FN-001.md", FN_CLAIMING_SR001);
   // IR-002 的 id 格式不合法
   write(
     cwd,
@@ -1072,6 +1076,8 @@ test("status --chain：状态文件缺失不是错误——六段全部未跳过
   // AR 承接（#152），隔离 sr.unallocated
   write(cwd, "baize/architecture.yaml", ARCHITECTURE_YAML);
   write(cwd, "baize/ar/AR-001.md", LEGAL_AR);
+  // 方案层认领（#181），隔离 sr.unclaimed
+  write(cwd, "baize/function-items/FN-001.md", FN_CLAIMING_SR001);
 
   // IR 录入门禁（#147）：未确认的链根会让下游条目报 stage.upstream-unconfirmed，先把根认下来
   await acceptAndRead(cwd, "IR-001");
@@ -1125,6 +1131,8 @@ test("validate：stage.skip-missing-reason —— 跳过记录缺 by / at / why 
     // AR 承接（#152），隔离 sr.unallocated
     write(cwd, "baize/architecture.yaml", ARCHITECTURE_YAML);
     write(cwd, "baize/ar/AR-001.md", LEGAL_AR);
+    // 方案层认领（#181），隔离 sr.unclaimed
+    write(cwd, "baize/function-items/FN-001.md", FN_CLAIMING_SR001);
     write(cwd, "baize/chains/IR-001.yaml", `skipped:\n  sr:\n${body.split("\n").map((l) => `    ${l}`).join("\n")}`);
 
     // IR 录入门禁（#147）：未确认的链根会让下游条目报 stage.upstream-unconfirmed，先把根认下来
@@ -1151,6 +1159,8 @@ test("validate：stage.skip-missing-reason —— 跳过记录缺 by / at / why 
   // AR 承接（#152），隔离 sr.unallocated
   write(cwd, "baize/architecture.yaml", ARCHITECTURE_YAML);
   write(cwd, "baize/ar/AR-001.md", LEGAL_AR);
+  // 方案层认领（#181），隔离 sr.unclaimed
+  write(cwd, "baize/function-items/FN-001.md", FN_CLAIMING_SR001);
   write(
     cwd,
     "baize/chains/IR-001.yaml",
@@ -1535,6 +1545,8 @@ test("validate：ref.unknown-element —— AR 的 allocates 指向清单里没�
     LEGAL_AR.replace("allocates: export-service", "allocates: ghost-service"),
   );
   write(cwd, "baize/architecture.yaml", ARCHITECTURE_YAML);
+  // 方案层认领（#181），隔离 sr.unclaimed
+  write(cwd, "baize/function-items/FN-001.md", FN_CLAIMING_SR001);
 
   // IR 录入门禁（#147）：未确认的链根会让下游条目报 stage.upstream-unconfirmed，先把根认下来
   await acceptAndRead(cwd, "IR-001");
@@ -1762,6 +1774,8 @@ test("validate：sr.unallocated —— 没有 AR 挂上的 SR 报 WARNING；有 
   t.after(() => rmSync(cwd, { recursive: true, force: true }));
   write(cwd, "baize/ir/IR-001.md", LEGAL_IR);
   write(cwd, "baize/sr/SR-001.md", LEGAL_SR_FULL);
+  // 方案层认领（#181），隔离 sr.unclaimed——本用例只看 sr.unallocated
+  write(cwd, "baize/function-items/FN-001.md", FN_CLAIMING_SR001);
 
   // IR 录入门禁（#147）：未确认的链根会让下游条目报 stage.upstream-unconfirmed，先把根认下来
   await acceptAndRead(cwd, "IR-001");
@@ -2022,6 +2036,8 @@ test("缺清单文件 = 空清单，不是错误：不引用清单的仓 exit 0�
   t.after(() => rmSync(cwd, { recursive: true, force: true }));
   write(cwd, "baize/ir/IR-001.md", LEGAL_IR);
   write(cwd, "baize/sr/SR-001.md", LEGAL_SR_FULL);
+  // 方案层认领（#181），隔离 sr.unclaimed
+  write(cwd, "baize/function-items/FN-001.md", FN_CLAIMING_SR001);
 
   // 没有 baize/architecture.yaml 且仓里没有引用：清单缺失本身不是错误
   // （唯一的 sr.unallocated 是 WARNING，不挡 exit code）。
@@ -2297,6 +2313,8 @@ test("validate：covers: [] 合法（不报 field/ref），缺 covers 字段走 
   // AR 承接（#152），隔离 sr.unallocated——本测试只验 covers 的 field/ref 行为
   write(cwd, "baize/architecture.yaml", ARCHITECTURE_YAML);
   write(cwd, "baize/ar/AR-001.md", LEGAL_AR);
+  // 方案层认领（#181），隔离 sr.unclaimed——SR 路径上不得有任何无关 rule
+  write(cwd, "baize/function-items/FN-001.md", FN_CLAIMING_SR001);
 
   // covers: [] —— SR 自身没有任何 field/ref 问题；覆盖率另算（两条线索都没人覆盖）
   // IR 录入门禁（#147）：未确认的链根会让下游条目报 stage.upstream-unconfirmed，先把根认下来
@@ -2644,6 +2662,8 @@ test("stale.transitive：陈旧条目的严格后代报 INFO，陈旧条目自�
   t.after(() => rmSync(cwd, { recursive: true, force: true }));
   injectUser(t, "alice");
   writeChain(cwd);
+  // 方案层认领（#181），隔离 sr.unclaimed——FN 经认领边也是 SR-001 的严格后代
+  write(cwd, "baize/function-items/FN-001.md", FN_CLAIMING_SR001);
   await acceptAll(cwd, ["SR-001", "AR-001", "SR-002"]);
   changeIrStatement(cwd);
 
@@ -2657,8 +2677,11 @@ test("stale.transitive：陈旧条目的严格后代报 INFO，陈旧条目自�
   const transitive = issues.filter((issue) => issue.rule === "stale.transitive");
   assert.deepEqual(
     transitive.map((issue) => [issue.level, issue.path]),
-    [["INFO", "baize/ar/AR-001.md"]],
-    "AR-001 是 SR-001 的严格后代、自己复核未失效",
+    [
+      ["INFO", "baize/ar/AR-001.md"],
+      ["INFO", "baize/function-items/FN-001.md"],
+    ],
+    "AR-001（parent 边）与 FN-001（认领边）都是 SR-001 的严格后代、自己复核未失效",
   );
   // 陈旧条目自己不算传递：SR-001 只有 WARNING direct，没有 INFO transitive
   const srIssues = issues.filter((issue) => issue.path === "baize/sr/SR-001.md");
@@ -3279,6 +3302,8 @@ test("validate：stage.upstream-unconfirmed —— 上游 IR 未确认时下游�
   write(cwd, "baize/sr/SR-001.md", srWithCovers("SR-001", "IR-001#a1, IR-001#a2"));
   write(cwd, "baize/architecture.yaml", ARCHITECTURE_YAML);
   write(cwd, "baize/ar/AR-001.md", LEGAL_AR);
+  // 方案层认领（#181），隔离 sr.unclaimed——FN 也是下游条目，未确认时同样报
+  write(cwd, "baize/function-items/FN-001.md", FN_CLAIMING_SR001);
 
   // 未确认：下游条目报 WARNING，IR 自己不报；WARNING 不挡 exit code
   const unconfirmed = await run(["validate", "--json"], { cwd });
@@ -3288,6 +3313,7 @@ test("validate：stage.upstream-unconfirmed —— 上游 IR 未确认时下游�
     issues.map((issue) => `${issue.rule} ${issue.path}`).sort(),
     [
       "stage.upstream-unconfirmed baize/ar/AR-001.md",
+      "stage.upstream-unconfirmed baize/function-items/FN-001.md",
       "stage.upstream-unconfirmed baize/sr/SR-001.md",
     ],
     unconfirmed.stdout,
@@ -3737,4 +3763,153 @@ test("认领边是实质字段：改场景的 refines / 功能项的 satisfies �
   assert.ok(sc2?.message.includes("SC-001"), "消息应点名被改的上游 SC-001：" + sc2?.message);
   const fp1 = direct.find((issue) => issue.path === "baize/function-points/FP-001.md");
   assert.ok(fp1?.message.includes("FN-001"), "消息应点名被改的上游 FN-001：" + fp1?.message);
+});
+
+// ── #181 两条新 WARNING：acceptance 超阈值 / SR 未被认领 ──────────────────
+
+/** N 条验收线索（a1..aN）的 IR。 */
+function irWithClues(clueCount: number): string {
+  const clues = Array.from({ length: clueCount }, (_, i) => `  a${i + 1}: 线索 ${i + 1}`);
+  return `---
+id: IR-001
+title: 支持用户数据导出
+parent: null
+acceptance:
+${clues.join("\n")}
+---
+
+产品要求用户能把数据带走，不能锁死在系统里。
+`;
+}
+
+/**
+ * clueCount 条线索的「除阈值外全绿」仓库：SR 全盖、AR 承接、场景认领 SR、
+ * 根已确认（其余 WARNING/ERROR 都不掺进来，只剩 acceptance 条数这一件事）。
+ */
+async function writeThresholdRepo(cwd: string, clueCount: number): Promise<void> {
+  const covers = Array.from({ length: clueCount }, (_, i) => `IR-001#a${i + 1}`).join(", ");
+  write(cwd, "baize/ir/IR-001.md", irWithClues(clueCount));
+  write(cwd, "baize/sr/SR-001.md", srWithCovers("SR-001", covers));
+  write(cwd, "baize/architecture.yaml", ARCHITECTURE_YAML);
+  write(cwd, "baize/ar/AR-001.md", AR_UNDER_SR001);
+  write(cwd, "baize/scenario-catalogs.yaml", SCENARIO_CATALOGS_YAML);
+  write(cwd, "baize/scenarios/SC-001.md", LEGAL_SC);
+  await acceptAndRead(cwd, "IR-001");
+}
+
+test("validate：field.acceptance-too-many —— 8 条线索报 WARNING（消息带条数与阈值），恰好 7 条不报", async (t) => {
+  const sevenCwd = mkdtempSync(join(tmpdir(), "baize-"));
+  const eightCwd = mkdtempSync(join(tmpdir(), "baize-"));
+  t.after(() => {
+    rmSync(sevenCwd, { recursive: true, force: true });
+    rmSync(eightCwd, { recursive: true, force: true });
+  });
+
+  await writeThresholdRepo(sevenCwd, 7);
+  const seven = await run(["validate", "--json"], { cwd: sevenCwd });
+  assert.equal(seven.exitCode, 0, seven.stdout);
+  assert.deepEqual(
+    parseJson<ValidateOutput>(seven.stdout).issues,
+    [],
+    "恰好 7 条不报：" + seven.stdout,
+  );
+
+  await writeThresholdRepo(eightCwd, 8);
+  const eight = await run(["validate", "--json"], { cwd: eightCwd });
+  assert.equal(eight.exitCode, 0, "WARNING 不挡 exit code：" + eight.stdout);
+  const issues = parseJson<ValidateOutput>(eight.stdout).issues;
+  assert.deepEqual(
+    issues.map((issue) => issue.rule),
+    ["field.acceptance-too-many"],
+    eight.stdout,
+  );
+  const issue = issues[0];
+  assert.ok(issue, eight.stdout);
+  assert.equal(issue.level, "WARNING");
+  assert.equal(issue.path, "baize/ir/IR-001.md");
+  assert.ok(issue.message.includes("8 条"), "消息带条数：" + issue.message);
+  assert.ok(issue.message.includes("阈值 7"), "消息带阈值：" + issue.message);
+  assert.ok(issue.fix?.includes("拆"), "fix 指向拆分：" + (issue.fix ?? ""));
+});
+
+test("validate --strict 把 WARNING（field.acceptance-too-many）也算失败（exit 1）", async (t) => {
+  const cwd = mkdtempSync(join(tmpdir(), "baize-"));
+  t.after(() => rmSync(cwd, { recursive: true, force: true }));
+  await writeThresholdRepo(cwd, 8);
+  const strict = await run(["validate", "--strict"], { cwd });
+  assert.equal(strict.exitCode, 1, strict.stdout);
+});
+
+
+/**
+ * 最小认领者（#181）：一条功能项 satisfies SR-001、realizes 允许空——
+ * 单文件即可把 sr.unclaimed 从用例里隔离掉（不需要场景目录清单）。
+ */
+const FN_CLAIMING_SR001 = `---
+id: FN-001
+title: 导出服务
+satisfies:
+  - SR-001
+domain: 数据服务
+realizes: []
+description: 承载导出能力。
+---
+`;
+
+test("validate：sr.unclaimed —— 没有方案层条目认领的 SR 报 WARNING；被 refines/satisfies 认领则不报", async (t) => {
+  const cwd = mkdtempSync(join(tmpdir(), "baize-"));
+  t.after(() => rmSync(cwd, { recursive: true, force: true }));
+  write(cwd, "baize/ir/IR-001.md", LEGAL_IR);
+  write(cwd, "baize/sr/SR-001.md", srWithCovers("SR-001", "IR-001#a1, IR-001#a2"));
+  write(cwd, "baize/architecture.yaml", ARCHITECTURE_YAML);
+  write(cwd, "baize/ar/AR-001.md", AR_UNDER_SR001); // AR 承接（#152），隔离 sr.unallocated
+  await acceptAndRead(cwd, "IR-001");
+
+  const unclaimed = await run(["validate", "--json"], { cwd });
+  assert.equal(unclaimed.exitCode, 0, "WARNING 不挡 exit code");
+  const issues = parseJson<ValidateOutput>(unclaimed.stdout).issues;
+  assert.deepEqual(
+    issues.map((issue) => issue.rule),
+    ["sr.unclaimed"],
+    unclaimed.stdout,
+  );
+  assert.equal(issues[0]?.level, "WARNING");
+  assert.equal(issues[0]?.path, "baize/sr/SR-001.md");
+  assert.ok(issues[0]?.message.includes("SR-001"), "消息应点名 SR：" + issues[0]?.message);
+
+  // 认领者出现（场景 refines / 功能项 satisfies 都算数）→ 不再报
+  write(cwd, "baize/scenario-catalogs.yaml", SCENARIO_CATALOGS_YAML);
+  write(cwd, "baize/scenarios/SC-001.md", LEGAL_SC);
+  const claimedByScenario = await run(["validate", "--json"], { cwd });
+  assert.equal(claimedByScenario.exitCode, 0, claimedByScenario.stdout);
+  assert.deepEqual(
+    parseJson<ValidateOutput>(claimedByScenario.stdout).issues,
+    [],
+    "场景 refines 认领后不报：" + claimedByScenario.stdout,
+  );
+
+  rmSync(join(cwd, "baize/scenarios"), { recursive: true, force: true });
+  write(cwd, "baize/function-items/FN-001.md", FN_CLAIMING_SR001);
+  const claimedByFn = await run(["validate", "--json"], { cwd });
+  assert.equal(claimedByFn.exitCode, 0, claimedByFn.stdout);
+  assert.deepEqual(
+    parseJson<ValidateOutput>(claimedByFn.stdout).issues,
+    [],
+    "功能项 satisfies 认领后不报：" + claimedByFn.stdout,
+  );
+});
+
+test("validate --strict 把 WARNING（sr.unclaimed）也算失败（exit 1）", async (t) => {
+  const cwd = mkdtempSync(join(tmpdir(), "baize-"));
+  t.after(() => rmSync(cwd, { recursive: true, force: true }));
+  write(cwd, "baize/ir/IR-001.md", LEGAL_IR);
+  write(cwd, "baize/sr/SR-001.md", srWithCovers("SR-001", "IR-001#a1, IR-001#a2"));
+  write(cwd, "baize/architecture.yaml", ARCHITECTURE_YAML);
+  write(cwd, "baize/ar/AR-001.md", AR_UNDER_SR001);
+  await acceptAndRead(cwd, "IR-001");
+
+  const lax = await run(["validate"], { cwd });
+  assert.equal(lax.exitCode, 0);
+  const strict = await run(["validate", "--strict"], { cwd });
+  assert.equal(strict.exitCode, 1);
 });

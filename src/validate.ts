@@ -57,6 +57,29 @@ function fieldIssues(entry: Entry): Issue[] {
   return issues;
 }
 
+/** IR 验收线索的提醒阈值（#181）：第 8 条起报 WARNING。硬挡会逼人把线索合并成空话，
+ * 而空话不可证伪，等于毁掉覆盖率基准（CONTEXT.md「验收线索」词条）。 */
+const ACCEPTANCE_CLUE_LIMIT = 7;
+
+// field.acceptance-too-many（#181）：IR 的验收线索超过阈值报 WARNING——
+// 线索一多，这条 IR 多半混进了不止一个需求（该拆了）。恰好 7 条不报。
+function acceptanceThresholdIssues(entry: Entry): Issue[] {
+  if (entry.layer.key !== "ir") return [];
+  const acceptance = entry.frontmatter["acceptance"];
+  if (!isPlainObject(acceptance)) return []; // 缺 / 空 / 形状不对由 field.* 报
+  const count = Object.keys(acceptance).length;
+  if (count <= ACCEPTANCE_CLUE_LIMIT) return [];
+  return [
+    {
+      level: "WARNING",
+      rule: "field.acceptance-too-many",
+      path: entry.path,
+      message: `验收线索 ${count} 条（阈值 ${ACCEPTANCE_CLUE_LIMIT}）：这条 IR 该拆了`,
+      fix: `把 ${entry.path} 拆成多条 IR，让每条的验收线索不超过 ${ACCEPTANCE_CLUE_LIMIT} 条`,
+    },
+  ];
+}
+
 function idIssue(entry: Entry): Issue[] {
   if (!Object.hasOwn(entry.frontmatter, "id")) return []; // 缺交由 field.absent 报
   const raw = entry.frontmatter["id"];
@@ -323,12 +346,36 @@ function allocationIssues(entry: Entry, byId: Record<string, Entry>): Issue[] {
   ];
 }
 
+// sr.unclaimed（#181）：SR 没有任何方案层条目认领（没有场景/用例的 refines、
+// 功能项/功能点的 satisfies 指向它）→ WARNING。与 sr.unallocated 同级同风格：
+// 这是拆分进度不是文件写坏，硬挡会逼人造假条目。反向关系现算，不落盘。
+function unclaimedIssues(entry: Entry, byId: Record<string, Entry>): Issue[] {
+  if (entry.layer.key !== "sr") return [];
+  const id = idOf(entry);
+  if (id === undefined) return []; // 缺 id 由 id.* / field.* 报
+  const claimed = Object.values(byId).some((candidate) =>
+    claimIdsOf(candidate).includes(id),
+  );
+  if (claimed) return [];
+  return [
+    {
+      level: "WARNING",
+      rule: "sr.unclaimed",
+      path: entry.path,
+      message: `SR 未被任何方案层条目认领：${id}（需求拆到方案层才算落到了交互与能力上）`,
+      fix: `为 ${id} 建一条 refines/satisfies 指向它的场景、用例、功能项或功能点`,
+    },
+  ];
+}
+
 function issuesFor(entry: Entry, byId: Record<string, Entry>, catalogs: Catalogs): Issue[] {
   return [
     ...idIssue(entry),
+    ...acceptanceThresholdIssues(entry),
     ...fieldIssues(entry),
     ...refIssues(entry, byId, catalogs),
     ...allocationIssues(entry, byId),
+    ...unclaimedIssues(entry, byId),
     ...upstreamGateIssues(entry, byId),
   ];
 }
