@@ -7,7 +7,7 @@ description: Use when starting any conversation in a project that has a `baize/`
 
 ## 这套东西是什么
 
-BaiZe 软件全量设计：把一条需求从录入开始，逐层拆成可追溯、可校验的设计条目。链条固定六段，有序但可跳段：
+BaiZe 软件全量设计：把一条需求从录入开始，逐层拆成可追溯、可校验的设计条目。链条有序但可跳段：
 
 **IR 录入 → SR 拆分 → AR 拆分 → 场景分析 → 用例分析 → 功能拆分**
 
@@ -15,8 +15,8 @@ BaiZe 软件全量设计：把一条需求从录入开始，逐层拆成可追�
 
 ## 入口在哪
 
-- 六段各有一个段 skill：`baize-ir` / `baize-sr` / `baize-ar` / `baize-scenario` / `baize-usecase` / `baize-function`。按你正处在哪一段，触发对应的那一个。
-- 三个纪律 skill：`baize-validate`（随时）/ `baize-review`（门禁前）/ `baize-revise`（上游变更后）。
+需求侧每一段各有一个段 skill：`baize-ir` / `baize-sr` / `baize-ar`；方案层（场景 / 用例 / 功能）各段也有对应的段 skill：`baize-scenario` / `baize-usecase` / `baize-function`。按你正处在哪一段，触发对应的那一个。
+纪律 skill：`baize-validate`（随时）/ `baize-review`（门禁前）/ `baize-revise`（上游变更后）。
 
 ## 第一步跑什么
 
