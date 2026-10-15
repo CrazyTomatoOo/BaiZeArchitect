@@ -32,9 +32,10 @@
     "typecheck": "tsc --noEmit",
     "test": "node --import tsx --test test/*.test.ts",
     "check:skills": "node scripts/check-skills.mjs",
+    "check:docs": "node scripts/check-doc-refs.mjs",
     "check:pack": "node scripts/check-pack.mjs",
     "check:fixture": "node scripts/check-fixture.mjs",
-    "check": "npm run typecheck && npm test && npm run build && npm run check:skills && npm run check:fixture && npm run check:pack",
+    "check": "npm run typecheck && npm test && npm run build && npm run check:skills && npm run check:docs && npm run check:fixture && npm run check:pack",
     "baize": "node --import tsx bin/baize.ts"
   },
   "dependencies": {
