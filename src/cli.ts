@@ -3,6 +3,7 @@ import { accept, DEFAULT_USER } from "./confirm.ts";
 import { BaizeError } from "./errors.ts";
 import { LAYERS } from "./layers.ts";
 import { BAIZE_DIR, nextId, scaffold, writeFileAtomic } from "./store.ts";
+import { applyMigrate, planMigrate } from "./migrate.ts";
 import { applyRename, planRename } from "./rename.ts";
 import { chainStatus, chainSummaries, itemStatus } from "./status.ts";
 import { validate } from "./validate.ts";
@@ -15,6 +16,7 @@ import {
   renderError,
   renderIssues,
   renderItem,
+  renderMigrate,
   renderRename,
   toJson,
   type Created,
@@ -356,6 +358,31 @@ async function runRename(args: ParsedArgs, cwd: string): Promise<CommandOutput> 
   };
 }
 
+async function runMigrate(args: ParsedArgs, cwd: string): Promise<CommandOutput> {
+  if (args.positionals.length > 0) {
+    throw new BaizeError("cli.usage", `多余参数：${args.positionals.join(" ")}`);
+  }
+  if (args.chain !== undefined || args.item !== undefined || args.strict) {
+    throw new BaizeError(
+      "cli.usage",
+      "migrate 只接受 --write / --json（不支持 --chain / --item / --strict）",
+    );
+  }
+  // 计划先行：识别旧模型（方案层 parent 指向 SR）→ 改写清单；拿不准的在计划里点名。
+  const plan = await planMigrate(cwd);
+  if (args.write) await applyMigrate(cwd, plan);
+  return {
+    data: {
+      schemaVersion: SCHEMA_VERSION,
+      write: args.write,
+      changes: plan.changes,
+      skipped: plan.skipped,
+    },
+    human: renderMigrate(plan, { write: args.write }),
+    exitCode: 0,
+  };
+}
+
 async function dispatch(
   args: ParsedArgs,
   cwd: string,
@@ -372,10 +399,18 @@ async function dispatch(
       return runAccept(args, cwd, now);
     case "rename":
       return runRename(args, cwd);
+    case "migrate":
+      return runMigrate(args, cwd);
     case undefined:
-      throw new BaizeError("cli.usage", "用法：baize <new|validate|status|accept> [选项]");
+      throw new BaizeError(
+        "cli.usage",
+        "用法：baize <new|validate|status|accept|rename|migrate> [选项]",
+      );
     default:
-      throw new BaizeError("cli.usage", `未知命令：${args.command}`);
+      throw new BaizeError(
+        "cli.usage",
+        "用法：baize <new|validate|status|accept|rename|migrate> [选项]",
+      );
   }
 }
 

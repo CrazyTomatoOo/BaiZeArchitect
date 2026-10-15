@@ -1,5 +1,6 @@
 import type { Accepted, ConfirmationView } from "./confirm.ts";
 import type { SkipRecord } from "./chainstate.ts";
+import type { MigratePlan } from "./migrate.ts";
 import type { RenamePlan } from "./rename.ts";
 import type { ChainDetail, ChainSummary, ItemView } from "./status.ts";
 import type { Issue } from "./types.ts";
@@ -221,6 +222,33 @@ export function renderRename(plan: RenamePlan, options: { write: boolean }): str
     );
   }
   if (!options.write) {
+    lines.push("未写盘（dry-run）。建议先提交，确认无误后加 --write 落盘。");
+  }
+  return `${lines.join("\n")}\n`;
+}
+
+/** migrate 的人读渲染：文件 + 行 + 旧值 → 新值；拿不准的点名；dry-run 额外给「建议先提交」。 */
+export function renderMigrate(plan: MigratePlan, options: { write: boolean }): string {
+  if (plan.changes.length === 0 && plan.skipped.length === 0) {
+    return "0 处改动（仓库已是新形状）\n";
+  }
+  const verb = options.write ? "已改写" : "发现";
+  const lines: string[] = [];
+  if (plan.changes.length > 0) {
+    lines.push(`${verb} ${plan.changes.length} 处改动（旧模型 → 新形状）：`);
+    for (const change of plan.changes) {
+      lines.push(`  ${change.path}:${change.line}: ${change.from} → ${change.to}`);
+    }
+  } else {
+    lines.push("0 处改动");
+  }
+  if (plan.skipped.length > 0) {
+    lines.push(`跳过 ${plan.skipped.length} 处（拿不准，未改；剩余问题 validate 会报）：`);
+    for (const skip of plan.skipped) {
+      lines.push(`  ${skip.path}${skip.line === null ? "" : `:${skip.line}`}: ${skip.reason}`);
+    }
+  }
+  if (!options.write && plan.changes.length > 0) {
     lines.push("未写盘（dry-run）。建议先提交，确认无误后加 --write 落盘。");
   }
   return `${lines.join("\n")}\n`;

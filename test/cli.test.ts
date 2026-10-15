@@ -4285,3 +4285,409 @@ test("validate：清单只查格式不查粒度——1 个或 200 个组件的�
     `粒度不是格式问题：${many.stdout}`,
   );
 });
+
+// ---- baize migrate（#185）：把旧模型的条目搬到新形状 ----
+// 旧模型（#180 之前）：场景 / 用例 / 功能项用 parent 挂在 SR 下，功能点 parent 挂功能项
+// 且没有认领边，场景的备选流拼作 alternateFlows。识别规则唯一（方案层的 parent 指向 SR），
+// 默认 dry-run、--write 才落盘，拿不准就跳过并点名（纪律见 ADR-0006）。
+
+/** 旧模型的场景：parent 挂 SR、备选流拼作 alternateFlows。 */
+const OLD_MODEL_SC = `---
+id: SC-001
+title: 下单主流程
+parent: SR-001
+catalog: order-flow
+preconditions:
+  - 用户已登录
+trigger: 用户点击下单
+mainFlow:
+  - 选择商品并确认
+alternateFlows: []
+expectedOutcome: 订单创建成功
+stakeholders:
+  - 买家
+---
+
+场景陈述：买家从选购到下单成功的完整过程。
+`;
+
+/** 旧模型的用例：parent 挂 SR（备选流本来就是 alternativeFlows 拼写）。 */
+const OLD_MODEL_UC = `---
+id: UC-001
+title: 提交订单
+parent: SR-001
+appearsIn:
+  - SC-001
+goal: 买家能提交购物车生成订单
+preconditions:
+  - 购物车非空
+mainFlow:
+  - 确认购物车并提交
+alternativeFlows: []
+postconditions:
+  - 生成订单号
+stakeholders:
+  - 买家
+---
+
+用例陈述：买家提交购物车，系统生成订单。
+`;
+
+/** 旧模型的功能项：parent 挂 SR。 */
+const OLD_MODEL_FN = `---
+id: FN-001
+title: 订单服务
+parent: SR-001
+domain: 交易
+realizes:
+  - UC-001
+description: 承载下单与订单查询的功能项。
+---`;
+
+/** 旧模型的功能点：parent 挂功能项、没有认领边（旧模型根本没有这条边）。 */
+const OLD_MODEL_FP = `---
+id: FP-001
+parent: FN-001
+responsibility: 校验并创建订单
+inputs:
+  - 购物车快照
+outputs:
+  - 订单号
+businessRules:
+  - 库存不足时拒绝下单
+acceptanceCriteria:
+  - 非法参数返回 400
+---`;
+
+/** 旧模型靶子：pre-#180 的 chain-sample 形状（七层各一条，方案层挂在 SR 下）。 */
+function writeOldModelChain(cwd: string): void {
+  write(cwd, "baize/ir/IR-001.md", LEGAL_IR);
+  write(cwd, "baize/sr/SR-001.md", srWithCovers("SR-001", "IR-001#a1, IR-001#a2"));
+  write(cwd, "baize/architecture.yaml", ARCHITECTURE_YAML);
+  write(cwd, "baize/ar/AR-001.md", AR_UNDER_SR001);
+  write(cwd, "baize/scenario-catalogs.yaml", SCENARIO_CATALOGS_YAML);
+  write(cwd, "baize/scenarios/SC-001.md", OLD_MODEL_SC);
+  write(cwd, "baize/usecases/UC-001.md", OLD_MODEL_UC);
+  write(cwd, "baize/function-items/FN-001.md", OLD_MODEL_FN);
+  write(cwd, "baize/function-points/FP-001.md", OLD_MODEL_FP);
+}
+
+test("migrate：多余参数或不支持的选项 → exit 2 用法错；仓库里没有旧模型的边 → 0 处改动、exit 0", async (t) => {
+  const cwd = mkdtempSync(join(tmpdir(), "baize-"));
+  t.after(() => rmSync(cwd, { recursive: true, force: true }));
+  writeOldModelChain(cwd);
+
+  const extra = await run(["migrate", "now"], { cwd });
+  assert.equal(extra.exitCode, 2);
+  const strict = await run(["migrate", "--strict"], { cwd });
+  assert.equal(strict.exitCode, 2);
+  const chain = await run(["migrate", "--chain", "IR-001"], { cwd });
+  assert.equal(chain.exitCode, 2);
+
+  // 连 baize/ 都没有的空仓库：0 处改动也是成功（幂等的另一面）
+  const emptyCwd = mkdtempSync(join(tmpdir(), "baize-empty-"));
+  t.after(() => rmSync(emptyCwd, { recursive: true, force: true }));
+  const empty = await run(["migrate"], { cwd: emptyCwd });
+  assert.equal(empty.exitCode, 0, empty.stdout);
+  assert.match(empty.stdout, /0 处改动/);
+});
+
+test("migrate dry-run：打印 文件+行+旧值→新值 与「建议先提交」，文件字节不变", async (t) => {
+  const cwd = mkdtempSync(join(tmpdir(), "baize-"));
+  t.after(() => rmSync(cwd, { recursive: true, force: true }));
+  writeOldModelChain(cwd);
+
+  const before = snapshotDir(cwd, "baize");
+  const result = await run(["migrate"], { cwd });
+  assert.equal(result.exitCode, 0, result.stdout);
+  assert.match(result.stdout, /发现 \d+ 处改动/);
+  // 行号由条目内容决定，只断言形状（别把行号钉死，夹具一改就假红）
+  assert.match(result.stdout, /baize\/scenarios\/SC-001\.md:\d+: parent: SR-001 → refines: \[SR-001\]/);
+  assert.match(result.stdout, /baize\/usecases\/UC-001\.md:\d+: parent: SR-001 → refines: \[SR-001\]/);
+  assert.match(result.stdout, /baize\/scenarios\/SC-001\.md:\d+: alternateFlows → alternativeFlows/);
+  assert.match(
+    result.stdout,
+    /baize\/function-points\/FP-001\.md:\d+: \(缺失\) → satisfies: \[SR-001\]（继承 FN-001 的认领）/,
+  );
+  assert.match(result.stdout, /baize\/function-items\/FN-001\.md:\d+: parent: SR-001 → satisfies: \[SR-001\]/);
+  assert.match(result.stdout, /建议先提交/);
+  // 协议级断言：dry-run 前后文件字节不变（含清单文件）
+  assert.ok(snapshotEqual(before, snapshotDir(cwd, "baize")), "dry-run 不得写盘");
+});
+
+test("migrate --write：旧模型七层链搬到新形状，validate --strict 零问题；不该动的边原样", async (t) => {
+  const cwd = mkdtempSync(join(tmpdir(), "baize-"));
+  t.after(() => rmSync(cwd, { recursive: true, force: true }));
+  injectUser(t, "fixture");
+  writeOldModelChain(cwd);
+  // 链根先确认，严格模式才不被 stage.upstream-unconfirmed 挡（migrate 不动 IR，确认不失效）
+  await acceptAndRead(cwd, "IR-001");
+
+  const arBefore = readFileSync(join(cwd, "baize/ar/AR-001.md"), "utf8");
+  const srBefore = readFileSync(join(cwd, "baize/sr/SR-001.md"), "utf8");
+
+  const result = await run(["migrate", "--write"], { cwd });
+  assert.equal(result.exitCode, 0, result.stdout);
+  assert.match(result.stdout, /已改写 5 处改动/);
+
+  // 场景：parent 换成 refines（原位），备选流统一拼写；其余字段不动
+  const sc = readFileSync(join(cwd, "baize/scenarios/SC-001.md"), "utf8");
+  assert.match(sc, /^refines:\n  - SR-001$/m);
+  assert.doesNotMatch(sc, /^parent:/m);
+  assert.match(sc, /^alternativeFlows: \[\]$/m);
+  assert.doesNotMatch(sc, /alternateFlows/);
+  // 用例：parent 换成 refines；关联边原样
+  const uc = readFileSync(join(cwd, "baize/usecases/UC-001.md"), "utf8");
+  assert.match(uc, /^refines:\n  - SR-001$/m);
+  assert.doesNotMatch(uc, /^parent:/m);
+  assert.match(uc, /^appearsIn:\n  - SC-001$/m, "关联边原样");
+  // 功能项：parent 换成 satisfies；关联边原样
+  const fn = readFileSync(join(cwd, "baize/function-items/FN-001.md"), "utf8");
+  assert.match(fn, /^satisfies:\n  - SR-001$/m);
+  assert.doesNotMatch(fn, /^parent:/m);
+  assert.match(fn, /^realizes:\n  - UC-001$/m, "关联边原样");
+  // 功能点：parent 原样（不误伤），认领边从所属功能项继承（旧模型没有这条边，所属
+  // 功能项的认领是唯一可推导的来源）
+  const fp = readFileSync(join(cwd, "baize/function-points/FP-001.md"), "utf8");
+  assert.match(fp, /^parent: FN-001$/m);
+  assert.match(fp, /^satisfies:\n  - SR-001$/m);
+  // AR 的 parent（SR→AR 在新模型仍合法）与 SR 的 covers：一字未动
+  assert.equal(readFileSync(join(cwd, "baize/ar/AR-001.md"), "utf8"), arBefore);
+  assert.equal(readFileSync(join(cwd, "baize/sr/SR-001.md"), "utf8"), srBefore);
+
+  // 搬完就是新形状：严格校验零问题
+  const strict = await run(["validate", "--strict", "--json"], { cwd });
+  assert.equal(strict.exitCode, 0, strict.stdout);
+  assert.deepEqual(parseJson<ValidateOutput>(strict.stdout).issues, []);
+});
+
+test("migrate 拿不准就不猜：指向不存在 / 指错层的 parent → 跳过并点名，parent 一字不动", async (t) => {
+  const cwd = mkdtempSync(join(tmpdir(), "baize-"));
+  t.after(() => rmSync(cwd, { recursive: true, force: true }));
+  writeOldModelChain(cwd);
+  // SC-002：parent 指向不存在的 SR-099（备选流改名是独立判断，照常做）
+  write(
+    cwd,
+    "baize/scenarios/SC-002.md",
+    OLD_MODEL_SC.replace("id: SC-001", "id: SC-002").replace(
+      "parent: SR-001",
+      "parent: SR-099",
+    ),
+  );
+  // UC-002：parent 指向 IR-001——条目存在但不是 SR
+  write(
+    cwd,
+    "baize/usecases/UC-002.md",
+    OLD_MODEL_UC.replace("id: UC-001", "id: UC-002").replace(
+      "parent: SR-001",
+      "parent: IR-001",
+    ),
+  );
+  // SC-003：子场景（parent 挂 SC-001，新旧模型都合法）——parent 不动，缺认领边时点名
+  write(
+    cwd,
+    "baize/scenarios/SC-003.md",
+    OLD_MODEL_SC.replace("id: SC-001", "id: SC-003").replace(
+      "parent: SR-001",
+      "parent: SC-001",
+    ),
+  );
+  // FP-002：parent 指向 SR——功能点的 parent 应指功能项，不敢改写
+  write(
+    cwd,
+    "baize/function-points/FP-002.md",
+    OLD_MODEL_FP.replace("id: FP-001", "id: FP-002").replace(
+      "parent: FN-001",
+      "parent: SR-001",
+    ),
+  );
+  // FN-002 的 parent 也指向不存在的 SR-099；FP-003 挂在它下面——所属功能项没有
+  // 可继承的认领边，功能点也拿不准
+  write(
+    cwd,
+    "baize/function-items/FN-002.md",
+    OLD_MODEL_FN.replace("id: FN-001", "id: FN-002").replace(
+      "parent: SR-001",
+      "parent: SR-099",
+    ),
+  );
+  write(
+    cwd,
+    "baize/function-points/FP-003.md",
+    OLD_MODEL_FP.replace("id: FP-001", "id: FP-003").replace(
+      "parent: FN-001",
+      "parent: FN-002",
+    ),
+  );
+
+  const before = snapshotDir(cwd, "baize");
+  const result = await run(["migrate", "--json"], { cwd });
+  assert.equal(result.exitCode, 0, result.stdout);
+  interface MigrateOutput {
+    write: boolean;
+    changes: unknown[];
+    skipped: { path: string; reason: string }[];
+  }
+  const data = parseJson<MigrateOutput>(result.stdout);
+  // 六处点名：每个拿不准的条目都在清单里
+  assert.deepEqual(
+    data.skipped.map((skip) => skip.path).sort(),
+    [
+      "baize/function-items/FN-002.md",
+      "baize/function-points/FP-002.md",
+      "baize/function-points/FP-003.md",
+      "baize/scenarios/SC-002.md",
+      "baize/scenarios/SC-003.md",
+      "baize/usecases/UC-002.md",
+    ],
+    result.stdout,
+  );
+  // 点名要说清指向了谁、为什么不动
+  const reasonOf = (suffix: string): string =>
+    data.skipped.find((skip) => skip.path.endsWith(suffix))?.reason ?? "";
+  assert.match(reasonOf("SC-002.md"), /SR-099/);
+  assert.match(reasonOf("UC-002.md"), /IR-001/);
+  assert.match(reasonOf("SC-003.md"), /refines/);
+  assert.match(reasonOf("FP-002.md"), /SR-001/);
+  assert.match(reasonOf("FP-003.md"), /FN-002/);
+
+  // --write：能搬的照样搬，被点名的 parent 一字不动
+  const written = await run(["migrate", "--write"], { cwd });
+  assert.equal(written.exitCode, 0, written.stdout);
+  // 旧链 5 处 + 两个拿不准场景的备选流改名（改名独立于 parent 判断）= 7 处
+  assert.match(written.stdout, /已改写 7 处改动/);
+  assert.match(written.stdout, /跳过 6 处/);
+  const parentOf = (text: string): string => /^parent:.*$/m.exec(text)?.[0] ?? "";
+  // snapshotDir 的键相对 baize/（与 rename 的用例同一份快照工具）
+  for (const rel of [
+    "scenarios/SC-002.md",
+    "usecases/UC-002.md",
+    "scenarios/SC-003.md",
+    "function-points/FP-002.md",
+    "function-items/FN-002.md",
+    "function-points/FP-003.md",
+  ]) {
+    const after = readFileSync(join(cwd, "baize", rel), "utf8");
+    assert.equal(
+      parentOf(after),
+      parentOf(before.get(rel) ?? ""),
+      `${rel} 的 parent 一字不动`,
+    );
+    // 除场景的备选流键改名外，拿不准的条目整个文件不动
+    if (rel !== "scenarios/SC-002.md" && rel !== "scenarios/SC-003.md") {
+      assert.equal(after, before.get(rel), `${rel} 拿不准就整个不动`);
+    }
+  }
+  // 子场景不代填认领边：refines 不会凭空出现
+  assert.doesNotMatch(
+    readFileSync(join(cwd, "baize/scenarios/SC-003.md"), "utf8"),
+    /^refines:/m,
+  );
+});
+
+/** 递归收集目录内每个文件的 mtime（毫秒），用于「0 改动时文件 mtime 不变」的协议级断言。 */
+function mtimesOf(cwd: string, rel: string): Map<string, number> {
+  const out = new Map<string, number>();
+  const walk = (abs: string, prefix: string): void => {
+    for (const name of readdirSync(abs)) {
+      const childAbs = join(abs, name);
+      const childRel = prefix === "" ? name : `${prefix}/${name}`;
+      if (statSync(childAbs).isDirectory()) walk(childAbs, childRel);
+      else out.set(childRel, statSync(childAbs).mtimeMs);
+    }
+  };
+  walk(join(cwd, rel), "");
+  return out;
+}
+
+test("migrate 幂等：对已迁移的仓库再跑（含 --write）= 0 处改动、exit 0、文件字节与 mtime 不变", async (t) => {
+  const cwd = mkdtempSync(join(tmpdir(), "baize-"));
+  t.after(() => rmSync(cwd, { recursive: true, force: true }));
+  writeOldModelChain(cwd);
+  const first = await run(["migrate", "--write"], { cwd });
+  assert.equal(first.exitCode, 0, first.stdout);
+
+  const bytesBefore = snapshotDir(cwd, "baize");
+  const mtimesBefore = mtimesOf(cwd, "baize");
+  const dry = await run(["migrate"], { cwd });
+  assert.equal(dry.exitCode, 0, dry.stdout);
+  assert.match(dry.stdout, /0 处改动/);
+  const again = await run(["migrate", "--write"], { cwd });
+  assert.equal(again.exitCode, 0, again.stdout);
+  assert.match(again.stdout, /0 处改动/);
+  // 协议级断言：0 改动时不写任何文件——字节与 mtime 都不变
+  assert.ok(snapshotEqual(bytesBefore, snapshotDir(cwd, "baize")), "幂等再跑不得写盘");
+  assert.deepEqual(mtimesOf(cwd, "baize"), mtimesBefore, "0 改动时文件 mtime 不变");
+});
+
+test("migrate 对已迁移的 fixture（chain-sample，已是新形状）→ 0 处改动、exit 0、一字不写", async () => {
+  const fixture = join(import.meta.dirname, "fixtures/chain-sample");
+  const before = snapshotDir(fixture, "baize");
+  const result = await run(["migrate"], { cwd: fixture });
+  assert.equal(result.exitCode, 0, result.stdout);
+  assert.match(result.stdout, /0 处改动/);
+  assert.ok(snapshotEqual(before, snapshotDir(fixture, "baize")), "dry-run 不得写盘");
+});
+
+test("migrate 不碰半迁移的僵局：已有认领边却留着 parent、两种备选流拼写并存 → 各自点名，僵局由人解", async (t) => {
+  const cwd = mkdtempSync(join(tmpdir(), "baize-"));
+  t.after(() => rmSync(cwd, { recursive: true, force: true }));
+  writeOldModelChain(cwd);
+  // SC-004：已有 refines 却还留着 parent: SR-001——改写 parent 会产生重复键
+  write(
+    cwd,
+    "baize/scenarios/SC-004.md",
+    OLD_MODEL_SC.replace("id: SC-001", "id: SC-004").replace(
+      "parent: SR-001",
+      "parent: SR-001\nrefines:\n  - SR-002",
+    ),
+  );
+  // SC-005：alternateFlows 与 alternativeFlows 并存——改名会造成重复键
+  write(
+    cwd,
+    "baize/scenarios/SC-005.md",
+    OLD_MODEL_SC.replace("id: SC-001", "id: SC-005").replace(
+      "alternateFlows: []",
+      "alternateFlows: []\nalternativeFlows: []",
+    ),
+  );
+
+  const before = snapshotDir(cwd, "baize");
+  const result = await run(["migrate", "--json"], { cwd });
+  assert.equal(result.exitCode, 0, result.stdout);
+  interface MigrateOutput {
+    write: boolean;
+    changes: { path: string }[];
+    skipped: { path: string; reason: string }[];
+  }
+  const data = parseJson<MigrateOutput>(result.stdout);
+  assert.deepEqual(
+    data.skipped.map((skip) => skip.path).sort(),
+    ["baize/scenarios/SC-004.md", "baize/scenarios/SC-005.md"],
+    result.stdout,
+  );
+  assert.match(
+    data.skipped.find((skip) => skip.path.endsWith("SC-004.md"))?.reason ?? "",
+    /refines/,
+  );
+  assert.match(
+    data.skipped.find((skip) => skip.path.endsWith("SC-005.md"))?.reason ?? "",
+    /同时存在/,
+  );
+
+  const written = await run(["migrate", "--write"], { cwd });
+  assert.equal(written.exitCode, 0, written.stdout);
+  // SC-004：parent 与已有 refines 一字不动（僵局由人解），备选流照常改名
+  const sc4 = readFileSync(join(cwd, "baize/scenarios/SC-004.md"), "utf8");
+  assert.match(sc4, /^parent: SR-001$/m);
+  assert.match(sc4, /^refines:\n  - SR-002$/m);
+  assert.match(sc4, /^alternativeFlows: \[\]$/m);
+  // SC-005：两种拼写都留着（不敢改名），parent 照常搬（它没有别的认领边）
+  const sc5 = readFileSync(join(cwd, "baize/scenarios/SC-005.md"), "utf8");
+  assert.match(sc5, /^alternateFlows: \[\]$/m);
+  assert.match(sc5, /^alternativeFlows: \[\]$/m);
+  assert.match(sc5, /^refines:\n  - SR-001$/m);
+  assert.doesNotMatch(sc5, /^parent:/m);
+  // 其余条目不受僵局影响：旧链 5 处 + SC-004 改名 + SC-005 搬边 = 7 处
+  assert.match(written.stdout, /已改写 7 处改动/);
+});
