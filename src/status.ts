@@ -14,7 +14,7 @@ import {
 } from "./chainstate.ts";
 import { computeCoverage, parseClueRef, unrealizedUsecases, type EntryCoverage } from "./coverage.ts";
 import { fieldDefectsOf } from "./fieldcheck.ts";
-import { chainRootOf } from "./gate.ts";
+import { chainRootsOf } from "./gate.ts";
 import { isPlainObject } from "./guards.ts";
 import { readEntries } from "./store.ts";
 import { directStaleViews, staleFindings, type DirectStaleView } from "./stale.ts";
@@ -206,16 +206,23 @@ function gatesOf(
   state: ChainState | undefined,
   unreviewedStale: DirectStaleView[],
 ): GateView[] {
-  // IR 录入门禁的判据：链根是 IR，且它已人工确认（且未失效）。与 validate 的
+  // IR 录入门禁的判据：所有可达链根都是 IR 且已人工确认（未失效）。与 validate 的
   // stage.upstream-unconfirmed 是同一条判据（都是「认链根 + confirmationOf」）。
-  // #190：链成员含认领边进来的方案层条目（它们无父），链根优先取无父的 IR。
-  const root =
-    members.find((entry) => parentIdOf(entry) === undefined && entry.layer.key === "ir") ??
-    members[0];
+  // #165 Q9：链成员可能认领多条 SR 同属多条链——任一链根未确认/确认失效，门禁即 pending。
+  const byId: Record<string, Entry> = {};
+  for (const candidate of all) {
+    const candidateId = idOf(candidate);
+    if (candidateId !== undefined && !Object.hasOwn(byId, candidateId)) {
+      byId[candidateId] = candidate;
+    }
+  }
   const irEntryPassed =
-    root !== undefined &&
-    root.layer.key === "ir" &&
-    confirmationOf(root).state === "confirmed";
+    members.length > 0 &&
+    members.every((member) =>
+      chainRootsOf(byId, member).every(
+        (root) => root.layer.key === "ir" && confirmationOf(root).state === "confirmed",
+      ),
+    );
 
   const srs = members.filter((entry) => entry.layer.key === "sr");
   const srArPassed = srs.every((sr) => {
@@ -339,9 +346,12 @@ export async function chainStatus(cwd: string, id: string): Promise<ChainDetail>
   };
 }
 
-/** 沿 parent 边走到根，返回链起始条目 id；父边断裂时停在可达的最高条目。 */
+/** 沿 parent 边（方案层沿认领边）走到根，返回链起始条目 id；父边断裂时停在可达的最高条目。
+ * 认领多条 SR 时同属多条链（#165 Q9），条目视图的 chain 字段是单值——取 id 排序后的
+ * 第一条（与认领边书写顺序无关）；多链归属在链视图的 shared 标注里完整呈现。 */
 function chainRootIdOf(entry: Entry, byId: Record<string, Entry>): string | null {
-  return idOf(chainRootOf(byId, entry)) ?? null;
+  const [first] = chainRootsOf(byId, entry);
+  return first === undefined ? null : (idOf(first) ?? null);
 }
 
 /** IR 的线索级反向覆盖：每条 acceptance 线索被哪几条 SR 的 covers 指向（升序）。 */

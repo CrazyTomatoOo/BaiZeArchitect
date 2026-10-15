@@ -305,11 +305,25 @@ parent: null
   assert.notEqual(empty.message, absent.message);
 });
 
-test("validate：rule 是点分 id，域限定为 RULE_DOMAINS 白名单（含 sr 与 catalog）", async (t) => {
+test("validate：rule 是点分 id，域钉在字面白名单（八个域，改清单必须是有意的测试编辑）", async (t) => {
   const cwd = mkdtempSync(join(tmpdir(), "baize-"));
   t.after(() => rmSync(cwd, { recursive: true, force: true }));
   write(cwd, "baize/ir/IR-001.md", LEGAL_IR.replace("id: IR-001", "id: bogus"));
   write(cwd, "baize/ir/IR-002.md", "---\nid: IR-002\n---\n");
+
+  // 白名单是测试里钉死的字面值，不是拿 RULE_DOMAINS 当预言机——
+  // 动 src/types.ts 的域清单会红，编辑这份期望必须是有意的。
+  const domains = [
+    "catalog",
+    "coverage",
+    "field",
+    "id",
+    "ref",
+    "sr",
+    "stage",
+    "stale",
+  ];
+  assert.deepEqual([...RULE_DOMAINS].sort(), domains);
 
   const result = await run(["validate", "--json"], { cwd });
   const issues = parseJson<ValidateOutput>(result.stdout).issues;
@@ -317,8 +331,7 @@ test("validate：rule 是点分 id，域限定为 RULE_DOMAINS 白名单（含 s
   for (const issue of issues) {
     const domain = issue.rule.split(".")[0] ?? "";
     assert.ok(
-      (RULE_DOMAINS as readonly string[]).includes(domain) &&
-        /^[a-z]+\.[a-z-]+$/.test(issue.rule),
+      domains.includes(domain) && /^[a-z]+\.[a-z-]+$/.test(issue.rule),
       `rule 必须点分且域在白名单：${issue.rule}`,
     );
     assert.ok(["ERROR", "WARNING", "INFO"].includes(issue.level));
@@ -1366,55 +1379,59 @@ test("new 方案层各自可建：场景/用例/功能项无父边（认领边�
   assert.equal(scenario.exitCode, 0, scenario.stdout);
   assert.equal(parseJson<CreatedOutput>(scenario.stdout).created.id, "SC-001");
   const scText = readFileSync(join(cwd, "baize/scenarios/SC-001.md"), "utf8");
-  assert.match(scText, /^id: SC-001$/m);
-  assert.match(scText, /^refines:/m);
-  assert.doesNotMatch(scText, /^parent:/m, "场景骨架不再有 parent");
-  assert.match(scText, /^preconditions:/m);
-  assert.match(scText, /^trigger:/m);
-  assert.match(scText, /^mainFlow:/m);
-  assert.match(scText, /^alternativeFlows:/m);
-  assert.doesNotMatch(scText, /^alternateFlows:/m, "备选流与用例统一拼写 alternativeFlows");
-  assert.match(scText, /^expectedOutcome:/m);
-  assert.match(scText, /^stakeholders:/m);
+  const scFm = frontmatterOf(scText);
+  assert.equal(scFm["id"], "SC-001");
+  assert.deepEqual(scFm["refines"], [], "骨架带 refines 待填");
+  assert.equal(scFm["parent"], undefined, "场景骨架不再有 parent");
+  assert.deepEqual(scFm["alternativeFlows"], [], "备选流与用例统一拼写 alternativeFlows");
+  assert.ok(Array.isArray(scFm["preconditions"]));
+  assert.equal(typeof scFm["trigger"], "string");
+  assert.ok(Array.isArray(scFm["mainFlow"]));
+  assert.equal(typeof scFm["expectedOutcome"], "string");
+  assert.ok(Array.isArray(scFm["stakeholders"]));
+  assert.equal(scFm["alternateFlows"], undefined, "旧拼写不应存在");
 
   const usecase = await run(["new", "usecase", "--json"], { cwd });
   assert.equal(usecase.exitCode, 0, usecase.stdout);
   assert.equal(parseJson<CreatedOutput>(usecase.stdout).created.id, "UC-001");
   const ucText = readFileSync(join(cwd, "baize/usecases/UC-001.md"), "utf8");
-  assert.match(ucText, /^refines:/m);
-  assert.doesNotMatch(ucText, /^parent:/m, "用例不再有父边");
-  assert.match(ucText, /^appearsIn:/m);
-  assert.match(ucText, /^goal:/m);
-  assert.match(ucText, /^alternativeFlows:/m);
-  assert.match(ucText, /^postconditions:/m);
+  const ucFm = frontmatterOf(ucText);
+  assert.deepEqual(ucFm["refines"], []);
+  assert.equal(ucFm["parent"], undefined, "用例不再有父边");
+  assert.ok(Array.isArray(ucFm["appearsIn"]));
+  assert.equal(typeof ucFm["goal"], "string");
+  assert.deepEqual(ucFm["alternativeFlows"], []);
+  assert.ok(Array.isArray(ucFm["postconditions"]));
 
   // 功能项是薄层：title + description，无 statement。
   const fn = await run(["new", "function-item", "--json"], { cwd });
   assert.equal(fn.exitCode, 0, fn.stdout);
   assert.equal(parseJson<CreatedOutput>(fn.stdout).created.id, "FN-001");
   const fnText = readFileSync(join(cwd, "baize/function-items/FN-001.md"), "utf8");
-  assert.match(fnText, /^title:/m);
-  assert.match(fnText, /^satisfies:/m);
-  assert.doesNotMatch(fnText, /^parent:/m, "功能项不再有父边");
-  assert.match(fnText, /^domain:/m);
-  assert.match(fnText, /^realizes:/m);
-  assert.match(fnText, /^description:/m);
-  assert.ok(!/^statement:/m.test(fnText), "功能项是薄层，不应有 statement");
+  const fnFm = frontmatterOf(fnText);
+  assert.equal(typeof fnFm["title"], "string");
+  assert.deepEqual(fnFm["satisfies"], []);
+  assert.equal(fnFm["parent"], undefined, "功能项不再有父边");
+  assert.equal(typeof fnFm["domain"], "string");
+  assert.deepEqual(fnFm["realizes"], []);
+  assert.equal(typeof fnFm["description"], "string");
+  assert.equal(fnFm["statement"], undefined, "功能项是薄层，不应有 statement");
 
   // 功能点五项必填；仍挂功能项（功能项 → 功能点是分解树保留边）；无 statement / title。
   const fp = await run(["new", "function-point", "--parent", "FN-001", "--json"], { cwd });
   assert.equal(fp.exitCode, 0, fp.stdout);
   assert.equal(parseJson<CreatedOutput>(fp.stdout).created.id, "FP-001");
   const fpText = readFileSync(join(cwd, "baize/function-points/FP-001.md"), "utf8");
-  assert.match(fpText, /^parent: FN-001$/m);
-  assert.match(fpText, /^satisfies:/m);
-  assert.match(fpText, /^responsibility:/m);
-  assert.match(fpText, /^inputs:/m);
-  assert.match(fpText, /^outputs:/m);
-  assert.match(fpText, /^businessRules:/m);
-  assert.match(fpText, /^acceptanceCriteria:/m);
-  assert.ok(!/^statement:/m.test(fpText), "功能点无 statement");
-  assert.ok(!/^title:/m.test(fpText), "功能点按契约无 title");
+  const fpFm = frontmatterOf(fpText);
+  assert.equal(fpFm["parent"], "FN-001");
+  assert.deepEqual(fpFm["satisfies"], []);
+  assert.equal(typeof fpFm["responsibility"], "string");
+  assert.ok(Array.isArray(fpFm["inputs"]));
+  assert.ok(Array.isArray(fpFm["outputs"]));
+  assert.ok(Array.isArray(fpFm["businessRules"]));
+  assert.ok(Array.isArray(fpFm["acceptanceCriteria"]));
+  assert.equal(fpFm["statement"], undefined, "功能点无 statement");
+  assert.equal(fpFm["title"], undefined, "功能点按契约无 title");
 });
 
 test("new 父边规矩（#190）：sr/ar/function-point 缺 --parent → exit 2；usecase/function-item 带 --parent → exit 2", async (t) => {
@@ -1491,15 +1508,16 @@ test("new scenario --catalog order-flow 写入 catalog（parent 只剩「场景�
   const result = await run(["new", "scenario", "--catalog", "order-flow"], { cwd });
   assert.equal(result.exitCode, 0, result.stdout);
   const text = readFileSync(join(cwd, "baize/scenarios/SC-001.md"), "utf8");
-  assert.match(text, /^id: SC-001$/m);
-  assert.match(text, /^catalog: order-flow$/m);
-  assert.doesNotMatch(text, /^parent:/m, "顶层场景无父边");
+  const fm = frontmatterOf(text);
+  assert.equal(fm["id"], "SC-001");
+  assert.equal(fm["catalog"], "order-flow");
+  assert.equal(fm["parent"], undefined, "顶层场景无父边");
 
   // 子场景仍可用 --parent 挂场景（#190 保留的唯一方案层父边）
   const child = await run(["new", "scenario", "--parent", "SC-001", "--json"], { cwd });
   assert.equal(child.exitCode, 0, child.stdout);
   const childText = readFileSync(join(cwd, "baize/scenarios/SC-002.md"), "utf8");
-  assert.match(childText, /^parent: SC-001$/m, "子场景挂场景");
+  assert.equal(frontmatterOf(childText)["parent"], "SC-001", "子场景挂场景");
 });
 
 test("new scenario 无 --parent 也可建（场景不再有必挂的父边）", async (t) => {
@@ -3431,10 +3449,9 @@ test("rename catalog --write 落盘：只改引用了旧 slug 的条目，清单
   assert.match(result.stdout, /已改写 2 处引用/);
 
   const sc1 = readFileSync(join(cwd, "baize/scenarios/SC-001.md"), "utf8");
-  assert.match(sc1, /^catalog: self-service$/m);
-  assert.doesNotMatch(sc1, /^catalog: order-flow$/m);
+  assert.equal(frontmatterOf(sc1)["catalog"], "self-service");
   const sc2 = readFileSync(join(cwd, "baize/scenarios/SC-002.md"), "utf8");
-  assert.match(sc2, /^catalog: self-service$/m);
+  assert.equal(frontmatterOf(sc2)["catalog"], "self-service");
   // 只改条目、绝不写清单：其余文件一字未动
   assert.equal(
     readFileSync(join(cwd, "baize/scenarios/SC-003.md"), "utf8"),
@@ -3490,8 +3507,7 @@ test("rename element 改 AR 的 allocates；清单文件（architecture.yaml）�
   );
   assert.equal(written.exitCode, 0, written.stdout);
   const ar = readFileSync(join(cwd, "baize/ar/AR-001.md"), "utf8");
-  assert.match(ar, /^allocates: audit-log$/m);
-  assert.doesNotMatch(ar, /^allocates: export-service$/m);
+  assert.equal(frontmatterOf(ar)["allocates"], "audit-log");
   // 只改条目：清单文件一字未动
   assert.equal(readFileSync(join(cwd, "baize/architecture.yaml"), "utf8"), catalogsBefore);
 });
@@ -4432,25 +4448,29 @@ test("migrate --write：旧模型七层链搬到新形状，validate --strict �
 
   // 场景：parent 换成 refines（原位），备选流统一拼写；其余字段不动
   const sc = readFileSync(join(cwd, "baize/scenarios/SC-001.md"), "utf8");
-  assert.match(sc, /^refines:\n  - SR-001$/m);
-  assert.doesNotMatch(sc, /^parent:/m);
-  assert.match(sc, /^alternativeFlows: \[\]$/m);
-  assert.doesNotMatch(sc, /alternateFlows/);
+  const scFm = frontmatterOf(sc);
+  assert.deepEqual(scFm["refines"], ["SR-001"], "parent 换成 refines（原位）");
+  assert.equal(scFm["parent"], undefined);
+  assert.deepEqual(scFm["alternativeFlows"], [], "备选流统一拼写");
+  assert.equal(scFm["alternateFlows"], undefined, "旧拼写不应残留");
   // 用例：parent 换成 refines；关联边原样
   const uc = readFileSync(join(cwd, "baize/usecases/UC-001.md"), "utf8");
-  assert.match(uc, /^refines:\n  - SR-001$/m);
-  assert.doesNotMatch(uc, /^parent:/m);
-  assert.match(uc, /^appearsIn:\n  - SC-001$/m, "关联边原样");
+  const ucFm = frontmatterOf(uc);
+  assert.deepEqual(ucFm["refines"], ["SR-001"]);
+  assert.equal(ucFm["parent"], undefined);
+  assert.deepEqual(ucFm["appearsIn"], ["SC-001"], "关联边原样");
   // 功能项：parent 换成 satisfies；关联边原样
   const fn = readFileSync(join(cwd, "baize/function-items/FN-001.md"), "utf8");
-  assert.match(fn, /^satisfies:\n  - SR-001$/m);
-  assert.doesNotMatch(fn, /^parent:/m);
-  assert.match(fn, /^realizes:\n  - UC-001$/m, "关联边原样");
+  const fnFm = frontmatterOf(fn);
+  assert.deepEqual(fnFm["satisfies"], ["SR-001"]);
+  assert.equal(fnFm["parent"], undefined);
+  assert.deepEqual(fnFm["realizes"], ["UC-001"], "关联边原样");
   // 功能点：parent 原样（不误伤），认领边从所属功能项继承（旧模型没有这条边，所属
   // 功能项的认领是唯一可推导的来源）
   const fp = readFileSync(join(cwd, "baize/function-points/FP-001.md"), "utf8");
-  assert.match(fp, /^parent: FN-001$/m);
-  assert.match(fp, /^satisfies:\n  - SR-001$/m);
+  const fpFm = frontmatterOf(fp);
+  assert.equal(fpFm["parent"], "FN-001");
+  assert.deepEqual(fpFm["satisfies"], ["SR-001"]);
   // AR 的 parent（SR→AR 在新模型仍合法）与 SR 的 covers：一字未动
   assert.equal(readFileSync(join(cwd, "baize/ar/AR-001.md"), "utf8"), arBefore);
   assert.equal(readFileSync(join(cwd, "baize/sr/SR-001.md"), "utf8"), srBefore);
@@ -4679,15 +4699,64 @@ test("migrate 不碰半迁移的僵局：已有认领边却留着 parent、两�
   assert.equal(written.exitCode, 0, written.stdout);
   // SC-004：parent 与已有 refines 一字不动（僵局由人解），备选流照常改名
   const sc4 = readFileSync(join(cwd, "baize/scenarios/SC-004.md"), "utf8");
-  assert.match(sc4, /^parent: SR-001$/m);
-  assert.match(sc4, /^refines:\n  - SR-002$/m);
-  assert.match(sc4, /^alternativeFlows: \[\]$/m);
+  const sc4Fm = frontmatterOf(sc4);
+  assert.equal(sc4Fm["parent"], "SR-001", "僵局里的 parent 一字不动");
+  assert.deepEqual(sc4Fm["refines"], ["SR-002"], "僵局里的 refines 一字不动");
+  assert.deepEqual(sc4Fm["alternativeFlows"], [], "备选流照常改名");
   // SC-005：两种拼写都留着（不敢改名），parent 照常搬（它没有别的认领边）
   const sc5 = readFileSync(join(cwd, "baize/scenarios/SC-005.md"), "utf8");
-  assert.match(sc5, /^alternateFlows: \[\]$/m);
-  assert.match(sc5, /^alternativeFlows: \[\]$/m);
-  assert.match(sc5, /^refines:\n  - SR-001$/m);
-  assert.doesNotMatch(sc5, /^parent:/m);
+  const sc5Fm = frontmatterOf(sc5);
+  assert.deepEqual(sc5Fm["alternateFlows"], [], "旧拼写不敢改名");
+  assert.deepEqual(sc5Fm["alternativeFlows"], [], "新拼写照旧保留");
+  assert.deepEqual(sc5Fm["refines"], ["SR-001"]);
+  assert.equal(sc5Fm["parent"], undefined, "parent 照常搬");
   // 其余条目不受僵局影响：旧链 5 处 + SC-004 改名 + SC-005 搬边 = 7 处
   assert.match(written.stdout, /已改写 7 处改动/);
+});
+
+// —— #190 评审修复：认领多条 SR 的条目同属多条链，未确认门禁按所有链根判 ——
+
+test("validate：stage.upstream-unconfirmed —— 一条用例认领两条 SR、只确认其中一条链根 → 仍报另一条链的未确认", async (t) => {
+  const cwd = mkdtempSync(join(tmpdir(), "baize-"));
+  t.after(() => rmSync(cwd, { recursive: true, force: true }));
+  writeSharedChains(cwd);
+  // 两条链根都未确认：UC-001 / SC-001 / FN-001 / FP-001 / SR-001 / SR-002 / AR-001 全部报
+  const none = parseJson<ValidateOutput>((await run(["validate", "--json"], { cwd })).stdout);
+  const gated = none.issues
+    .filter((issue) => issue.rule === "stage.upstream-unconfirmed")
+    .map((issue) => issue.path);
+  assert.ok(gated.includes("baize/usecases/UC-001.md"), JSON.stringify(gated));
+
+  // 只确认第一条链的根（IR-001）：UC-001 仍认领 SR-002，其链根 IR-002 未确认 → 继续报
+  await acceptAndRead(cwd, "IR-001");
+  const half = await run(["validate", "--json"], { cwd });
+  const still = parseJson<ValidateOutput>(half.stdout).issues.filter(
+    (issue) => issue.rule === "stage.upstream-unconfirmed",
+  );
+  assert.deepEqual(
+    still.map((issue) => issue.path).sort(),
+    ["baize/sr/SR-002.md", "baize/usecases/UC-001.md"],
+    half.stdout,
+  );
+  const ucIssue = still.find((issue) => issue.path === "baize/usecases/UC-001.md");
+  assert.ok(ucIssue, half.stdout);
+  assert.ok(ucIssue?.message.includes("IR-002"), ucIssue?.message);
+
+  // 同一判据在 status 链视图的门禁里也成立：共享成员踩着未确认的另一条链 → ir-entry pending
+  const gatePending = parseJson<ChainSharedOutput>(
+    (await run(["status", "--chain", "IR-001", "--json"], { cwd })).stdout,
+  ).chain.gates.find((gate) => gate.gate === "ir-entry");
+  assert.equal(gatePending?.state, "pending");
+
+  // 两条链根都确认后，门禁问题清空（SR-002 无 AR 的 sr.unallocated 与本测试无关）
+  await acceptAndRead(cwd, "IR-002");
+  const both = await run(["validate", "--json"], { cwd });
+  const gateLeft = parseJson<ValidateOutput>(both.stdout).issues.filter(
+    (issue) => issue.rule === "stage.upstream-unconfirmed",
+  );
+  const gatePassed = parseJson<ChainSharedOutput>(
+    (await run(["status", "--chain", "IR-001", "--json"], { cwd })).stdout,
+  ).chain.gates.find((gate) => gate.gate === "ir-entry");
+  assert.equal(gatePassed?.state, "passed");
+  assert.deepEqual(gateLeft, [], both.stdout);
 });

@@ -12,7 +12,7 @@ import {
 import { computeCoverage, parseClueRef, unrealizedUsecases } from "./coverage.ts";
 import { confirmationOf } from "./confirm.ts";
 import { fieldDefectsOf } from "./fieldcheck.ts";
-import { chainRootOf } from "./gate.ts";
+import { chainRootsOf } from "./gate.ts";
 import type { Catalogs } from "./catalogs.ts";
 import { readCatalogs } from "./catalogs.ts";
 import { isPlainObject } from "./guards.ts";
@@ -391,13 +391,15 @@ function issuesFor(entry: Entry, byId: Record<string, Entry>, catalogs: Catalogs
  */
 function upstreamGateIssues(entry: Entry, byId: Record<string, Entry>): Issue[] {
   if (entry.layer.key === "ir") return [];
-  const root = chainRootOf(byId, entry);
-  if (root.layer.key !== "ir") return []; // 链根不是 IR（例如孤儿 SR）另有 ref.* 报
-  const confirmation = confirmationOf(root);
-  if (confirmation.state === "confirmed") return [];
-  const rootId = idOf(root) ?? "";
-  return [
-    {
+  // #165 Q9：认领多条 SR 的条目同属多条链，任一链根未确认/确认失效都算建在未确认的基准上
+  const unconfirmed = chainRootsOf(byId, entry).filter((root) => {
+    if (root.layer.key !== "ir") return false; // 链根不是 IR（例如孤儿 SR）另有 ref.* 报
+    return confirmationOf(root).state !== "confirmed";
+  });
+  return unconfirmed.map((root) => {
+    const confirmation = confirmationOf(root);
+    const rootId = idOf(root) ?? "";
+    return {
       level: "WARNING",
       rule: "stage.upstream-unconfirmed",
       path: entry.path,
@@ -405,8 +407,8 @@ function upstreamGateIssues(entry: Entry, byId: Record<string, Entry>): Issue[] 
         confirmation.state === "stale" ? "确认已失效——实质内容改过" : "尚未人工确认"
       }）——下游条目建在未确认的基准上`,
       fix: `先让 ${rootId} 的 statement 与 acceptance 得到人工确认，再往下拆`,
-    },
-  ];
+    };
+  });
 }
 
 /**

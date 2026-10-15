@@ -1,6 +1,7 @@
 import { promises as fs } from "node:fs";
 import path from "node:path";
 import { claimIdsOf, idOf, parentIdOf, type Entry } from "./entry.ts";
+import { escapeRegExp, fieldLineOf } from "./frontmatter.ts";
 import { CLAIM_FIELD } from "./layers.ts";
 import { readEntries, writeFileAtomic } from "./store.ts";
 
@@ -82,26 +83,6 @@ export interface MigratePlan {
   skipped: MigrateSkip[];
 }
 
-function escapeRegExp(text: string): string {
-  return text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-}
-
-/**
- * 在 frontmatter 块里定位 `field:` 所在行（1 起始）。
- * 重复键时 YAML 语义是后者生效，故取最后一次出现（与 rename 的手法一致）。
- */
-function fieldLineOf(text: string, field: string): number | undefined {
-  const lines = text.split("\n");
-  const pattern = new RegExp(`^\\s*${escapeRegExp(field)}\\s*:`);
-  let found: number | undefined;
-  for (let i = 1; i < lines.length; i++) {
-    const line = lines[i] ?? "";
-    if (/^---[ \t]*\r?$/.test(line)) break; // frontmatter 结束
-    if (pattern.test(line)) found = i + 1;
-  }
-  return found;
-}
-
 /**
  * 计划一次 migrate：读全仓条目，识别旧模型的边，收集「改什么」与「什么拿不准」。
  * 本函数只读不写——dry-run 与 --write 共用同一份计划（拒绝条件先于改写）。
@@ -155,7 +136,7 @@ export async function planMigrate(cwd: string): Promise<MigratePlan> {
           reason: "alternateFlows 与 alternativeFlows 同时存在，不敢改名（改了就是重复键）",
         });
       } else {
-        const line = fieldLineOf(await textOf(entry), "alternateFlows");
+        const line = fieldLineOf(await textOf(entry), "alternateFlows")?.line;
         if (line === undefined) {
           skipped.push({
             path: entry.path,
@@ -187,7 +168,7 @@ export async function planMigrate(cwd: string): Promise<MigratePlan> {
     if (entry.layer.key === "function-points") {
       if (Object.hasOwn(entry.frontmatter, claimField)) continue; // 已有认领边：新形状
       const parentLineOf = async (): Promise<number | null> =>
-        fieldLineOf(await textOf(entry), "parent") ?? null;
+        fieldLineOf(await textOf(entry), "parent")?.line ?? null;
       if (target === undefined) {
         skipped.push({
           path: entry.path,
@@ -244,7 +225,7 @@ export async function planMigrate(cwd: string): Promise<MigratePlan> {
       if (!Object.hasOwn(entry.frontmatter, claimField)) {
         skipped.push({
           path: entry.path,
-          line: fieldLineOf(await textOf(entry), "parent") ?? null,
+          line: fieldLineOf(await textOf(entry), "parent")?.line ?? null,
           reason: `子场景没有认领边（${claimField} 缺失）：parent 保留（场景挂场景仍合法），认领哪条 SR 由人决定`,
         });
       }
@@ -257,12 +238,12 @@ export async function planMigrate(cwd: string): Promise<MigratePlan> {
         // 已有认领边字段却还留着 parent：改写会产生重复键，不敢动
         skipped.push({
           path: entry.path,
-          line: fieldLineOf(await textOf(entry), "parent") ?? null,
+          line: fieldLineOf(await textOf(entry), "parent")?.line ?? null,
           reason: `已有 ${claimField} 字段，不敢改写 parent（先手工合并认领边）`,
         });
         continue;
       }
-      const line = fieldLineOf(await textOf(entry), "parent");
+      const line = fieldLineOf(await textOf(entry), "parent")?.line;
       if (line === undefined) {
         skipped.push({
           path: entry.path,
@@ -284,7 +265,7 @@ export async function planMigrate(cwd: string): Promise<MigratePlan> {
     // 剩下的全是拿不准：parent 指向不存在的条目，或指向 SR 之外的层——点名，不动
     skipped.push({
       path: entry.path,
-      line: fieldLineOf(await textOf(entry), "parent") ?? null,
+      line: fieldLineOf(await textOf(entry), "parent")?.line ?? null,
       reason:
         target === undefined
           ? `parent 指向不存在的条目：${parent}`
