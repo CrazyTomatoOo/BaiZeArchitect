@@ -1,5 +1,5 @@
 import type { Entry } from "./entry.ts";
-import { idOf, parentIdOf } from "./entry.ts";
+import { claimIdsOf, idOf, parentIdOf } from "./entry.ts";
 import { BaizeError } from "./errors.ts";
 import { chainMembers } from "./chain.ts";
 import {
@@ -12,25 +12,14 @@ import {
 import { computeCoverage, parseClueRef, unrealizedUsecases } from "./coverage.ts";
 import { confirmationOf } from "./confirm.ts";
 import { fieldDefectsOf } from "./fieldcheck.ts";
-import { chainRootOf } from "./gate.ts";
+import { chainRootsOf } from "./gate.ts";
 import type { Catalogs } from "./catalogs.ts";
 import { readCatalogs } from "./catalogs.ts";
 import { isPlainObject } from "./guards.ts";
-import { ALLOWED_PARENTS } from "./layers.ts";
+import { ALLOWED_PARENTS, CLAIM_FIELD, LAYER_LABEL } from "./layers.ts";
 import { readEntries } from "./store.ts";
 import { staleIssues } from "./stale.ts";
 import type { Issue } from "./types.ts";
-
-/** 层的中文叫法（错误消息里人读用）：键为 layer key。 */
-const LAYER_LABEL: Record<string, string> = {
-  ir: "初始需求",
-  sr: "系统需求",
-  ar: "分配需求",
-  scenarios: "场景",
-  usecases: "用例",
-  "function-items": "功能项",
-  "function-points": "功能点",
-};
 
 function fieldIssues(entry: Entry): Issue[] {
   const issues: Issue[] = [];
@@ -55,6 +44,29 @@ function fieldIssues(entry: Entry): Issue[] {
     });
   }
   return issues;
+}
+
+/** IR 验收线索的提醒阈值（#181）：第 8 条起报 WARNING。硬挡会逼人把线索合并成空话，
+ * 而空话不可证伪，等于毁掉覆盖率基准（CONTEXT.md「验收线索」词条）。 */
+const ACCEPTANCE_CLUE_LIMIT = 7;
+
+// field.acceptance-too-many（#181）：IR 的验收线索超过阈值报 WARNING——
+// 线索一多，这条 IR 多半混进了不止一个需求（该拆了）。恰好 7 条不报。
+function acceptanceThresholdIssues(entry: Entry): Issue[] {
+  if (entry.layer.key !== "ir") return [];
+  const acceptance = entry.frontmatter["acceptance"];
+  if (!isPlainObject(acceptance)) return []; // 缺 / 空 / 形状不对由 field.* 报
+  const count = Object.keys(acceptance).length;
+  if (count <= ACCEPTANCE_CLUE_LIMIT) return [];
+  return [
+    {
+      level: "WARNING",
+      rule: "field.acceptance-too-many",
+      path: entry.path,
+      message: `验收线索 ${count} 条（阈值 ${ACCEPTANCE_CLUE_LIMIT}）：这条 IR 该拆了`,
+      fix: `把 ${entry.path} 拆成多条 IR，让每条的验收线索不超过 ${ACCEPTANCE_CLUE_LIMIT} 条`,
+    },
+  ];
 }
 
 function idIssue(entry: Entry): Issue[] {
@@ -83,8 +95,25 @@ function refIssues(entry: Entry, byId: Record<string, Entry>, catalogs: Catalogs
   const issues: Issue[] = [];
   const parentId = parentIdOf(entry);
 
-  // ref.orphan：除 IR（链顶端，parent 恒为 null）外，各层必须有父。null / 缺失 / 空都算。
-  if (entry.layer.key !== "ir" && parentId === undefined) {
+  // ref.orphan（#190 新模型）：
+  // - SR / AR / 功能点仍必须有父（分解树：IR → SR → AR、功能项 → 功能点）；
+  // - 方案层（场景 / 用例 / 功能项 / 功能点）不再要求父边——「孤儿」判据改为
+  //   「没有任何认领边」：refines / satisfies 为空或缺失即孤儿（IR 是链顶端，两者都不需要）。
+  const claimField = CLAIM_FIELD[entry.layer.key];
+  if (entry.layer.key !== "ir" && claimField !== undefined && claimIdsOf(entry).length === 0) {
+    const ownLabel = LAYER_LABEL[entry.layer.key] ?? entry.layer.key;
+    issues.push({
+      level: "ERROR",
+      rule: "ref.orphan",
+      path: entry.path,
+      message: `${entry.layer.prefix} 没有任何认领边：${claimField} 为空或缺失（${ownLabel}必须用 ${claimField} 认领至少一条 SR）`,
+      fix: `给 ${entry.path} 的 frontmatter 补上 ${claimField}: [SR-…]（可多值）`,
+    });
+  }
+  if (
+    (entry.layer.key === "sr" || entry.layer.key === "ar" || entry.layer.key === "function-points") &&
+    parentId === undefined
+  ) {
     issues.push({
       level: "ERROR",
       rule: "ref.orphan",
@@ -106,7 +135,7 @@ function refIssues(entry: Entry, byId: Record<string, Entry>, catalogs: Catalogs
   }
 
   // ref.parent-not-allowed：父条目存在，但不是本层分解树允许的上层
-  // （IR → SR → {AR, 场景, 用例, 功能项}、功能项 → 功能点；IR 是链顶端）。
+  // （#190 新模型：IR → SR → AR、功能项 → 功能点，外加场景 → 场景例外）。
   if (parentId !== undefined) {
     const parent = byId[parentId];
     const allowed = ALLOWED_PARENTS[entry.layer.key];
@@ -114,9 +143,12 @@ function refIssues(entry: Entry, byId: Record<string, Entry>, catalogs: Catalogs
       const ownLabel = LAYER_LABEL[entry.layer.key] ?? entry.layer.key;
       const parentLabel = LAYER_LABEL[parent.layer.key] ?? parent.layer.key;
       const allowedText = allowed.map((key) => LAYER_LABEL[key] ?? key).join("、");
+      const claimField = CLAIM_FIELD[entry.layer.key];
       const tail =
         allowed.length === 0
-          ? "；IR 是链顶端，不允许有上层"
+          ? claimField !== undefined
+            ? `；${ownLabel}不再挂在分解树上（它用 ${claimField} 认领 SR，无父边）`
+            : "；IR 是链顶端，不允许有上层"
           : `；${ownLabel}只允许挂在${allowedText}层下`;
       issues.push({
         level: "ERROR",
@@ -157,14 +189,18 @@ function refIssues(entry: Entry, byId: Record<string, Entry>, catalogs: Catalogs
     }
   }
 
-  // ref.unknown-target：多对多关联边（用例 appearsIn → 场景、功能项 realizes → 用例）
-  // 指向的条目必须存在，且必须是它该指的那一层（appearsIn 指场景、realizes 指用例）。
+  // ref.unknown-target：出边（关联边 + 认领边，#190）指向的条目必须存在，
+  // 且必须是它该指的那一层（appearsIn 指场景、realizes 指用例、refines / satisfies 指 SR）。
   const edgeFields: Array<{ name: string; target: string; targetLayer: string }> = [];
   if (entry.layer.key === "usecases") {
     edgeFields.push({ name: "appearsIn", target: "场景", targetLayer: "scenarios" });
   }
   if (entry.layer.key === "function-items") {
     edgeFields.push({ name: "realizes", target: "用例", targetLayer: "usecases" });
+  }
+  const claimEdgeField = CLAIM_FIELD[entry.layer.key];
+  if (claimEdgeField !== undefined) {
+    edgeFields.push({ name: claimEdgeField, target: "系统需求（SR）", targetLayer: "sr" });
   }
   for (const edge of edgeFields) {
     const items = entry.frontmatter[edge.name];
@@ -190,6 +226,37 @@ function refIssues(entry: Entry, byId: Record<string, Entry>, catalogs: Catalogs
           path: entry.path,
           message: `${edge.name} 指向的不是${edge.target}：${item}（是${targetLabel}层条目；${edge.name} 只能指向${edge.target}）`,
           fix: `把 ${entry.path} 的 ${edge.name} 改成${edge.target}条目 id`,
+        });
+      }
+    }
+  }
+
+  // ref.cross-edge-break（#190 断链，ERROR）：功能项 satisfies 的 SR 集合 ∩ 它 realizes 的
+  // 用例所 refines 的 SR 集合 = 空。功能侧认领的需求与它承载的交互认领的需求完全不相交，
+  // 说明「实现」与「交互」中间断了一环。两侧都为空时不报——那由 ref.orphan /
+  // coverage.unrealized-usecase 各管各的；realizes 指向不存在 / 非用例的条目由
+  // ref.unknown-target 报，这里跳过。
+  if (entry.layer.key === "function-items") {
+    const satisfied = claimIdsOf(entry);
+    const realizedRaw = entry.frontmatter["realizes"];
+    const realized = Array.isArray(realizedRaw)
+      ? realizedRaw.filter((item): item is string => typeof item === "string")
+      : [];
+    if (satisfied.length > 0 && realized.length > 0) {
+      const refined = new Set<string>();
+      for (const usecaseId of realized) {
+        const usecase = byId[usecaseId];
+        if (usecase === undefined || usecase.layer.key !== "usecases") continue;
+        for (const id of claimIdsOf(usecase)) refined.add(id);
+      }
+      if (refined.size > 0 && !satisfied.some((id) => refined.has(id))) {
+        const fnId = idOf(entry) ?? entry.path;
+        issues.push({
+          level: "ERROR",
+          rule: "ref.cross-edge-break",
+          path: entry.path,
+          message: `功能项 ${fnId} 认领的 SR（${satisfied.join("、")}）与它实现的用例所认领的 SR（${[...refined].join("、")}）完全不相交（断链）`,
+          fix: `让 ${fnId} 的 satisfies 与用例的 refines 至少有一条共同的 SR，或核对 realizes 与两侧认领边是否写错`,
         });
       }
     }
@@ -268,12 +335,36 @@ function allocationIssues(entry: Entry, byId: Record<string, Entry>): Issue[] {
   ];
 }
 
+// sr.unclaimed（#181）：SR 没有任何方案层条目认领（没有场景/用例的 refines、
+// 功能项/功能点的 satisfies 指向它）→ WARNING。与 sr.unallocated 同级同风格：
+// 这是拆分进度不是文件写坏，硬挡会逼人造假条目。反向关系现算，不落盘。
+function unclaimedIssues(entry: Entry, byId: Record<string, Entry>): Issue[] {
+  if (entry.layer.key !== "sr") return [];
+  const id = idOf(entry);
+  if (id === undefined) return []; // 缺 id 由 id.* / field.* 报
+  const claimed = Object.values(byId).some((candidate) =>
+    claimIdsOf(candidate).includes(id),
+  );
+  if (claimed) return [];
+  return [
+    {
+      level: "WARNING",
+      rule: "sr.unclaimed",
+      path: entry.path,
+      message: `SR 未被任何方案层条目认领：${id}（需求拆到方案层才算落到了交互与能力上）`,
+      fix: `为 ${id} 建一条 refines/satisfies 指向它的场景、用例、功能项或功能点`,
+    },
+  ];
+}
+
 function issuesFor(entry: Entry, byId: Record<string, Entry>, catalogs: Catalogs): Issue[] {
   return [
     ...idIssue(entry),
+    ...acceptanceThresholdIssues(entry),
     ...fieldIssues(entry),
     ...refIssues(entry, byId, catalogs),
     ...allocationIssues(entry, byId),
+    ...unclaimedIssues(entry, byId),
     ...upstreamGateIssues(entry, byId),
   ];
 }
@@ -289,13 +380,15 @@ function issuesFor(entry: Entry, byId: Record<string, Entry>, catalogs: Catalogs
  */
 function upstreamGateIssues(entry: Entry, byId: Record<string, Entry>): Issue[] {
   if (entry.layer.key === "ir") return [];
-  const root = chainRootOf(byId, entry);
-  if (root.layer.key !== "ir") return []; // 链根不是 IR（例如孤儿 SR）另有 ref.* 报
-  const confirmation = confirmationOf(root);
-  if (confirmation.state === "confirmed") return [];
-  const rootId = idOf(root) ?? "";
-  return [
-    {
+  // #165 Q9：认领多条 SR 的条目同属多条链，任一链根未确认/确认失效都算建在未确认的基准上
+  const unconfirmed = chainRootsOf(byId, entry).filter((root) => {
+    if (root.layer.key !== "ir") return false; // 链根不是 IR（例如孤儿 SR）另有 ref.* 报
+    return confirmationOf(root).state !== "confirmed";
+  });
+  return unconfirmed.map((root) => {
+    const confirmation = confirmationOf(root);
+    const rootId = idOf(root) ?? "";
+    return {
       level: "WARNING",
       rule: "stage.upstream-unconfirmed",
       path: entry.path,
@@ -303,8 +396,8 @@ function upstreamGateIssues(entry: Entry, byId: Record<string, Entry>): Issue[] 
         confirmation.state === "stale" ? "确认已失效——实质内容改过" : "尚未人工确认"
       }）——下游条目建在未确认的基准上`,
       fix: `先让 ${rootId} 的 statement 与 acceptance 得到人工确认，再往下拆`,
-    },
-  ];
+    };
+  });
 }
 
 /**
@@ -369,7 +462,9 @@ export async function validate(
   }
 
   const issues = [
-    ...scoped.flatMap((entry) => issuesFor(entry, byId, catalogs)),
+    // #186 清单格式：清单文件自身的问题（解析失败 / 格式）与条目问题同场报出
+    ...catalogs.issues,
+     ...scoped.flatMap((entry) => issuesFor(entry, byId, catalogs)),
     ...(await stageIssues(cwd, options.chain)),
     ...coverageIssues(scoped),
     ...unrealizedUsecaseIssues(scoped, entries),

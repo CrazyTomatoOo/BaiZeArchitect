@@ -28,6 +28,6 @@ description: Use when a system requirement exists and no architecture element ha
 
 ## 报错往哪个方向动
 
-- ref 域：指向的元素不存在——对照受控清单改条目里的引用；清单里确实没有，找清单的维护人加，不许自己往清单里塞（清单由外部维护，本套件只读）。
+- ref 域：指向的元素不存在——对照清单改条目里的引用；清单里确实没有，找清单的维护人加，不许自己往清单里塞（清单由外部维护，本套件只读）。重复改名或引用很多时用 `baize rename` 自动改写全部引用，不手工逐条改。
 - field 域：allocates 没写或为空，补上。
-- coverage / stale 域在这一段不会出现：AR 是叶子，无出边。
+- coverage / stale 域在这一段不会出现：AR 是叶子，无出边（`allocates` 指向的是清单里的元素，不是条目）。

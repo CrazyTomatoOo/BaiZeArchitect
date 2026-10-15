@@ -7,7 +7,7 @@ description: Use when a human — the boss, a reviewer, the team — wants to lo
 
 ## 门禁前人该看到什么
 
-`baize status` 的链视图把三处门禁摊开：每处带判据原文与当前状态。两类门禁的下一步动作不同：
+`baize status` 的链视图把门禁摊开：每处带判据原文与当前状态。两类门禁的下一步动作不同：
 
 - 标了 `kind: auto` 的（IR 录入、SR→AR 分配）：由事实现算，人不用签。状态不对 = 事实不对——回去改条目或补确认，重跑即重算。
 - 标了 `kind: signed` 的（功能拆分）：是人的判断，**agent 不能代签**——动作是去找人。

@@ -1,5 +1,5 @@
 import { parse as parseYaml } from "yaml";
-import type { LayerDef } from "./layers.ts";
+import { CLAIM_FIELD, type LayerDef } from "./layers.ts";
 import { isPlainObject } from "./guards.ts";
 
 /** 一条解析后的条目：层级、仓库相对路径、frontmatter、正文。 */
@@ -41,4 +41,29 @@ export function idOf(entry: Entry): string | undefined {
 export function parentIdOf(entry: Entry): string | undefined {
   const value = entry.frontmatter["parent"];
   return typeof value === "string" && value.trim() !== "" ? value : undefined;
+}
+
+/**
+ * 认领边（#190）：方案层条目用 `refines` / `satisfies` 指向的 SR id 列表。
+ * 字段缺失 / 非数组 / 元素非字符串一律忽略（形状问题由 ref.orphan 等规则报，
+ * 这里只回答「认领了谁」）。非方案层返回空数组。
+ */
+export function claimIdsOf(entry: Entry): string[] {
+  const field = CLAIM_FIELD[entry.layer.key];
+  if (field === undefined) return [];
+  const value = entry.frontmatter[field];
+  if (!Array.isArray(value)) return [];
+  return value.filter((item): item is string => typeof item === "string" && item.trim() !== "");
+}
+
+/**
+ * 上游 id 集合（#183）：`parent`（分解树）∪ 认领边（`refines` / `satisfies`）。
+ * 升序去重。复核记录（confirm.ts 的 accept）与陈旧传播（stale.ts）共用这一份
+ * 上游定义，不各算一套。
+ */
+export function upstreamIdsOf(entry: Entry): string[] {
+  const ids = new Set<string>(claimIdsOf(entry));
+  const parent = parentIdOf(entry);
+  if (parent !== undefined) ids.add(parent);
+  return [...ids].sort();
 }

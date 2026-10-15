@@ -6,7 +6,8 @@ import { parseEntry, type Entry } from "./entry.ts";
 
 export const BAIZE_DIR = "baize";
 
-function isEnoent(error: unknown): boolean {
+/** 文件/目录不存在：读路径上「缺了就当空」的地方共用这一份判定（`ENOENT` 的形状只有一处认识）。 */
+export function isEnoent(error: unknown): boolean {
   return (
     typeof error === "object" &&
     error !== null &&

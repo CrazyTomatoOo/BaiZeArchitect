@@ -7,10 +7,13 @@ import {
   readFileSync,
   existsSync,
   rmSync,
+  readdirSync,
+  statSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, dirname } from "node:path";
 import { run } from "../src/cli.ts";
+import { RULE_DOMAINS } from "../src/types.ts";
 import { parse as parseYaml } from "yaml";
 
 // 缝：CLI 的可观察边界——给定 argv 与初始目录状态，得到确定的 stdout / exit code / 目录变化。
@@ -157,14 +160,15 @@ catalogs:
 const LEGAL_SCENARIO = `---
 id: SC-001
 title: 下单后导出报表
-parent: SR-001
+refines:
+  - SR-001
 catalog: order-flow
 preconditions:
   - 用户已登录
 trigger: 用户在订单页点击导出
 mainFlow:
   - 系统生成报表文件
-alternateFlows: []
+alternativeFlows: []
 expectedOutcome: 浏览器开始下载报表
 stakeholders:
   - 买家
@@ -205,6 +209,8 @@ test("validate：合法条目 exit 0 且 issues 为空", async (t) => {
   // AR 分配（#152）：合法仓库要求每条 SR 都有 AR 承接
   write(cwd, "baize/architecture.yaml", ARCHITECTURE_YAML);
   write(cwd, "baize/ar/AR-001.md", LEGAL_AR);
+  // 方案层认领（#181），隔离 sr.unclaimed
+  write(cwd, "baize/function-items/FN-001.md", FN_CLAIMING_SR001);
 
   // IR 录入门禁（#147）：未确认的链根会让下游条目报 stage.upstream-unconfirmed，先把根认下来
   await acceptAndRead(cwd, "IR-001");
@@ -299,19 +305,34 @@ parent: null
   assert.notEqual(empty.message, absent.message);
 });
 
-test("validate：rule 是点分 id，域限定为 ref/coverage/field/stale/id/stage", async (t) => {
+test("validate：rule 是点分 id，域钉在字面白名单（八个域，改清单必须是有意的测试编辑）", async (t) => {
   const cwd = mkdtempSync(join(tmpdir(), "baize-"));
   t.after(() => rmSync(cwd, { recursive: true, force: true }));
   write(cwd, "baize/ir/IR-001.md", LEGAL_IR.replace("id: IR-001", "id: bogus"));
   write(cwd, "baize/ir/IR-002.md", "---\nid: IR-002\n---\n");
 
+  // 白名单是测试里钉死的字面值，不是拿 RULE_DOMAINS 当预言机——
+  // 动 src/types.ts 的域清单会红，编辑这份期望必须是有意的。
+  const domains = [
+    "catalog",
+    "coverage",
+    "field",
+    "id",
+    "ref",
+    "sr",
+    "stage",
+    "stale",
+  ];
+  assert.deepEqual([...RULE_DOMAINS].sort(), domains);
+
   const result = await run(["validate", "--json"], { cwd });
   const issues = parseJson<ValidateOutput>(result.stdout).issues;
   assert.ok(issues.length > 0);
   for (const issue of issues) {
+    const domain = issue.rule.split(".")[0] ?? "";
     assert.ok(
-      /^(ref|coverage|field|stale|id|stage)\.[a-z-]+$/.test(issue.rule),
-      `rule 必须点分且域受限：${issue.rule}`,
+      domains.includes(domain) && /^[a-z]+\.[a-z-]+$/.test(issue.rule),
+      `rule 必须点分且域在白名单：${issue.rule}`,
     );
     assert.ok(["ERROR", "WARNING", "INFO"].includes(issue.level));
     assert.equal(typeof issue.path, "string");
@@ -380,6 +401,8 @@ test("默认全仓、--chain 限定作用域", async (t) => {
   // AR 承接（#152），隔离 sr.unallocated
   write(cwd, "baize/architecture.yaml", ARCHITECTURE_YAML);
   write(cwd, "baize/ar/AR-001.md", LEGAL_AR);
+  // 方案层认领（#181），隔离 sr.unclaimed
+  write(cwd, "baize/function-items/FN-001.md", FN_CLAIMING_SR001);
   // IR-002 的 id 格式不合法
   write(
     cwd,
@@ -488,18 +511,20 @@ covers: [IR-001#a1, IR-001#a2]
 系统应提供统一的导出能力。
 `;
 
-// 分析层合法条目（#154）。场景/用例字段全必填但允许空数组（alternateFlows: [] = 看过了确实没有）。
+// 方案层合法条目（#154；#190 起改用认领边：场景/用例 refines、功能项/功能点 satisfies，
+// 不再写 parent）。字段全必填但允许空数组（alternativeFlows: [] = 看过了确实没有）。
 const LEGAL_SC = `---
 id: SC-001
 title: 下单主流程
-parent: SR-001
+refines:
+  - SR-001
 catalog: order-flow
 preconditions:
   - 用户已登录
 trigger: 用户点击下单
 mainFlow:
   - 选择商品并确认
-alternateFlows: []
+alternativeFlows: []
 expectedOutcome: 订单创建成功
 stakeholders:
   - 买家
@@ -511,7 +536,8 @@ stakeholders:
 const LEGAL_UC = `---
 id: UC-001
 title: 提交订单
-parent: SR-001
+refines:
+  - SR-001
 appearsIn:
   - SC-001
 goal: 买家能提交购物车生成订单
@@ -533,7 +559,8 @@ stakeholders:
 const LEGAL_FN = `---
 id: FN-001
 title: 订单服务
-parent: SR-001
+satisfies:
+  - SR-001
 domain: 交易
 realizes:
   - UC-001
@@ -545,6 +572,8 @@ description: 承载下单与订单查询的功能项。
 const LEGAL_FP = `---
 id: FP-001
 parent: FN-001
+satisfies:
+  - SR-001
 responsibility: 校验并创建订单
 inputs:
   - 购物车快照
@@ -632,7 +661,7 @@ test("new sr --covers IR-001#a1,IR-001#a2 写入 covers 数组", async (t) => {
   assert.match(text, /^\s+- IR-001#a2$/m);
 });
 
-test("validate：ref.orphan —— SR/AR 无 parent 报 ERROR；IR 的 parent: null 合法", async (t) => {
+test("validate：ref.orphan —— SR/AR 无 parent 报 ERROR；方案层无认领边报 ERROR；IR 的 parent: null 合法", async (t) => {
   const cwd = mkdtempSync(join(tmpdir(), "baize-"));
   t.after(() => rmSync(cwd, { recursive: true, force: true }));
   write(cwd, "baize/ir/IR-001.md", LEGAL_IR);
@@ -649,12 +678,18 @@ title: 导出由报表服务负责
 分配说明。
 `,
   );
+  // 方案层没有任何认领边 → 孤儿（#190：场景/用例无 refines、功能项/功能点无 satisfies）
+  write(cwd, "baize/scenarios/SC-001.md", LEGAL_SC.replace("refines:\n  - SR-001\n", ""));
+  write(cwd, "baize/usecases/UC-001.md", LEGAL_UC.replace("refines:\n  - SR-001\n", ""));
+  write(cwd, "baize/function-items/FN-001.md", LEGAL_FN.replace("satisfies:\n  - SR-001\n", ""));
+  write(cwd, "baize/function-points/FP-001.md", LEGAL_FP.replace("satisfies:\n  - SR-001\n", ""));
 
   const result = await run(["validate", "--json"], { cwd });
   assert.equal(result.exitCode, 1, result.stdout);
   const issues = parseJson<ValidateOutput>(result.stdout).issues;
   const orphans = issues.filter((i) => i.rule === "ref.orphan");
-  assert.equal(orphans.length, 2, result.stdout);
+  // SR（无父）+ AR（无父）+ SC/UC/FN/FP（无认领边）= 6 条
+  assert.equal(orphans.length, 6, result.stdout);
   assert.ok(
     orphans.every(
       (i) => i.level === "ERROR" && i.path !== "baize/ir/IR-001.md",
@@ -662,10 +697,31 @@ title: 导出由报表服务负责
     "IR 的 parent: null 不得触发 ref.orphan：" + result.stdout,
   );
   assert.ok(
-    !issues.some(
-      (i) => i.rule === "ref.orphan" && i.path === "baize/ir/IR-001.md",
+    orphans.some(
+      (i) => i.path === "baize/scenarios/SC-001.md" && i.message.includes("refines"),
     ),
-    "IR 的 parent: null 不得触发 ref.orphan：" + result.stdout,
+    "场景无认领边应点出 refines：" + result.stdout,
+  );
+  assert.ok(
+    orphans.some(
+      (i) => i.path === "baize/function-points/FP-001.md" && i.message.includes("satisfies"),
+    ),
+    "功能点无认领边应点出 satisfies：" + result.stdout,
+  );
+
+  // 反例：补回认领边（SR-001 即使自身是孤儿，也不挡别人认领它）→ 方案层不再报孤儿
+  write(cwd, "baize/scenarios/SC-001.md", LEGAL_SC);
+  write(cwd, "baize/usecases/UC-001.md", LEGAL_UC);
+  write(cwd, "baize/function-items/FN-001.md", LEGAL_FN);
+  write(cwd, "baize/function-points/FP-001.md", LEGAL_FP);
+  const claimed = await run(["validate", "--json"], { cwd });
+  const claimedOrphans = parseJson<ValidateOutput>(claimed.stdout).issues.filter(
+    (i) => i.rule === "ref.orphan",
+  );
+  assert.equal(claimedOrphans.length, 2, claimed.stdout);
+  assert.ok(
+    claimedOrphans.every((i) => i.path !== "baize/scenarios/SC-001.md"),
+    claimed.stdout,
   );
 });
 
@@ -1033,6 +1089,8 @@ test("status --chain：状态文件缺失不是错误——六段全部未跳过
   // AR 承接（#152），隔离 sr.unallocated
   write(cwd, "baize/architecture.yaml", ARCHITECTURE_YAML);
   write(cwd, "baize/ar/AR-001.md", LEGAL_AR);
+  // 方案层认领（#181），隔离 sr.unclaimed
+  write(cwd, "baize/function-items/FN-001.md", FN_CLAIMING_SR001);
 
   // IR 录入门禁（#147）：未确认的链根会让下游条目报 stage.upstream-unconfirmed，先把根认下来
   await acceptAndRead(cwd, "IR-001");
@@ -1086,6 +1144,8 @@ test("validate：stage.skip-missing-reason —— 跳过记录缺 by / at / why 
     // AR 承接（#152），隔离 sr.unallocated
     write(cwd, "baize/architecture.yaml", ARCHITECTURE_YAML);
     write(cwd, "baize/ar/AR-001.md", LEGAL_AR);
+    // 方案层认领（#181），隔离 sr.unclaimed
+    write(cwd, "baize/function-items/FN-001.md", FN_CLAIMING_SR001);
     write(cwd, "baize/chains/IR-001.yaml", `skipped:\n  sr:\n${body.split("\n").map((l) => `    ${l}`).join("\n")}`);
 
     // IR 录入门禁（#147）：未确认的链根会让下游条目报 stage.upstream-unconfirmed，先把根认下来
@@ -1112,6 +1172,8 @@ test("validate：stage.skip-missing-reason —— 跳过记录缺 by / at / why 
   // AR 承接（#152），隔离 sr.unallocated
   write(cwd, "baize/architecture.yaml", ARCHITECTURE_YAML);
   write(cwd, "baize/ar/AR-001.md", LEGAL_AR);
+  // 方案层认领（#181），隔离 sr.unclaimed
+  write(cwd, "baize/function-items/FN-001.md", FN_CLAIMING_SR001);
   write(
     cwd,
     "baize/chains/IR-001.yaml",
@@ -1308,66 +1370,82 @@ test("validate：coverage.missing-clue —— 未覆盖的线索报 ERROR 且指
 
 // ── #154 分析三层与关联边 ─────────────────────────────────────────────
 
-test("new 分析四层各自可建：scenario / usecase / function-item / function-point 带 --parent 与全字段", async (t) => {
+test("new 方案层各自可建：场景/用例/功能项无父边（认领边进骨架），功能点仍挂功能项", async (t) => {
   const cwd = mkdtempSync(join(tmpdir(), "baize-"));
   t.after(() => rmSync(cwd, { recursive: true, force: true }));
 
-  const scenario = await run(["new", "scenario", "--parent", "SR-001", "--json"], { cwd });
+  // 场景不再有父边（parent 只剩「场景挂场景」例外）：骨架带 refines 待填。
+  const scenario = await run(["new", "scenario", "--json"], { cwd });
   assert.equal(scenario.exitCode, 0, scenario.stdout);
   assert.equal(parseJson<CreatedOutput>(scenario.stdout).created.id, "SC-001");
   const scText = readFileSync(join(cwd, "baize/scenarios/SC-001.md"), "utf8");
-  assert.match(scText, /^id: SC-001$/m);
-  assert.match(scText, /^parent: SR-001$/m);
-  assert.match(scText, /^preconditions:/m);
-  assert.match(scText, /^trigger:/m);
-  assert.match(scText, /^mainFlow:/m);
-  assert.match(scText, /^alternateFlows:/m);
-  assert.match(scText, /^expectedOutcome:/m);
-  assert.match(scText, /^stakeholders:/m);
+  const scFm = frontmatterOf(scText);
+  assert.equal(scFm["id"], "SC-001");
+  assert.deepEqual(scFm["refines"], [], "骨架带 refines 待填");
+  assert.equal(scFm["parent"], undefined, "场景骨架不再有 parent");
+  assert.deepEqual(scFm["alternativeFlows"], [], "备选流与用例统一拼写 alternativeFlows");
+  assert.ok(Array.isArray(scFm["preconditions"]));
+  assert.equal(typeof scFm["trigger"], "string");
+  assert.ok(Array.isArray(scFm["mainFlow"]));
+  assert.equal(typeof scFm["expectedOutcome"], "string");
+  assert.ok(Array.isArray(scFm["stakeholders"]));
+  assert.equal(scFm["alternateFlows"], undefined, "旧拼写不应存在");
 
-  const usecase = await run(["new", "usecase", "--parent", "SR-001", "--json"], { cwd });
+  const usecase = await run(["new", "usecase", "--json"], { cwd });
   assert.equal(usecase.exitCode, 0, usecase.stdout);
   assert.equal(parseJson<CreatedOutput>(usecase.stdout).created.id, "UC-001");
   const ucText = readFileSync(join(cwd, "baize/usecases/UC-001.md"), "utf8");
-  assert.match(ucText, /^appearsIn:/m);
-  assert.match(ucText, /^goal:/m);
-  assert.match(ucText, /^alternativeFlows:/m);
-  assert.match(ucText, /^postconditions:/m);
+  const ucFm = frontmatterOf(ucText);
+  assert.deepEqual(ucFm["refines"], []);
+  assert.equal(ucFm["parent"], undefined, "用例不再有父边");
+  assert.ok(Array.isArray(ucFm["appearsIn"]));
+  assert.equal(typeof ucFm["goal"], "string");
+  assert.deepEqual(ucFm["alternativeFlows"], []);
+  assert.ok(Array.isArray(ucFm["postconditions"]));
 
   // 功能项是薄层：title + description，无 statement。
-  const fn = await run(["new", "function-item", "--parent", "SR-001", "--json"], { cwd });
+  const fn = await run(["new", "function-item", "--json"], { cwd });
   assert.equal(fn.exitCode, 0, fn.stdout);
   assert.equal(parseJson<CreatedOutput>(fn.stdout).created.id, "FN-001");
   const fnText = readFileSync(join(cwd, "baize/function-items/FN-001.md"), "utf8");
-  assert.match(fnText, /^title:/m);
-  assert.match(fnText, /^domain:/m);
-  assert.match(fnText, /^realizes:/m);
-  assert.match(fnText, /^description:/m);
-  assert.ok(!/^statement:/m.test(fnText), "功能项是薄层，不应有 statement");
+  const fnFm = frontmatterOf(fnText);
+  assert.equal(typeof fnFm["title"], "string");
+  assert.deepEqual(fnFm["satisfies"], []);
+  assert.equal(fnFm["parent"], undefined, "功能项不再有父边");
+  assert.equal(typeof fnFm["domain"], "string");
+  assert.deepEqual(fnFm["realizes"], []);
+  assert.equal(typeof fnFm["description"], "string");
+  assert.equal(fnFm["statement"], undefined, "功能项是薄层，不应有 statement");
 
-  // 功能点五项必填；无 statement / title。
+  // 功能点五项必填；仍挂功能项（功能项 → 功能点是分解树保留边）；无 statement / title。
   const fp = await run(["new", "function-point", "--parent", "FN-001", "--json"], { cwd });
   assert.equal(fp.exitCode, 0, fp.stdout);
   assert.equal(parseJson<CreatedOutput>(fp.stdout).created.id, "FP-001");
   const fpText = readFileSync(join(cwd, "baize/function-points/FP-001.md"), "utf8");
-  assert.match(fpText, /^parent: FN-001$/m);
-  assert.match(fpText, /^responsibility:/m);
-  assert.match(fpText, /^inputs:/m);
-  assert.match(fpText, /^outputs:/m);
-  assert.match(fpText, /^businessRules:/m);
-  assert.match(fpText, /^acceptanceCriteria:/m);
-  assert.ok(!/^statement:/m.test(fpText), "功能点无 statement");
-  assert.ok(!/^title:/m.test(fpText), "功能点按契约无 title");
+  const fpFm = frontmatterOf(fpText);
+  assert.equal(fpFm["parent"], "FN-001");
+  assert.deepEqual(fpFm["satisfies"], []);
+  assert.equal(typeof fpFm["responsibility"], "string");
+  assert.ok(Array.isArray(fpFm["inputs"]));
+  assert.ok(Array.isArray(fpFm["outputs"]));
+  assert.ok(Array.isArray(fpFm["businessRules"]));
+  assert.ok(Array.isArray(fpFm["acceptanceCriteria"]));
+  assert.equal(fpFm["statement"], undefined, "功能点无 statement");
+  assert.equal(fpFm["title"], undefined, "功能点按契约无 title");
 });
 
-test("new 分析四层缺 --parent → exit 2 且不写文件", async (t) => {
+test("new 父边规矩（#190）：sr/ar/function-point 缺 --parent → exit 2；usecase/function-item 带 --parent → exit 2", async (t) => {
   const cwd = mkdtempSync(join(tmpdir(), "baize-"));
   t.after(() => rmSync(cwd, { recursive: true, force: true }));
 
-  for (const layer of ["scenario", "usecase", "function-item", "function-point"]) {
+  for (const layer of ["sr", "ar", "function-point"]) {
     const result = await run(["new", layer, "--json"], { cwd });
     assert.equal(result.exitCode, 2, result.stdout);
     assert.ok(parseJson<ErrorOutput>(result.stdout).error.rule);
+  }
+  for (const layer of ["usecase", "function-item"]) {
+    const result = await run(["new", layer, "--parent", "SR-001", "--json"], { cwd });
+    assert.equal(result.exitCode, 2, `${layer} 没有父边，--parent 应被拒：${result.stdout}`);
   }
   assert.ok(!existsSync(join(cwd, "baize")), "不成立请求不应写任何文件");
 });
@@ -1385,10 +1463,7 @@ test("new usecase --appears-in SC-001,SC-002 写入数组（一条用例同时�
   const cwd = mkdtempSync(join(tmpdir(), "baize-"));
   t.after(() => rmSync(cwd, { recursive: true, force: true }));
 
-  const result = await run(
-    ["new", "usecase", "--parent", "SR-001", "--appears-in", "SC-001,SC-002"],
-    { cwd },
-  );
+  const result = await run(["new", "usecase", "--appears-in", "SC-001,SC-002"], { cwd });
   assert.equal(result.exitCode, 0, result.stdout);
   const text = readFileSync(join(cwd, "baize/usecases/UC-001.md"), "utf8");
   assert.match(text, /^appearsIn:\s*$/m);
@@ -1400,10 +1475,7 @@ test("new function-item --realizes UC-001,UC-002 写入数组（一个功能项�
   const cwd = mkdtempSync(join(tmpdir(), "baize-"));
   t.after(() => rmSync(cwd, { recursive: true, force: true }));
 
-  const result = await run(
-    ["new", "function-item", "--parent", "SR-001", "--realizes", "UC-001,UC-002"],
-    { cwd },
-  );
+  const result = await run(["new", "function-item", "--realizes", "UC-001,UC-002"], { cwd });
   assert.equal(result.exitCode, 0, result.stdout);
   const text = readFileSync(join(cwd, "baize/function-items/FN-001.md"), "utf8");
   assert.match(text, /^realizes:\s*$/m);
@@ -1416,7 +1488,7 @@ test("new 拒绝张冠李戴的关联选项（--appears-in 只适用 usecase，-
   t.after(() => rmSync(cwd, { recursive: true, force: true }));
 
   const wrongAppearsIn = await run(
-    ["new", "scenario", "--parent", "SR-001", "--appears-in", "SC-001"],
+    ["new", "scenario", "--appears-in", "SC-001"],
     { cwd },
   );
   assert.equal(wrongAppearsIn.exitCode, 2, wrongAppearsIn.stdout);
@@ -1429,25 +1501,32 @@ test("new 拒绝张冠李戴的关联选项（--appears-in 只适用 usecase，-
   assert.ok(!existsSync(join(cwd, "baize")), "不成立请求不应写文件");
 });
 
-test("new scenario --parent SR-001 --catalog order-flow 写入 catalog", async (t) => {
-  const cwd = mkdtempSync(join(tmpdir(), "baize-"));
-  t.after(() => rmSync(cwd, { recursive: true, force: true }));
-
-  const result = await run(["new", "scenario", "--parent", "SR-001", "--catalog", "order-flow"], { cwd });
-  assert.equal(result.exitCode, 0, result.stdout);
-  const text = readFileSync(join(cwd, "baize/scenarios/SC-001.md"), "utf8");
-  assert.match(text, /^id: SC-001$/m);
-  assert.match(text, /^parent: SR-001$/m);
-  assert.match(text, /^catalog: order-flow$/m);
-});
-
-test("new scenario 缺 --parent → exit 2 且不写文件", async (t) => {
+test("new scenario --catalog order-flow 写入 catalog（parent 只剩「场景挂场景」可选例外）", async (t) => {
   const cwd = mkdtempSync(join(tmpdir(), "baize-"));
   t.after(() => rmSync(cwd, { recursive: true, force: true }));
 
   const result = await run(["new", "scenario", "--catalog", "order-flow"], { cwd });
-  assert.equal(result.exitCode, 2);
-  assert.equal(existsSync(join(cwd, "baize/scenarios/SC-001.md")), false);
+  assert.equal(result.exitCode, 0, result.stdout);
+  const text = readFileSync(join(cwd, "baize/scenarios/SC-001.md"), "utf8");
+  const fm = frontmatterOf(text);
+  assert.equal(fm["id"], "SC-001");
+  assert.equal(fm["catalog"], "order-flow");
+  assert.equal(fm["parent"], undefined, "顶层场景无父边");
+
+  // 子场景仍可用 --parent 挂场景（#190 保留的唯一方案层父边）
+  const child = await run(["new", "scenario", "--parent", "SC-001", "--json"], { cwd });
+  assert.equal(child.exitCode, 0, child.stdout);
+  const childText = readFileSync(join(cwd, "baize/scenarios/SC-002.md"), "utf8");
+  assert.equal(frontmatterOf(childText)["parent"], "SC-001", "子场景挂场景");
+});
+
+test("new scenario 无 --parent 也可建（场景不再有必挂的父边）", async (t) => {
+  const cwd = mkdtempSync(join(tmpdir(), "baize-"));
+  t.after(() => rmSync(cwd, { recursive: true, force: true }));
+
+  const result = await run(["new", "scenario", "--catalog", "order-flow"], { cwd });
+  assert.equal(result.exitCode, 0, result.stdout);
+  assert.ok(existsSync(join(cwd, "baize/scenarios/SC-001.md")));
 });
 
 test("new ar --parent SR-001 --allocates export-service 写入标量 allocates（不是数组）", async (t) => {
@@ -1484,6 +1563,8 @@ test("validate：ref.unknown-element —— AR 的 allocates 指向清单里没�
     LEGAL_AR.replace("allocates: export-service", "allocates: ghost-service"),
   );
   write(cwd, "baize/architecture.yaml", ARCHITECTURE_YAML);
+  // 方案层认领（#181），隔离 sr.unclaimed
+  write(cwd, "baize/function-items/FN-001.md", FN_CLAIMING_SR001);
 
   // IR 录入门禁（#147）：未确认的链根会让下游条目报 stage.upstream-unconfirmed，先把根认下来
   await acceptAndRead(cwd, "IR-001");
@@ -1561,18 +1642,40 @@ test("validate：ref.parent-not-allowed —— 父条目存在但不是本层分
   );
   rmSync(join(cwd, "baize/ir/IR-002.md"));
 
-  // 场景挂场景是 CONTEXT.md 明确允许的（「parent 天然支持场景挂场景」）→ 不报
+  // 场景挂场景是 #190 明确保留的例外 → 不报
   write(
     cwd,
     "baize/scenarios/SC-002.md",
-    LEGAL_SC.replace("id: SC-001", "id: SC-002").replace("parent: SR-001", "parent: SC-001"),
+    LEGAL_SC.replace("id: SC-001", "id: SC-002").replace(
+      "catalog: order-flow",
+      "parent: SC-001\ncatalog: order-flow",
+    ),
   );
   const scUnderSc = await run(["validate", "--json"], { cwd });
   assert.ok(
     !parseJson<ValidateOutput>(scUnderSc.stdout).issues.some(
-      (i) => i.rule === "ref.parent-not-allowed",
+      (i) => i.rule === "ref.parent-not-allowed" && i.path === "baize/scenarios/SC-002.md",
     ),
     `场景挂场景不应报（能表达 ≠ 必须分级）：${scUnderSc.stdout}`,
+  );
+
+  // 用例再挂 SR（旧模型写法）→ parent-not-allowed（用例无父边，改用 refines 认领）
+  write(
+    cwd,
+    "baize/usecases/UC-002.md",
+    LEGAL_UC.replace("id: UC-001", "id: UC-002").replace(
+      "appearsIn:",
+      "parent: SR-001\nappearsIn:",
+    ),
+  );
+  const ucUnderSr = await run(["validate", "--json"], { cwd });
+  const ucViolation = parseJson<ValidateOutput>(ucUnderSr.stdout).issues.find(
+    (i) => i.rule === "ref.parent-not-allowed" && i.path === "baize/usecases/UC-002.md",
+  );
+  assert.ok(ucViolation, `用例挂 SR 应报：${ucUnderSr.stdout}`);
+  assert.ok(
+    ucViolation.message.includes("refines"),
+    `消息应点出认领边：${ucUnderSr.stdout}`,
   );
 });
 
@@ -1689,6 +1792,8 @@ test("validate：sr.unallocated —— 没有 AR 挂上的 SR 报 WARNING；有 
   t.after(() => rmSync(cwd, { recursive: true, force: true }));
   write(cwd, "baize/ir/IR-001.md", LEGAL_IR);
   write(cwd, "baize/sr/SR-001.md", LEGAL_SR_FULL);
+  // 方案层认领（#181），隔离 sr.unclaimed——本用例只看 sr.unallocated
+  write(cwd, "baize/function-items/FN-001.md", FN_CLAIMING_SR001);
 
   // IR 录入门禁（#147）：未确认的链根会让下游条目报 stage.upstream-unconfirmed，先把根认下来
   await acceptAndRead(cwd, "IR-001");
@@ -1949,6 +2054,8 @@ test("缺清单文件 = 空清单，不是错误：不引用清单的仓 exit 0�
   t.after(() => rmSync(cwd, { recursive: true, force: true }));
   write(cwd, "baize/ir/IR-001.md", LEGAL_IR);
   write(cwd, "baize/sr/SR-001.md", LEGAL_SR_FULL);
+  // 方案层认领（#181），隔离 sr.unclaimed
+  write(cwd, "baize/function-items/FN-001.md", FN_CLAIMING_SR001);
 
   // 没有 baize/architecture.yaml 且仓里没有引用：清单缺失本身不是错误
   // （唯一的 sr.unallocated 是 WARNING，不挡 exit code）。
@@ -2059,6 +2166,163 @@ test("validate：ref.unknown-target 也判目标层——appearsIn 必须指向�
   );
 });
 
+test("validate：认领边（refines / satisfies）也走 ref.unknown-target——存在、且必须是 SR", async (t) => {
+  const cwd = mkdtempSync(join(tmpdir(), "baize-"));
+  t.after(() => rmSync(cwd, { recursive: true, force: true }));
+  write(cwd, "baize/ir/IR-001.md", LEGAL_IR);
+  write(cwd, "baize/sr/SR-001.md", LEGAL_SR_FULL);
+  write(cwd, "baize/scenarios/SC-001.md", LEGAL_SC);
+  write(cwd, "baize/scenario-catalogs.yaml", SCENARIO_CATALOGS_YAML);
+  write(cwd, "baize/architecture.yaml", ARCHITECTURE_YAML);
+  write(cwd, "baize/ar/AR-001.md", LEGAL_AR);
+
+  // 反例：指向不存在的 SR
+  write(cwd, "baize/usecases/UC-001.md", LEGAL_UC.replace("  - SR-001", "  - SR-999"));
+  const missing = await run(["validate", "--json"], { cwd });
+  assert.equal(missing.exitCode, 1, missing.stdout);
+  const missingIssues = parseJson<ValidateOutput>(missing.stdout).issues.filter(
+    (i) => i.rule === "ref.unknown-target" && i.path === "baize/usecases/UC-001.md",
+  );
+  assert.equal(missingIssues.length, 1, missing.stdout);
+  assert.ok(missingIssues[0]!.message.includes("SR-999"), missing.stdout);
+
+  // 正例（层不对）：refines 指向场景（不是 SR）→ ERROR；satisfies 指向用例 → ERROR
+  write(cwd, "baize/usecases/UC-001.md", LEGAL_UC.replace("  - SR-001", "  - SC-001"));
+  write(cwd, "baize/function-items/FN-001.md", LEGAL_FN.replace("  - SR-001", "  - UC-001"));
+  const wrongLayer = await run(["validate", "--json"], { cwd });
+  assert.equal(wrongLayer.exitCode, 1, wrongLayer.stdout);
+  const wrongLayerIssues = parseJson<ValidateOutput>(wrongLayer.stdout).issues.filter(
+    (i) => i.rule === "ref.unknown-target",
+  );
+  assert.ok(
+    wrongLayerIssues.some(
+      (i) =>
+        i.path === "baize/usecases/UC-001.md" &&
+        i.message.includes("refines") &&
+        i.message.includes("系统需求"),
+    ),
+    `refines 指错层应报：${wrongLayer.stdout}`,
+  );
+  assert.ok(
+    wrongLayerIssues.some(
+      (i) =>
+        i.path === "baize/function-items/FN-001.md" &&
+        i.message.includes("satisfies") &&
+        i.message.includes("系统需求"),
+    ),
+    `satisfies 指错层应报：${wrongLayer.stdout}`,
+  );
+
+  // 改回 SR → 不再报本 rule
+  write(cwd, "baize/usecases/UC-001.md", LEGAL_UC);
+  write(cwd, "baize/function-items/FN-001.md", LEGAL_FN);
+  const clean = await run(["validate", "--json"], { cwd });
+  assert.ok(
+    !parseJson<ValidateOutput>(clean.stdout).issues.some(
+      (i) => i.rule === "ref.unknown-target",
+    ),
+    clean.stdout,
+  );
+});
+
+test("validate：ref.cross-edge-break —— 功能项认领的 SR 与用例认领的 SR 完全不相交报 ERROR；有交集不报", async (t) => {
+  const cwd = mkdtempSync(join(tmpdir(), "baize-"));
+  t.after(() => rmSync(cwd, { recursive: true, force: true }));
+  write(cwd, "baize/ir/IR-001.md", LEGAL_IR);
+  write(cwd, "baize/sr/SR-001.md", LEGAL_SR_FULL);
+  // SR-002 也挂在 IR-001 下（跨需求复用才需要第二条 SR）
+  write(cwd, "baize/sr/SR-002.md", srWithCovers("SR-002", "IR-001#a1, IR-001#a2"));
+  write(cwd, "baize/scenarios/SC-001.md", LEGAL_SC);
+  write(cwd, "baize/scenario-catalogs.yaml", SCENARIO_CATALOGS_YAML);
+  write(cwd, "baize/architecture.yaml", ARCHITECTURE_YAML);
+  write(cwd, "baize/ar/AR-001.md", LEGAL_AR);
+  write(cwd, "baize/usecases/UC-001.md", LEGAL_UC);
+  write(cwd, "baize/function-items/FN-001.md", LEGAL_FN);
+
+  // IR 录入门禁（#147）：未确认的链根会让下游条目报 stage.upstream-unconfirmed，先把根认下来
+  await acceptAndRead(cwd, "IR-001");
+
+  // 反例：FN 只认领 SR-002，UC 只认领 SR-001 → 完全不相交（断链）
+  write(
+    cwd,
+    "baize/function-items/FN-001.md",
+    LEGAL_FN.replace("  - SR-001", "  - SR-002"),
+  );
+  const broken = await run(["validate", "--json"], { cwd });
+  assert.equal(broken.exitCode, 1, broken.stdout);
+  const breaks = parseJson<ValidateOutput>(broken.stdout).issues.filter(
+    (i) => i.rule === "ref.cross-edge-break",
+  );
+  assert.equal(breaks.length, 1, broken.stdout);
+  assert.equal(breaks[0]!.level, "ERROR");
+  assert.equal(breaks[0]!.path, "baize/function-items/FN-001.md");
+  assert.ok(
+    breaks[0]!.message.includes("SR-002") && breaks[0]!.message.includes("SR-001"),
+    `消息应点出两侧认领的 SR：${broken.stdout}`,
+  );
+
+  // 正例：FN 认领的 SR-002 ∩ UC 认领的 SR-001 之外，再让 UC 同时认领 SR-002（多值）→ 相交，不报
+  write(
+    cwd,
+    "baize/usecases/UC-001.md",
+    LEGAL_UC.replace("refines:\n  - SR-001", "refines:\n  - SR-001\n  - SR-002"),
+  );
+  const crossed = await run(["validate", "--json"], { cwd });
+  assert.equal(crossed.exitCode, 0, crossed.stdout);
+  assert.ok(
+    !parseJson<ValidateOutput>(crossed.stdout).issues.some(
+      (i) => i.rule === "ref.cross-edge-break",
+    ),
+    crossed.stdout,
+  );
+
+  // 功能项没有 realizes（功能侧还没承载任何用例）→ 不报本 rule（由 ref.orphan /
+  // coverage.unrealized-usecase 各管各的）
+  write(
+    cwd,
+    "baize/function-items/FN-001.md",
+    LEGAL_FN.replace("  - SR-001", "  - SR-002").replace("realizes:\n  - UC-001\n", ""),
+  );
+  const noRealizes = await run(["validate", "--json"], { cwd });
+  assert.ok(
+    !parseJson<ValidateOutput>(noRealizes.stdout).issues.some(
+      (i) => i.rule === "ref.cross-edge-break",
+    ),
+    noRealizes.stdout,
+  );
+});
+
+test("validate：一条用例可同时认领多条 SR（refines 多值正例，#190 user story 2）", async (t) => {
+  const cwd = mkdtempSync(join(tmpdir(), "baize-"));
+  t.after(() => rmSync(cwd, { recursive: true, force: true }));
+  write(cwd, "baize/ir/IR-001.md", LEGAL_IR);
+  write(cwd, "baize/sr/SR-001.md", LEGAL_SR_FULL);
+  write(cwd, "baize/sr/SR-002.md", srWithCovers("SR-002", "IR-001#a1, IR-001#a2"));
+  write(cwd, "baize/scenarios/SC-001.md", LEGAL_SC);
+  write(cwd, "baize/scenario-catalogs.yaml", SCENARIO_CATALOGS_YAML);
+  write(cwd, "baize/architecture.yaml", ARCHITECTURE_YAML);
+  write(cwd, "baize/ar/AR-001.md", LEGAL_AR);
+  // SR-002 也要有 AR 承接，隔离 sr.unallocated
+  write(
+    cwd,
+    "baize/ar/AR-002.md",
+    LEGAL_AR.replace("id: AR-001", "id: AR-002").replace("parent: SR-001", "parent: SR-002"),
+  );
+  write(
+    cwd,
+    "baize/usecases/UC-001.md",
+    LEGAL_UC.replace("refines:\n  - SR-001", "refines:\n  - SR-001\n  - SR-002"),
+  );
+  write(cwd, "baize/function-items/FN-001.md", LEGAL_FN);
+
+  // IR 录入门禁（#147）：未确认的链根会让下游条目报 stage.upstream-unconfirmed，先把根认下来
+  await acceptAndRead(cwd, "IR-001");
+
+  const result = await run(["validate", "--json"], { cwd });
+  assert.equal(result.exitCode, 0, result.stdout);
+  assert.equal(parseJson<ValidateOutput>(result.stdout).issues.length, 0, result.stdout);
+});
+
 test("validate：covers: [] 合法（不报 field/ref），缺 covers 字段走 field.absent——两条 rule 不混", async (t) => {
   const cwd = mkdtempSync(join(tmpdir(), "baize-"));
   t.after(() => rmSync(cwd, { recursive: true, force: true }));
@@ -2067,6 +2331,8 @@ test("validate：covers: [] 合法（不报 field/ref），缺 covers 字段走 
   // AR 承接（#152），隔离 sr.unallocated——本测试只验 covers 的 field/ref 行为
   write(cwd, "baize/architecture.yaml", ARCHITECTURE_YAML);
   write(cwd, "baize/ar/AR-001.md", LEGAL_AR);
+  // 方案层认领（#181），隔离 sr.unclaimed——SR 路径上不得有任何无关 rule
+  write(cwd, "baize/function-items/FN-001.md", FN_CLAIMING_SR001);
 
   // covers: [] —— SR 自身没有任何 field/ref 问题；覆盖率另算（两条线索都没人覆盖）
   // IR 录入门禁（#147）：未确认的链根会让下游条目报 stage.upstream-unconfirmed，先把根认下来
@@ -2264,13 +2530,13 @@ test("validate：coverage.unrealized-usecase —— 未被任何功能项 realiz
   assert.equal(parseJson<ValidateOutput>(clean.stdout).issues.length, 0, clean.stdout);
 });
 
-test("validate：场景/用例字段全必填但允许空数组 —— 缺 alternateFlows/alternativeFlows 报 field.absent，空数组不报错", async (t) => {
+test("validate：场景/用例字段全必填但允许空数组 —— 场景缺 alternativeFlows 报 field.absent，空数组不报错（#190 与用例统一拼写）", async (t) => {
   const cwd = mkdtempSync(join(tmpdir(), "baize-"));
   t.after(() => rmSync(cwd, { recursive: true, force: true }));
   write(cwd, "baize/ir/IR-001.md", LEGAL_IR);
   write(cwd, "baize/sr/SR-001.md", LEGAL_SR);
-  // 场景整段缺 alternateFlows；用例整段缺 alternativeFlows
-  write(cwd, "baize/scenarios/SC-001.md", LEGAL_SC.replace("alternateFlows: []\n", ""));
+  // 场景整段缺 alternativeFlows；用例整段缺 alternativeFlows
+  write(cwd, "baize/scenarios/SC-001.md", LEGAL_SC.replace("alternativeFlows: []\n", ""));
   write(cwd, "baize/scenario-catalogs.yaml", SCENARIO_CATALOGS_YAML);
   write(
     cwd,
@@ -2284,16 +2550,16 @@ test("validate：场景/用例字段全必填但允许空数组 —— 缺 alter
   const absent = issues.filter((i) => i.rule === "field.absent");
   assert.ok(
     absent.some(
-      (i) => i.path === "baize/scenarios/SC-001.md" && i.message.includes("alternateFlows"),
+      (i) => i.path === "baize/scenarios/SC-001.md" && i.message.includes("alternativeFlows"),
     ),
-    "缺 alternateFlows 应报 field.absent：" + result.stdout,
+    "场景缺 alternativeFlows 应报 field.absent：" + result.stdout,
   );
   assert.ok(
     absent.some(
       (i) =>
         i.path === "baize/usecases/UC-001.md" && i.message.includes("alternativeFlows"),
     ),
-    "缺 alternativeFlows 应报 field.absent：" + result.stdout,
+    "用例缺 alternativeFlows 应报 field.absent：" + result.stdout,
   );
 
   // 空数组合法：[] = 看过了确实没有。补回空数组并配齐 realizes 与线索覆盖（#150）使全仓全绿
@@ -2315,7 +2581,7 @@ test("validate：场景/用例字段全必填但允许空数组 —— 缺 alter
   );
 });
 
-test("validate：场景/用例的正文 statement 不必填——必填只到六项 + id/title/parent（+场景的 catalog）", async (t) => {
+test("validate：场景/用例的正文 statement 不必填——必填止于字段 schema（#190 起方案层无父边，用认领边认领 SR）", async (t) => {
   const cwd = mkdtempSync(join(tmpdir(), "baize-"));
   t.after(() => rmSync(cwd, { recursive: true, force: true }));
   writeFullChain(cwd);
@@ -2414,6 +2680,8 @@ test("stale.transitive：陈旧条目的严格后代报 INFO，陈旧条目自�
   t.after(() => rmSync(cwd, { recursive: true, force: true }));
   injectUser(t, "alice");
   writeChain(cwd);
+  // 方案层认领（#181），隔离 sr.unclaimed——FN 经认领边也是 SR-001 的严格后代
+  write(cwd, "baize/function-items/FN-001.md", FN_CLAIMING_SR001);
   await acceptAll(cwd, ["SR-001", "AR-001", "SR-002"]);
   changeIrStatement(cwd);
 
@@ -2427,8 +2695,11 @@ test("stale.transitive：陈旧条目的严格后代报 INFO，陈旧条目自�
   const transitive = issues.filter((issue) => issue.rule === "stale.transitive");
   assert.deepEqual(
     transitive.map((issue) => [issue.level, issue.path]),
-    [["INFO", "baize/ar/AR-001.md"]],
-    "AR-001 是 SR-001 的严格后代、自己复核未失效",
+    [
+      ["INFO", "baize/ar/AR-001.md"],
+      ["INFO", "baize/function-items/FN-001.md"],
+    ],
+    "AR-001（parent 边）与 FN-001（认领边）都是 SR-001 的严格后代、自己复核未失效",
   );
   // 陈旧条目自己不算传递：SR-001 只有 WARNING direct，没有 INFO transitive
   const srIssues = issues.filter((issue) => issue.path === "baize/sr/SR-001.md");
@@ -2637,7 +2908,7 @@ const UC_TWO_SCENARIOS = LEGAL_UC.replace(
   "appearsIn:\n  - SC-001\n  - SC-002",
 );
 
-/** 铺一条六层齐全且无陈旧的链：IR → SR → AR，SR → SC → UC → FN → FP。 */
+/** 铺一条七层齐全且无陈旧的链：IR → SR → AR；SC / UC / FN / FP 用认领边挂到 SR-001（#190）。 */
 function writeFullChain(cwd: string): void {
   write(cwd, "baize/ir/IR-001.md", LEGAL_IR);
   write(cwd, "baize/sr/SR-001.md", LEGAL_SR_FULL);
@@ -3023,7 +3294,7 @@ test("status --item UC-001：反向视图给出继承自哪些场景目录（一
   assert.match(human.stdout, /FN-001/);
 });
 
-test("status --item：任意条目都看得到自己属于哪条链（沿 parent 边到根的反向信息）", async (t) => {
+test("status --item：任意条目都看得到自己属于哪条链（沿 parent 边、方案层沿认领边到根的反向信息，#190）", async (t) => {
   const cwd = mkdtempSync(join(tmpdir(), "baize-"));
   t.after(() => rmSync(cwd, { recursive: true, force: true }));
   writeFullChain(cwd);
@@ -3049,6 +3320,8 @@ test("validate：stage.upstream-unconfirmed —— 上游 IR 未确认时下游�
   write(cwd, "baize/sr/SR-001.md", srWithCovers("SR-001", "IR-001#a1, IR-001#a2"));
   write(cwd, "baize/architecture.yaml", ARCHITECTURE_YAML);
   write(cwd, "baize/ar/AR-001.md", LEGAL_AR);
+  // 方案层认领（#181），隔离 sr.unclaimed——FN 也是下游条目，未确认时同样报
+  write(cwd, "baize/function-items/FN-001.md", FN_CLAIMING_SR001);
 
   // 未确认：下游条目报 WARNING，IR 自己不报；WARNING 不挡 exit code
   const unconfirmed = await run(["validate", "--json"], { cwd });
@@ -3058,6 +3331,7 @@ test("validate：stage.upstream-unconfirmed —— 上游 IR 未确认时下游�
     issues.map((issue) => `${issue.rule} ${issue.path}`).sort(),
     [
       "stage.upstream-unconfirmed baize/ar/AR-001.md",
+      "stage.upstream-unconfirmed baize/function-items/FN-001.md",
       "stage.upstream-unconfirmed baize/sr/SR-001.md",
     ],
     unconfirmed.stdout,
@@ -3086,4 +3360,1438 @@ test("validate：stage.upstream-unconfirmed —— 上游 IR 未确认时下游�
   const reappeared = staleIssues.find((issue) => issue.rule === "stage.upstream-unconfirmed");
   assert.ok(reappeared, "确认失效后应重新报：" + stale.stdout);
   assert.ok(reappeared.message.includes("确认已失效"), reappeared.message);
+});
+
+// ---- baize rename（#184）：把条目里的清单引用跟到新 slug ----
+// 共同契约（与 #185 migrate 同族，纪律见 ADR-0006）：默认 dry-run、--write 才落盘、
+// 只改条目绝不写清单、拒绝条件先于改写、原子性只到单文件。
+
+/** 递归快照目录内所有文件的文本内容，用于「目录零变化」协议级断言。 */
+function snapshotDir(cwd: string, rel: string): Map<string, string> {
+  const out = new Map<string, string>();
+  const walk = (abs: string, prefix: string): void => {
+    for (const name of readdirSync(abs)) {
+      const childAbs = join(abs, name);
+      const childRel = prefix === "" ? name : `${prefix}/${name}`;
+      if (statSync(childAbs).isDirectory()) walk(childAbs, childRel);
+      else out.set(childRel, readFileSync(childAbs, "utf8"));
+    }
+  };
+  walk(join(cwd, rel), "");
+  return out;
+}
+
+function snapshotEqual(
+  before: Map<string, string>,
+  after: Map<string, string>,
+): boolean {
+  if (before.size !== after.size) return false;
+  for (const [key, value] of before) {
+    if (after.get(key) !== value) return false;
+  }
+  return true;
+}
+
+// 两条场景引用 order-flow，一条引用 self-service；清单里两个 slug 都在。
+function writeRenameRepo(cwd: string): void {
+  write(cwd, "baize/scenario-catalogs.yaml", SCENARIO_CATALOGS_YAML);
+  write(cwd, "baize/scenarios/SC-001.md", LEGAL_SCENARIO);
+  write(
+    cwd,
+    "baize/scenarios/SC-002.md",
+    LEGAL_SCENARIO.replace("id: SC-001", "id: SC-002"),
+  );
+  write(
+    cwd,
+    "baize/scenarios/SC-003.md",
+    LEGAL_SCENARIO.replace("id: SC-001", "id: SC-003").replace(
+      "catalog: order-flow",
+      "catalog: self-service",
+    ),
+  );
+}
+
+test("rename catalog dry-run：打印文件 + 行 + 旧值 → 新值与「建议先提交」，文件字节不变", async (t) => {
+  const cwd = mkdtempSync(join(tmpdir(), "baize-"));
+  t.after(() => rmSync(cwd, { recursive: true, force: true }));
+  writeRenameRepo(cwd);
+
+  const before = snapshotDir(cwd, "baize");
+  const result = await run(["rename", "catalog", "order-flow", "self-service"], {
+    cwd,
+  });
+  assert.equal(result.exitCode, 0, result.stdout);
+  // 文件 + 行 + 旧值 → 新值：行号由条目内容决定，只断言形状（别把行号钉死，夹具一改就假红）
+  assert.match(result.stdout, /baize\/scenarios\/SC-001\.md:\d+: catalog: order-flow → self-service/);
+  assert.match(result.stdout, /baize\/scenarios\/SC-002\.md:\d+: catalog: order-flow → self-service/);
+  assert.match(result.stdout, /2 处引用/);
+  assert.match(result.stdout, /建议先提交/);
+  assert.doesNotMatch(result.stdout, /SC-003/, "未引用的条目不得出现在清单里");
+  // 协议级断言：dry-run 前后文件字节不变（含清单文件）
+  assert.ok(snapshotEqual(before, snapshotDir(cwd, "baize")), "dry-run 不得写盘");
+});
+
+test("rename catalog --write 落盘：只改引用了旧 slug 的条目，清单文件与其余条目字节不变", async (t) => {
+  const cwd = mkdtempSync(join(tmpdir(), "baize-"));
+  t.after(() => rmSync(cwd, { recursive: true, force: true }));
+  writeRenameRepo(cwd);
+  const sc3Before = readFileSync(join(cwd, "baize/scenarios/SC-003.md"), "utf8");
+  const catalogsBefore = readFileSync(
+    join(cwd, "baize/scenario-catalogs.yaml"),
+    "utf8",
+  );
+
+  const result = await run(
+    ["rename", "catalog", "order-flow", "self-service", "--write"],
+    { cwd },
+  );
+  assert.equal(result.exitCode, 0, result.stdout);
+  assert.match(result.stdout, /已改写 2 处引用/);
+
+  const sc1 = readFileSync(join(cwd, "baize/scenarios/SC-001.md"), "utf8");
+  assert.equal(frontmatterOf(sc1)["catalog"], "self-service");
+  const sc2 = readFileSync(join(cwd, "baize/scenarios/SC-002.md"), "utf8");
+  assert.equal(frontmatterOf(sc2)["catalog"], "self-service");
+  // 只改条目、绝不写清单：其余文件一字未动
+  assert.equal(
+    readFileSync(join(cwd, "baize/scenarios/SC-003.md"), "utf8"),
+    sc3Before,
+  );
+  assert.equal(
+    readFileSync(join(cwd, "baize/scenario-catalogs.yaml"), "utf8"),
+    catalogsBefore,
+  );
+});
+
+test("rename：新 slug 不在清单里 → exit 2 且目录零变化（拒绝条件先于改写）", async (t) => {
+  const cwd = mkdtempSync(join(tmpdir(), "baize-"));
+  t.after(() => rmSync(cwd, { recursive: true, force: true }));
+  writeRenameRepo(cwd);
+
+  const before = snapshotDir(cwd, "baize");
+  const result = await run(
+    ["rename", "catalog", "order-flow", "no-such-catalog", "--write", "--json"],
+    { cwd },
+  );
+  assert.equal(result.exitCode, 2);
+  const error = parseJson<ErrorOutput>(result.stdout).error;
+  assert.equal(error.rule, "rename.unknown-slug");
+  assert.match(error.message, /no-such-catalog/);
+  assert.match(error.message, /scenario-catalogs\.yaml/);
+  // 协议级断言：被拒时目录零变化
+  assert.ok(snapshotEqual(before, snapshotDir(cwd, "baize")), "拒绝后不得动任何文件");
+});
+
+test("rename element 改 AR 的 allocates；清单文件（architecture.yaml）不被写", async (t) => {
+  const cwd = mkdtempSync(join(tmpdir(), "baize-"));
+  t.after(() => rmSync(cwd, { recursive: true, force: true }));
+  write(cwd, "baize/architecture.yaml", ARCHITECTURE_YAML);
+  write(cwd, "baize/ar/AR-001.md", LEGAL_AR);
+  const catalogsBefore = readFileSync(join(cwd, "baize/architecture.yaml"), "utf8");
+
+  // dry-run：LEGAL_AR 的 allocates 在第 5 行，字节不变
+  const dry = await run(["rename", "element", "export-service", "audit-log"], {
+    cwd,
+  });
+  assert.equal(dry.exitCode, 0, dry.stdout);
+  assert.match(dry.stdout, /baize\/ar\/AR-001\.md:5: allocates: export-service → audit-log/);
+  assert.equal(
+    readFileSync(join(cwd, "baize/ar/AR-001.md"), "utf8"),
+    LEGAL_AR,
+    "dry-run 不得写盘",
+  );
+
+  const written = await run(
+    ["rename", "element", "export-service", "audit-log", "--write"],
+    { cwd },
+  );
+  assert.equal(written.exitCode, 0, written.stdout);
+  const ar = readFileSync(join(cwd, "baize/ar/AR-001.md"), "utf8");
+  assert.equal(frontmatterOf(ar)["allocates"], "audit-log");
+  // 只改条目：清单文件一字未动
+  assert.equal(readFileSync(join(cwd, "baize/architecture.yaml"), "utf8"), catalogsBefore);
+});
+
+test("rename：无任何引用时打印「0 处引用」并以成功退出（不是用法错）", async (t) => {
+  // 有清单但还没有任何条目：0 处引用，同样成功
+  const emptyCwd = mkdtempSync(join(tmpdir(), "baize-empty-"));
+  t.after(() => rmSync(emptyCwd, { recursive: true, force: true }));
+  write(emptyCwd, "baize/scenario-catalogs.yaml", SCENARIO_CATALOGS_YAML);
+  const result = await run(["rename", "catalog", "order-flow", "self-service"], {
+    cwd: emptyCwd,
+  });
+  assert.equal(result.exitCode, 0, result.stdout);
+  assert.match(result.stdout, /0 处引用/);
+
+  // 有仓库、有条目，但没人引用旧 slug：同样成功、不动文件
+  const noneCwd = mkdtempSync(join(tmpdir(), "baize-none-"));
+  t.after(() => rmSync(noneCwd, { recursive: true, force: true }));
+  write(noneCwd, "baize/scenario-catalogs.yaml", SCENARIO_CATALOGS_YAML);
+  write(
+    noneCwd,
+    "baize/scenarios/SC-001.md",
+    LEGAL_SCENARIO.replace("catalog: order-flow", "catalog: self-service"),
+  );
+  const before = snapshotDir(noneCwd, "baize");
+  const none = await run(["rename", "catalog", "order-flow", "self-service"], {
+    cwd: noneCwd,
+  });
+  assert.equal(none.exitCode, 0, none.stdout);
+  assert.match(none.stdout, /0 处引用/);
+  assert.ok(snapshotEqual(before, snapshotDir(noneCwd, "baize")));
+});
+
+test("rename：kind 不合法或参数缺失 → exit 2 用法错，不写文件", async (t) => {
+  const cwd = mkdtempSync(join(tmpdir(), "baize-"));
+  t.after(() => rmSync(cwd, { recursive: true, force: true }));
+  writeRenameRepo(cwd);
+
+  const badKind = await run(["rename", "widget", "a", "b"], { cwd });
+  assert.equal(badKind.exitCode, 2);
+  const missing = await run(["rename", "catalog", "order-flow"], { cwd });
+  assert.equal(missing.exitCode, 2);
+  const none = await run(["rename"], { cwd });
+  assert.equal(none.exitCode, 2);
+  const extra = await run(["rename", "catalog", "a", "b", "c"], { cwd });
+  assert.equal(extra.exitCode, 2);
+  const wrongOption = await run(["rename", "catalog", "a", "b", "--strict"], { cwd });
+  assert.equal(wrongOption.exitCode, 2);
+});
+
+// ---- #183 陈旧与复核沿认领边（refines / satisfies）传 ----
+
+/**
+ * 认领边陈旧的靶子仓：IR-001（两条线索）→ SR-001（两条线索都盖）+ AR 承接，
+ * 方案层四层各一条、全部认领 SR-001（场景/用例 refines，功能项/功能点 satisfies）。
+ * 覆盖与承接都齐：什么都没改时 validate 全绿。
+ */
+function writeClaimChain(cwd: string): void {
+  write(cwd, "baize/ir/IR-001.md", LEGAL_IR);
+  write(cwd, "baize/sr/SR-001.md", srWithCovers("SR-001", "IR-001#a1, IR-001#a2"));
+  write(cwd, "baize/architecture.yaml", ARCHITECTURE_YAML);
+  write(cwd, "baize/ar/AR-001.md", AR_UNDER_SR001);
+  write(cwd, "baize/scenario-catalogs.yaml", SCENARIO_CATALOGS_YAML);
+  write(cwd, "baize/scenarios/SC-001.md", LEGAL_SC);
+  write(cwd, "baize/usecases/UC-001.md", LEGAL_UC);
+  write(cwd, "baize/function-items/FN-001.md", LEGAL_FN);
+  write(cwd, "baize/function-points/FP-001.md", LEGAL_FP);
+}
+
+/** 只改 SR-001 的 statement（实质字段）。 */
+function changeSrStatement(cwd: string): void {
+  const text = readFileSync(join(cwd, "baize/sr/SR-001.md"), "utf8");
+  const changed = text.replace("导出能力。", "导出能力，含异步任务队列。");
+  assert.notEqual(changed, text, "本用例必须真的改掉 SR 的 statement");
+  write(cwd, "baize/sr/SR-001.md", changed);
+}
+
+test("认领边陈旧：accept 方案层条目把认领的 SR 记进 reviewed；改 SR 的 statement → 认领它的条目报 stale.direct-downstream（WARNING，门禁处阻塞）", async (t) => {
+  const cwd = mkdtempSync(join(tmpdir(), "baize-"));
+  t.after(() => rmSync(cwd, { recursive: true, force: true }));
+  injectUser(t, "alice");
+  writeClaimChain(cwd);
+  // 链根先确认，否则 stage.upstream-unconfirmed 会掺进本用例的断言
+  await acceptAndRead(cwd, "IR-001");
+  await acceptAll(cwd, ["SC-001", "UC-001", "FN-001", "FP-001"]);
+
+  // 复核记录：被复核的上游可以是 SR（场景/用例 refines、功能项/功能点 satisfies；
+  // 功能点还带 parent 功能项，两个上游都记）
+  const sc = frontmatterOf(readFileSync(join(cwd, "baize/scenarios/SC-001.md"), "utf8"));
+  assert.deepEqual(
+    Object.keys((sc["reviewed"] ?? {}) as object),
+    ["SR-001"],
+    "场景的认领边应记进 reviewed",
+  );
+  const fp = frontmatterOf(readFileSync(join(cwd, "baize/function-points/FP-001.md"), "utf8"));
+  assert.deepEqual(Object.keys((fp["reviewed"] ?? {}) as object), ["FN-001", "SR-001"]);
+
+  // 不触发（一反）：什么都没改时全绿
+  const before = await run(["validate", "--json"], { cwd });
+  assert.equal(before.exitCode, 0, before.stdout);
+  assert.deepEqual(parseJson<ValidateOutput>(before.stdout).issues, []);
+
+  // 触发（一正）：SR 的 statement 一改，认领它的四层条目都是直接下游
+  changeSrStatement(cwd);
+  const loose = await run(["validate", "--json"], { cwd });
+  assert.equal(loose.exitCode, 0, loose.stdout);
+  const direct = parseJson<ValidateOutput>(loose.stdout).issues.filter(
+    (issue) => issue.rule === "stale.direct-downstream",
+  );
+  assert.deepEqual(
+    direct.map((issue) => issue.path).sort(),
+    [
+      "baize/function-items/FN-001.md",
+      "baize/function-points/FP-001.md",
+      "baize/scenarios/SC-001.md",
+      "baize/usecases/UC-001.md",
+    ],
+  );
+  assert.ok(direct.every((issue) => issue.level === "WARNING"), loose.stdout);
+  assert.ok(direct.every((issue) => issue.message.includes("SR-001")), loose.stdout);
+
+  // 门禁处阻塞（WARNING）：--strict 升级为失败
+  const strict = await run(["validate", "--strict", "--json"], { cwd });
+  assert.equal(strict.exitCode, 1, strict.stdout);
+
+  // 复核仍走 baize accept：按现版 SR 再认一次 SC-001，它退出待复核清单
+  await acceptAndRead(cwd, "SC-001");
+  const after = await run(["validate", "--json"], { cwd });
+  const remaining = parseJson<ValidateOutput>(after.stdout).issues
+    .filter((issue) => issue.rule === "stale.direct-downstream")
+    .map((issue) => issue.path);
+  assert.ok(!remaining.includes("baize/scenarios/SC-001.md"), after.stdout);
+  assert.equal(remaining.length, 3, "其余三条认领者仍在待复核：" + after.stdout);
+});
+
+test("认领边闭包：SR 直接陈旧 → 认领它的方案层条目报 stale.transitive（INFO，消息点名该 SR）", async (t) => {
+  const cwd = mkdtempSync(join(tmpdir(), "baize-"));
+  t.after(() => rmSync(cwd, { recursive: true, force: true }));
+  injectUser(t, "alice");
+  writeClaimChain(cwd);
+  await acceptAll(cwd, ["IR-001", "SR-001", "SC-001", "UC-001", "FN-001", "FP-001"]);
+  changeIrStatement(cwd); // IR 改 → 只有复核过 IR 的 SR-001 是直接下游
+
+  const loose = await run(["validate", "--json"], { cwd });
+  assert.equal(loose.exitCode, 0, loose.stdout);
+  const issues = parseJson<ValidateOutput>(loose.stdout).issues;
+
+  const direct = issues.filter((issue) => issue.rule === "stale.direct-downstream");
+  assert.deepEqual(
+    direct.map((issue) => issue.path),
+    ["baize/sr/SR-001.md"],
+    "SR-001 自己没改，只有它复核过的 IR 失效",
+  );
+
+  // 闭包沿认领边传：认领 SR-001 的四层条目自己的复核未失效（SR-001 没改），
+  // 只算传递影响；AR-001 沿 parent 边照旧在闭包里（既有语义不变）
+  const transitive = issues.filter((issue) => issue.rule === "stale.transitive");
+  assert.deepEqual(
+    transitive.map((issue) => [issue.level, issue.path]),
+    [
+      ["INFO", "baize/ar/AR-001.md"],
+      ["INFO", "baize/function-items/FN-001.md"],
+      ["INFO", "baize/function-points/FP-001.md"],
+      ["INFO", "baize/scenarios/SC-001.md"],
+      ["INFO", "baize/usecases/UC-001.md"],
+    ],
+  );
+  // 消息点名陈旧的上游：认领边回溯到 SR-001（不是 parent 祖先）
+  assert.ok(
+    transitive.every((issue) => issue.message.includes("SR-001")),
+    loose.stdout,
+  );
+});
+
+test("认领边陈旧不级联：--strict 下方案层的 stale.transitive 仍 INFO 永不升级，exit 1 只由直接下游的 WARNING 造成", async (t) => {
+  const cwd = mkdtempSync(join(tmpdir(), "baize-"));
+  t.after(() => rmSync(cwd, { recursive: true, force: true }));
+  injectUser(t, "alice");
+  writeClaimChain(cwd);
+  await acceptAll(cwd, ["IR-001", "SR-001", "SC-001", "UC-001", "FN-001", "FP-001"]);
+  changeIrStatement(cwd);
+
+  const strict = await run(["validate", "--strict", "--json"], { cwd });
+  assert.equal(strict.exitCode, 1, strict.stdout);
+  const issues = parseJson<ValidateOutput>(strict.stdout).issues;
+
+  // 认领边进闭包的四条也在场（断言不是空转），且全部 INFO
+  const transitive = issues.filter((issue) => issue.rule === "stale.transitive");
+  assert.deepEqual(
+    transitive.map((issue) => issue.path).sort(),
+    [
+      "baize/ar/AR-001.md",
+      "baize/function-items/FN-001.md",
+      "baize/function-points/FP-001.md",
+      "baize/scenarios/SC-001.md",
+      "baize/usecases/UC-001.md",
+    ],
+  );
+  assert.ok(transitive.every((issue) => issue.level === "INFO"), strict.stdout);
+  const direct = issues.filter((issue) => issue.rule === "stale.direct-downstream");
+  assert.deepEqual(direct.map((issue) => issue.level), ["WARNING"]);
+});
+
+/** 子场景：挂在 SC-001 下（场景挂场景的例外），也认领 SR-001。 */
+const SC_002_UNDER_SC001 = `---
+id: SC-002
+title: 导出失败重试
+parent: SC-001
+refines:
+  - SR-001
+catalog: order-flow
+preconditions:
+  - 用户已登录
+trigger: 导出失败后用户点击重试
+mainFlow:
+  - 系统重新发起导出
+alternativeFlows: []
+expectedOutcome: 重试成功并下载
+stakeholders:
+  - 买家
+---
+
+子场景：主流程之外的重试分支。
+`;
+
+/** 给条目的认领边列表追加一条（出边变化，不动 statement）。 */
+function addClaim(cwd: string, rel: string, extra: string): void {
+  const text = readFileSync(join(cwd, rel), "utf8");
+  const changed = text.replace(/^(\s*)- SR-001$/m, `$1- SR-001
+$1- ${extra}`);
+  assert.notEqual(changed, text, "本用例必须真的改掉认领边");
+  write(cwd, rel, changed);
+}
+
+test("认领边是实质字段：改场景的 refines / 功能项的 satisfies 同样让复核过的下游失效", async (t) => {
+  const cwd = mkdtempSync(join(tmpdir(), "baize-"));
+  t.after(() => rmSync(cwd, { recursive: true, force: true }));
+  injectUser(t, "alice");
+  writeClaimChain(cwd);
+  // SR-002 供改边后认领（改边要指向存在的条目，否则 ref.unknown-target 盖过本用例）
+  write(cwd, "baize/sr/SR-002.md", srWithCovers("SR-002", "IR-001#a1"));
+  write(cwd, "baize/scenarios/SC-002.md", SC_002_UNDER_SC001);
+  // SC-002 复核 parent 场景 SC-001；FP-001 复核 parent 功能项 FN-001
+  await acceptAll(cwd, ["IR-001", "SC-001", "SC-002", "FP-001"]);
+
+  const before = await run(["validate", "--json"], { cwd });
+  const beforeIssues = parseJson<ValidateOutput>(before.stdout).issues;
+  assert.ok(
+    beforeIssues.every((issue) => !issue.rule.startsWith("stale.")),
+    `改边之前不应有陈旧：${JSON.stringify(beforeIssues)}`,
+  );
+
+  // 出边一改（SC-001 多认领 SR-002、FN-001 多认领 SR-002），statement 一字未动
+  addClaim(cwd, "baize/scenarios/SC-001.md", "SR-002");
+  addClaim(cwd, "baize/function-items/FN-001.md", "SR-002");
+
+  const result = await run(["validate", "--json"], { cwd });
+  assert.equal(result.exitCode, 0, result.stdout);
+  const direct = parseJson<ValidateOutput>(result.stdout).issues.filter(
+    (issue) => issue.rule === "stale.direct-downstream",
+  );
+  assert.deepEqual(
+    direct.map((issue) => issue.path).sort(),
+    ["baize/function-points/FP-001.md", "baize/scenarios/SC-002.md"],
+    "复核过 SC-001 / FN-001 的下游应失效",
+  );
+  assert.ok(direct.every((issue) => issue.level === "WARNING"), result.stdout);
+  const sc2 = direct.find((issue) => issue.path === "baize/scenarios/SC-002.md");
+  assert.ok(sc2?.message.includes("SC-001"), "消息应点名被改的上游 SC-001：" + sc2?.message);
+  const fp1 = direct.find((issue) => issue.path === "baize/function-points/FP-001.md");
+  assert.ok(fp1?.message.includes("FN-001"), "消息应点名被改的上游 FN-001：" + fp1?.message);
+});
+
+// ── #181 两条新 WARNING：acceptance 超阈值 / SR 未被认领 ──────────────────
+
+/** N 条验收线索（a1..aN）的 IR。 */
+function irWithClues(clueCount: number): string {
+  const clues = Array.from({ length: clueCount }, (_, i) => `  a${i + 1}: 线索 ${i + 1}`);
+  return `---
+id: IR-001
+title: 支持用户数据导出
+parent: null
+acceptance:
+${clues.join("\n")}
+---
+
+产品要求用户能把数据带走，不能锁死在系统里。
+`;
+}
+
+/**
+ * clueCount 条线索的「除阈值外全绿」仓库：SR 全盖、AR 承接、场景认领 SR、
+ * 根已确认（其余 WARNING/ERROR 都不掺进来，只剩 acceptance 条数这一件事）。
+ */
+async function writeThresholdRepo(cwd: string, clueCount: number): Promise<void> {
+  const covers = Array.from({ length: clueCount }, (_, i) => `IR-001#a${i + 1}`).join(", ");
+  write(cwd, "baize/ir/IR-001.md", irWithClues(clueCount));
+  write(cwd, "baize/sr/SR-001.md", srWithCovers("SR-001", covers));
+  write(cwd, "baize/architecture.yaml", ARCHITECTURE_YAML);
+  write(cwd, "baize/ar/AR-001.md", AR_UNDER_SR001);
+  write(cwd, "baize/scenario-catalogs.yaml", SCENARIO_CATALOGS_YAML);
+  write(cwd, "baize/scenarios/SC-001.md", LEGAL_SC);
+  await acceptAndRead(cwd, "IR-001");
+}
+
+test("validate：field.acceptance-too-many —— 8 条线索报 WARNING（消息带条数与阈值），恰好 7 条不报", async (t) => {
+  const sevenCwd = mkdtempSync(join(tmpdir(), "baize-"));
+  const eightCwd = mkdtempSync(join(tmpdir(), "baize-"));
+  t.after(() => {
+    rmSync(sevenCwd, { recursive: true, force: true });
+    rmSync(eightCwd, { recursive: true, force: true });
+  });
+
+  await writeThresholdRepo(sevenCwd, 7);
+  const seven = await run(["validate", "--json"], { cwd: sevenCwd });
+  assert.equal(seven.exitCode, 0, seven.stdout);
+  assert.deepEqual(
+    parseJson<ValidateOutput>(seven.stdout).issues,
+    [],
+    "恰好 7 条不报：" + seven.stdout,
+  );
+
+  await writeThresholdRepo(eightCwd, 8);
+  const eight = await run(["validate", "--json"], { cwd: eightCwd });
+  assert.equal(eight.exitCode, 0, "WARNING 不挡 exit code：" + eight.stdout);
+  const issues = parseJson<ValidateOutput>(eight.stdout).issues;
+  assert.deepEqual(
+    issues.map((issue) => issue.rule),
+    ["field.acceptance-too-many"],
+    eight.stdout,
+  );
+  const issue = issues[0];
+  assert.ok(issue, eight.stdout);
+  assert.equal(issue.level, "WARNING");
+  assert.equal(issue.path, "baize/ir/IR-001.md");
+  assert.ok(issue.message.includes("8 条"), "消息带条数：" + issue.message);
+  assert.ok(issue.message.includes("阈值 7"), "消息带阈值：" + issue.message);
+  assert.ok(issue.fix?.includes("拆"), "fix 指向拆分：" + (issue.fix ?? ""));
+});
+
+test("validate --strict 把 WARNING（field.acceptance-too-many）也算失败（exit 1）", async (t) => {
+  const cwd = mkdtempSync(join(tmpdir(), "baize-"));
+  t.after(() => rmSync(cwd, { recursive: true, force: true }));
+  await writeThresholdRepo(cwd, 8);
+  const strict = await run(["validate", "--strict"], { cwd });
+  assert.equal(strict.exitCode, 1, strict.stdout);
+});
+
+
+/**
+ * 最小认领者（#181）：一条功能项 satisfies SR-001、realizes 允许空——
+ * 单文件即可把 sr.unclaimed 从用例里隔离掉（不需要场景目录清单）。
+ */
+const FN_CLAIMING_SR001 = `---
+id: FN-001
+title: 导出服务
+satisfies:
+  - SR-001
+domain: 数据服务
+realizes: []
+description: 承载导出能力。
+---
+`;
+
+test("validate：sr.unclaimed —— 没有方案层条目认领的 SR 报 WARNING；被 refines/satisfies 认领则不报", async (t) => {
+  const cwd = mkdtempSync(join(tmpdir(), "baize-"));
+  t.after(() => rmSync(cwd, { recursive: true, force: true }));
+  write(cwd, "baize/ir/IR-001.md", LEGAL_IR);
+  write(cwd, "baize/sr/SR-001.md", srWithCovers("SR-001", "IR-001#a1, IR-001#a2"));
+  write(cwd, "baize/architecture.yaml", ARCHITECTURE_YAML);
+  write(cwd, "baize/ar/AR-001.md", AR_UNDER_SR001); // AR 承接（#152），隔离 sr.unallocated
+  await acceptAndRead(cwd, "IR-001");
+
+  const unclaimed = await run(["validate", "--json"], { cwd });
+  assert.equal(unclaimed.exitCode, 0, "WARNING 不挡 exit code");
+  const issues = parseJson<ValidateOutput>(unclaimed.stdout).issues;
+  assert.deepEqual(
+    issues.map((issue) => issue.rule),
+    ["sr.unclaimed"],
+    unclaimed.stdout,
+  );
+  assert.equal(issues[0]?.level, "WARNING");
+  assert.equal(issues[0]?.path, "baize/sr/SR-001.md");
+  assert.ok(issues[0]?.message.includes("SR-001"), "消息应点名 SR：" + issues[0]?.message);
+
+  // 认领者出现（场景 refines / 功能项 satisfies 都算数）→ 不再报
+  write(cwd, "baize/scenario-catalogs.yaml", SCENARIO_CATALOGS_YAML);
+  write(cwd, "baize/scenarios/SC-001.md", LEGAL_SC);
+  const claimedByScenario = await run(["validate", "--json"], { cwd });
+  assert.equal(claimedByScenario.exitCode, 0, claimedByScenario.stdout);
+  assert.deepEqual(
+    parseJson<ValidateOutput>(claimedByScenario.stdout).issues,
+    [],
+    "场景 refines 认领后不报：" + claimedByScenario.stdout,
+  );
+
+  rmSync(join(cwd, "baize/scenarios"), { recursive: true, force: true });
+  write(cwd, "baize/function-items/FN-001.md", FN_CLAIMING_SR001);
+  const claimedByFn = await run(["validate", "--json"], { cwd });
+  assert.equal(claimedByFn.exitCode, 0, claimedByFn.stdout);
+  assert.deepEqual(
+    parseJson<ValidateOutput>(claimedByFn.stdout).issues,
+    [],
+    "功能项 satisfies 认领后不报：" + claimedByFn.stdout,
+  );
+});
+
+test("validate --strict 把 WARNING（sr.unclaimed）也算失败（exit 1）", async (t) => {
+  const cwd = mkdtempSync(join(tmpdir(), "baize-"));
+  t.after(() => rmSync(cwd, { recursive: true, force: true }));
+  write(cwd, "baize/ir/IR-001.md", LEGAL_IR);
+  write(cwd, "baize/sr/SR-001.md", srWithCovers("SR-001", "IR-001#a1, IR-001#a2"));
+  write(cwd, "baize/architecture.yaml", ARCHITECTURE_YAML);
+  write(cwd, "baize/ar/AR-001.md", AR_UNDER_SR001);
+  await acceptAndRead(cwd, "IR-001");
+
+  const lax = await run(["validate"], { cwd });
+  assert.equal(lax.exitCode, 0);
+  const strict = await run(["validate", "--strict"], { cwd });
+  assert.equal(strict.exitCode, 1);
+});
+
+// ---- #182 链成员跟认领边 + status 共享标注 ----
+
+interface SharedChainView {
+  chain: string;
+  count: number;
+}
+
+interface ChainSharedOutput {
+  schemaVersion: number;
+  chain: {
+    id: string;
+    items: { id: string }[];
+    shared?: SharedChainView[];
+    stages: StageView[];
+    gates: GateView[];
+  };
+}
+
+/**
+ * 共两条链的靶子仓：IR-001→SR-001（有 AR 承接）与 IR-002→SR-002 各一条链；
+ * UC-001 同时认领两条 SR——两条链的成员都含它；SC-001 / FN-001 / FP-001 只认领 SR-001。
+ */
+function writeSharedChains(cwd: string): void {
+  write(cwd, "baize/ir/IR-001.md", LEGAL_IR);
+  write(cwd, "baize/sr/SR-001.md", srWithCovers("SR-001", "IR-001#a1, IR-001#a2"));
+  write(
+    cwd,
+    "baize/ir/IR-002.md",
+    LEGAL_IR.replace("id: IR-001", "id: IR-002").replace(
+      "title: 支持用户数据导出",
+      "title: 审计日志留存",
+    ),
+  );
+  write(
+    cwd,
+    "baize/sr/SR-002.md",
+    srWithCovers("SR-002", "IR-002#a1, IR-002#a2").replace("parent: IR-001", "parent: IR-002"),
+  );
+  write(cwd, "baize/architecture.yaml", ARCHITECTURE_YAML);
+  write(cwd, "baize/scenario-catalogs.yaml", SCENARIO_CATALOGS_YAML);
+  write(cwd, "baize/ar/AR-001.md", AR_UNDER_SR001);
+  write(cwd, "baize/scenarios/SC-001.md", LEGAL_SC);
+  // UC-001 认领两条 SR：同属两条链（#190 user story 2）——共享标注的靶子
+  write(
+    cwd,
+    "baize/usecases/UC-001.md",
+    LEGAL_UC.replace("refines:\n  - SR-001", "refines:\n  - SR-001\n  - SR-002"),
+  );
+  write(cwd, "baize/function-items/FN-001.md", LEGAL_FN);
+  write(cwd, "baize/function-points/FP-001.md", LEGAL_FP);
+}
+
+test("status --chain：一条用例认领两条 SR → 两条链的 items 都含它，shared 互指（现算不落盘）", async (t) => {
+  const cwd = mkdtempSync(join(tmpdir(), "baize-"));
+  t.after(() => rmSync(cwd, { recursive: true, force: true }));
+  writeSharedChains(cwd);
+
+  const first = parseJson<ChainSharedOutput>(
+    (await run(["status", "--chain", "IR-001", "--json"], { cwd })).stdout,
+  ).chain;
+  assert.ok(
+    first.items.some((item) => item.id === "UC-001"),
+    `链 IR-001 的条目应含共享的 UC-001：${JSON.stringify(first.items)}`,
+  );
+  assert.deepEqual(first.shared, [{ chain: "IR-002", count: 1 }]);
+
+  const second = parseJson<ChainSharedOutput>(
+    (await run(["status", "--chain", "IR-002", "--json"], { cwd })).stdout,
+  ).chain;
+  assert.ok(
+    second.items.some((item) => item.id === "UC-001"),
+    `链 IR-002 的条目也应含共享的 UC-001：${JSON.stringify(second.items)}`,
+  );
+  assert.deepEqual(second.shared, [{ chain: "IR-001", count: 1 }], "共享计数应互指");
+
+  // 人类可读输出加一行（与 --json 同源）
+  const human = await run(["status", "--chain", "IR-001"], { cwd });
+  assert.equal(human.exitCode, 0, human.stdout);
+  assert.ok(human.stdout.includes("与链 IR-002 共享 1 条条目"), human.stdout);
+
+  // 现算不落盘：共享是反向现算信息，status 不得写状态文件
+  assert.ok(!existsSync(join(cwd, "baize/chains")), "共享信息不得落盘");
+});
+
+test("签字不复用：给链 IR-001 签功能拆分，链 IR-002 仍 pending，缺的正是签字", async (t) => {
+  const cwd = mkdtempSync(join(tmpdir(), "baize-"));
+  t.after(() => rmSync(cwd, { recursive: true, force: true }));
+  writeSharedChains(cwd);
+  const splitOf = async (chain: string) =>
+    parseJson<ChainSharedOutput>(
+      (await run(["status", "--chain", chain, "--json"], { cwd })).stdout,
+    ).chain.gates.find((gate) => gate.gate === "function-split")!;
+
+  // 起点：两条链都没人签过
+  assert.equal((await splitOf("IR-001")).state, "pending");
+  assert.equal((await splitOf("IR-002")).state, "pending");
+
+  // 只给链 IR-001 签字（UC-001 由 FN-001 realizes，两条链的自动挡都过——差的只有签字）
+  write(
+    cwd,
+    "baize/chains/IR-001.yaml",
+    `skipped: {}
+gates:
+  function-split:
+    by: alice
+    at: 2026-10-12
+    criterion: ${FUNCTION_SPLIT_CRITERION}
+`,
+  );
+
+  const signed = await splitOf("IR-001");
+  assert.equal(signed.state, "passed", "IR-001：签字 + 自动挡齐 → passed");
+  assert.equal(signed.by, "alice");
+
+  const other = await splitOf("IR-002");
+  assert.equal(other.state, "pending", "签字按链各签各的，不跨链复用");
+  assert.equal(other.by, null);
+  assert.deepEqual(
+    other.missing,
+    ["签字：gates.function-split 缺 by + at 的人工通过记录"],
+    `缺的正是签字：${JSON.stringify(other.missing)}`,
+  );
+});
+
+test("跳过不跨链：链 IR-001 跳过 scenario 段，链 IR-002 的同一段仍未跳过", async (t) => {
+  const cwd = mkdtempSync(join(tmpdir(), "baize-"));
+  t.after(() => rmSync(cwd, { recursive: true, force: true }));
+  writeSharedChains(cwd);
+  // 只在链 IR-001 的状态文件里记跳过（跳过记录是链级属性）
+  write(
+    cwd,
+    "baize/chains/IR-001.yaml",
+    `skipped:
+  scenario:
+    by: crazytomatooo
+    at: 2026-10-12
+    why: 交互由既有产品承载，本链不再单独设计场景
+`,
+  );
+
+  const stageOf = async (chain: string, stage: string) =>
+    parseJson<ChainSharedOutput>(
+      (await run(["status", "--chain", chain, "--json"], { cwd })).stdout,
+    ).chain.stages.find((view) => view.stage === stage)!;
+
+  const mine = await stageOf("IR-001", "scenario");
+  assert.notEqual(mine.skipped, null, "IR-001 的 scenario 段已跳过");
+  assert.equal(mine.skipped?.by, "crazytomatooo");
+  assert.equal(mine.skipped?.why, "交互由既有产品承载，本链不再单独设计场景");
+
+  const other = await stageOf("IR-002", "scenario");
+  assert.equal(other.skipped, null, "跳过记录只管本链：IR-002 的 scenario 仍未跳过");
+});
+
+test("自动挡各自按本链成员算：只有链 IR-001 有的未实现用例，只有那条链的自动挡不过", async (t) => {
+  const cwd = mkdtempSync(join(tmpdir(), "baize-"));
+  t.after(() => rmSync(cwd, { recursive: true, force: true }));
+  writeSharedChains(cwd);
+  // UC-002 只认领 SR-001（只进链 IR-001），没有任何功能项 realizes 它
+  write(cwd, "baize/usecases/UC-002.md", LEGAL_UC.replace("id: UC-001", "id: UC-002"));
+
+  const splitOf = async (chain: string) =>
+    parseJson<ChainSharedOutput>(
+      (await run(["status", "--chain", chain, "--json"], { cwd })).stdout,
+    ).chain.gates.find((gate) => gate.gate === "function-split")!;
+  const mine = await splitOf("IR-001");
+  assert.equal(
+    mine.checks?.find((check) => check.check.includes("realizes"))?.passed,
+    false,
+    "UC-002 无人承载 → 链 IR-001 的自动挡不过",
+  );
+  assert.deepEqual(
+    mine.pending?.unrealizedUsecases.map((usecase) => usecase.id),
+    ["UC-002"],
+  );
+
+  const other = await splitOf("IR-002");
+  assert.equal(
+    other.checks?.find((check) => check.check.includes("realizes"))?.passed,
+    true,
+    "UC-002 不在链 IR-002 的成员里 → 同一项自动挡在该链照过",
+  );
+  assert.deepEqual(other.pending?.unrealizedUsecases, []);
+});
+
+// ---- #186 清单格式校验 + 解析保护：清单是外部维护的文件，按脏输入处理 ----
+
+test("validate：catalog.unparseable —— 清单写重复键不再抛栈，报一条带文件与行号的 ERROR（--json 可解析、退出码 1）", async (t) => {
+  const cwd = mkdtempSync(join(tmpdir(), "baize-"));
+  t.after(() => rmSync(cwd, { recursive: true, force: true }));
+  write(cwd, "baize/ir/IR-001.md", LEGAL_IR);
+  write(cwd, "baize/sr/SR-001.md", LEGAL_SR_FULL);
+  // 第二个 a 在第 3 行——之前这里会抛 YAMLParseError: Map keys must be unique 一坨栈
+  write(cwd, "baize/architecture.yaml", "components:\n  a: { name: A }\n  a: { name: B }\n");
+
+  const result = await run(["validate", "--json"], { cwd });
+  assert.equal(result.exitCode, 1, result.stdout);
+  const unparseable = parseJson<ValidateOutput>(result.stdout).issues.filter(
+    (issue) => issue.rule === "catalog.unparseable",
+  );
+  assert.equal(unparseable.length, 1, result.stdout);
+  assert.equal(unparseable[0]!.level, "ERROR");
+  assert.equal(unparseable[0]!.path, "baize/architecture.yaml");
+  assert.match(unparseable[0]!.message, /第 3 行/, `消息应带行号：${result.stdout}`);
+
+  // 人读模式同一份数据，同样不出栈
+  const human = await run(["validate"], { cwd });
+  assert.equal(human.exitCode, 1, human.stdout);
+  assert.match(human.stdout, /catalog\.unparseable baize\/architecture\.yaml/);
+
+  // 解析保护惠及所有读者：rename 读同一份清单，拒绝时 exit 2（不抛栈、不动文件）
+  const rename = await run(["rename", "element", "a", "b", "--json"], { cwd });
+  assert.equal(rename.exitCode, 2, rename.stdout);
+  assert.equal(parseJson<ErrorOutput>(rename.stdout).error.rule, "rename.unknown-slug");
+});
+
+test("validate：catalog.invalid-slug —— 清单 slug 不是 kebab-case 报 ERROR（带 slug 与行号）", async (t) => {
+  const cwd = mkdtempSync(join(tmpdir(), "baize-"));
+  t.after(() => rmSync(cwd, { recursive: true, force: true }));
+  write(cwd, "baize/ir/IR-001.md", LEGAL_IR);
+  write(cwd, "baize/sr/SR-001.md", LEGAL_SR_FULL);
+  write(
+    cwd,
+    "baize/architecture.yaml",
+    "components:\n  Export Service: { name: A }\n  export_service: { name: B }\n",
+  );
+
+  const result = await run(["validate", "--json"], { cwd });
+  assert.equal(result.exitCode, 1, result.stdout);
+  const invalid = parseJson<ValidateOutput>(result.stdout).issues.filter(
+    (issue) => issue.rule === "catalog.invalid-slug",
+  );
+  assert.equal(invalid.length, 2, result.stdout);
+  assert.ok(
+    invalid.every(
+      (issue) => issue.level === "ERROR" && issue.path === "baize/architecture.yaml",
+    ),
+    result.stdout,
+  );
+  assert.match(invalid[0]!.message, /Export Service/, result.stdout);
+  assert.match(invalid[0]!.message, /第 2 行/, `消息应带行号：${result.stdout}`);
+  assert.match(invalid[1]!.message, /export_service/, result.stdout);
+
+  // kebab-case 不报——顺带守住「粒度不查」：一个组件的清单也零清单问题
+  write(cwd, "baize/architecture.yaml", "components:\n  export-service: { name: 导出服务 }\n");
+  const good = await run(["validate", "--json"], { cwd });
+  assert.equal(good.exitCode, 0, good.stdout);
+  assert.ok(
+    parseJson<ValidateOutput>(good.stdout).issues.every((issue) => !issue.rule.startsWith("catalog.")),
+    `不应有清单问题：${good.stdout}`,
+  );
+});
+
+test("validate：catalog.name-missing / catalog.description-empty —— name 缺失或空、description 写了就非空，都报 ERROR", async (t) => {
+  const cwd = mkdtempSync(join(tmpdir(), "baize-"));
+  t.after(() => rmSync(cwd, { recursive: true, force: true }));
+  write(cwd, "baize/ir/IR-001.md", LEGAL_IR);
+  write(cwd, "baize/sr/SR-001.md", LEGAL_SR_FULL);
+  // 三种坏法：name 空串 / name 缺失 / description 空串（写了就必须非空）
+  write(
+    cwd,
+    "baize/architecture.yaml",
+    'components:\n  export-service: { name: "" }\n  audit-log: {}\n  billing: { name: 账单, description: "" }\n',
+  );
+
+  const result = await run(["validate", "--json"], { cwd });
+  assert.equal(result.exitCode, 1, result.stdout);
+  const issues = parseJson<ValidateOutput>(result.stdout).issues;
+  const missing = issues.filter((issue) => issue.rule === "catalog.name-missing");
+  assert.equal(missing.length, 2, result.stdout);
+  assert.match(missing[0]!.message, /export-service/, result.stdout);
+  assert.match(missing[0]!.message, /第 2 行/, `消息应带行号：${result.stdout}`);
+  assert.match(missing[1]!.message, /audit-log/, result.stdout);
+  const emptyDesc = issues.filter((issue) => issue.rule === "catalog.description-empty");
+  assert.equal(emptyDesc.length, 1, result.stdout);
+  assert.match(emptyDesc[0]!.message, /billing/, result.stdout);
+  assert.match(emptyDesc[0]!.message, /第 4 行/, `消息应带行号：${result.stdout}`);
+
+  // 修好 → 零清单问题（description 不写也合法——「若存在则非空」）
+  write(
+    cwd,
+    "baize/architecture.yaml",
+    "components:\n  export-service: { name: 导出服务 }\n  audit-log: { name: 审计 }\n  billing: { name: 账单, description: 出账 }\n",
+  );
+  const good = await run(["validate", "--json"], { cwd });
+  assert.equal(good.exitCode, 0, good.stdout);
+  assert.ok(
+    parseJson<ValidateOutput>(good.stdout).issues.every(
+      (issue) => !issue.rule.startsWith("catalog."),
+    ),
+    `不应有清单问题：${good.stdout}`,
+  );
+});
+
+test("validate：catalog.top-key-not-mapping —— 配定顶层键不是映射时报 ERROR（两份清单对称）", async (t) => {
+  const cwd = mkdtempSync(join(tmpdir(), "baize-"));
+  t.after(() => rmSync(cwd, { recursive: true, force: true }));
+  write(cwd, "baize/ir/IR-001.md", LEGAL_IR);
+  write(cwd, "baize/sr/SR-001.md", LEGAL_SR_FULL);
+  write(cwd, "baize/architecture.yaml", "components:\n  - export-service\n  - audit-log\n");
+
+  const result = await run(["validate", "--json"], { cwd });
+  assert.equal(result.exitCode, 1, result.stdout);
+  const issues = parseJson<ValidateOutput>(result.stdout).issues.filter(
+    (issue) => issue.rule === "catalog.top-key-not-mapping",
+  );
+  assert.equal(issues.length, 1, result.stdout);
+  assert.equal(issues[0]!.level, "ERROR");
+  assert.equal(issues[0]!.path, "baize/architecture.yaml");
+  assert.match(issues[0]!.message, /components/, result.stdout);
+  assert.match(issues[0]!.message, /第 1 行/, `消息应带行号：${result.stdout}`);
+
+  // 场景目录词表同一读法（ADR-0004：两份清单是同一类东西，形态与校验统一）
+  write(cwd, "baize/scenario-catalogs.yaml", "catalogs: order-flow\n");
+  const both = await run(["validate", "--json"], { cwd });
+  assert.equal(both.exitCode, 1, both.stdout);
+  const paths = parseJson<ValidateOutput>(both.stdout).issues
+    .filter((issue) => issue.rule === "catalog.top-key-not-mapping")
+    .map((issue) => issue.path);
+  assert.deepEqual(
+    [...paths].sort(),
+    ["baize/architecture.yaml", "baize/scenario-catalogs.yaml"],
+    both.stdout,
+  );
+
+  // 修好 → 零清单问题
+  write(cwd, "baize/architecture.yaml", ARCHITECTURE_YAML);
+  write(cwd, "baize/scenario-catalogs.yaml", SCENARIO_CATALOGS_YAML);
+  const good = await run(["validate", "--json"], { cwd });
+  assert.equal(good.exitCode, 0, good.stdout);
+  assert.ok(
+    parseJson<ValidateOutput>(good.stdout).issues.every(
+      (issue) => !issue.rule.startsWith("catalog."),
+    ),
+    `不应有清单问题：${good.stdout}`,
+  );
+});
+
+test("validate：清单只查格式不查粒度——1 个或 200 个组件的清单都零清单问题（ADR-0004 禁区）", async (t) => {
+  const cwd = mkdtempSync(join(tmpdir(), "baize-"));
+  t.after(() => rmSync(cwd, { recursive: true, force: true }));
+  writeFullChain(cwd);
+  await acceptAndRead(cwd, "IR-001");
+
+  // 只剩 1 个组件（AR 引用的 export-service 还在）→ 全绿
+  write(cwd, "baize/architecture.yaml", "components:\n  export-service: { name: 导出服务 }\n");
+  const single = await run(["validate", "--json"], { cwd });
+  assert.equal(single.exitCode, 0, single.stdout);
+  assert.ok(
+    parseJson<ValidateOutput>(single.stdout).issues.every(
+      (issue) => !issue.rule.startsWith("catalog."),
+    ),
+    `组件多少不是格式问题：${single.stdout}`,
+  );
+
+  // 200 个组件同样零清单问题——粒度/层级/数量都在「组件该怎么分」的界外
+  const big = ["components:", "  export-service: { name: 导出服务 }"];
+  for (let i = 2; i <= 200; i++) {
+    big.push(`  comp-${String(i).padStart(3, "0")}: { name: 组件${i} }`);
+  }
+  write(cwd, "baize/architecture.yaml", `${big.join("\n")}\n`);
+  const many = await run(["validate", "--json"], { cwd });
+  assert.equal(many.exitCode, 0, many.stdout);
+  assert.deepEqual(
+    parseJson<ValidateOutput>(many.stdout).issues.filter((issue) =>
+      issue.rule.startsWith("catalog."),
+    ),
+    [],
+    `粒度不是格式问题：${many.stdout}`,
+  );
+});
+
+// ---- baize migrate（#185）：把旧模型的条目搬到新形状 ----
+// 旧模型（#180 之前）：场景 / 用例 / 功能项用 parent 挂在 SR 下，功能点 parent 挂功能项
+// 且没有认领边，场景的备选流拼作 alternateFlows。识别规则唯一（方案层的 parent 指向 SR），
+// 默认 dry-run、--write 才落盘，拿不准就跳过并点名（纪律见 ADR-0006）。
+
+/** 旧模型的场景：parent 挂 SR、备选流拼作 alternateFlows。 */
+const OLD_MODEL_SC = `---
+id: SC-001
+title: 下单主流程
+parent: SR-001
+catalog: order-flow
+preconditions:
+  - 用户已登录
+trigger: 用户点击下单
+mainFlow:
+  - 选择商品并确认
+alternateFlows: []
+expectedOutcome: 订单创建成功
+stakeholders:
+  - 买家
+---
+
+场景陈述：买家从选购到下单成功的完整过程。
+`;
+
+/** 旧模型的用例：parent 挂 SR（备选流本来就是 alternativeFlows 拼写）。 */
+const OLD_MODEL_UC = `---
+id: UC-001
+title: 提交订单
+parent: SR-001
+appearsIn:
+  - SC-001
+goal: 买家能提交购物车生成订单
+preconditions:
+  - 购物车非空
+mainFlow:
+  - 确认购物车并提交
+alternativeFlows: []
+postconditions:
+  - 生成订单号
+stakeholders:
+  - 买家
+---
+
+用例陈述：买家提交购物车，系统生成订单。
+`;
+
+/** 旧模型的功能项：parent 挂 SR。 */
+const OLD_MODEL_FN = `---
+id: FN-001
+title: 订单服务
+parent: SR-001
+domain: 交易
+realizes:
+  - UC-001
+description: 承载下单与订单查询的功能项。
+---`;
+
+/** 旧模型的功能点：parent 挂功能项、没有认领边（旧模型根本没有这条边）。 */
+const OLD_MODEL_FP = `---
+id: FP-001
+parent: FN-001
+responsibility: 校验并创建订单
+inputs:
+  - 购物车快照
+outputs:
+  - 订单号
+businessRules:
+  - 库存不足时拒绝下单
+acceptanceCriteria:
+  - 非法参数返回 400
+---`;
+
+/** 旧模型靶子：pre-#180 的 chain-sample 形状（七层各一条，方案层挂在 SR 下）。 */
+function writeOldModelChain(cwd: string): void {
+  write(cwd, "baize/ir/IR-001.md", LEGAL_IR);
+  write(cwd, "baize/sr/SR-001.md", srWithCovers("SR-001", "IR-001#a1, IR-001#a2"));
+  write(cwd, "baize/architecture.yaml", ARCHITECTURE_YAML);
+  write(cwd, "baize/ar/AR-001.md", AR_UNDER_SR001);
+  write(cwd, "baize/scenario-catalogs.yaml", SCENARIO_CATALOGS_YAML);
+  write(cwd, "baize/scenarios/SC-001.md", OLD_MODEL_SC);
+  write(cwd, "baize/usecases/UC-001.md", OLD_MODEL_UC);
+  write(cwd, "baize/function-items/FN-001.md", OLD_MODEL_FN);
+  write(cwd, "baize/function-points/FP-001.md", OLD_MODEL_FP);
+}
+
+test("migrate：多余参数或不支持的选项 → exit 2 用法错；仓库里没有旧模型的边 → 0 处改动、exit 0", async (t) => {
+  const cwd = mkdtempSync(join(tmpdir(), "baize-"));
+  t.after(() => rmSync(cwd, { recursive: true, force: true }));
+  writeOldModelChain(cwd);
+
+  const extra = await run(["migrate", "now"], { cwd });
+  assert.equal(extra.exitCode, 2);
+  const strict = await run(["migrate", "--strict"], { cwd });
+  assert.equal(strict.exitCode, 2);
+  const chain = await run(["migrate", "--chain", "IR-001"], { cwd });
+  assert.equal(chain.exitCode, 2);
+
+  // 连 baize/ 都没有的空仓库：0 处改动也是成功（幂等的另一面）
+  const emptyCwd = mkdtempSync(join(tmpdir(), "baize-empty-"));
+  t.after(() => rmSync(emptyCwd, { recursive: true, force: true }));
+  const empty = await run(["migrate"], { cwd: emptyCwd });
+  assert.equal(empty.exitCode, 0, empty.stdout);
+  assert.match(empty.stdout, /0 处改动/);
+});
+
+test("migrate dry-run：打印 文件+行+旧值→新值 与「建议先提交」，文件字节不变", async (t) => {
+  const cwd = mkdtempSync(join(tmpdir(), "baize-"));
+  t.after(() => rmSync(cwd, { recursive: true, force: true }));
+  writeOldModelChain(cwd);
+
+  const before = snapshotDir(cwd, "baize");
+  const result = await run(["migrate"], { cwd });
+  assert.equal(result.exitCode, 0, result.stdout);
+  assert.match(result.stdout, /发现 \d+ 处改动/);
+  // 行号由条目内容决定，只断言形状（别把行号钉死，夹具一改就假红）
+  assert.match(result.stdout, /baize\/scenarios\/SC-001\.md:\d+: parent: SR-001 → refines: \[SR-001\]/);
+  assert.match(result.stdout, /baize\/usecases\/UC-001\.md:\d+: parent: SR-001 → refines: \[SR-001\]/);
+  assert.match(result.stdout, /baize\/scenarios\/SC-001\.md:\d+: alternateFlows → alternativeFlows/);
+  assert.match(
+    result.stdout,
+    /baize\/function-points\/FP-001\.md:\d+: \(缺失\) → satisfies: \[SR-001\]（继承 FN-001 的认领）/,
+  );
+  assert.match(result.stdout, /baize\/function-items\/FN-001\.md:\d+: parent: SR-001 → satisfies: \[SR-001\]/);
+  assert.match(result.stdout, /建议先提交/);
+  // 协议级断言：dry-run 前后文件字节不变（含清单文件）
+  assert.ok(snapshotEqual(before, snapshotDir(cwd, "baize")), "dry-run 不得写盘");
+});
+
+test("migrate --write：旧模型七层链搬到新形状，validate --strict 零问题；不该动的边原样", async (t) => {
+  const cwd = mkdtempSync(join(tmpdir(), "baize-"));
+  t.after(() => rmSync(cwd, { recursive: true, force: true }));
+  injectUser(t, "fixture");
+  writeOldModelChain(cwd);
+  // 链根先确认，严格模式才不被 stage.upstream-unconfirmed 挡（migrate 不动 IR，确认不失效）
+  await acceptAndRead(cwd, "IR-001");
+
+  const arBefore = readFileSync(join(cwd, "baize/ar/AR-001.md"), "utf8");
+  const srBefore = readFileSync(join(cwd, "baize/sr/SR-001.md"), "utf8");
+
+  const result = await run(["migrate", "--write"], { cwd });
+  assert.equal(result.exitCode, 0, result.stdout);
+  assert.match(result.stdout, /已改写 5 处改动/);
+
+  // 场景：parent 换成 refines（原位），备选流统一拼写；其余字段不动
+  const sc = readFileSync(join(cwd, "baize/scenarios/SC-001.md"), "utf8");
+  const scFm = frontmatterOf(sc);
+  assert.deepEqual(scFm["refines"], ["SR-001"], "parent 换成 refines（原位）");
+  assert.equal(scFm["parent"], undefined);
+  assert.deepEqual(scFm["alternativeFlows"], [], "备选流统一拼写");
+  assert.equal(scFm["alternateFlows"], undefined, "旧拼写不应残留");
+  // 用例：parent 换成 refines；关联边原样
+  const uc = readFileSync(join(cwd, "baize/usecases/UC-001.md"), "utf8");
+  const ucFm = frontmatterOf(uc);
+  assert.deepEqual(ucFm["refines"], ["SR-001"]);
+  assert.equal(ucFm["parent"], undefined);
+  assert.deepEqual(ucFm["appearsIn"], ["SC-001"], "关联边原样");
+  // 功能项：parent 换成 satisfies；关联边原样
+  const fn = readFileSync(join(cwd, "baize/function-items/FN-001.md"), "utf8");
+  const fnFm = frontmatterOf(fn);
+  assert.deepEqual(fnFm["satisfies"], ["SR-001"]);
+  assert.equal(fnFm["parent"], undefined);
+  assert.deepEqual(fnFm["realizes"], ["UC-001"], "关联边原样");
+  // 功能点：parent 原样（不误伤），认领边从所属功能项继承（旧模型没有这条边，所属
+  // 功能项的认领是唯一可推导的来源）
+  const fp = readFileSync(join(cwd, "baize/function-points/FP-001.md"), "utf8");
+  const fpFm = frontmatterOf(fp);
+  assert.equal(fpFm["parent"], "FN-001");
+  assert.deepEqual(fpFm["satisfies"], ["SR-001"]);
+  // AR 的 parent（SR→AR 在新模型仍合法）与 SR 的 covers：一字未动
+  assert.equal(readFileSync(join(cwd, "baize/ar/AR-001.md"), "utf8"), arBefore);
+  assert.equal(readFileSync(join(cwd, "baize/sr/SR-001.md"), "utf8"), srBefore);
+
+  // 搬完就是新形状：严格校验零问题
+  const strict = await run(["validate", "--strict", "--json"], { cwd });
+  assert.equal(strict.exitCode, 0, strict.stdout);
+  assert.deepEqual(parseJson<ValidateOutput>(strict.stdout).issues, []);
+});
+
+test("migrate 拿不准就不猜：指向不存在 / 指错层的 parent → 跳过并点名，parent 一字不动", async (t) => {
+  const cwd = mkdtempSync(join(tmpdir(), "baize-"));
+  t.after(() => rmSync(cwd, { recursive: true, force: true }));
+  writeOldModelChain(cwd);
+  // SC-002：parent 指向不存在的 SR-099（备选流改名是独立判断，照常做）
+  write(
+    cwd,
+    "baize/scenarios/SC-002.md",
+    OLD_MODEL_SC.replace("id: SC-001", "id: SC-002").replace(
+      "parent: SR-001",
+      "parent: SR-099",
+    ),
+  );
+  // UC-002：parent 指向 IR-001——条目存在但不是 SR
+  write(
+    cwd,
+    "baize/usecases/UC-002.md",
+    OLD_MODEL_UC.replace("id: UC-001", "id: UC-002").replace(
+      "parent: SR-001",
+      "parent: IR-001",
+    ),
+  );
+  // SC-003：子场景（parent 挂 SC-001，新旧模型都合法）——parent 不动，缺认领边时点名
+  write(
+    cwd,
+    "baize/scenarios/SC-003.md",
+    OLD_MODEL_SC.replace("id: SC-001", "id: SC-003").replace(
+      "parent: SR-001",
+      "parent: SC-001",
+    ),
+  );
+  // FP-002：parent 指向 SR——功能点的 parent 应指功能项，不敢改写
+  write(
+    cwd,
+    "baize/function-points/FP-002.md",
+    OLD_MODEL_FP.replace("id: FP-001", "id: FP-002").replace(
+      "parent: FN-001",
+      "parent: SR-001",
+    ),
+  );
+  // FN-002 的 parent 也指向不存在的 SR-099；FP-003 挂在它下面——所属功能项没有
+  // 可继承的认领边，功能点也拿不准
+  write(
+    cwd,
+    "baize/function-items/FN-002.md",
+    OLD_MODEL_FN.replace("id: FN-001", "id: FN-002").replace(
+      "parent: SR-001",
+      "parent: SR-099",
+    ),
+  );
+  write(
+    cwd,
+    "baize/function-points/FP-003.md",
+    OLD_MODEL_FP.replace("id: FP-001", "id: FP-003").replace(
+      "parent: FN-001",
+      "parent: FN-002",
+    ),
+  );
+
+  const before = snapshotDir(cwd, "baize");
+  const result = await run(["migrate", "--json"], { cwd });
+  assert.equal(result.exitCode, 0, result.stdout);
+  interface MigrateOutput {
+    write: boolean;
+    changes: unknown[];
+    skipped: { path: string; reason: string }[];
+  }
+  const data = parseJson<MigrateOutput>(result.stdout);
+  // 六处点名：每个拿不准的条目都在清单里
+  assert.deepEqual(
+    data.skipped.map((skip) => skip.path).sort(),
+    [
+      "baize/function-items/FN-002.md",
+      "baize/function-points/FP-002.md",
+      "baize/function-points/FP-003.md",
+      "baize/scenarios/SC-002.md",
+      "baize/scenarios/SC-003.md",
+      "baize/usecases/UC-002.md",
+    ],
+    result.stdout,
+  );
+  // 点名要说清指向了谁、为什么不动
+  const reasonOf = (suffix: string): string =>
+    data.skipped.find((skip) => skip.path.endsWith(suffix))?.reason ?? "";
+  assert.match(reasonOf("SC-002.md"), /SR-099/);
+  assert.match(reasonOf("UC-002.md"), /IR-001/);
+  assert.match(reasonOf("SC-003.md"), /refines/);
+  assert.match(reasonOf("FP-002.md"), /SR-001/);
+  assert.match(reasonOf("FP-003.md"), /FN-002/);
+
+  // --write：能搬的照样搬，被点名的 parent 一字不动
+  const written = await run(["migrate", "--write"], { cwd });
+  assert.equal(written.exitCode, 0, written.stdout);
+  // 旧链 5 处 + 两个拿不准场景的备选流改名（改名独立于 parent 判断）= 7 处
+  assert.match(written.stdout, /已改写 7 处改动/);
+  assert.match(written.stdout, /跳过 6 处/);
+  // snapshotDir 的键相对 baize/（与 rename 的用例同一份快照工具）
+  for (const rel of [
+    "scenarios/SC-002.md",
+    "usecases/UC-002.md",
+    "scenarios/SC-003.md",
+    "function-points/FP-002.md",
+    "function-items/FN-002.md",
+    "function-points/FP-003.md",
+  ]) {
+    const after = readFileSync(join(cwd, "baize", rel), "utf8");
+    assert.equal(
+      frontmatterOf(after)["parent"],
+      frontmatterOf(before.get(rel) ?? "")["parent"],
+      `${rel} 的 parent 一字不动`,
+    );
+    // 除场景的备选流键改名外，拿不准的条目整个文件不动
+    if (rel !== "scenarios/SC-002.md" && rel !== "scenarios/SC-003.md") {
+      assert.equal(after, before.get(rel), `${rel} 拿不准就整个不动`);
+    }
+  }
+  // 子场景不代填认领边：解析后看，refines 确实没长出来
+  assert.equal(
+    frontmatterOf(readFileSync(join(cwd, "baize/scenarios/SC-003.md"), "utf8"))["refines"],
+    undefined,
+    "子场景的认领边由人决定，migrate 不代填",
+  );
+});
+
+/** 递归收集目录内每个文件的 mtime（毫秒），用于「0 改动时文件 mtime 不变」的协议级断言。 */
+function mtimesOf(cwd: string, rel: string): Map<string, number> {
+  const out = new Map<string, number>();
+  const walk = (abs: string, prefix: string): void => {
+    for (const name of readdirSync(abs)) {
+      const childAbs = join(abs, name);
+      const childRel = prefix === "" ? name : `${prefix}/${name}`;
+      if (statSync(childAbs).isDirectory()) walk(childAbs, childRel);
+      else out.set(childRel, statSync(childAbs).mtimeMs);
+    }
+  };
+  walk(join(cwd, rel), "");
+  return out;
+}
+
+test("migrate 幂等：对已迁移的仓库再跑（含 --write）= 0 处改动、exit 0、文件字节与 mtime 不变", async (t) => {
+  const cwd = mkdtempSync(join(tmpdir(), "baize-"));
+  t.after(() => rmSync(cwd, { recursive: true, force: true }));
+  writeOldModelChain(cwd);
+  const first = await run(["migrate", "--write"], { cwd });
+  assert.equal(first.exitCode, 0, first.stdout);
+
+  const bytesBefore = snapshotDir(cwd, "baize");
+  const mtimesBefore = mtimesOf(cwd, "baize");
+  const dry = await run(["migrate"], { cwd });
+  assert.equal(dry.exitCode, 0, dry.stdout);
+  assert.match(dry.stdout, /0 处改动/);
+  const again = await run(["migrate", "--write"], { cwd });
+  assert.equal(again.exitCode, 0, again.stdout);
+  assert.match(again.stdout, /0 处改动/);
+  // 协议级断言：0 改动时不写任何文件——字节与 mtime 都不变
+  assert.ok(snapshotEqual(bytesBefore, snapshotDir(cwd, "baize")), "幂等再跑不得写盘");
+  assert.deepEqual(mtimesOf(cwd, "baize"), mtimesBefore, "0 改动时文件 mtime 不变");
+});
+
+test("migrate 对已迁移的 fixture（chain-sample，已是新形状）→ 0 处改动、exit 0、一字不写", async () => {
+  const fixture = join(import.meta.dirname, "fixtures/chain-sample");
+  const before = snapshotDir(fixture, "baize");
+  const result = await run(["migrate"], { cwd: fixture });
+  assert.equal(result.exitCode, 0, result.stdout);
+  assert.match(result.stdout, /0 处改动/);
+  assert.ok(snapshotEqual(before, snapshotDir(fixture, "baize")), "dry-run 不得写盘");
+});
+
+test("migrate 不碰半迁移的僵局：已有认领边却留着 parent、两种备选流拼写并存 → 各自点名，僵局由人解", async (t) => {
+  const cwd = mkdtempSync(join(tmpdir(), "baize-"));
+  t.after(() => rmSync(cwd, { recursive: true, force: true }));
+  writeOldModelChain(cwd);
+  // SC-004：已有 refines 却还留着 parent: SR-001——改写 parent 会产生重复键
+  write(
+    cwd,
+    "baize/scenarios/SC-004.md",
+    OLD_MODEL_SC.replace("id: SC-001", "id: SC-004").replace(
+      "parent: SR-001",
+      "parent: SR-001\nrefines:\n  - SR-002",
+    ),
+  );
+  // SC-005：alternateFlows 与 alternativeFlows 并存——改名会造成重复键
+  write(
+    cwd,
+    "baize/scenarios/SC-005.md",
+    OLD_MODEL_SC.replace("id: SC-001", "id: SC-005").replace(
+      "alternateFlows: []",
+      "alternateFlows: []\nalternativeFlows: []",
+    ),
+  );
+
+  const before = snapshotDir(cwd, "baize");
+  const result = await run(["migrate", "--json"], { cwd });
+  assert.equal(result.exitCode, 0, result.stdout);
+  interface MigrateOutput {
+    write: boolean;
+    changes: { path: string }[];
+    skipped: { path: string; reason: string }[];
+  }
+  const data = parseJson<MigrateOutput>(result.stdout);
+  assert.deepEqual(
+    data.skipped.map((skip) => skip.path).sort(),
+    ["baize/scenarios/SC-004.md", "baize/scenarios/SC-005.md"],
+    result.stdout,
+  );
+  assert.match(
+    data.skipped.find((skip) => skip.path.endsWith("SC-004.md"))?.reason ?? "",
+    /refines/,
+  );
+  assert.match(
+    data.skipped.find((skip) => skip.path.endsWith("SC-005.md"))?.reason ?? "",
+    /同时存在/,
+  );
+
+  const written = await run(["migrate", "--write"], { cwd });
+  assert.equal(written.exitCode, 0, written.stdout);
+  // SC-004：parent 与已有 refines 一字不动（僵局由人解），备选流照常改名
+  const sc4 = readFileSync(join(cwd, "baize/scenarios/SC-004.md"), "utf8");
+  const sc4Fm = frontmatterOf(sc4);
+  assert.equal(sc4Fm["parent"], "SR-001", "僵局里的 parent 一字不动");
+  assert.deepEqual(sc4Fm["refines"], ["SR-002"], "僵局里的 refines 一字不动");
+  assert.deepEqual(sc4Fm["alternativeFlows"], [], "备选流照常改名");
+  // SC-005：两种拼写都留着（不敢改名），parent 照常搬（它没有别的认领边）
+  const sc5 = readFileSync(join(cwd, "baize/scenarios/SC-005.md"), "utf8");
+  const sc5Fm = frontmatterOf(sc5);
+  assert.deepEqual(sc5Fm["alternateFlows"], [], "旧拼写不敢改名");
+  assert.deepEqual(sc5Fm["alternativeFlows"], [], "新拼写照旧保留");
+  assert.deepEqual(sc5Fm["refines"], ["SR-001"]);
+  assert.equal(sc5Fm["parent"], undefined, "parent 照常搬");
+  // 其余条目不受僵局影响：旧链 5 处 + SC-004 改名 + SC-005 搬边 = 7 处
+  assert.match(written.stdout, /已改写 7 处改动/);
+});
+
+// —— #190 评审修复：认领多条 SR 的条目同属多条链，未确认门禁按所有链根判 ——
+
+test("validate：stage.upstream-unconfirmed —— 一条用例认领两条 SR、只确认其中一条链根 → 仍报另一条链的未确认", async (t) => {
+  const cwd = mkdtempSync(join(tmpdir(), "baize-"));
+  t.after(() => rmSync(cwd, { recursive: true, force: true }));
+  writeSharedChains(cwd);
+  // 两条链根都未确认：UC-001 / SC-001 / FN-001 / FP-001 / SR-001 / SR-002 / AR-001 全部报
+  const none = parseJson<ValidateOutput>((await run(["validate", "--json"], { cwd })).stdout);
+  const gated = none.issues
+    .filter((issue) => issue.rule === "stage.upstream-unconfirmed")
+    .map((issue) => issue.path);
+  assert.ok(gated.includes("baize/usecases/UC-001.md"), JSON.stringify(gated));
+
+  // 只确认第一条链的根（IR-001）：UC-001 仍认领 SR-002，其链根 IR-002 未确认 → 继续报
+  await acceptAndRead(cwd, "IR-001");
+  const half = await run(["validate", "--json"], { cwd });
+  const still = parseJson<ValidateOutput>(half.stdout).issues.filter(
+    (issue) => issue.rule === "stage.upstream-unconfirmed",
+  );
+  assert.deepEqual(
+    still.map((issue) => issue.path).sort(),
+    ["baize/sr/SR-002.md", "baize/usecases/UC-001.md"],
+    half.stdout,
+  );
+  const ucIssue = still.find((issue) => issue.path === "baize/usecases/UC-001.md");
+  assert.ok(ucIssue, half.stdout);
+  assert.ok(ucIssue?.message.includes("IR-002"), ucIssue?.message);
+
+  // 同一判据在 status 链视图的门禁里也成立：共享成员踩着未确认的另一条链 → ir-entry pending
+  const gatePending = parseJson<ChainSharedOutput>(
+    (await run(["status", "--chain", "IR-001", "--json"], { cwd })).stdout,
+  ).chain.gates.find((gate) => gate.gate === "ir-entry");
+  assert.equal(gatePending?.state, "pending");
+
+  // 两条链根都确认后，门禁问题清空（SR-002 无 AR 的 sr.unallocated 与本测试无关）
+  await acceptAndRead(cwd, "IR-002");
+  const both = await run(["validate", "--json"], { cwd });
+  const gateLeft = parseJson<ValidateOutput>(both.stdout).issues.filter(
+    (issue) => issue.rule === "stage.upstream-unconfirmed",
+  );
+  const gatePassed = parseJson<ChainSharedOutput>(
+    (await run(["status", "--chain", "IR-001", "--json"], { cwd })).stdout,
+  ).chain.gates.find((gate) => gate.gate === "ir-entry");
+  assert.equal(gatePassed?.state, "passed");
+  assert.deepEqual(gateLeft, [], both.stdout);
+});
+
+// 评审发现（`/code-review` Spec 轴，P1）：功能点**同时**有父（挂功能项）与认领边，
+// 向上走时只跟了父那一路——它认领的另一条链的链根就漏出链根集合，门禁随之漏报。
+test("stage.upstream-unconfirmed：功能点同时有父与认领边 → 两条链的链根都参与门禁（#190 评审修复）", async (t) => {
+  const cwd = mkdtempSync(join(tmpdir(), "baize-"));
+  t.after(() => rmSync(cwd, { recursive: true, force: true }));
+  injectUser(t, "alice");
+  writeSharedChains(cwd);
+  // FP-001 的父是 FN-001（认领 SR-001），但它自己认领 SR-002 —— 同属两条链
+  write(
+    cwd,
+    "baize/function-points/FP-001.md",
+    LEGAL_FP.replace("satisfies:\n  - SR-001", "satisfies:\n  - SR-002"),
+  );
+  await acceptAndRead(cwd, "IR-001"); // 只确认第一条链的链根
+
+  const result = await run(["validate", "--json"], { cwd });
+  const fp = parseJson<ValidateOutput>(result.stdout).issues.filter(
+    (issue) => issue.rule === "stage.upstream-unconfirmed" && issue.path.endsWith("FP-001.md"),
+  );
+  assert.equal(fp.length, 1, result.stdout);
+  assert.ok(
+    fp[0]?.message.includes("IR-002"),
+    "应点名它认领的那条链的链根 IR-002：" + fp[0]?.message,
+  );
+
+  // 第二条链根也确认后，这一条清空
+  await acceptAndRead(cwd, "IR-002");
+  const after = parseJson<ValidateOutput>(
+    (await run(["validate", "--json"], { cwd })).stdout,
+  ).issues.filter(
+    (issue) => issue.rule === "stage.upstream-unconfirmed" && issue.path.endsWith("FP-001.md"),
+  );
+  assert.deepEqual(after, []);
 });

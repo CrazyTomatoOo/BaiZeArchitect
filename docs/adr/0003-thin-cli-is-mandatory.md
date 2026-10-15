@@ -1,6 +1,6 @@
 # 极薄 CLI 是必需的（发号与校验不能交给 skills）
 
-本项目带三条命令的 CLI：`baize new <layer>`（发号 + 建文件）、`baize validate`、`baize status`。技术形态 **Node + TypeScript**，唯一运行时依赖是 `yaml`（v2.9.1，实测零传递依赖）。`validate` 默认只在 ERROR 时失败（exit 1），`--strict` 把 WARNING 也算失败；默认作用域是全仓，`--chain <id>` 限定到一条链。
+本项目带三条命令的 CLI：`baize new <layer>`（发号 + 建文件）、`baize validate`、`baize status`。技术形态 **Node + TypeScript**，唯一运行时依赖是 `yaml`（v2.9.1，实测零传递依赖）。`validate` 默认只在 ERROR 时失败（exit 1），`--strict` 把 WARNING 也算失败；默认作用域是全仓，`--chain <id>` 限定到一条链。 → 命令族后来扩编：`accept` 见 ADR-0005，`rename` / `migrate` 见 ADR-0006；全量以 `README.md` 与 `src/cli.ts` 为准，「三条」是当年的快照。
 
 **为什么一个 skill 套件必须带 CLI，而 Superpowers 不带**：Superpowers 证明了纯散文的技能套件可行，但它没有**跨条目的不变量**。本项目有两个散文管不住的东西：
 
@@ -24,5 +24,5 @@
 - 产品形态就此定形：**CLI + skills 两半**，CLI 是「唯一权威」，skills 是「判断与写作」。
 - `status --json` 成为 **skills 的稳定输入契约**——它必须稳定，因为 skills 要解析它做门禁判定。
 - **exit code 是门禁的机械依据**：#126 的三处门禁（IR 录入阻塞 / SR→AR 提醒 / 功能拆分阻塞）靠它，而不是靠模型自觉。
-- `baize confirm` 是否作为第四条命令存在，取决于「人工确认的记录方式与失效规则」工单——若确认记录落在阶段状态文件里，`confirm` 可能只是 `new`/写命令的一部分。
-- 后三层（场景 / 用例 / 功能）的目录名待「场景/用例/功能三层的挂载点与层级语义」工单。
+- `baize confirm` 是否作为第四条命令存在，取决于「人工确认的记录方式与失效规则」工单——若确认记录落在阶段状态文件里，`confirm` 可能只是 `new`/写命令的一部分。 → 已定：确认与复核共用 `baize accept`，确认记在条目上（`confirmed` / `reviewed`），不进阶段状态文件（见 `CONTEXT.md`「确认」与 ADR-0005）。
+- 后三层（场景 / 用例 / 功能）的目录名待「场景/用例/功能三层的挂载点与层级语义」工单。 → 已定：`scenarios/` / `usecases/` / `function-items/` / `function-points/`（`src/layers.ts` 的 `dir`）；「后三层」实为四层。

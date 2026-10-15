@@ -39,20 +39,48 @@ export interface LayerDef {
 }
 
 /**
- * 分解树允许的上层（CONTEXT.md「分解树」）：`IR → SR → {AR, 场景, 用例, 功能项}`、
- * `功能项 → 功能点`。IR 是链顶端，不允许任何上层。
- * 例外：场景可挂场景——「parent 天然支持场景挂场景」（能表达 ≠ 必须分级）。
+ * 分解树允许的上层（#190 新模型）：`IR → SR → AR`、`功能项 → 功能点`。
+ * 方案层（场景 / 用例 / 功能项 / 功能点）不再挂在分解树上——它们用认领边
+ * （`refines` / `satisfies`）指向 SR（见 CLAIM_FIELD）。
+ * 唯一保留的例外：场景可挂场景——「parent 天然支持场景挂场景」（能表达 ≠ 必须分级）。
  * 父边指到别的层由 validate 的 `ref.parent-not-allowed` 报（父不存在另走 parent-missing）。
  */
 export const ALLOWED_PARENTS: Record<LayerKey, readonly LayerKey[]> = {
   ir: [],
   sr: ["ir"],
   ar: ["sr"],
-  scenarios: ["sr", "scenarios"],
-  usecases: ["sr"],
-  "function-items": ["sr"],
+  scenarios: ["scenarios"],
+  usecases: [],
+  "function-items": [],
   "function-points": ["function-items"],
 };
+
+/**
+ * 方案层的认领边字段（#190）：场景 / 用例用 `refines`、功能项 / 功能点用 `satisfies`，
+ * 元素是 SR 的 id，必填、可多值。为空 / 缺失由 validate 的 `ref.orphan` 报。
+ */
+export const CLAIM_FIELD: Partial<Record<LayerKey, "refines" | "satisfies">> = {
+  scenarios: "refines",
+  usecases: "refines",
+  "function-items": "satisfies",
+  "function-points": "satisfies",
+};
+
+/**
+ * 层的中文叫法（人读消息用）：键为 layer key。
+ * 一处定义，`validate` 的错误消息与 `migrate` 的点名清单共用——两处各抄一份，
+ * 层的增改就会让两边显示不同的名字。
+ */
+export const LAYER_LABEL: Record<string, string> = {
+  ir: "初始需求",
+  sr: "系统需求",
+  ar: "分配需求",
+  scenarios: "场景",
+  usecases: "用例",
+  "function-items": "功能项",
+  "function-points": "功能点",
+};
+
 export const LAYERS: readonly LayerDef[] = [
   {
     key: "ir",
@@ -187,7 +215,9 @@ export const LAYERS: readonly LayerDef[] = [
     ],
   },
   {
-    // 场景层完整 schema：#152 的 catalog（受控清单）+ #154 的分析字段。
+    // 场景层完整 schema：#152 的 catalog（受控清单）+ #154 的分析字段；#190 起用
+    // refines 认领 SR（parent 只剩「场景挂场景」例外，不再进 schema——手写 parent 仍被
+    // ref.parent-not-allowed 校验；alternateFlows 与用例统一拼写）。
     key: "scenarios",
     dir: "scenarios",
     prefix: "SC",
@@ -207,12 +237,12 @@ export const LAYERS: readonly LayerDef[] = [
         emptyMessage: "字段为空：title（人类可读的短名）",
       },
       {
-        // 同 SR/AR：为空/缺失由 ref.orphan 报。
-        name: "parent",
+        // 认领边（#190）：场景用 refines 认领 SR，必填、可多值。为空/缺失由 ref.orphan 报。
+        name: "refines",
         source: "frontmatter",
         nonEmpty: false,
-        kind: "scalar",
-        emptyMessage: "字段为空：parent",
+        kind: "array",
+        emptyMessage: "字段为空：refines",
       },
       {
         // 场景挂受控清单 baize/scenario-catalogs.yaml 的一个目录 slug。
@@ -246,11 +276,11 @@ export const LAYERS: readonly LayerDef[] = [
       },
       {
         // 空数组合法：看过了确实没有备选流。
-        name: "alternateFlows",
+        name: "alternativeFlows",
         source: "frontmatter",
         nonEmpty: false,
         kind: "array",
-        emptyMessage: "字段为空：alternateFlows",
+        emptyMessage: "字段为空：alternativeFlows",
       },
       {
         name: "expectedOutcome",
@@ -266,7 +296,7 @@ export const LAYERS: readonly LayerDef[] = [
         kind: "array",
         emptyMessage: "字段为空：stakeholders",
       },
-      // 无 statement：CONTEXT.md 的「statement」是需求的陈述，场景的必填止于六项 + id/title/parent/catalog。
+      // 无 statement：CONTEXT.md 的「statement」是需求的陈述，场景的必填止于上面几项 + id/title。
     ],
   },
   {
@@ -289,12 +319,13 @@ export const LAYERS: readonly LayerDef[] = [
         emptyMessage: "字段为空：title（人类可读的短名）",
       },
       {
-        // 用例的父边指向 SR。为空/缺失由 ref.orphan 报。
-        name: "parent",
+        // 认领边（#190）：用例用 refines 认领 SR，必填、可多值。为空/缺失由 ref.orphan 报。
+        // 用例不再有父边（ALLOWED_PARENTS 为空）。
+        name: "refines",
         source: "frontmatter",
         nonEmpty: false,
-        kind: "scalar",
-        emptyMessage: "字段为空：parent",
+        kind: "array",
+        emptyMessage: "字段为空：refines",
       },
       {
         // 多对多关联边：一条用例可同时出现在多个场景（不必复制用例）。
@@ -372,12 +403,13 @@ export const LAYERS: readonly LayerDef[] = [
         emptyMessage: "字段为空：title（人类可读的短名）",
       },
       {
-        // 功能项的父边指向 SR。为空/缺失由 ref.orphan 报。
-        name: "parent",
+        // 认领边（#190）：功能项用 satisfies 认领 SR，必填、可多值。为空/缺失由 ref.orphan 报。
+        // 功能项不再有父边（ALLOWED_PARENTS 为空）。
+        name: "satisfies",
         source: "frontmatter",
         nonEmpty: false,
-        kind: "scalar",
-        emptyMessage: "字段为空：parent",
+        kind: "array",
+        emptyMessage: "字段为空：satisfies",
       },
       {
         // 功能域只是功能项上的一个字段，不是一层。
@@ -425,6 +457,14 @@ export const LAYERS: readonly LayerDef[] = [
         nonEmpty: false,
         kind: "scalar",
         emptyMessage: "字段为空：parent",
+      },
+      {
+        // 认领边（#190）：功能点用 satisfies 认领 SR（同功能项）。为空/缺失由 ref.orphan 报。
+        name: "satisfies",
+        source: "frontmatter",
+        nonEmpty: false,
+        kind: "array",
+        emptyMessage: "字段为空：satisfies",
       },
       {
         name: "responsibility",

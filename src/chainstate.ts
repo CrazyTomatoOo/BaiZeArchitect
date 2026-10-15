@@ -1,7 +1,7 @@
 import { promises as fs } from "node:fs";
 import path from "node:path";
 import { parse as parseYaml } from "yaml";
-import { BAIZE_DIR } from "./store.ts";
+import { BAIZE_DIR, isEnoent } from "./store.ts";
 import { isPlainObject } from "./guards.ts";
 
 /**
@@ -37,15 +37,6 @@ export interface ChainState {
   skipped: Record<string, unknown>;
   /** 功能拆分门禁的人工通过；本票只读不消费（呈现归后续工单）。 */
   gates: Record<string, unknown>;
-}
-
-function isEnoent(error: unknown): boolean {
-  return (
-    typeof error === "object" &&
-    error !== null &&
-    "code" in error &&
-    error.code === "ENOENT"
-  );
 }
 
 /** 链状态文件的仓库相对路径。 */
