@@ -3913,3 +3913,188 @@ test("validate --strict 把 WARNING（sr.unclaimed）也算失败（exit 1）", 
   const strict = await run(["validate", "--strict"], { cwd });
   assert.equal(strict.exitCode, 1);
 });
+
+// ---- #182 链成员跟认领边 + status 共享标注 ----
+
+interface SharedChainView {
+  chain: string;
+  count: number;
+}
+
+interface ChainSharedOutput {
+  schemaVersion: number;
+  chain: {
+    id: string;
+    items: { id: string }[];
+    shared?: SharedChainView[];
+    stages: StageView[];
+    gates: GateView[];
+  };
+}
+
+/**
+ * 共两条链的靶子仓：IR-001→SR-001（有 AR 承接）与 IR-002→SR-002 各一条链；
+ * UC-001 同时认领两条 SR——两条链的成员都含它；SC-001 / FN-001 / FP-001 只认领 SR-001。
+ */
+function writeSharedChains(cwd: string): void {
+  write(cwd, "baize/ir/IR-001.md", LEGAL_IR);
+  write(cwd, "baize/sr/SR-001.md", srWithCovers("SR-001", "IR-001#a1, IR-001#a2"));
+  write(
+    cwd,
+    "baize/ir/IR-002.md",
+    LEGAL_IR.replace("id: IR-001", "id: IR-002").replace(
+      "title: 支持用户数据导出",
+      "title: 审计日志留存",
+    ),
+  );
+  write(
+    cwd,
+    "baize/sr/SR-002.md",
+    srWithCovers("SR-002", "IR-002#a1, IR-002#a2").replace("parent: IR-001", "parent: IR-002"),
+  );
+  write(cwd, "baize/architecture.yaml", ARCHITECTURE_YAML);
+  write(cwd, "baize/scenario-catalogs.yaml", SCENARIO_CATALOGS_YAML);
+  write(cwd, "baize/ar/AR-001.md", AR_UNDER_SR001);
+  write(cwd, "baize/scenarios/SC-001.md", LEGAL_SC);
+  // UC-001 认领两条 SR：同属两条链（#190 user story 2）——共享标注的靶子
+  write(
+    cwd,
+    "baize/usecases/UC-001.md",
+    LEGAL_UC.replace("refines:\n  - SR-001", "refines:\n  - SR-001\n  - SR-002"),
+  );
+  write(cwd, "baize/function-items/FN-001.md", LEGAL_FN);
+  write(cwd, "baize/function-points/FP-001.md", LEGAL_FP);
+}
+
+test("status --chain：一条用例认领两条 SR → 两条链的 items 都含它，shared 互指（现算不落盘）", async (t) => {
+  const cwd = mkdtempSync(join(tmpdir(), "baize-"));
+  t.after(() => rmSync(cwd, { recursive: true, force: true }));
+  writeSharedChains(cwd);
+
+  const first = parseJson<ChainSharedOutput>(
+    (await run(["status", "--chain", "IR-001", "--json"], { cwd })).stdout,
+  ).chain;
+  assert.ok(
+    first.items.some((item) => item.id === "UC-001"),
+    `链 IR-001 的条目应含共享的 UC-001：${JSON.stringify(first.items)}`,
+  );
+  assert.deepEqual(first.shared, [{ chain: "IR-002", count: 1 }]);
+
+  const second = parseJson<ChainSharedOutput>(
+    (await run(["status", "--chain", "IR-002", "--json"], { cwd })).stdout,
+  ).chain;
+  assert.ok(
+    second.items.some((item) => item.id === "UC-001"),
+    `链 IR-002 的条目也应含共享的 UC-001：${JSON.stringify(second.items)}`,
+  );
+  assert.deepEqual(second.shared, [{ chain: "IR-001", count: 1 }], "共享计数应互指");
+
+  // 人类可读输出加一行（与 --json 同源）
+  const human = await run(["status", "--chain", "IR-001"], { cwd });
+  assert.equal(human.exitCode, 0, human.stdout);
+  assert.ok(human.stdout.includes("与链 IR-002 共享 1 条条目"), human.stdout);
+
+  // 现算不落盘：共享是反向现算信息，status 不得写状态文件
+  assert.ok(!existsSync(join(cwd, "baize/chains")), "共享信息不得落盘");
+});
+
+test("签字不复用：给链 IR-001 签功能拆分，链 IR-002 仍 pending，缺的正是签字", async (t) => {
+  const cwd = mkdtempSync(join(tmpdir(), "baize-"));
+  t.after(() => rmSync(cwd, { recursive: true, force: true }));
+  writeSharedChains(cwd);
+  const splitOf = async (chain: string) =>
+    parseJson<ChainSharedOutput>(
+      (await run(["status", "--chain", chain, "--json"], { cwd })).stdout,
+    ).chain.gates.find((gate) => gate.gate === "function-split")!;
+
+  // 起点：两条链都没人签过
+  assert.equal((await splitOf("IR-001")).state, "pending");
+  assert.equal((await splitOf("IR-002")).state, "pending");
+
+  // 只给链 IR-001 签字（UC-001 由 FN-001 realizes，两条链的自动挡都过——差的只有签字）
+  write(
+    cwd,
+    "baize/chains/IR-001.yaml",
+    `skipped: {}
+gates:
+  function-split:
+    by: alice
+    at: 2026-10-12
+    criterion: ${FUNCTION_SPLIT_CRITERION}
+`,
+  );
+
+  const signed = await splitOf("IR-001");
+  assert.equal(signed.state, "passed", "IR-001：签字 + 自动挡齐 → passed");
+  assert.equal(signed.by, "alice");
+
+  const other = await splitOf("IR-002");
+  assert.equal(other.state, "pending", "签字按链各签各的，不跨链复用");
+  assert.equal(other.by, null);
+  assert.deepEqual(
+    other.missing,
+    ["签字：gates.function-split 缺 by + at 的人工通过记录"],
+    `缺的正是签字：${JSON.stringify(other.missing)}`,
+  );
+});
+
+test("跳过不跨链：链 IR-001 跳过 scenario 段，链 IR-002 的同一段仍未跳过", async (t) => {
+  const cwd = mkdtempSync(join(tmpdir(), "baize-"));
+  t.after(() => rmSync(cwd, { recursive: true, force: true }));
+  writeSharedChains(cwd);
+  // 只在链 IR-001 的状态文件里记跳过（跳过记录是链级属性）
+  write(
+    cwd,
+    "baize/chains/IR-001.yaml",
+    `skipped:
+  scenario:
+    by: crazytomatooo
+    at: 2026-10-12
+    why: 交互由既有产品承载，本链不再单独设计场景
+`,
+  );
+
+  const stageOf = async (chain: string, stage: string) =>
+    parseJson<ChainSharedOutput>(
+      (await run(["status", "--chain", chain, "--json"], { cwd })).stdout,
+    ).chain.stages.find((view) => view.stage === stage)!;
+
+  const mine = await stageOf("IR-001", "scenario");
+  assert.notEqual(mine.skipped, null, "IR-001 的 scenario 段已跳过");
+  assert.equal(mine.skipped?.by, "crazytomatooo");
+  assert.equal(mine.skipped?.why, "交互由既有产品承载，本链不再单独设计场景");
+
+  const other = await stageOf("IR-002", "scenario");
+  assert.equal(other.skipped, null, "跳过记录只管本链：IR-002 的 scenario 仍未跳过");
+});
+
+test("自动挡各自按本链成员算：只有链 IR-001 有的未实现用例，只有那条链的自动挡不过", async (t) => {
+  const cwd = mkdtempSync(join(tmpdir(), "baize-"));
+  t.after(() => rmSync(cwd, { recursive: true, force: true }));
+  writeSharedChains(cwd);
+  // UC-002 只认领 SR-001（只进链 IR-001），没有任何功能项 realizes 它
+  write(cwd, "baize/usecases/UC-002.md", LEGAL_UC.replace("id: UC-001", "id: UC-002"));
+
+  const splitOf = async (chain: string) =>
+    parseJson<ChainSharedOutput>(
+      (await run(["status", "--chain", chain, "--json"], { cwd })).stdout,
+    ).chain.gates.find((gate) => gate.gate === "function-split")!;
+  const mine = await splitOf("IR-001");
+  assert.equal(
+    mine.checks?.find((check) => check.check.includes("realizes"))?.passed,
+    false,
+    "UC-002 无人承载 → 链 IR-001 的自动挡不过",
+  );
+  assert.deepEqual(
+    mine.pending?.unrealizedUsecases.map((usecase) => usecase.id),
+    ["UC-002"],
+  );
+
+  const other = await splitOf("IR-002");
+  assert.equal(
+    other.checks?.find((check) => check.check.includes("realizes"))?.passed,
+    true,
+    "UC-002 不在链 IR-002 的成员里 → 同一项自动挡在该链照过",
+  );
+  assert.deepEqual(other.pending?.unrealizedUsecases, []);
+});

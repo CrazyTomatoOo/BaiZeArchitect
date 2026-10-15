@@ -1,7 +1,7 @@
 import type { Entry } from "./entry.ts";
 import { claimIdsOf, idOf, parentIdOf } from "./entry.ts";
 import { BaizeError } from "./errors.ts";
-import { chainMembers } from "./chain.ts";
+import { chainMembers, chainRoots } from "./chain.ts";
 import { confirmationOf, type ConfirmationView } from "./confirm.ts";
 import {
   gateRecordOf,
@@ -61,6 +61,25 @@ export interface ChainStaleView {
   /** 另有 N 条下游受传递影响（陈旧条目的严格后代，自身不重复计）。 */
   transitive: number;
 }
+/** 与另一条链的共享（#182）：本链成员同时出现在对方链成员里的条数。现算不落盘。 */
+export interface ChainShared {
+  /** 对方链的（链根）id。 */
+  chain: string;
+  count: number;
+}
+export interface ChainDetail {
+  id: string;
+  items: ChainItem[];
+  stages: StageView[];
+  /** 链内每条 IR 的线索覆盖率（与 validate 的 coverage.missing-clue 同一份数据）。 */
+  coverage: EntryCoverage[];
+  stale: ChainStaleView;
+  /** 三处门禁（#156）：两处 auto、一处 signed，criterion 原样可取。 */
+  gates: GateView[];
+  /** 与其他链的共享（#182 现算不落盘）：认领多条 SR 的条目同属多条链，
+   * 标注出来才不会被误读成重复计数；无共享为空数组。 */
+  shared: ChainShared[];
+}
 /** 一处门禁的现算视图（#156）。两种形态靠 `kind` 区分：auto 由事实算出，signed 必须去找人。 */
 export interface GateView {
   /** `ir-entry` IR 录入 / `sr-ar` SR→AR 分配 / `function-split` 功能拆分。 */
@@ -86,16 +105,6 @@ export interface GateView {
   signedCriterion?: string | null;
   /** 仅 function-split：state 为 pending 时缺的是哪几样（签字 / 判据一致 / 三项自动挡）。 */
   missing?: string[];
-}
-export interface ChainDetail {
-  id: string;
-  items: ChainItem[];
-  stages: StageView[];
-  /** 链内每条 IR 的线索覆盖率（与 validate 的 coverage.missing-clue 同一份数据）。 */
-  coverage: EntryCoverage[];
-  stale: ChainStaleView;
-  /** 三处门禁（#156）：两处 auto、一处 signed，criterion 原样可取。 */
-  gates: GateView[];
 }
 /** 一条 IR 线索的反向覆盖：被哪几条 SR 的 covers 指向（关系只存单向，反向现算）。 */
 export interface ItemClueCoverage {
@@ -155,12 +164,10 @@ function chainItemOf(entry: Entry): ChainItem {
 
 /** 全仓总览：每条链（链根一行）。链根 = 无父且无任何认领边的条目（#190：
  * 方案层条目无父边，顶层场景 / 用例 / 功能项靠认领边挂在链上，不是链根），
- * 带进度（条目数 / 覆盖率）与陈旧两档计数。共享计数视图另票（#182）细化。 */
+ * 带进度（条目数 / 覆盖率）与陈旧两档计数。共享标注只在链视图（chainStatus，#182）。 */
 export async function chainSummaries(cwd: string): Promise<ChainSummary[]> {
   const entries = await readEntries(cwd);
-  const roots = entries.filter(
-    (entry) => parentIdOf(entry) === undefined && claimIdsOf(entry).length === 0,
-  );
+  const roots = chainRoots(entries);
   const summaries: ChainSummary[] = [];
   for (const root of roots) {
     const members = chainMembers(entries, idOf(root) ?? root.path);
@@ -295,6 +302,25 @@ export async function chainStatus(cwd: string, id: string): Promise<ChainDetail>
     }
     return { stage, skipped: skipRecordOf(state?.skipped[stage]) };
   });
+  // #182 共享（现算不落盘）：认领多条 SR 的条目同属多条链——与其它链的成员交集
+  // 逐链数出来并标注，链视图才不会被误读成重复计数。链的集合与总览同源（链根）。
+  const memberIds = new Set<string>();
+  for (const member of members) {
+    const memberId = idOf(member);
+    if (memberId !== undefined) memberIds.add(memberId);
+  }
+  const shared: ChainShared[] = [];
+  for (const root of chainRoots(entries)) {
+    const rootId = idOf(root);
+    if (rootId === undefined || rootId === id) continue;
+    let count = 0;
+    for (const other of chainMembers(entries, rootId)) {
+      const otherId = idOf(other);
+      if (otherId !== undefined && memberIds.has(otherId)) count += 1;
+    }
+    if (count > 0) shared.push({ chain: rootId, count });
+  }
+  shared.sort((a, b) => a.chain.localeCompare(b.chain));
   // #155 陈旧：上下游关系现算不落盘；WARNING 直接下游 / INFO 传递（见 stale.ts 注释）。
   // 分级只算一次：链视图的陈旧汇总与门禁的待签字清单共用同一份结果，不重复遍历。
   const findings = staleFindings(members);
@@ -309,6 +335,7 @@ export async function chainStatus(cwd: string, id: string): Promise<ChainDetail>
       transitive: findings.transitive.length,
     },
     gates: gatesOf(members, entries, state, unreviewedStale),
+    shared,
   };
 }
 

@@ -120,6 +120,10 @@ export function renderChain(chain: ChainDetail): string {
   for (const item of chain.items) {
     lines.push(`  ${item.id} [${item.layer}] ${item.title}`);
   }
+  // #182 共享标注：认领多条 SR 的条目同属多条链，标出来才不会被误读成重复计数
+  for (const share of chain.shared) {
+    lines.push(`  与链 ${share.chain} 共享 ${share.count} 条条目`);
+  }
   lines.push("阶段：");
   for (const stage of chain.stages) {
     const own =
