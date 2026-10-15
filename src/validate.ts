@@ -471,7 +471,9 @@ export async function validate(
   }
 
   const issues = [
-    ...scoped.flatMap((entry) => issuesFor(entry, byId, catalogs)),
+    // #186 清单格式：清单文件自身的问题（解析失败 / 格式）与条目问题同场报出
+    ...catalogs.issues,
+     ...scoped.flatMap((entry) => issuesFor(entry, byId, catalogs)),
     ...(await stageIssues(cwd, options.chain)),
     ...coverageIssues(scoped),
     ...unrealizedUsecaseIssues(scoped, entries),

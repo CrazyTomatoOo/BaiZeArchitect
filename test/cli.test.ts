@@ -4098,3 +4098,190 @@ test("自动挡各自按本链成员算：只有链 IR-001 有的未实现用例
   );
   assert.deepEqual(other.pending?.unrealizedUsecases, []);
 });
+
+// ---- #186 清单格式校验 + 解析保护：清单是外部维护的文件，按脏输入处理 ----
+
+test("validate：catalog.unparseable —— 清单写重复键不再抛栈，报一条带文件与行号的 ERROR（--json 可解析、退出码 1）", async (t) => {
+  const cwd = mkdtempSync(join(tmpdir(), "baize-"));
+  t.after(() => rmSync(cwd, { recursive: true, force: true }));
+  write(cwd, "baize/ir/IR-001.md", LEGAL_IR);
+  write(cwd, "baize/sr/SR-001.md", LEGAL_SR_FULL);
+  // 第二个 a 在第 3 行——之前这里会抛 YAMLParseError: Map keys must be unique 一坨栈
+  write(cwd, "baize/architecture.yaml", "components:\n  a: { name: A }\n  a: { name: B }\n");
+
+  const result = await run(["validate", "--json"], { cwd });
+  assert.equal(result.exitCode, 1, result.stdout);
+  const unparseable = parseJson<ValidateOutput>(result.stdout).issues.filter(
+    (issue) => issue.rule === "catalog.unparseable",
+  );
+  assert.equal(unparseable.length, 1, result.stdout);
+  assert.equal(unparseable[0]!.level, "ERROR");
+  assert.equal(unparseable[0]!.path, "baize/architecture.yaml");
+  assert.match(unparseable[0]!.message, /第 3 行/, `消息应带行号：${result.stdout}`);
+
+  // 人读模式同一份数据，同样不出栈
+  const human = await run(["validate"], { cwd });
+  assert.equal(human.exitCode, 1, human.stdout);
+  assert.match(human.stdout, /catalog\.unparseable baize\/architecture\.yaml/);
+
+  // 解析保护惠及所有读者：rename 读同一份清单，拒绝时 exit 2（不抛栈、不动文件）
+  const rename = await run(["rename", "element", "a", "b", "--json"], { cwd });
+  assert.equal(rename.exitCode, 2, rename.stdout);
+  assert.equal(parseJson<ErrorOutput>(rename.stdout).error.rule, "rename.unknown-slug");
+});
+
+test("validate：catalog.invalid-slug —— 清单 slug 不是 kebab-case 报 ERROR（带 slug 与行号）", async (t) => {
+  const cwd = mkdtempSync(join(tmpdir(), "baize-"));
+  t.after(() => rmSync(cwd, { recursive: true, force: true }));
+  write(cwd, "baize/ir/IR-001.md", LEGAL_IR);
+  write(cwd, "baize/sr/SR-001.md", LEGAL_SR_FULL);
+  write(
+    cwd,
+    "baize/architecture.yaml",
+    "components:\n  Export Service: { name: A }\n  export_service: { name: B }\n",
+  );
+
+  const result = await run(["validate", "--json"], { cwd });
+  assert.equal(result.exitCode, 1, result.stdout);
+  const invalid = parseJson<ValidateOutput>(result.stdout).issues.filter(
+    (issue) => issue.rule === "catalog.invalid-slug",
+  );
+  assert.equal(invalid.length, 2, result.stdout);
+  assert.ok(
+    invalid.every(
+      (issue) => issue.level === "ERROR" && issue.path === "baize/architecture.yaml",
+    ),
+    result.stdout,
+  );
+  assert.match(invalid[0]!.message, /Export Service/, result.stdout);
+  assert.match(invalid[0]!.message, /第 2 行/, `消息应带行号：${result.stdout}`);
+  assert.match(invalid[1]!.message, /export_service/, result.stdout);
+
+  // kebab-case 不报——顺带守住「粒度不查」：一个组件的清单也零清单问题
+  write(cwd, "baize/architecture.yaml", "components:\n  export-service: { name: 导出服务 }\n");
+  const good = await run(["validate", "--json"], { cwd });
+  assert.equal(good.exitCode, 0, good.stdout);
+  assert.ok(
+    parseJson<ValidateOutput>(good.stdout).issues.every((issue) => !issue.rule.startsWith("catalog.")),
+    `不应有清单问题：${good.stdout}`,
+  );
+});
+
+test("validate：catalog.name-missing / catalog.description-empty —— name 缺失或空、description 写了就非空，都报 ERROR", async (t) => {
+  const cwd = mkdtempSync(join(tmpdir(), "baize-"));
+  t.after(() => rmSync(cwd, { recursive: true, force: true }));
+  write(cwd, "baize/ir/IR-001.md", LEGAL_IR);
+  write(cwd, "baize/sr/SR-001.md", LEGAL_SR_FULL);
+  // 三种坏法：name 空串 / name 缺失 / description 空串（写了就必须非空）
+  write(
+    cwd,
+    "baize/architecture.yaml",
+    'components:\n  export-service: { name: "" }\n  audit-log: {}\n  billing: { name: 账单, description: "" }\n',
+  );
+
+  const result = await run(["validate", "--json"], { cwd });
+  assert.equal(result.exitCode, 1, result.stdout);
+  const issues = parseJson<ValidateOutput>(result.stdout).issues;
+  const missing = issues.filter((issue) => issue.rule === "catalog.name-missing");
+  assert.equal(missing.length, 2, result.stdout);
+  assert.match(missing[0]!.message, /export-service/, result.stdout);
+  assert.match(missing[0]!.message, /第 2 行/, `消息应带行号：${result.stdout}`);
+  assert.match(missing[1]!.message, /audit-log/, result.stdout);
+  const emptyDesc = issues.filter((issue) => issue.rule === "catalog.description-empty");
+  assert.equal(emptyDesc.length, 1, result.stdout);
+  assert.match(emptyDesc[0]!.message, /billing/, result.stdout);
+  assert.match(emptyDesc[0]!.message, /第 4 行/, `消息应带行号：${result.stdout}`);
+
+  // 修好 → 零清单问题（description 不写也合法——「若存在则非空」）
+  write(
+    cwd,
+    "baize/architecture.yaml",
+    "components:\n  export-service: { name: 导出服务 }\n  audit-log: { name: 审计 }\n  billing: { name: 账单, description: 出账 }\n",
+  );
+  const good = await run(["validate", "--json"], { cwd });
+  assert.equal(good.exitCode, 0, good.stdout);
+  assert.ok(
+    parseJson<ValidateOutput>(good.stdout).issues.every(
+      (issue) => !issue.rule.startsWith("catalog."),
+    ),
+    `不应有清单问题：${good.stdout}`,
+  );
+});
+
+test("validate：catalog.top-key-not-mapping —— 配定顶层键不是映射时报 ERROR（两份清单对称）", async (t) => {
+  const cwd = mkdtempSync(join(tmpdir(), "baize-"));
+  t.after(() => rmSync(cwd, { recursive: true, force: true }));
+  write(cwd, "baize/ir/IR-001.md", LEGAL_IR);
+  write(cwd, "baize/sr/SR-001.md", LEGAL_SR_FULL);
+  write(cwd, "baize/architecture.yaml", "components:\n  - export-service\n  - audit-log\n");
+
+  const result = await run(["validate", "--json"], { cwd });
+  assert.equal(result.exitCode, 1, result.stdout);
+  const issues = parseJson<ValidateOutput>(result.stdout).issues.filter(
+    (issue) => issue.rule === "catalog.top-key-not-mapping",
+  );
+  assert.equal(issues.length, 1, result.stdout);
+  assert.equal(issues[0]!.level, "ERROR");
+  assert.equal(issues[0]!.path, "baize/architecture.yaml");
+  assert.match(issues[0]!.message, /components/, result.stdout);
+  assert.match(issues[0]!.message, /第 1 行/, `消息应带行号：${result.stdout}`);
+
+  // 场景目录词表同一读法（ADR-0004：两份清单是同一类东西，形态与校验统一）
+  write(cwd, "baize/scenario-catalogs.yaml", "catalogs: order-flow\n");
+  const both = await run(["validate", "--json"], { cwd });
+  assert.equal(both.exitCode, 1, both.stdout);
+  const paths = parseJson<ValidateOutput>(both.stdout).issues
+    .filter((issue) => issue.rule === "catalog.top-key-not-mapping")
+    .map((issue) => issue.path);
+  assert.deepEqual(
+    [...paths].sort(),
+    ["baize/architecture.yaml", "baize/scenario-catalogs.yaml"],
+    both.stdout,
+  );
+
+  // 修好 → 零清单问题
+  write(cwd, "baize/architecture.yaml", ARCHITECTURE_YAML);
+  write(cwd, "baize/scenario-catalogs.yaml", SCENARIO_CATALOGS_YAML);
+  const good = await run(["validate", "--json"], { cwd });
+  assert.equal(good.exitCode, 0, good.stdout);
+  assert.ok(
+    parseJson<ValidateOutput>(good.stdout).issues.every(
+      (issue) => !issue.rule.startsWith("catalog."),
+    ),
+    `不应有清单问题：${good.stdout}`,
+  );
+});
+
+test("validate：清单只查格式不查粒度——1 个或 200 个组件的清单都零清单问题（ADR-0004 禁区）", async (t) => {
+  const cwd = mkdtempSync(join(tmpdir(), "baize-"));
+  t.after(() => rmSync(cwd, { recursive: true, force: true }));
+  writeFullChain(cwd);
+  await acceptAndRead(cwd, "IR-001");
+
+  // 只剩 1 个组件（AR 引用的 export-service 还在）→ 全绿
+  write(cwd, "baize/architecture.yaml", "components:\n  export-service: { name: 导出服务 }\n");
+  const single = await run(["validate", "--json"], { cwd });
+  assert.equal(single.exitCode, 0, single.stdout);
+  assert.ok(
+    parseJson<ValidateOutput>(single.stdout).issues.every(
+      (issue) => !issue.rule.startsWith("catalog."),
+    ),
+    `组件多少不是格式问题：${single.stdout}`,
+  );
+
+  // 200 个组件同样零清单问题——粒度/层级/数量都在「组件该怎么分」的界外
+  const big = ["components:", "  export-service: { name: 导出服务 }"];
+  for (let i = 2; i <= 200; i++) {
+    big.push(`  comp-${String(i).padStart(3, "0")}: { name: 组件${i} }`);
+  }
+  write(cwd, "baize/architecture.yaml", `${big.join("\n")}\n`);
+  const many = await run(["validate", "--json"], { cwd });
+  assert.equal(many.exitCode, 0, many.stdout);
+  assert.deepEqual(
+    parseJson<ValidateOutput>(many.stdout).issues.filter((issue) =>
+      issue.rule.startsWith("catalog."),
+    ),
+    [],
+    `粒度不是格式问题：${many.stdout}`,
+  );
+});
