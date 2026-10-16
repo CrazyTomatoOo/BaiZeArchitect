@@ -83,6 +83,12 @@ function activeView(entry: Entry): RetiredView {
  * 记录恰好 by / at / why（+ 可选取代者）；`--undo` 就是把这个键删掉，
  * 模型里没有第二处记录要同步，也没有「退役状态」这个枚举。
  */
+export interface RetiredOutcome {
+  retired: RetiredView;
+  /** false = 这一次调用没写盘：撤销一个本来就没有退役记录的条目（幂等）。 */
+  changed: boolean;
+}
+
 export async function retire(
   cwd: string,
   id: string,
@@ -93,7 +99,7 @@ export async function retire(
     supersededBy?: string;
     undo?: boolean;
   },
-): Promise<RetiredView> {
+): Promise<RetiredOutcome> {
   const entries = await readEntries(cwd);
   const entry = entries.find((candidate) => idOf(candidate) === id);
   if (!entry) throw new BaizeError("item.not-found", `条目不存在：${id}`);
@@ -101,11 +107,11 @@ export async function retire(
 
   if (options.undo === true) {
     // 幂等：本来就没退役就不动文件（不制造无谓的写盘）。
-    if (!isRetired(entry)) return activeView(entry);
+    if (!isRetired(entry)) return { retired: activeView(entry), changed: false };
     const frontmatter: Record<string, unknown> = { ...entry.frontmatter };
     delete frontmatter["retired"];
     await writeFileAtomic(abs, `---\n${stringifyYaml(frontmatter)}---\n${entry.body}`);
-    return activeView(entry);
+    return { retired: activeView(entry), changed: true };
   }
 
   const why = options.why;
@@ -141,12 +147,15 @@ export async function retire(
   await writeFileAtomic(abs, `---\n${stringifyYaml(frontmatter)}---\n${entry.body}`);
 
   return {
-    id,
-    layer: entry.layer.key,
-    state: "retired",
-    by: options.by,
-    at,
-    why,
-    supersededBy: supersededBy ?? null,
+    retired: {
+      id,
+      layer: entry.layer.key,
+      state: "retired",
+      by: options.by,
+      at,
+      why,
+      supersededBy: supersededBy ?? null,
+    },
+    changed: true,
   };
 }

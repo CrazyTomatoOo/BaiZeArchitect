@@ -2,7 +2,7 @@ import type { Accepted, ConfirmationView } from "./confirm.ts";
 import type { SkipRecord } from "./chainstate.ts";
 import type { MigratePlan } from "./migrate.ts";
 import type { RenamePlan } from "./rename.ts";
-import type { RetiredView } from "./retire.ts";
+import type { RetiredOutcome, RetiredView } from "./retire.ts";
 import type { ChainDetail, ChainSummary, ItemView } from "./status.ts";
 import type { Issue } from "./types.ts";
 
@@ -69,7 +69,12 @@ function renderRetiredState(retired: RetiredView): string {
   return `已退役 ${retired.id}：${retired.by} @ ${retired.at}（理由：${retired.why}${replacement}）`;
 }
 
-export function renderRetired(retired: RetiredView): string {
+/** 撤销一个本来就没退役的条目是幂等的：别报一件没发生过的动作（#194）。 */
+export function renderRetired(outcome: RetiredOutcome): string {
+  const { retired, changed } = outcome;
+  if (retired.state === "active" && !changed) {
+    return `${retired.id} 未退役：本来就没有退役记录\n`;
+  }
   return `${renderRetiredState(retired)}\n`;
 }
 

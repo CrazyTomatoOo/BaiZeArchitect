@@ -358,7 +358,7 @@ async function runRetire(
     throw new BaizeError("cli.usage", "--undo 与 --why 不能同时给：撤销不需要理由");
   }
   const by = process.env.BAIZE_USER ?? DEFAULT_USER;
-  const retired = await retire(cwd, id, {
+  const outcome = await retire(cwd, id, {
     by,
     now,
     undo: args.undo,
@@ -366,8 +366,8 @@ async function runRetire(
     ...(args.supersededBy !== undefined ? { supersededBy: args.supersededBy } : {}),
   });
   return {
-    data: { schemaVersion: SCHEMA_VERSION, retired },
-    human: renderRetired(retired),
+    data: { schemaVersion: SCHEMA_VERSION, retired: outcome.retired },
+    human: renderRetired(outcome),
     exitCode: 0,
   };
 }
