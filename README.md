@@ -63,9 +63,24 @@ claude --plugin-dir <本仓路径>
 
 ### 在你自己的项目里用它
 
+**先摆两份受控清单**——本套件对它们**只读**（清单是输入，不是产物）；缺了而你又引用了，`validate` 会报 `ref.unknown-element` / `ref.unknown-catalog`：
+
+```yaml
+# baize/architecture.yaml —— 架构元素：AR 认领的那个组件。
+# 「组件该怎么分」由你们定，本套件不回答（ADR-0004）。
+components:
+  export-service: { name: 导出服务, description: 产出可下载的数据文件 }
+```
+
+```yaml
+# baize/scenario-catalogs.yaml —— 场景目录：场景归的那一类。
+catalogs:
+  compliance: { name: 合规与审计 }
+```
+
 ```sh
 npm install file:<本仓路径>    # 还没发布，先按路径装
-npx baize new ir
+npx baize new ir              # 发号建壳；baize/ 与各层目录会自动建
 ```
 
 ```console
@@ -80,6 +95,45 @@ $ npx baize validate
 ```
 
 `new` 只发号建壳，所以刚建出来必然是空的——`validate` 就是拿来看「还差什么」的。填完再跑就是 `校验通过：0 个问题`（上面那条 fixture 链是零问题的样板）。退出码：`0` 干净 / `1` 有问题 / `2` 用法错。
+
+**谁在干活**：日常你**不对 CLI 说话，对 agent 说话**——「把老板那段话记成一条需求」「IR-001 的验收确认过了，拆成系统需求」。段 skill 负责起草条目，纪律 skill 负责校验、复核与门禁前审阅；**CLI 是那台只认事实的机器**：发号、报错、算覆盖率与陈旧、给出门禁状态。
+
+**一条链从零走完**：
+
+| | 你这边 | 机器这边 |
+|---|---|---|
+| 1 · IR 录入 | 说「记一条需求：用户要能把数据带走」；agent 起草 `title` / `statement` / `acceptance` | `baize new ir` → `IR-001` |
+| 2 · 认领（**人**） | **你**读一遍措辞与验收线索——这两样只能由人认领，agent 只起草 | `BAIZE_USER=你的名字 baize accept IR-001` |
+| 3 · SR 拆分 | 说「按验收线索拆成系统需求」 | `baize new sr --parent IR-001 --covers IR-001#a1,IR-001#a2` |
+| 4 · AR 分配（**人**） | 说「导出服务负责这条」——选哪个组件是架构决策，agent 只给建议 | `baize new ar --parent SR-001 --allocates export-service` |
+| 5 · 场景 / 用例 / 功能 | 三段依次起草：场景讲情境、用例讲目标、功能项与功能点讲能力与实现。**认领边（`refines` / `satisfies`）与字段内容由 agent 起草、你确认** | `baize new scenario --catalog compliance`、`baize new usecase`、`baize new function-item`、`baize new function-point --parent FN-001`（骨架里带空的 `refines: []` / `satisfies: []` 待填） |
+| 6 · 过门禁（**人**签字） | 三处门禁：IR 录入阻塞、SR→AR 提醒、功能拆分阻塞且要人签一句固定文案 | `baize status --chain IR-001` |
+| 7 · 随时校验 | 动过任何条目就跑 | `baize validate` / `--strict` |
+
+> 骨架刚建出来的方案层条目**不认领任何 SR**——所以它暂时**不属于任何链**（`status --chain` 里看不到它），`validate` 也会报孤儿（`ref.orphan`）。填上 `refines` / `satisfies`，它就进链、进覆盖率、进陈旧传播。
+
+**日常就这几条命令**：
+
+```console
+$ npx baize validate                  # 现在有没有问题（门禁前、CI 里用）
+$ npx baize status                    # 全仓：几条链、各自覆盖率进度与陈旧
+$ npx baize status --chain IR-001     # 这条链：条目、三处门禁、待复核清单
+$ npx baize accept SR-001             # 复核上游（改过上游之后跑它，陈旧才消）
+```
+
+**`baize/` 长这样**：
+
+```text
+baize/
+├── ir/  sr/  ar/                        # 需求侧三层
+├── scenarios/  usecases/                # 交互侧两层
+├── function-items/  function-points/    # 能力两层
+├── architecture.yaml                    # 受控清单：架构元素（外部维护，本套件只读）
+├── scenario-catalogs.yaml               # 受控清单：场景目录（同上）
+└── chains/                              # 只存「算不出来」的两样：跳过记录、功能拆分签字
+```
+
+**进 CI 一行**：`npx baize validate --strict`——WARNING 也算失败，于是「该看的都看过」由 CI 保证。
 
 本仓自身的开发态，等价命令是 `npm run baize -- <命令>`。
 
