@@ -16,23 +16,32 @@ export function isEnoent(error: unknown): boolean {
   );
 }
 
-/** 扫描全仓的已知层级目录，返回所有条目（一层内扁平）。 */
+/** 层目录第一层的名字（已排序）；目录不存在 = 该层还没有条目。 */
+export async function listLayerDir(cwd: string, layer: LayerDef): Promise<string[]> {
+  try {
+    return (await fs.readdir(path.join(cwd, BAIZE_DIR, layer.dir))).sort();
+  } catch (error) {
+    // 目录不存在 = 该层还没有条目；其它失败（权限、路径是文件）必须上抛，
+    // 否则「读不到」会被当成「没有」，validate 会静默通过。
+    if (isEnoent(error)) return [];
+    throw error;
+  }
+}
+
+/**
+ * 扫描全仓的已知层级目录，返回所有条目（一层内扁平）。
+ * 条目只由「层目录第一层的 `.md` 文件」决定——子目录与非 `.md` 的路径都不算，
+ * 这一点由 `id.stray` 报出（#193）。
+ */
 export async function readEntries(cwd: string): Promise<Entry[]> {
   const entries: Entry[] = [];
   for (const layer of LAYERS) {
-    const dir = path.join(cwd, BAIZE_DIR, layer.dir);
-    let names: string[];
-    try {
-      names = await fs.readdir(dir);
-    } catch (error) {
-      // 目录不存在 = 该层还没有条目；其它失败（权限、路径是文件）必须上抛，
-      // 否则「读不到」会被当成「没有」，validate 会静默通过。
-      if (isEnoent(error)) continue;
-      throw error;
-    }
-    for (const name of names.sort()) {
+    for (const name of await listLayerDir(cwd, layer)) {
       if (!name.endsWith(".md")) continue;
-      const text = await fs.readFile(path.join(dir, name), "utf8");
+      const text = await fs.readFile(
+        path.join(cwd, BAIZE_DIR, layer.dir, name),
+        "utf8",
+      );
       entries.push(
         parseEntry(layer, path.posix.join(BAIZE_DIR, layer.dir, name), text),
       );
@@ -41,21 +50,15 @@ export async function readEntries(cwd: string): Promise<Entry[]> {
   return entries;
 }
 
-/** 发号：扫描该层目录的 `PREFIX-NNN.md`，取最大号 +1，零填充三位。 */
-export async function nextId(cwd: string, layer: LayerDef): Promise<string> {
-  const dir = path.join(cwd, BAIZE_DIR, layer.dir);
+/** 层目录里现有条目用到的最大编号（只看 `<PREFIX>-<数字>.md` 这个名字形状）；空层为 0。 */
+export async function maxNumberInDir(cwd: string, layer: LayerDef): Promise<number> {
   const pattern = new RegExp(`^${layer.prefix}-(\\d+)\\.md$`);
   let max = 0;
-  try {
-    for (const name of await fs.readdir(dir)) {
-      const matched = pattern.exec(name)?.[1];
-      if (matched !== undefined) max = Math.max(max, Number(matched));
-    }
-  } catch (error) {
-    // 目录不存在 → 从 001 起；其它失败必须上抛，否则可能覆盖已有编号。
-    if (!isEnoent(error)) throw error;
+  for (const name of await listLayerDir(cwd, layer)) {
+    const matched = pattern.exec(name)?.[1];
+    if (matched !== undefined) max = Math.max(max, Number(matched));
   }
-  return `${layer.prefix}-${String(max + 1).padStart(3, "0")}`;
+  return max;
 }
 
 function emptyValue(kind: FieldKind): unknown {

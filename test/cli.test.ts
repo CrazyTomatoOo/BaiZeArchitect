@@ -4795,3 +4795,144 @@ test("stage.upstream-unconfirmed：功能点同时有父与认领边 → 两条�
   );
   assert.deepEqual(after, []);
 });
+
+// ——— #193 发号账本与条目发现 ————————————————————————————————
+// 已发出去的编号不得复用：账本记「发过哪些号」，层目录只能记「现在有什么」。
+// 断言只落在 CLI 缝上；账本断言的是解析后的数据，不是文件措辞。
+
+function idsOf(cwd: string, layer: string): unknown {
+  const text = readFileSync(join(cwd, "baize/ids.yaml"), "utf8");
+  return (parseYaml(text) as Record<string, unknown>)[layer];
+}
+
+function issuesOf(result: { stdout: string }): Issue[] {
+  return parseJson<ValidateOutput>(result.stdout).issues;
+}
+
+test("#193 发号当场记账；删掉刚建的条目后再发号，编号不回退", async (t) => {
+  const cwd = mkdtempSync(join(tmpdir(), "baize-"));
+  t.after(() => rmSync(cwd, { recursive: true, force: true }));
+
+  const first = parseJson<CreatedOutput>((await run(["new", "ir", "--json"], { cwd })).stdout);
+  assert.equal(first.created.id, "IR-001");
+  assert.equal(idsOf(cwd, "ir"), 1, "发号当场记账");
+
+  rmSync(join(cwd, "baize/ir/IR-001.md"));
+
+  const second = await run(["new", "ir", "--json"], { cwd });
+  assert.equal(second.exitCode, 0, second.stdout);
+  assert.equal(
+    parseJson<CreatedOutput>(second.stdout).created.id,
+    "IR-002",
+    "编号一旦发出就不复用：" + second.stdout,
+  );
+  assert.equal(idsOf(cwd, "ir"), 2);
+});
+
+test("#193 把条目搬进层目录的子目录：编号不回退，该路径被点名（id.stray）", async (t) => {
+  const cwd = mkdtempSync(join(tmpdir(), "baize-"));
+  t.after(() => rmSync(cwd, { recursive: true, force: true }));
+
+  write(cwd, "baize/ir/IR-001.md", LEGAL_IR);
+  // 账本缺失时以「层目录里已有的最大号」为基线：接下去的新号是 IR-002
+  const issued = parseJson<CreatedOutput>((await run(["new", "ir", "--json"], { cwd })).stdout);
+  assert.equal(issued.created.id, "IR-002");
+
+  // 当成「归档」搬进子目录：模型只扫层目录第一层，它就此从模型里消失
+  write(cwd, "baize/ir/archive/IR-002.md", LEGAL_IR);
+  rmSync(join(cwd, "baize/ir/IR-002.md"));
+
+  const next = parseJson<CreatedOutput>((await run(["new", "ir", "--json"], { cwd })).stdout);
+  assert.equal(next.created.id, "IR-003", "搬走条目也不退号");
+
+  const strays = issuesOf(await run(["validate", "--json"], { cwd })).filter(
+    (issue) => issue.rule === "id.stray",
+  );
+  assert.equal(strays.length, 1, "一个子目录只报一次，不逐文件刷：" + JSON.stringify(strays));
+  assert.equal(strays[0]?.path, "baize/ir/archive");
+  assert.equal(strays[0]?.level, "WARNING");
+});
+
+test("#193 层目录里的非 .md 路径被点名；.md 文件一律当条目读；隐藏文件不算", async (t) => {
+  const cwd = mkdtempSync(join(tmpdir(), "baize-"));
+  t.after(() => rmSync(cwd, { recursive: true, force: true }));
+
+  write(cwd, "baize/ir/IR-001.md", LEGAL_IR);
+  write(cwd, "baize/ir/notes.txt", "随手记\n");
+  write(cwd, "baize/ir/archive/IR-002.md", LEGAL_IR);
+  write(cwd, "baize/ir/.DS_Store", "系统留下的\n");
+  // 名字不是三位号也是条目——条目只由「第一层的 .md」决定，id 取自正文 frontmatter
+  write(cwd, "baize/ir/IR-1.md", LEGAL_IR.replaceAll("IR-001", "IR-008"));
+
+  const strays = issuesOf(await run(["validate", "--json"], { cwd }))
+    .filter((issue) => issue.rule === "id.stray")
+    .map((issue) => issue.path)
+    .sort();
+  assert.deepEqual(strays, ["baize/ir/archive", "baize/ir/notes.txt"]);
+});
+
+test("#193 删掉被引用的条目后再发号：旧 covers 继续报 ref.unknown-clue，不静默改指", async (t) => {
+  const cwd = mkdtempSync(join(tmpdir(), "baize-"));
+  t.after(() => rmSync(cwd, { recursive: true, force: true }));
+
+  // 这条链是 CLI 建的：IR-001 被 SR-001 的 covers 指着
+  await run(["new", "ir", "--json"], { cwd });
+  write(cwd, "baize/sr/SR-001.md", srWithCovers("SR-001", "IR-001#a1"));
+  rmSync(join(cwd, "baize/ir/IR-001.md"));
+
+  // 新需求起草时又写了一条叫 a1 的验收线索——但号不复用，旧引用不得被顶替
+  const created = parseJson<CreatedOutput>((await run(["new", "ir", "--json"], { cwd })).stdout);
+  assert.equal(created.created.id, "IR-002");
+
+  const issues = issuesOf(await run(["validate", "--json"], { cwd }));
+  const dangling = issues.filter((issue) => issue.rule === "ref.unknown-clue");
+  assert.equal(
+    dangling.length,
+    1,
+    "旧引用必须继续报错，不能因为新条目同号同名就变成有效：" + JSON.stringify(issues),
+  );
+  assert.match(dangling[0]?.message ?? "", /IR-001#a1/);
+});
+
+test("#193 账本落后于目录：id.ledger-behind（INFO），下次发号自动跟上", async (t) => {
+  const cwd = mkdtempSync(join(tmpdir(), "baize-"));
+  t.after(() => rmSync(cwd, { recursive: true, force: true }));
+
+  await run(["new", "ir", "--json"], { cwd });
+  // 有人手工塞了一条：0009 没走过 CLI，账本里只有 ir: 1
+  write(cwd, "baize/ir/IR-009.md", LEGAL_IR.replaceAll("IR-001", "IR-009"));
+
+  const issues = issuesOf(await run(["validate", "--json"], { cwd }));
+  const behind = issues.find((issue) => issue.rule === "id.ledger-behind");
+  assert.ok(behind, "账本落后必须报：" + JSON.stringify(issues));
+  assert.equal(behind.level, "INFO");
+  assert.equal(behind.path, "baize/ids.yaml");
+
+  const next = parseJson<CreatedOutput>((await run(["new", "ir", "--json"], { cwd })).stdout);
+  assert.equal(next.created.id, "IR-010", "手工塞进来的号也要被尊重");
+  assert.equal(idsOf(cwd, "ir"), 10);
+
+  const after = issuesOf(await run(["validate", "--json"], { cwd }));
+  assert.ok(
+    !after.some((issue) => issue.rule === "id.ledger-behind"),
+    "账本跟上后不再报：" + JSON.stringify(after),
+  );
+});
+
+test("#193 账本读不懂就不发号：new 拒绝（exit 2、目录零变化），validate 报 id.ledger-invalid", async (t) => {
+  const cwd = mkdtempSync(join(tmpdir(), "baize-"));
+  t.after(() => rmSync(cwd, { recursive: true, force: true }));
+
+  write(cwd, "baize/ids.yaml", "ir: 3\nexport-service: 4\n");
+
+  const result = await run(["new", "ir", "--json"], { cwd });
+  assert.equal(result.exitCode, 2, result.stdout);
+  assert.ok(parseJson<ErrorOutput>(result.stdout).error.rule, "拒绝必须带 rule");
+  assert.ok(!existsSync(join(cwd, "baize/ir")), "读不懂账本时不许发号，目录零变化");
+
+  const issues = issuesOf(await run(["validate", "--json"], { cwd }));
+  const invalid = issues.find((issue) => issue.rule === "id.ledger-invalid");
+  assert.ok(invalid, "账本读不懂必须报：" + JSON.stringify(issues));
+  assert.equal(invalid.level, "ERROR");
+  assert.equal(invalid.path, "baize/ids.yaml");
+});

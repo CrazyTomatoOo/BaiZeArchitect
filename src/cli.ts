@@ -1,8 +1,9 @@
 import path from "node:path";
 import { accept, DEFAULT_USER } from "./confirm.ts";
 import { BaizeError } from "./errors.ts";
+import { nextId, recordIssued } from "./ids.ts";
 import { LAYERS } from "./layers.ts";
-import { BAIZE_DIR, nextId, scaffold, writeFileAtomic } from "./store.ts";
+import { BAIZE_DIR, scaffold, writeFileAtomic } from "./store.ts";
 import { applyMigrate, planMigrate } from "./migrate.ts";
 import { applyRename, planRename } from "./rename.ts";
 import { chainStatus, chainSummaries, itemStatus } from "./status.ts";
@@ -219,6 +220,8 @@ async function runNew(args: ParsedArgs, cwd: string): Promise<CommandOutput> {
 
   const id = await nextId(cwd, layer);
   const relPath = path.posix.join(BAIZE_DIR, layer.dir, `${id}.md`);
+  // 先记账再落盘（#193）：号一旦发出就不再复用；半途失败只留一个空洞，不留一次复用。
+  await recordIssued(cwd, layer, id);
   await writeFileAtomic(path.join(cwd, relPath), scaffold(layer, id, overrides));
   const created: Created = { id, path: relPath };
   return {

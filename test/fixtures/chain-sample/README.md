@@ -11,3 +11,5 @@
 ```bash
 cd test/fixtures/chain-sample && BAIZE_USER=fixture node ../../../dist/bin/baize.js accept IR-001
 ```
+
+`baize/ids.yaml` 是**发号账本**（#193）：每层记着已发出去的最大编号，`baize new` 会更新它。fixture 里它与各层条目一一对应（都是 `001`）。手工往层目录里加条目时，要一并把它改到不小于目录里的最大号，否则 `validate --strict` 会多报一条 `id.ledger-behind`——`scripts/check-fixture.mjs` 要求零问题，INFO 也不放行。

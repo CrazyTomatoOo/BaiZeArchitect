@@ -1,0 +1,8 @@
+# 由 baize 维护：每层已发出去的最大编号。编号只增不减——删掉或搬走条目都不会让号退回来（#193）。
+ir: 1
+sr: 1
+ar: 1
+scenarios: 1
+usecases: 1
+function-items: 1
+function-points: 1

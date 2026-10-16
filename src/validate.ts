@@ -16,8 +16,9 @@ import { chainRootsOf } from "./gate.ts";
 import type { Catalogs } from "./catalogs.ts";
 import { readCatalogs } from "./catalogs.ts";
 import { isPlainObject } from "./guards.ts";
-import { ALLOWED_PARENTS, CLAIM_FIELD, LAYER_LABEL } from "./layers.ts";
-import { readEntries } from "./store.ts";
+import { IDS_FILE, readIssued, type IssuedLedger } from "./ids.ts";
+import { ALLOWED_PARENTS, CLAIM_FIELD, LAYER_LABEL, LAYERS } from "./layers.ts";
+import { BAIZE_DIR, listLayerDir, maxNumberInDir, readEntries } from "./store.ts";
 import { staleIssues } from "./stale.ts";
 import type { Issue } from "./types.ts";
 
@@ -464,7 +465,9 @@ export async function validate(
   const issues = [
     // #186 清单格式：清单文件自身的问题（解析失败 / 格式）与条目问题同场报出
     ...catalogs.issues,
-     ...scoped.flatMap((entry) => issuesFor(entry, byId, catalogs)),
+    // #193 条目发现与发号账本：层目录里哪些路径算条目、号发到哪儿了
+    ...(await idIssues(cwd)),
+    ...scoped.flatMap((entry) => issuesFor(entry, byId, catalogs)),
     ...(await stageIssues(cwd, options.chain)),
     ...coverageIssues(scoped),
     ...unrealizedUsecaseIssues(scoped, entries),
@@ -476,6 +479,76 @@ export async function validate(
       ? a.rule.localeCompare(b.rule)
       : a.path.localeCompare(b.path),
   );
+  return issues;
+}
+
+/**
+ * #193 条目发现与发号账本。三条规则说的都是「算不算条目、号发到哪儿了」：
+ *
+ * - `id.stray`（WARNING）：层目录第一层里不是 `.md` 的路径（子目录、随手记的文件）
+ *   不会被当成条目。不报的话，把条目「归档」进子目录就是一次静默消失——validate /
+ *   status / 覆盖率全看不见它，**而编号会因此退回来**（#193 实测的第二次退号）。
+ * - `id.ledger-behind`（INFO）：账本落后于层目录（有人手工塞了条目）。发号会自己跟上，
+ *   这行只回答「下一个号为什么跳了」——报不报都不影响发号，所以不升 WARNING。
+ * - `id.ledger-invalid`（ERROR）：账本读不懂。此时 `baize new` 会拒绝发号——
+ *   宁可不发，也不冒复用编号的险。
+ *
+ * 账本**缺失**刻意不报：老仓库（条目不经过 CLI、手写出来的）升级过来必然没有账本，
+ * 而这件事报一百遍也修不好——第一次 `baize new` 会按层目录现状补上基线。反过来说，
+ * 「手写一条与已删条目同号的文件」这条路人本来就堵不住：模型只以编号为身份，没有
+ * 内容记忆，能不能认出来得靠下游的 `reviewed` 指纹（stale.direct-downstream）或 git。
+ */
+async function idIssues(cwd: string): Promise<Issue[]> {
+  const issues: Issue[] = [];
+
+  for (const layer of LAYERS) {
+    for (const name of await listLayerDir(cwd, layer)) {
+      // `.md` 一律当条目读（名字什么形状不影响「算不算条目」，id 取自 frontmatter）；
+      // 以 `.` 开头的是编辑器 / 系统留下的隐藏文件，每个目录都可能有，不当信号。
+      if (name.endsWith(".md") || name.startsWith(".")) continue;
+      issues.push({
+        level: "WARNING",
+        rule: "id.stray",
+        path: `${BAIZE_DIR}/${layer.dir}/${name}`,
+        message: `${LAYER_LABEL[layer.key]}层第一层里不是 .md 的路径不会被当成条目——它从模型里消失：validate / status / 覆盖率都看不见它，指着它的 parent / covers 会报「引用的条目不存在」`,
+        fix: "条目要么在第一层、要么就不是条目：不做 / 归档请直接删（git 留历史，编号由 baize/ids.yaml 记住）；笔记类文件放到 baize/ 之外",
+      });
+    }
+  }
+
+  let ledger: IssuedLedger;
+  try {
+    ledger = await readIssued(cwd);
+  } catch (error) {
+    if (!(error instanceof BaizeError)) throw error;
+    return [
+      ...issues,
+      {
+        level: "ERROR",
+        rule: "id.ledger-invalid",
+        path: IDS_FILE,
+        message: error.message,
+        fix: `修好 ${IDS_FILE}（每层一行「层名: 非负整数」），或删掉它再跑一次 baize new 立新账本`,
+      },
+    ];
+  }
+
+  for (const layer of LAYERS) {
+    const recorded = ledger.numbers[layer.key];
+    if (recorded === undefined) continue;
+    const max = await maxNumberInDir(cwd, layer);
+    if (recorded >= max) continue;
+    const used = `${layer.prefix}-${String(max).padStart(3, "0")}`;
+    const next = `${layer.prefix}-${String(max + 1).padStart(3, "0")}`;
+    issues.push({
+      level: "INFO",
+      rule: "id.ledger-behind",
+      path: IDS_FILE,
+      message: `账本记的${LAYER_LABEL[layer.key]}层最大号是 ${recorded}，层目录里已经有 ${used}（没走过发号）——账本跟上之前，${used} 被删掉的话下一个还会是 ${used}`,
+      fix: `跑一次 baize new ${layer.key} 让账本跟上（那之后发号从 ${next} 起）`,
+    });
+  }
+
   return issues;
 }
 
