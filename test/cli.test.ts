@@ -4936,3 +4936,477 @@ test("#193 账本读不懂就不发号：new 拒绝（exit 2、目录零变化�
   assert.equal(invalid.level, "ERROR");
   assert.equal(invalid.path, "baize/ids.yaml");
 });
+
+// —— #194 退役（retired）：条目带着 by / at / why 退出推进 ——
+
+interface RetiredOutput {
+  schemaVersion: number;
+  retired: {
+    id: string;
+    layer: string;
+    state: "retired" | "active";
+    by: string | null;
+    at: string | null;
+    why: string | null;
+    supersededBy: string | null;
+  };
+}
+
+/** status --item 里退役记录的形状（by / at / why，取代者可选）。 */
+interface RetiredRecordView {
+  by: string | null;
+  at: string | null;
+  why: string | null;
+  supersededBy: string | null;
+}
+interface ItemViewWithRetired extends ItemView {
+  retired: RetiredRecordView | null;
+}
+
+/** 同形状的另一条 IR（只换编号）。 */
+function irNamed(id: string): string {
+  return LEGAL_IR.replaceAll("IR-001", id);
+}
+
+function itemViewOf(cwd: string, id: string): Promise<ItemViewWithRetired> {
+  return run(["status", "--item", id, "--json"], { cwd }).then(
+    (result) => parseJson<StatusItemOutput>(result.stdout).item as ItemViewWithRetired,
+  );
+}
+
+/** 断言这类请求都 exit 2 且不落盘，返回它的 rule。 */
+async function rejectedRetire(cwd: string, argv: string[]): Promise<string> {
+  const result = await run(argv, { cwd, now: FIXED_NOW });
+  assert.equal(result.exitCode, 2, result.stdout);
+  return parseJson<ErrorOutput>(result.stdout).error.rule;
+}
+
+test("#194 retire：退役记录落进 frontmatter，status --item 读得回来", async (t) => {
+  const cwd = mkdtempSync(join(tmpdir(), "baize-"));
+  t.after(() => rmSync(cwd, { recursive: true, force: true }));
+  injectUser(t, "alice");
+  write(cwd, "baize/ir/IR-001.md", LEGAL_IR);
+  write(cwd, "baize/ir/IR-002.md", irNamed("IR-002"));
+
+  const result = await run(
+    [
+      "retire",
+      "IR-001",
+      "--why",
+      "业务改由 IR-002 承接",
+      "--superseded-by",
+      "IR-002",
+      "--json",
+    ],
+    { cwd, now: FIXED_NOW },
+  );
+  assert.equal(result.exitCode, 0, result.stdout);
+  const retired = parseJson<RetiredOutput>(result.stdout).retired;
+  assert.equal(retired.id, "IR-001");
+  assert.equal(retired.layer, "ir");
+  assert.equal(retired.state, "retired");
+  assert.equal(retired.by, "alice");
+  assert.equal(retired.at, FIXED_NOW);
+  assert.equal(retired.why, "业务改由 IR-002 承接");
+  assert.equal(retired.supersededBy, "IR-002");
+
+  // 落盘：by / at / why（+ 可选取代者）——人的签字里不夹带指纹
+  const text = readFileSync(join(cwd, "baize/ir/IR-001.md"), "utf8");
+  const record = frontmatterOf(text)["retired"] as Record<string, unknown>;
+  assert.deepEqual(Object.keys(record).sort(), ["at", "by", "supersededBy", "why"]);
+  assert.equal(record["at"], FIXED_NOW);
+  // 起草时写的那句话原样保留：只改 frontmatter，不动正文
+  assert.match(text, /产品要求用户能把数据带走/);
+
+  // status --item 读回同一份记录；在做的条目是 null（不是缺字段）
+  const item = await itemViewOf(cwd, "IR-001");
+  assert.equal(item.retired?.by, "alice");
+  assert.equal(item.retired?.supersededBy, "IR-002");
+  assert.equal((await itemViewOf(cwd, "IR-002")).retired, null);
+
+  // 再退役一次是「按现在这版再签一次」：整条记录覆盖，不带旧取代者
+  injectUser(t, "bob");
+  const again = await run(["retire", "IR-001", "--why", "换人复查后仍退役", "--json"], {
+    cwd,
+    now: "2026-11-01T00:00:00.000Z",
+  });
+  assert.equal(again.exitCode, 0, again.stdout);
+  const second = parseJson<RetiredOutput>(again.stdout).retired;
+  assert.equal(second.by, "bob");
+  assert.equal(second.at, "2026-11-01T00:00:00.000Z");
+  assert.equal(second.supersededBy, null);
+});
+
+test("#194 retire：--undo 撤销；不成立的请求 exit 2 且一条都不写盘", async (t) => {
+  const cwd = mkdtempSync(join(tmpdir(), "baize-"));
+  t.after(() => rmSync(cwd, { recursive: true, force: true }));
+  injectUser(t, "alice");
+  write(cwd, "baize/ir/IR-001.md", LEGAL_IR);
+  write(cwd, "baize/ir/IR-002.md", irNamed("IR-002"));
+  write(cwd, "baize/sr/SR-001.md", LEGAL_SR);
+
+  assert.equal(await rejectedRetire(cwd, ["retire", "--json"]), "cli.usage");
+  assert.equal(
+    await rejectedRetire(cwd, ["retire", "IR-999", "--why", "没这条", "--json"]),
+    "item.not-found",
+  );
+  assert.equal(
+    await rejectedRetire(cwd, ["retire", "IR-001", "--json"]),
+    "cli.usage",
+    "缺 --why 不成立：退役的理由是签字的一部分",
+  );
+  assert.equal(
+    await rejectedRetire(cwd, ["retire", "IR-001", "--why", "   ", "--json"]),
+    "cli.usage",
+    "空白理由不算理由",
+  );
+  assert.equal(
+    await rejectedRetire(cwd, ["retire", "IR-001", "--why", "x", "--undo", "--json"]),
+    "cli.usage",
+  );
+  assert.equal(
+    await rejectedRetire(cwd, [
+      "retire",
+      "IR-001",
+      "--why",
+      "x",
+      "--superseded-by",
+      "IR-001",
+      "--json",
+    ]),
+    "cli.usage",
+    "取代者不能是自己",
+  );
+  assert.equal(
+    await rejectedRetire(cwd, [
+      "retire",
+      "IR-001",
+      "--why",
+      "x",
+      "--superseded-by",
+      "SR-001",
+      "--json",
+    ]),
+    "cli.usage",
+    "取代者必须同层",
+  );
+  assert.equal(
+    await rejectedRetire(cwd, [
+      "retire",
+      "IR-001",
+      "--why",
+      "x",
+      "--superseded-by",
+      "IR-999",
+      "--json",
+    ]),
+    "item.not-found",
+  );
+  assert.equal(
+    await rejectedRetire(cwd, ["retire", "IR-001", "--why", "x", "--chain", "IR-001", "--json"]),
+    "cli.usage",
+  );
+  assert.ok(
+    !/^retired:/m.test(readFileSync(join(cwd, "baize/ir/IR-001.md"), "utf8")),
+    "不成立的请求不得写盘",
+  );
+
+  // 撤销：键被删掉，条目回到未退役；再撤一次是幂等的
+  const done = await run(["retire", "IR-001", "--why", "不再做了", "--json"], {
+    cwd,
+    now: FIXED_NOW,
+  });
+  assert.equal(done.exitCode, 0, done.stdout);
+  const undone = await run(["retire", "IR-001", "--undo", "--json"], { cwd, now: FIXED_NOW });
+  assert.equal(undone.exitCode, 0, undone.stdout);
+  const after = parseJson<RetiredOutput>(undone.stdout).retired;
+  assert.equal(after.id, "IR-001");
+  assert.equal(after.state, "active");
+  assert.equal(after.why, null);
+  assert.ok(!/^retired:/m.test(readFileSync(join(cwd, "baize/ir/IR-001.md"), "utf8")));
+  assert.equal(after.by, null, "撤销后 by 也回落到 null");
+  assert.equal((await itemViewOf(cwd, "IR-001")).retired, null);
+  assert.equal((await run(["retire", "IR-001", "--undo", "--json"], { cwd })).exitCode, 0);
+});
+
+test("#194 retired 记录不完整报 field.retire-incomplete（ERROR）", async (t) => {
+  const cwd = mkdtempSync(join(tmpdir(), "baize-"));
+  t.after(() => rmSync(cwd, { recursive: true, force: true }));
+  // 手工写的：缺 at / why
+  write(
+    cwd,
+    "baize/ir/IR-001.md",
+    LEGAL_IR.replace("parent: null", "parent: null\nretired:\n  by: alice\n"),
+  );
+  // 记成了标量：退役的意图看得见，记录却读不出来
+  write(
+    cwd,
+    "baize/ir/IR-002.md",
+    irNamed("IR-002").replace("parent: null", "parent: null\nretired: 是\n"),
+  );
+
+  const issues = issuesOf(await run(["validate", "--json"], { cwd }));
+  const incomplete = issues.filter((issue) => issue.rule === "field.retire-incomplete");
+  assert.equal(incomplete.length, 2, JSON.stringify(issues));
+  assert.deepEqual(incomplete.map((issue) => issue.level), ["ERROR", "ERROR"]);
+  assert.deepEqual(
+    incomplete.map((issue) => issue.path).sort(),
+    ["baize/ir/IR-001.md", "baize/ir/IR-002.md"],
+  );
+
+  // 完整记录（CLI 写的）不报
+  const ok = await run(["retire", "IR-001", "--why", "整条退出推进", "--json"], {
+    cwd,
+    now: FIXED_NOW,
+  });
+  assert.equal(ok.exitCode, 0, ok.stdout);
+  const after = issuesOf(await run(["validate", "--json"], { cwd })).filter(
+    (issue) => issue.rule === "field.retire-incomplete",
+  );
+  assert.deepEqual(
+    after.map((issue) => issue.path),
+    ["baize/ir/IR-002.md"],
+  );
+});
+
+/** validate 的问题清单（本段多处按 rule / path 断言）。 */
+function issuesIn(cwd: string): Promise<Issue[]> {
+  return run(["validate", "--json"], { cwd }).then((result) => issuesOf(result));
+}
+
+test("#194 退役的 SR：产出义务豁免，它的 covers 也不再算覆盖", async (t) => {
+  const cwd = mkdtempSync(join(tmpdir(), "baize-"));
+  t.after(() => rmSync(cwd, { recursive: true, force: true }));
+  injectUser(t, "alice");
+  write(cwd, "baize/ir/IR-001.md", LEGAL_IR);
+  write(cwd, "baize/sr/SR-001.md", LEGAL_SR_FULL);
+
+  const before = await issuesIn(cwd);
+  assert.ok(
+    before.some((issue) => issue.rule === "sr.unallocated"),
+    JSON.stringify(before),
+  );
+  assert.ok(before.some((issue) => issue.rule === "sr.unclaimed"));
+  assert.ok(
+    !before.some((issue) => issue.rule === "coverage.missing-clue"),
+    "a1 / a2 都被这条 SR 覆盖",
+  );
+
+  const done = await run(["retire", "SR-001", "--why", "这条不做了", "--json"], {
+    cwd,
+    now: FIXED_NOW,
+  });
+  assert.equal(done.exitCode, 0, done.stdout);
+
+  const after = await issuesIn(cwd);
+  assert.ok(
+    !after.some((issue) => issue.rule === "sr.unallocated"),
+    "退役条目不再有产出义务：" + JSON.stringify(after),
+  );
+  assert.ok(!after.some((issue) => issue.rule === "sr.unclaimed"));
+  // 出边不算履约：它原先覆盖的两条线索重新变成未覆盖（退役不是履约）
+  assert.equal(
+    after.filter((issue) => issue.rule === "coverage.missing-clue").length,
+    2,
+    JSON.stringify(after),
+  );
+});
+
+test("#194 退役的出边不算履约：AR 不算承接、认领不算数、退役用例不再要求实现", async (t) => {
+  const cwd = mkdtempSync(join(tmpdir(), "baize-"));
+  t.after(() => rmSync(cwd, { recursive: true, force: true }));
+  injectUser(t, "alice");
+  write(cwd, "baize/ir/IR-001.md", LEGAL_IR);
+  write(cwd, "baize/sr/SR-001.md", LEGAL_SR_FULL);
+  write(cwd, "baize/ar/AR-001.md", LEGAL_AR);
+  write(cwd, "baize/usecases/UC-001.md", LEGAL_UC);
+
+  const before = await issuesIn(cwd);
+  assert.ok(
+    !before.some((issue) => issue.rule === "sr.unallocated"),
+    "AR-001 承接、UC-001 认领，SR-001 的产出与认领都齐了：" + JSON.stringify(before),
+  );
+  assert.ok(!before.some((issue) => issue.rule === "sr.unclaimed"));
+  assert.ok(
+    before.some((issue) => issue.rule === "coverage.unrealized-usecase"),
+    "UC-001 还没有功能项实现它",
+  );
+
+  await run(["retire", "AR-001", "--why", "架构不再这么切", "--json"], { cwd, now: FIXED_NOW });
+  await run(["retire", "UC-001", "--why", "这个用例不做了", "--json"], { cwd, now: FIXED_NOW });
+
+  const after = await issuesIn(cwd);
+  assert.ok(
+    after.some((issue) => issue.rule === "sr.unallocated"),
+    "退役的 AR 不再算「SR 已被承接」：" + JSON.stringify(after),
+  );
+  assert.ok(after.some((issue) => issue.rule === "sr.unclaimed"), "退役的认领不算认领");
+  assert.ok(
+    !after.some((issue) => issue.rule === "coverage.unrealized-usecase"),
+    "退役的用例不该再被要求实现",
+  );
+});
+
+test("#194 下游挂着退役上游：stage.upstream-retired（WARNING）；一起退役或改挂都不报", async (t) => {
+  const cwd = mkdtempSync(join(tmpdir(), "baize-"));
+  t.after(() => rmSync(cwd, { recursive: true, force: true }));
+  injectUser(t, "alice");
+  write(cwd, "baize/ir/IR-001.md", LEGAL_IR);
+  write(cwd, "baize/ir/IR-002.md", irNamed("IR-002"));
+  write(cwd, "baize/sr/SR-001.md", LEGAL_SR_FULL);
+
+  await run(
+    ["retire", "IR-001", "--why", "改由 IR-002 承接", "--superseded-by", "IR-002", "--json"],
+    { cwd, now: FIXED_NOW },
+  );
+  const hit = (await issuesIn(cwd)).filter((issue) => issue.rule === "stage.upstream-retired");
+  assert.equal(hit.length, 1, JSON.stringify(hit));
+  assert.equal(hit[0]?.level, "WARNING");
+  assert.equal(hit[0]?.path, "baize/sr/SR-001.md");
+  assert.equal(
+    hit[0]?.fix?.includes("IR-002"),
+    true,
+    "怎么改要说清取代者：" + String(hit[0]?.fix),
+  );
+
+  // 自己也退役：这条线上没有谁还需要决定什么
+  await run(["retire", "SR-001", "--why", "随上游一起退", "--json"], { cwd, now: FIXED_NOW });
+  assert.deepEqual(
+    (await issuesIn(cwd)).filter((issue) => issue.rule === "stage.upstream-retired"),
+    [],
+  );
+
+  // 改挂到在做的上游：撤销退役 + 换 parent
+  await run(["retire", "SR-001", "--undo", "--json"], { cwd, now: FIXED_NOW });
+  write(cwd, "baize/sr/SR-001.md", LEGAL_SR_FULL.replace("parent: IR-001", "parent: IR-002"));
+  assert.deepEqual(
+    (await issuesIn(cwd)).filter((issue) => issue.rule === "stage.upstream-retired"),
+    [],
+  );
+});
+
+test("#194 退役不进指纹：链根退役后下游不再要确认、不再陈旧，撤销即回来", async (t) => {
+  const cwd = mkdtempSync(join(tmpdir(), "baize-"));
+  t.after(() => rmSync(cwd, { recursive: true, force: true }));
+  injectUser(t, "alice");
+  writeFullChain(cwd);
+
+  const before = await issuesIn(cwd);
+  assert.ok(
+    before.some(
+      (issue) => issue.rule === "stage.upstream-unconfirmed" && issue.path === "baize/sr/SR-001.md",
+    ),
+    JSON.stringify(before),
+  );
+
+  await acceptAll(cwd, ["SR-001"]);
+  changeIrStatement(cwd);
+  assert.ok(
+    (await issuesIn(cwd)).some(
+      (issue) => issue.rule === "stale.direct-downstream" && issue.path === "baize/sr/SR-001.md",
+    ),
+    "SR-001 复核过 IR-001，IR 一改就该点名",
+  );
+
+  await run(["retire", "IR-001", "--why", "整条不做了", "--json"], { cwd, now: FIXED_NOW });
+  const after = await issuesIn(cwd);
+  assert.ok(
+    !after.some((issue) => issue.rule === "stage.upstream-unconfirmed"),
+    "链根退役 = 整链了结，不再有「建在未确认基准上」这回事：" + JSON.stringify(after),
+  );
+  assert.ok(
+    !after.some((issue) => issue.rule.startsWith("stale.") && issue.path === "baize/sr/SR-001.md"),
+    "退役条目的下游不再被复核诉求点名",
+  );
+  assert.ok(
+    after.some(
+      (issue) => issue.rule === "stage.upstream-retired" && issue.path === "baize/sr/SR-001.md",
+    ),
+    "但下游要知道上游退役了",
+  );
+
+  // 撤销退役：退役记录的写入没动过实质字段，陈旧必须还在（退役不进指纹）
+  await run(["retire", "IR-001", "--undo", "--json"], { cwd, now: FIXED_NOW });
+  const back = await issuesIn(cwd);
+  assert.ok(
+    back.some(
+      (issue) => issue.rule === "stale.direct-downstream" && issue.path === "baize/sr/SR-001.md",
+    ),
+    "撤销后陈旧必须还在：" + JSON.stringify(back),
+  );
+  assert.ok(back.some((issue) => issue.rule === "stage.upstream-unconfirmed"));
+
+  // 退役条目自己也不再被复核诉求点名（#194 验收：退役条目不再被 stale.* 点名）
+  await run(["retire", "SR-001", "--why", "这条也退", "--json"], { cwd, now: FIXED_NOW });
+  const selfRetired = await issuesIn(cwd);
+  assert.ok(
+    !selfRetired.some(
+      (issue) => issue.rule.startsWith("stale.") && issue.path === "baize/sr/SR-001.md",
+    ),
+    "退役条目不该再被 stale.* 点名：" + JSON.stringify(selfRetired),
+  );
+});
+
+interface ChainsWithConcluded {
+  schemaVersion: number;
+  chains: Array<ChainSummaryView & { concluded: boolean }>;
+}
+interface ChainItemsWithRetired {
+  schemaVersion: number;
+  chain: { items: Array<{ id: string; retired: RetiredRecordView | null }> };
+}
+
+test("#194 链根退役 = 整链了结：status 分开已了结与在做，门禁不再挂 pending，条目带标记", async (t) => {
+  const cwd = mkdtempSync(join(tmpdir(), "baize-"));
+  t.after(() => rmSync(cwd, { recursive: true, force: true }));
+  injectUser(t, "alice");
+  writeFullChain(cwd);
+  write(
+    cwd,
+    "baize/ir/IR-002.md",
+    irNamed("IR-002").replace("title: 支持用户数据导出", "title: 审计日志留存"),
+  );
+
+  const before = parseJson<ChainsWithConcluded>((await run(["status", "--json"], { cwd })).stdout);
+  assert.equal(
+    before.chains.find((chain) => chain.id === "IR-001")?.concluded,
+    false,
+    "在做（还没确认）的链不是已了结",
+  );
+  const gatesBefore = parseJson<ChainGatesOutput>(
+    (await run(["status", "--chain", "IR-001", "--json"], { cwd })).stdout,
+  ).chain;
+  assert.equal(gatesBefore.gates[0]?.state, "pending");
+
+  await run(["retire", "IR-001", "--why", "整条不做了", "--json"], { cwd, now: FIXED_NOW });
+
+  const after = parseJson<ChainsWithConcluded>((await run(["status", "--json"], { cwd })).stdout);
+  assert.equal(after.chains.find((chain) => chain.id === "IR-001")?.concluded, true);
+  assert.equal(
+    after.chains.find((chain) => chain.id === "IR-002")?.concluded,
+    false,
+  );
+
+  const detail = parseJson<ChainGatesOutput>(
+    (await run(["status", "--chain", "IR-001", "--json"], { cwd })).stdout,
+  ).chain;
+  assert.equal(
+    detail.gates[0]?.state,
+    "passed",
+    "链根退役了，IR 录入门禁没有还要进的条目",
+  );
+
+  const items = parseJson<ChainItemsWithRetired>(
+    (await run(["status", "--chain", "IR-001", "--json"], { cwd })).stdout,
+  ).chain.items;
+  assert.equal(items.find((item) => item.id === "IR-001")?.retired?.by, "alice");
+  assert.equal(items.find((item) => item.id === "SR-001")?.retired, null);
+
+  // 人读总览：在做的那条排在已了结的前面（分开呈现，不靠文案断言）
+  const human = await run(["status"], { cwd });
+  assert.equal(human.exitCode, 0, human.stdout);
+  assert.ok(
+    human.stdout.indexOf("IR-002") < human.stdout.indexOf("IR-001"),
+    "在做的链要排在已了结的链之前：\n" + human.stdout,
+  );
+});

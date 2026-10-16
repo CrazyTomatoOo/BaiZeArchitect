@@ -2,6 +2,7 @@ import type { Entry } from "./entry.ts";
 import { idOf, upstreamIdsOf } from "./entry.ts";
 import { fingerprintOf } from "./fingerprint.ts";
 import { isPlainObject } from "./guards.ts";
+import { isRetired } from "./retire.ts";
 import type { Issue } from "./types.ts";
 
 /**
@@ -64,10 +65,15 @@ export interface StaleFinding {
   transitive: Entry[];
 }
 
-/** 在 scoped 集合内现算陈旧分级；上游不存在 / 未复核的条目不参与。 */
+/**
+ * 在 scoped 集合内现算陈旧分级；上游不存在 / 未复核的条目不参与。
+ * 退役条目不出现在结果里（#194）：它们退出了推进，没有「待复核」这回事；
+ * 但它们仍在关系图上（下游的退役另由 stage.upstream-retired 说）。
+ */
 export function staleFindings(scoped: Entry[]): StaleFinding {
-  const byId = byIdOf(scoped);
-  const direct = scoped.filter((entry) => staleUpstreamIdsOf(entry, byId).length > 0);
+  const live = scoped.filter((entry) => !isRetired(entry));
+  const byId = byIdOf(live);
+  const direct = live.filter((entry) => staleUpstreamIdsOf(entry, byId).length > 0);
   const directIds = new Set(direct.map((entry) => idOf(entry) ?? entry.path));
 
   // 下游索引：parent 边（分解树）∪ 认领边（#183：认领者是被认领条目的下游）；
@@ -93,8 +99,9 @@ export function staleFindings(scoped: Entry[]): StaleFinding {
       const childId = idOf(child) ?? child.path;
       if (seen.has(childId)) continue;
       seen.add(childId);
-      if (!directIds.has(childId)) transitive.push(child);
-      queue.push(child); // 继续下探；直接陈旧的子节点自己不报传递，但其后代仍算
+      // 退役条目自己不被点名，但是链条不断：它的后代仍沿图下探
+      if (!directIds.has(childId) && !isRetired(child)) transitive.push(child);
+      queue.push(child);
     }
   }
 
@@ -120,7 +127,7 @@ export function directStaleViews(
   scoped: Entry[],
   findings: StaleFinding = staleFindings(scoped),
 ): DirectStaleView[] {
-  const byId = byIdOf(scoped);
+  const byId = byIdOf(scoped.filter((entry) => !isRetired(entry)));
   return findings.direct.map((entry) => ({
     id: idOf(entry) ?? entry.path,
     path: entry.path,
@@ -159,7 +166,7 @@ function directlyStaleUpstreamsOf(
  * - `stale.transitive` = **INFO**，永不升级。
  */
 export function staleIssues(scoped: Entry[]): Issue[] {
-  const byId = byIdOf(scoped);
+  const byId = byIdOf(scoped.filter((entry) => !isRetired(entry)));
   const { direct, transitive } = staleFindings(scoped);
   const directIds = new Set(direct.map((entry) => idOf(entry) ?? entry.path));
 

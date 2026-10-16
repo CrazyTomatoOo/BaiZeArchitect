@@ -16,6 +16,7 @@ import { computeCoverage, parseClueRef, unrealizedUsecases, type EntryCoverage }
 import { fieldDefectsOf } from "./fieldcheck.ts";
 import { chainRootsOf } from "./gate.ts";
 import { isPlainObject } from "./guards.ts";
+import { isRetired, retiredViewOf, type RetiredView } from "./retire.ts";
 import { readEntries } from "./store.ts";
 import { directStaleViews, staleFindings, type DirectStaleView } from "./stale.ts";
 
@@ -36,6 +37,8 @@ export interface ChainSummary {
   coverage: { covered: number; total: number };
   /** 陈旧两档计数：直接下游待复核 / 另有 N 条传递受影响。 */
   stale: { direct: number; transitive: number };
+  /** 已了结（#194）：链根退役（整条不做了）或链上每条都退役。在做的不带这个标记。 */
+  concluded: boolean;
 }
 export interface ChainItem {
   id: string;
@@ -43,6 +46,8 @@ export interface ChainItem {
   title: string;
   path: string;
   parent: string | null;
+  /** 退役记录（#194）：非 null 就是这条已退出推进；与条目视图同一形状。 */
+  retired: RetiredView | null;
 }
 /**
  * 一段链路的现算视图：有 skipped 记录 = 已跳过，没有 = 未跳过。
@@ -136,6 +141,8 @@ export interface ItemView {
   catalogs?: ItemCatalogSource[];
   /** 仅用例：哪些功能项 realizes 了它。 */
   realizedBy?: string[];
+  /** 退役记录（#194）：非 null 就是这条已退出推进；null 表示没有退役记录。 */
+  retired: RetiredView | null;
 }
 
 function titleOf(entry: Entry): string {
@@ -159,6 +166,7 @@ function chainItemOf(entry: Entry): ChainItem {
     title: titleOf(entry),
     path: entry.path,
     parent: parentIdOf(entry) ?? null,
+    retired: retiredViewOf(entry),
   };
 }
 
@@ -184,6 +192,8 @@ export async function chainSummaries(cwd: string): Promise<ChainSummary[]> {
         total: coverage.reduce((sum, item) => sum + item.total, 0),
       },
       stale: { direct: direct.length, transitive: transitive.length },
+      // 链根退役 = 整条链了结（#194）；链上每条都退役也算
+      concluded: isRetired(root) || members.every((member) => isRetired(member)),
     });
   }
   summaries.sort((a, b) => a.id.localeCompare(b.id));
@@ -220,16 +230,20 @@ function gatesOf(
     members.length > 0 &&
     members.every((member) =>
       chainRootsOf(byId, member).every(
-        (root) => root.layer.key === "ir" && confirmationOf(root).state === "confirmed",
+        (root) =>
+          root.layer.key === "ir" &&
+          // 退役的链根 = 整链了结，不再是「建在未确认的基准上」（#194）
+          (isRetired(root) || confirmationOf(root).state === "confirmed"),
       ),
     );
 
-  const srs = members.filter((entry) => entry.layer.key === "sr");
+  const srs = members.filter((entry) => entry.layer.key === "sr" && !isRetired(entry));
   const srArPassed = srs.every((sr) => {
     const id = idOf(sr);
     if (id === undefined) return false; // 缺 id 由 id.*/field.* 报；此处无从判定，按未过
     return all.some(
-      (candidate) => candidate.layer.key === "ar" && parentIdOf(candidate) === id,
+      (candidate) =>
+        candidate.layer.key === "ar" && !isRetired(candidate) && parentIdOf(candidate) === id,
     );
   });
 
@@ -237,7 +251,9 @@ function gatesOf(
   const unrealized = unrealizedUsecases(members, all);
   const incompletePoints = members.filter(
     (entry) =>
-      entry.layer.key === "function-points" && fieldDefectsOf(entry).length > 0,
+      entry.layer.key === "function-points" &&
+      !isRetired(entry) &&
+      fieldDefectsOf(entry).length > 0,
   );
   const checks: { check: string; passed: boolean }[] = [
     { check: "每条用例都有功能点 realizes 它", passed: unrealized.length === 0 },
@@ -430,6 +446,7 @@ export async function itemStatus(cwd: string, id: string): Promise<ItemView> {
     acceptance: stringMapOf(entry.frontmatter["acceptance"]),
     confirmation: confirmationOf(entry),
     chain: chainRootIdOf(entry, byId),
+    retired: retiredViewOf(entry),
   };
   if (entry.layer.key === "ir") {
     view.clueCoverage = clueCoverageOf(entry, entries);

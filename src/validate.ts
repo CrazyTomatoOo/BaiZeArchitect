@@ -1,5 +1,5 @@
 import type { Entry } from "./entry.ts";
-import { claimIdsOf, idOf, parentIdOf } from "./entry.ts";
+import { claimIdsOf, idOf, parentIdOf, upstreamIdsOf } from "./entry.ts";
 import { BaizeError } from "./errors.ts";
 import { chainMembers } from "./chain.ts";
 import {
@@ -16,6 +16,7 @@ import { chainRootsOf } from "./gate.ts";
 import type { Catalogs } from "./catalogs.ts";
 import { readCatalogs } from "./catalogs.ts";
 import { isPlainObject } from "./guards.ts";
+import { isRetired, retiredRecordOf } from "./retire.ts";
 import { IDS_FILE, readIssued, type IssuedLedger } from "./ids.ts";
 import { ALLOWED_PARENTS, CLAIM_FIELD, LAYER_LABEL, LAYERS } from "./layers.ts";
 import { BAIZE_DIR, listLayerDir, maxNumberInDir, readEntries } from "./store.ts";
@@ -316,13 +317,15 @@ function refIssues(entry: Entry, byId: Record<string, Entry>, catalogs: Catalogs
 }
 
 // sr.unallocated：SR 没有 AR 挂上（没有 AR 以它为 parent）→ WARNING。
-// 反向关系现算，不落盘。
+// 反向关系现算，不落盘。退役两边都不算（#194）：退役的 SR 不再有产出义务，
+// 退役的 AR 也不算承接——它的出边不再是履约。
 function allocationIssues(entry: Entry, byId: Record<string, Entry>): Issue[] {
-  if (entry.layer.key !== "sr") return [];
+  if (entry.layer.key !== "sr" || isRetired(entry)) return [];
   const id = idOf(entry);
   if (id === undefined) return []; // 缺 id 由 id.* / field.* 报
   const hasAr = Object.values(byId).some(
-    (candidate) => candidate.layer.key === "ar" && parentIdOf(candidate) === id,
+    (candidate) =>
+      candidate.layer.key === "ar" && !isRetired(candidate) && parentIdOf(candidate) === id,
   );
   if (hasAr) return [];
   return [
@@ -340,11 +343,11 @@ function allocationIssues(entry: Entry, byId: Record<string, Entry>): Issue[] {
 // 功能项/功能点的 satisfies 指向它）→ WARNING。与 sr.unallocated 同级同风格：
 // 这是拆分进度不是文件写坏，硬挡会逼人造假条目。反向关系现算，不落盘。
 function unclaimedIssues(entry: Entry, byId: Record<string, Entry>): Issue[] {
-  if (entry.layer.key !== "sr") return [];
+  if (entry.layer.key !== "sr" || isRetired(entry)) return [];
   const id = idOf(entry);
   if (id === undefined) return []; // 缺 id 由 id.* / field.* 报
-  const claimed = Object.values(byId).some((candidate) =>
-    claimIdsOf(candidate).includes(id),
+  const claimed = Object.values(byId).some(
+    (candidate) => !isRetired(candidate) && claimIdsOf(candidate).includes(id),
   );
   if (claimed) return [];
   return [
@@ -358,14 +361,51 @@ function unclaimedIssues(entry: Entry, byId: Record<string, Entry>): Issue[] {
   ];
 }
 
+/**
+ * 退役记录的规则（#194）：退役是人的签字，签的是 by / at / why 三项。
+ * 键在就算退役（豁免据此生效），记录读不全则报 ERROR——不把笔误悄悄降级成「还在做」。
+ * 提醒级升不了级：半条记录与写坏的文件同级（`--strict` 不该为它开脱）。
+ */
+function retireIssues(entry: Entry): Issue[] {
+  const raw = entry.frontmatter["retired"];
+  if (raw === undefined || raw === null) return [];
+  if (!isPlainObject(raw)) {
+    return [
+      {
+        level: "ERROR",
+        rule: "field.retire-incomplete",
+        path: entry.path,
+        message: "退役记录读不出来：retired 不是映射（应为 { by, at, why }）",
+        fix: '用 baize retire <id> --why "为什么不做" 重签一次，或手工补齐 by / at / why',
+      },
+    ];
+  }
+  const missing = ["by", "at", "why"].filter((field) => {
+    const value = raw[field];
+    return typeof value !== "string" || value.trim() === "";
+  });
+  if (missing.length === 0) return [];
+  return [
+    {
+      level: "ERROR",
+      rule: "field.retire-incomplete",
+      path: entry.path,
+      message: `退役记录不完整：缺 ${missing.join(" / ")}（退役是人的签字：谁、何时、为什么）`,
+      fix: `用 baize retire <id> --why "为什么不做" 重签一次，或手工补上 ${missing.join(" / ")}`,
+    },
+  ];
+}
+
 function issuesFor(entry: Entry, byId: Record<string, Entry>, catalogs: Catalogs): Issue[] {
   return [
     ...idIssue(entry),
     ...acceptanceThresholdIssues(entry),
     ...fieldIssues(entry),
+    ...retireIssues(entry),
     ...refIssues(entry, byId, catalogs),
     ...allocationIssues(entry, byId),
     ...unclaimedIssues(entry, byId),
+    ...upstreamRetiredIssues(entry, byId),
     ...upstreamGateIssues(entry, byId),
   ];
 }
@@ -381,9 +421,12 @@ function issuesFor(entry: Entry, byId: Record<string, Entry>, catalogs: Catalogs
  */
 function upstreamGateIssues(entry: Entry, byId: Record<string, Entry>): Issue[] {
   if (entry.layer.key === "ir") return [];
+  // 自己退役了就不必再决定什么；链根退役 = 整链了结（#194）
+  if (isRetired(entry)) return [];
   // #165 Q9：认领多条 SR 的条目同属多条链，任一链根未确认/确认失效都算建在未确认的基准上
   const unconfirmed = chainRootsOf(byId, entry).filter((root) => {
     if (root.layer.key !== "ir") return false; // 链根不是 IR（例如孤儿 SR）另有 ref.* 报
+    if (isRetired(root)) return false;
     return confirmationOf(root).state !== "confirmed";
   });
   return unconfirmed.map((root) => {
@@ -427,17 +470,75 @@ async function stageIssues(cwd: string, chain: string | undefined): Promise<Issu
   return issues;
 }
 
+/**
+ * stage.upstream-retired：上游退役了，却还挂在这条链上——下游要么自己也退役，
+ * 要么换个在做的上游（退役记录里的 `supersededBy` 就是干这个用的）。只报**直接**上游：
+ * 再往上那一层的同一件事由那条上游的直接下游去问，否则一次退役会刷满整棵树。
+ *
+ * 提醒级（`--strict` 升级），与 `stage.upstream-unconfirmed` 同级：退役是一笔记录，
+ * 不是把人拦在门外的墙——下游挂着它照样能读、能写，只是该有人做个决定。
+ */
+function upstreamRetiredIssues(entry: Entry, byId: Record<string, Entry>): Issue[] {
+  if (isRetired(entry)) return [];
+  const self = idOf(entry) ?? entry.path;
+  const retired = upstreamIdsOf(entry)
+    .map((id) => byId[id])
+    .filter((upstream): upstream is Entry => upstream !== undefined && isRetired(upstream));
+  return retired.map((upstream) => {
+    const id = idOf(upstream) ?? upstream.path;
+    const record = retiredRecordOf(upstream);
+    const facts = [record?.by, record?.at, record?.why]
+      .filter((value): value is string => typeof value === "string" && value.trim() !== "")
+      .join(" / ");
+    const suffix = facts === "" ? "" : `（${facts}）`;
+    return {
+      level: "WARNING" as const,
+      rule: "stage.upstream-retired",
+      path: entry.path,
+      message: `上游条目已退役：${id}${suffix}——要么自己也退役，要么换个在做的上游`,
+      fix:
+        record?.supersededBy !== undefined
+          ? `若 ${record.supersededBy} 已接手，把 ${self} 的 parent / 认领边改到它；否则 baize retire ${self} --why "…"`
+          : `还有在做的上游就改挂到它；这条线到此为止就 baize retire ${self} --why "…"`,
+    };
+  });
+}
+
+/** 退役的 SR 曾经指向这些线索：退役带走了履约，消息里要点出是谁（#194）。 */
+function retiredCoverersOf(scoped: Entry[]): Map<string, string[]> {
+  const byClue = new Map<string, string[]>();
+  for (const entry of scoped) {
+    if (entry.layer.key !== "sr" || !isRetired(entry)) continue;
+    const id = idOf(entry);
+    const covers = entry.frontmatter["covers"];
+    if (id === undefined || !Array.isArray(covers)) continue;
+    for (const item of covers) {
+      const ref = parseClueRef(item);
+      if (ref === null) continue;
+      const key = `${ref.entryId}#${ref.clueId}`;
+      byClue.set(key, [...(byClue.get(key) ?? []), id]);
+    }
+  }
+  return byClue;
+}
+
 /** coverage.missing-clue：IR 的每条验收线索都要至少一个 SR 的 covers 指向它。
  * 覆盖率数据与 status 共用 src/coverage.ts（不各算一套）。 */
 function coverageIssues(scoped: Entry[]): Issue[] {
+  const retiredCoverers = retiredCoverersOf(scoped);
   return computeCoverage(scoped).flatMap((coverage) =>
-    coverage.missing.map((clue) => ({
-      level: "ERROR" as const,
-      rule: "coverage.missing-clue",
-      path: coverage.path,
-      message: `验收线索未覆盖：${coverage.id}#${clue.clueId}「${clue.text}」没有任何 SR 的 covers 指向它`,
-      fix: `新建或修改 SR，把 ${coverage.id}#${clue.clueId} 写进其 covers；若线索已废弃，从 ${coverage.path} 的 acceptance 删掉它`,
-    })),
+    coverage.missing.map((clue) => {
+      const retired = [...new Set(retiredCoverers.get(`${coverage.id}#${clue.clueId}`) ?? [])].sort();
+      return {
+        level: "ERROR" as const,
+        rule: "coverage.missing-clue",
+        path: coverage.path,
+        message: `验收线索未覆盖：${coverage.id}#${clue.clueId}「${clue.text}」没有任何 SR 的 covers 指向它${
+          retired.length === 0 ? "" : `（指向它的 SR 已退役：${retired.join("、")}）`
+        }`,
+        fix: `新建或修改 SR，把 ${coverage.id}#${clue.clueId} 写进其 covers；若线索已废弃，从 ${coverage.path} 的 acceptance 删掉它`,
+      };
+    }),
   );
 }
 

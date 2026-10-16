@@ -1,6 +1,7 @@
 import type { Entry } from "./entry.ts";
 import { idOf } from "./entry.ts";
 import { isPlainObject } from "./guards.ts";
+import { isRetired } from "./retire.ts";
 
 /**
  * 线索级覆盖率：每条 IR 的验收线索（acceptance 的键）有没有 SR 的 covers 指向它。
@@ -39,11 +40,12 @@ function clueTextOf(value: unknown): string {
  * 对给定条目集合（全仓，或一条链的成员）算每条 IR 的线索覆盖率。
  * 只数集合内 SR 的 covers；指向不存在线索的 covers 项不可能是任何线索的覆盖
  * （覆盖率只按 IR acceptance 里真实存在的键核对），悬空引用由 ref.unknown-clue 另报。
+ * 退役条目两边都不算（#194）：退役 SR 的 covers 不是履约，退役 IR 的线索也不再有覆盖义务。
  */
 export function computeCoverage(entries: Entry[]): EntryCoverage[] {
   const coveredRefs = new Set<string>();
   for (const entry of entries) {
-    if (entry.layer.key !== "sr") continue;
+    if (entry.layer.key !== "sr" || isRetired(entry)) continue;
     const covers = entry.frontmatter["covers"];
     if (!Array.isArray(covers)) continue;
     for (const item of covers) {
@@ -54,7 +56,7 @@ export function computeCoverage(entries: Entry[]): EntryCoverage[] {
 
   const result: EntryCoverage[] = [];
   for (const entry of entries) {
-    if (entry.layer.key !== "ir") continue;
+    if (entry.layer.key !== "ir" || isRetired(entry)) continue;
     const id = idOf(entry);
     const acceptance = entry.frontmatter["acceptance"];
     if (id === undefined || !isPlainObject(acceptance)) continue;
@@ -84,6 +86,7 @@ export interface UnrealizedUsecase {
 /**
  * 未被任何功能项 realizes 的用例（`coverage.unrealized-usecase` 那份数据）。
  * realizes 集合取全仓（跨链引用也合法），报告范围按传入的 scoped 限定。
+ * 退役两边都不算（#194）：退役的功能项不是实现，退役的用例也不再要求被实现。
  * validate（报成 issue）与 status（功能拆分门禁的待签字清单）共用本函数，不各算一套。
  */
 export function unrealizedUsecases(
@@ -92,7 +95,7 @@ export function unrealizedUsecases(
 ): UnrealizedUsecase[] {
   const realized = new Set<string>();
   for (const entry of all) {
-    if (entry.layer.key !== "function-items") continue;
+    if (entry.layer.key !== "function-items" || isRetired(entry)) continue;
     const items = entry.frontmatter["realizes"];
     if (!Array.isArray(items)) continue;
     for (const item of items) {
@@ -102,7 +105,7 @@ export function unrealizedUsecases(
 
   const result: UnrealizedUsecase[] = [];
   for (const entry of scoped) {
-    if (entry.layer.key !== "usecases") continue;
+    if (entry.layer.key !== "usecases" || isRetired(entry)) continue;
     const id = idOf(entry);
     if (id === undefined || realized.has(id)) continue;
     result.push({ id, path: entry.path });

@@ -6,6 +6,7 @@ import { LAYERS } from "./layers.ts";
 import { BAIZE_DIR, scaffold, writeFileAtomic } from "./store.ts";
 import { applyMigrate, planMigrate } from "./migrate.ts";
 import { applyRename, planRename } from "./rename.ts";
+import { retire } from "./retire.ts";
 import { chainStatus, chainSummaries, itemStatus } from "./status.ts";
 import { validate } from "./validate.ts";
 import {
@@ -19,6 +20,7 @@ import {
   renderItem,
   renderMigrate,
   renderRename,
+  renderRetired,
   toJson,
   type Created,
 } from "./render.ts";
@@ -47,6 +49,9 @@ interface ParsedArgs {
   realizes: string | undefined;
   catalog: string | undefined;
   allocates: string | undefined;
+  why: string | undefined;
+  supersededBy: string | undefined;
+  undo: boolean;
 }
 
 interface CommandOutput {
@@ -68,6 +73,9 @@ function parseArgs(argv: string[]): ParsedArgs {
   let realizes: string | undefined;
   let catalog: string | undefined;
   let allocates: string | undefined;
+  let why: string | undefined;
+  let supersededBy: string | undefined;
+  let undo = false;
 
   for (let i = 0; i < argv.length; i++) {
     const token = argv[i];
@@ -82,6 +90,10 @@ function parseArgs(argv: string[]): ParsedArgs {
     }
     if (token === "--write") {
       write = true;
+      continue;
+    }
+    if (token === "--undo") {
+      undo = true;
       continue;
     }
     if (token === "--chain" || token === "--item") {
@@ -100,7 +112,9 @@ function parseArgs(argv: string[]): ParsedArgs {
       token === "--appears-in" ||
       token === "--realizes" ||
       token === "--catalog" ||
-      token === "--allocates"
+      token === "--allocates" ||
+      token === "--why" ||
+      token === "--superseded-by"
     ) {
       const value = argv[i + 1];
       if (value === undefined || value.startsWith("--")) {
@@ -111,7 +125,9 @@ function parseArgs(argv: string[]): ParsedArgs {
       else if (token === "--appears-in") appearsIn = value;
       else if (token === "--realizes") realizes = value;
       else if (token === "--catalog") catalog = value;
-      else allocates = value;
+      else if (token === "--allocates") allocates = value;
+      else if (token === "--why") why = value;
+      else supersededBy = value;
       i++;
       continue;
     }
@@ -135,6 +151,9 @@ function parseArgs(argv: string[]): ParsedArgs {
     realizes,
     catalog,
     allocates,
+    why,
+    supersededBy,
+    undo,
   };
 }
 
@@ -317,6 +336,42 @@ async function runAccept(
   };
 }
 
+async function runRetire(
+  args: ParsedArgs,
+  cwd: string,
+  now: Date,
+): Promise<CommandOutput> {
+  const id = args.positionals[0];
+  if (id === undefined) {
+    throw new BaizeError(
+      "cli.usage",
+      '用法：baize retire <id> --why "为什么不做" [--superseded-by <id>] [--undo] [--json]',
+    );
+  }
+  if (args.positionals.length > 1) {
+    throw new BaizeError("cli.usage", `多余参数：${args.positionals.slice(1).join(" ")}`);
+  }
+  if (args.chain !== undefined || args.item !== undefined || args.strict) {
+    throw new BaizeError("cli.usage", "retire 只接受 --json（不支持 --chain / --item / --strict）");
+  }
+  if (args.undo && args.why !== undefined) {
+    throw new BaizeError("cli.usage", "--undo 与 --why 不能同时给：撤销不需要理由");
+  }
+  const by = process.env.BAIZE_USER ?? DEFAULT_USER;
+  const retired = await retire(cwd, id, {
+    by,
+    now,
+    undo: args.undo,
+    ...(args.why !== undefined ? { why: args.why } : {}),
+    ...(args.supersededBy !== undefined ? { supersededBy: args.supersededBy } : {}),
+  });
+  return {
+    data: { schemaVersion: SCHEMA_VERSION, retired },
+    human: renderRetired(retired),
+    exitCode: 0,
+  };
+}
+
 async function runRename(args: ParsedArgs, cwd: string): Promise<CommandOutput> {
   const kindRaw = args.positionals[0];
   const old = args.positionals[1];
@@ -400,6 +455,8 @@ async function dispatch(
       return runStatus(args, cwd);
     case "accept":
       return runAccept(args, cwd, now);
+    case "retire":
+      return runRetire(args, cwd, now);
     case "rename":
       return runRename(args, cwd);
     case "migrate":
@@ -407,12 +464,12 @@ async function dispatch(
     case undefined:
       throw new BaizeError(
         "cli.usage",
-        "用法：baize <new|validate|status|accept|rename|migrate> [选项]",
+        "用法：baize <new|validate|status|accept|retire|rename|migrate> [选项]",
       );
     default:
       throw new BaizeError(
         "cli.usage",
-        "用法：baize <new|validate|status|accept|rename|migrate> [选项]",
+        "用法：baize <new|validate|status|accept|retire|rename|migrate> [选项]",
       );
   }
 }

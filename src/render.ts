@@ -2,6 +2,7 @@ import type { Accepted, ConfirmationView } from "./confirm.ts";
 import type { SkipRecord } from "./chainstate.ts";
 import type { MigratePlan } from "./migrate.ts";
 import type { RenamePlan } from "./rename.ts";
+import type { RetiredView } from "./retire.ts";
 import type { ChainDetail, ChainSummary, ItemView } from "./status.ts";
 import type { Issue } from "./types.ts";
 
@@ -60,12 +61,31 @@ function renderConfirmation(confirmation: ConfirmationView): string {
   return "未确认";
 }
 
+/** 退役状态的人读渲染（与 --json 同源；撤销后是「回到未退役」）。 */
+function renderRetiredState(retired: RetiredView): string {
+  if (retired.state === "active") return `已撤销退役 ${retired.id}（条目回到未退役）`;
+  const replacement =
+    retired.supersededBy === null ? "" : `；取代者：${retired.supersededBy}`;
+  return `已退役 ${retired.id}：${retired.by} @ ${retired.at}（理由：${retired.why}${replacement}）`;
+}
+
+export function renderRetired(retired: RetiredView): string {
+  return `${renderRetiredState(retired)}\n`;
+}
+
+/** 链总览：在做（还有要推进的）排在已了结（退役）的前面，#194。 */
 export function renderChains(chains: ChainSummary[]): string {
   if (chains.length === 0) return "没有链。\n";
-  const lines = [`链：${chains.length} 条`];
-  for (const chain of chains) {
+  const live = chains.filter((chain) => !chain.concluded);
+  const done = chains.filter((chain) => chain.concluded);
+  const lines = [
+    done.length === 0
+      ? `链：${chains.length} 条`
+      : `链：${chains.length} 条（在做 ${live.length} / 已了结 ${done.length}）`,
+  ];
+  for (const chain of [...live, ...done]) {
     lines.push(
-      `  ${chain.id}  ${chain.title}  ${chain.items} 个条目  覆盖 ${chain.coverage.covered}/${chain.coverage.total}  陈旧 直接 ${chain.stale.direct} / 传递 ${chain.stale.transitive}`,
+      `  ${chain.id}  ${chain.title}  ${chain.items} 个条目  覆盖 ${chain.coverage.covered}/${chain.coverage.total}  陈旧 直接 ${chain.stale.direct} / 传递 ${chain.stale.transitive}${chain.concluded ? "  已了结" : ""}`,
     );
   }
   return `${lines.join("\n")}\n`;
@@ -117,9 +137,15 @@ function renderGates(gates: ChainDetail["gates"]): string[] {
 }
 
 export function renderChain(chain: ChainDetail): string {
-  const lines = [`链 ${chain.id}：${chain.items.length} 个条目`];
+  const root = chain.items.find((item) => item.id === chain.id);
+  const concluded =
+    (root !== undefined && root.retired !== null) ||
+    (chain.items.length > 0 && chain.items.every((item) => item.retired !== null));
+  const lines = [`链 ${chain.id}：${chain.items.length} 个条目${concluded ? "（已了结）" : ""}`];
   for (const item of chain.items) {
-    lines.push(`  ${item.id} [${item.layer}] ${item.title}`);
+    lines.push(
+      `  ${item.id} [${item.layer}] ${item.title}${item.retired === null ? "" : "（已退役）"}`,
+    );
   }
   // #182 共享标注：认领多条 SR 的条目同属多条链，标出来才不会被误读成重复计数
   for (const share of chain.shared) {
@@ -174,6 +200,13 @@ export function renderItem(item: ItemView): string {
     `  confirmation: ${renderConfirmation(item.confirmation)}`,
     `  statement: ${item.statement}`,
   ];
+  if (item.retired !== null) {
+    const replacement =
+      item.retired.supersededBy === null ? "" : `；取代者：${item.retired.supersededBy}`;
+    lines.push(
+      `  retired: ${item.retired.by} @ ${item.retired.at}（理由：${item.retired.why}${replacement}）`,
+    );
+  }
   const clues = Object.keys(item.acceptance);
   if (clues.length > 0) {
     lines.push("  acceptance:");
